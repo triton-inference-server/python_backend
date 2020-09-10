@@ -211,6 +211,21 @@ install(
     ${INSTALL_CONFIGDIR}
 )
 
+install(
+  FILES
+    ${GRPC_PY}
+    resources/startup.py
+  DESTINATION
+    ${INSTALL_CONFIGDIR}
+)
+
+install(
+  FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/triton_python_backend_utils.py
+  DESTINATION
+    ${INSTALL_CONFIGDIR}
+)
+
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
   ${CMAKE_CURRENT_LIST_DIR}/cmake/TritonPythonBackendConfig.cmake.in
