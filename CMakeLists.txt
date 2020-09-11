@@ -214,14 +214,14 @@ install(
 install(
   FILES
     ${GRPC_PY}
-    resources/startup.py
+    src/resources/startup.py
   DESTINATION
     ${INSTALL_CONFIGDIR}
 )
 
 install(
   FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/resources/triton_python_backend_utils.py
+    src/resources/triton_python_backend_utils.py
   DESTINATION
     ${INSTALL_CONFIGDIR}
 )
