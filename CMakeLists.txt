@@ -96,8 +96,6 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 get_filename_component(python_host_proto_abspath "src/python_host.proto" ABSOLUTE)
 get_filename_component(python_host_proto_dir "${python_host_proto_abspath}" PATH)
 
-message(${python_host_proto_abspath})
-
 set(GRPC_SRCS
     "${CMAKE_CURRENT_BINARY_DIR}/python_host.grpc.pb.cc"
     "${CMAKE_CURRENT_BINARY_DIR}/python_host.pb.cc")
