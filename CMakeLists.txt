@@ -25,7 +25,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.17)
 
 project(tritonpythonbackend LANGUAGES C CXX)
 
@@ -36,15 +36,13 @@ project(tritonpythonbackend LANGUAGES C CXX)
 # projects included in this one by FetchContent.
 #
 # GPU support is disabled by default because python backend doesn't
-# support GPUs.
+# because python backend does not need to access CUDA or GPUs
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" OFF)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
 
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
-
-find_package(RapidJSON CONFIG REQUIRED)
 
 #
 # Dependencies
@@ -69,16 +67,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(repo-common repo-backend)
 
 FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY "https://github.com/google/googletest"
-    GIT_TAG        "release-1.10.0"
+  googletest
+  GIT_REPOSITORY "https://github.com/google/googletest"
+  GIT_TAG "release-1.10.0"
+  GIT_SHALLOW ON
 )
-
 FetchContent_Declare(
-   grpc
-   GIT_REPOSITORY https://github.com/grpc/grpc.git
-   GIT_TAG        "v1.31.1")
-
+  grpc
+  GIT_REPOSITORY https://github.com/grpc/grpc.git
+  GIT_TAG "v1.31.1"
+  GIT_SHALLOW ON
+)
 FetchContent_MakeAvailable(googletest grpc)
 
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)
@@ -90,13 +89,14 @@ set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 get_target_property(Protobuf_INCLUDE_DIRS ${_PROTOBUF_LIBPROTOBUF} INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(gRPC_INCLUDE_DIRS ${_GRPC_GRPCPP} INTERFACE_INCLUDE_DIRECTORIES)
 
-include_directories(${RapidJSON_INCLUDE_DIRS})
 include_directories(${Protobuf_INCLUDE_DIRS})
 include_directories(${gRPC_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-get_filename_component(python_host_proto_abspath "python_host.proto" ABSOLUTE)
+get_filename_component(python_host_proto_abspath "src/python_host.proto" ABSOLUTE)
 get_filename_component(python_host_proto_dir "${python_host_proto_abspath}" PATH)
+
+message(${python_host_proto_abspath})
 
 set(GRPC_SRCS
     "${CMAKE_CURRENT_BINARY_DIR}/python_host.grpc.pb.cc"
@@ -118,11 +118,11 @@ add_custom_command(
     --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
     -I "${python_host_proto_dir}"
     --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
-    "python_host.proto"
-  DEPENDS "python_host.proto" ${_PROTOBUF_LIBPROTOBUF}
+    "${python_host_proto_abspath}"
+  DEPENDS "${python_host_proto_abspath}" ${_PROTOBUF_LIBPROTOBUF}
 )
 
-find_program(PYTHON "python3" REQUIRED)
+find_package(Python REQUIRED COMPONENTS Interpreter)   
 add_custom_command(
   OUTPUT ${GRPC_PY}
   COMMAND ${PYTHON}
@@ -131,8 +131,8 @@ add_custom_command(
     -I "${python_host_proto_dir}"
     --grpc_python_out "${CMAKE_CURRENT_BINARY_DIR}"
     --python_out "${CMAKE_CURRENT_BINARY_DIR}"
-    "python_host.proto"
-  DEPENDS "python_host.proto" ${_PROTOBUF_LIBPROTOBUF}
+    "${python_host_proto_abspath}"
+  DEPENDS "${python_host_proto_abspath}" ${_PROTOBUF_LIBPROTOBUF}
 )
 
 add_custom_target(python-grpc-py-library ALL
@@ -172,9 +172,9 @@ target_compile_options(
 
 target_link_libraries(
   triton-python-backend
-  PUBLIC
+  PRIVATE
     triton-backend-utils  # from repo-backend
-  PRIVATE ${_GRPC_GRPCPP}
+    ${_GRPC_GRPCPP}
 )
 
 set_target_properties(
