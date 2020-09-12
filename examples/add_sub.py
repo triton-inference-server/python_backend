@@ -83,6 +83,9 @@ class TritonPythonModel:
         pb_utils.InferenceRequest in `requests`. If there is an error, you can
         set the error argument when creating a pb_utils.InferenceResponse"""
 
+        output0_dtype = self.output0_dtype
+        output1_dtype = self.output1_dtype
+
         responses = []
 
         # Every Python backend must iterate over everyone of the requests
