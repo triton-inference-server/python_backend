@@ -32,27 +32,52 @@
 
 The Triton backend for Python
 
-Use a recent cmake to build and install in a local directory.
+## Quick Start
+
+1. Requirements
+
+
+* cmake >= 1.17
+* Triton Inference Server
+* Triton Python Client libraries
+
+2. Build Python backend
 
 ```
+$ git clone https://github.com/triton-inference-server/python_backend:<release> python_backend
+$ cd python_backend
 $ mkdir build
 $ cd build
 $ cmake -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 $ make install
 ```
 
-The following required Triton repositories will be pulled and used in the build. By default the "main" branch/tag will be used for each repo but the listed CMake argument can be used to override.
+2. Copy example model and configuration
 
-* triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=[tag]
-* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
+```
+$ mkdir -p models/python_float32_float32_float32/1/
+$ cp examples/add_sub.py models/python_float32_float32_float32/1/model.py
+$ cp examples/config.pbtxt models/python_float32_float32_float32/config.pbtxt
+```
 
-# Usage
+3. Start the Triton Server
 
-The goal of Python backend is to let you run models written in Python be served by Triton for inference without having to write any
+```
+$ /opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models
+```
+
+4. Use the client app to perform inference
+
+```
+$ python3 examples/add_sub_client.py
+```
+
+## Usage
+
+The goal of Python backend is to let you serve models written in Python by Triton Inference Server without having to write any
 C++ code. In order to use the Python backend, you need to create a Python file that has a structure similar to below:
 
 ```python
-
 import triton_python_backend_utils as pb_utils
 
 
@@ -75,12 +100,12 @@ class TritonPythonModel:
 
         responses = []
 
-        # Every Python backend must iterate over everyone of the requests
-        # and create a pb_utils.InferenceResponse for each of them.
+        # Every Python backend must iterate every request and create a
+        # pb_utils.InferenceResponse for each of them.
         for request in requests:
-            # Perform inference on every request and append to responses list
+            # Perform inference on the request and append it to responses list...
 
-        # You should return a list of pb_utils.InferenceResponse. Length
+        # You must return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
         return responses
 
@@ -111,7 +136,7 @@ are given an `args` variable. `args` is a Python dictionary. Both keys and value
 | model_version            | Model version                                    |
 | model_name               | Model name                                       |
 
-## `execute`
+### `execute`
 
 `execute` function is called whenever an inference request is made. Every Python
 model **MUST** implement `execute` function. In the `execute` function you are given
@@ -119,7 +144,7 @@ a list of `InferenceRequest` objects. In this fucntion, your `execute` function
 must return a list of `InferenceResponse` objects that has the same length as 
 `requets`.
 
-## `finalize`
+### `finalize`
 
 Implementing `finalize` is OPTIONAL. This function allows you to do any clean ups necessary before the model is unloaded from Triton server.
 
