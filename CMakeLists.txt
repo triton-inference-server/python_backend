@@ -123,7 +123,7 @@ add_custom_command(
 find_package(Python REQUIRED COMPONENTS Interpreter)   
 add_custom_command(
   OUTPUT ${GRPC_PY}
-  COMMAND ${PYTHON}
+  COMMAND ${Python_EXECUTABLE}
   ARGS
     -m grpc_tools.protoc
     -I "${python_host_proto_dir}"
