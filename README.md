@@ -154,8 +154,7 @@ Every Python backend can implement three main functions:
 ### `initialize`
 
 `initialize` is called once the model is being loaded. Implementing `initialize` is optional. `initialize`
-allows you to do any necessary initializations before execution. Examples include creating your models and
-loading the pretrained model weights before performing inference on it. In the `initialize` function, you
+allows you to do any necessary initializations before execution. In the `initialize` function, you
 are given an `args` variable. `args` is a Python dictionary. Both keys and values for this Python dictionary are strings. You can find the available keys in the `args` dictionary along with their description in the table below:
 
 | key                      | description                                      |
