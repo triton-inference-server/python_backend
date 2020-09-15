@@ -28,6 +28,8 @@ import numpy as np
 import sys
 import json
 
+import sys
+sys.path.append('../')
 # You need to include triton_python_backend_utils here to be able to work with
 # inference requests and responses. It also contains some utility functions for
 # extracting information from model_config and converting Triton input/output
@@ -44,16 +46,19 @@ class TritonPythonModel:
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
-        Implementing `initialize` function is OPTIONAL. This function allows
-        the model to intialize any state associated with this model. An `args`
-        argument is also given to you. `args` is a Python dictionary. It
-        contains the keys below:
-        * model_config: A JSON string containing the model configuration
-        * model_instance_kind: A string containing model instance kind
-        * model_instance_device_id: A string containing model instance device ID
-        * model_repository: Model repository path
-        * model_version: Model version
-        * model_name: Model name
+        Implementing `initialize` function is optional. This function allows
+        the model to intialize any state associated with this model.
+
+        Parameters
+        ----------
+        args : dict
+          Both keys and values are strings. The dictionary keys and values are:
+          * model_config: A JSON string containing the model configuration
+          * model_instance_kind: A string containing model instance kind
+          * model_instance_device_id: A string containing model instance device ID
+          * model_repository: Model repository path
+          * model_version: Model version
+          * model_name: Model name
         """
 
         # You must parse model_config. JSON string is not parsed here
@@ -81,7 +86,19 @@ class TritonPythonModel:
         Batching) used, `requests` may contain multiple requests. Every
         Python model, must create one pb_utils.InferenceResponse for every
         pb_utils.InferenceRequest in `requests`. If there is an error, you can
-        set the error argument when creating a pb_utils.InferenceResponse"""
+        set the error argument when creating a pb_utils.InferenceResponse
+
+        Parameters
+        ----------
+        requests : list
+          A list of pb_utils.InferenceRequest
+
+        Returns
+        -------
+        list
+          A list of pb_utils.InferenceResponse. The length of this list must
+          be the same as `requests`
+        """
 
         output0_dtype = self.output0_dtype
         output1_dtype = self.output1_dtype

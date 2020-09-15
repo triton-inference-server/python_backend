@@ -1,5 +1,5 @@
 
-name: "python_float32_float32_float32"
+name: "add_sub"
 backend: "python"
 
 input [
