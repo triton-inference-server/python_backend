@@ -175,6 +175,27 @@ a list of `InferenceRequest` objects. In this fucntion, your `execute` function
 must return a list of `InferenceResponse` objects that has the same length as 
 `requets`.
 
+In case one of the inputs has an error, you can use the `TritonError` object to set the error message for that specific request. Below is an example of setting errors for an `InferenceResponse` object:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+    ...
+
+    def execute(self, requests):
+        responses = []
+
+        for request in requests:
+            if an_error_occured:
+              # If there is an error, the output_tensors are ignored
+              responses.append(pb_utils.InferenceResponse(
+                output_tensors=[], error=pb_utils.TritonError("An Error Occured")))
+
+        return responses
+```
+
 ### `finalize`
 
 Implementing `finalize` is optional. This function allows you to do any clean ups necessary before the model is unloaded from Triton server.
@@ -200,6 +221,26 @@ models
 │   │   └── model.py
 │   └── config.pbtxt
 └── triton_python_backend_utils.py
+```
+
+`triton_python_backend_utils.py` can be put in other directories too if it can be imported from `model.py`. This
+directory structure helps if you have multiple models and you don't want to copy `triton_python_backend_utils.py` multiple times.
+
+## Error Handling
+
+If there is an error that affects the `initialize`, `execute`, or `finalize` function of the Python model you can
+use `TritonInferenceException`. For example, if there is an error during initilization:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+    ...
+
+    def finalize(self):
+      if error_during_finalize:
+        raise pb_utils.TritonModelException("An error occured during finalize.")
 ```
 
 # Reporting problems, asking questions

@@ -29,7 +29,7 @@ import sys
 import json
 
 import sys
-sys.path.append('../')
+sys.path.append('../../')
 # You need to include triton_python_backend_utils here to be able to work with
 # inference requests and responses. It also contains some utility functions for
 # extracting information from model_config and converting Triton input/output
