@@ -55,8 +55,8 @@
 
 #include "triton/backend/backend_common.h"
 #include "triton/common/triton_json.h"
-#include "triton/common/tritonbackend.h"
-#include "triton/common/tritonserver.h"
+#include "triton/core/tritonbackend.h"
+#include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
 
