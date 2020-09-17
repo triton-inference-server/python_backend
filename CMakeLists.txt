@@ -223,14 +223,14 @@ install(
     ${GRPC_PY}
     src/resources/startup.py
   DESTINATION
-    ${INSTALL_CONFIGDIR}
+    ${CMAKE_INSTALL_LIBDIR}/backends/python
 )
 
 install(
   FILES
     src/resources/triton_python_backend_utils.py
   DESTINATION
-    ${INSTALL_CONFIGDIR}
+    ${CMAKE_INSTALL_LIBDIR}/backends/python
 )
 
 include(CMakePackageConfigHelpers)
