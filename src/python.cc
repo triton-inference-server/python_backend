@@ -592,7 +592,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     }
   }
 
-  // Set the default path for python runtime and library
+  // Use BackendArtifacts to determine the location of Python files
   const char *location;
   TRITONBACKEND_ArtifactType artifact_type;
   RETURN_IF_ERROR(TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
