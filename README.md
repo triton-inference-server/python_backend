@@ -30,7 +30,9 @@
 
 # Python Backend
 
-The Triton backend for Python. The goal of Python backend is to let you serve models written in Python by Triton Inference Server without having to write any C++ code.
+The Triton backend for Python. The goal of Python backend is to let you serve
+models written in Python by Triton Inference Server without having to write
+any C++ code.
 
 ## Quick Start
 
@@ -65,7 +67,7 @@ $ cp examples/config.pbtxt models/add_sub/config.pbtxt
 3. Copy `triton_python_backend_utils.py`
 
 ```
-$ cp src/resources/triton_python_backend_utils.py models/
+$ cp src/resources/triton_python_backend_utils.py models/add_sub/1/
 ```
 
 4. Start the Triton Server
@@ -82,7 +84,8 @@ $ python3 examples/add_sub_client.py
 
 ## Usage
 
- In order to use the Python backend, you need to create a Python file that has a structure similar to below:
+In order to use the Python backend, you need to create a Python file that
+has a structure similar to below:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -153,9 +156,13 @@ Every Python backend can implement three main functions:
 
 ### `initialize`
 
-`initialize` is called once the model is being loaded. Implementing `initialize` is optional. `initialize`
-allows you to do any necessary initializations before execution. In the `initialize` function, you
-are given an `args` variable. `args` is a Python dictionary. Both keys and values for this Python dictionary are strings. You can find the available keys in the `args` dictionary along with their description in the table below:
+`initialize` is called once the model is being loaded. Implementing
+`initialize` is optional. `initialize` allows you to do any necessary
+initializations before execution. In the `initialize` function, you are given
+an `args` variable. `args` is a Python dictionary. Both keys and
+values for this Python dictionary are strings. You can find the available
+keys in the `args` dictionary along with their description in the table
+below:
 
 | key                      | description                                      |
 |--------------------------|--------------------------------------------------|
@@ -174,7 +181,9 @@ a list of `InferenceRequest` objects. In this fucntion, your `execute` function
 must return a list of `InferenceResponse` objects that has the same length as 
 `requets`.
 
-In case one of the inputs has an error, you can use the `TritonError` object to set the error message for that specific request. Below is an example of setting errors for an `InferenceResponse` object:
+In case one of the inputs has an error, you can use the `TritonError` object
+to set the error message for that specific request. Below is an example of
+setting errors for an `InferenceResponse` object:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -197,11 +206,13 @@ class TritonPythonModel:
 
 ### `finalize`
 
-Implementing `finalize` is optional. This function allows you to do any clean ups necessary before the model is unloaded from Triton server.
+Implementing `finalize` is optional. This function allows you to do any clean
+ups necessary before the model is unloaded from Triton server.
 
 You can look at the [add_sub example](examples/add_sub.py) which contains
 a complete example of implementing all these functions for a Python model
-that adds and subtracts the inputs given to it. After implementing all the necessary functions, you should save this file as `model.py`.
+that adds and subtracts the inputs given to it. After implementing all the
+necessary functions, you should save this file as `model.py`.
 
 ## Model Config File
 
@@ -210,25 +221,28 @@ the model configuration. In order to use this backend you must set the `backend`
 field of your model `config.pbtxt` file to `python`. You shouldn't set
 `platform` field of the configuration.
 
-Also, you need to make a copy of [triton_python_backend_utils.py](src/resources/triton_python_backend_utils.py) available to your `model.py`.
+Also, you need to make a copy of
+[triton_python_backend_utils.py](src/resources/triton_python_backend_utils.py)
+available to your `model.py`.
 
 Your models directory should look like below:
 ```
 models
-├── add_sub
-│   ├── 1
-│   │   └── model.py
-│   └── config.pbtxt
-└── triton_python_backend_utils.py
+└── add_sub
+    ├── 1
+    │   ├── model.py
+    │   └── triton_python_backend_utils.py
+    └── config.pbtxt
 ```
 
-`triton_python_backend_utils.py` can be put in other directories too if it can be imported from `model.py`. This
-directory structure helps if you have multiple models and you don't want to copy `triton_python_backend_utils.py` multiple times.
+It is recommended to have one copy of `triton_python_backend_utils.py` along
+with every `model.py` file like the tree structure shown above.
 
 ## Error Handling
 
-If there is an error that affects the `initialize`, `execute`, or `finalize` function of the Python model you can
-use `TritonInferenceException`. For example, if there is an error during initilization:
+If there is an error that affects the `initialize`, `execute`, or `finalize`
+function of the Python model you can use `TritonInferenceException`. 
+Example below shows how you can do error handling in `finalize`:
 
 ```python
 import triton_python_backend_utils as pb_utils
