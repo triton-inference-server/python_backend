@@ -203,8 +203,8 @@ install(
     triton-python-backend
   EXPORT
     triton-python-backend-targets
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/backends/python
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/backends/python
+  LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(
@@ -223,14 +223,14 @@ install(
     ${GRPC_PY}
     src/resources/startup.py
   DESTINATION
-    ${INSTALL_CONFIGDIR}
+    ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(
   FILES
     src/resources/triton_python_backend_utils.py
   DESTINATION
-    ${INSTALL_CONFIGDIR}
+    ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 include(CMakePackageConfigHelpers)

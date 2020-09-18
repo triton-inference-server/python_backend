@@ -504,7 +504,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
   BackendState* backend_state = reinterpret_cast<BackendState*>(bstate);
 
   const char* path = nullptr;
-  TRITONBACKEND_ModelArtifactType artifact_type;
+  TRITONBACKEND_ArtifactType artifact_type;
   RETURN_IF_ERROR(
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
 
@@ -582,16 +582,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
-  bool found_py_lib_config = false;
   bool found_py_runtime_config = false;
 
   if (backend_config.Find("cmdline", &cmdline)) {
-    triton::common::TritonJson::Value python_lib;
-    if (cmdline.Find("python-lib", &python_lib)) {
-      RETURN_IF_ERROR(python_lib.AsString(&backend_state->python_lib));
-      found_py_lib_config = true;
-    }
-
     triton::common::TritonJson::Value python_runtime;
     if (cmdline.Find("python-runtime", &python_runtime)) {
       RETURN_IF_ERROR(python_runtime.AsString(&backend_state->python_runtime));
@@ -599,15 +592,15 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     }
   }
 
-  // Set the default path for python runtime and library
-  if (!found_py_lib_config) {
-    backend_state->python_lib = "/opt/tritonserver/lib/python/runtime";
-  }
+  // Use BackendArtifacts to determine the location of Python files
+  const char *location;
+  TRITONBACKEND_ArtifactType artifact_type;
+  RETURN_IF_ERROR(TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
+  backend_state->python_lib = location;
 
   if (!found_py_runtime_config) {
     backend_state->python_runtime = "python3";
   }
-
 
   RETURN_IF_ERROR(TRITONBACKEND_BackendSetState(
       backend, reinterpret_cast<void*>(backend_state.get())));
@@ -625,7 +618,7 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
   auto backend_state = reinterpret_cast<BackendState*>(vstate);
   delete backend_state;
   LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "TRITONBACKEND_Finalize: End");
-  return nullptr;  // success
+  return nullptr; // success
 }
 
 TRITONSERVER_Error*
