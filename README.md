@@ -39,6 +39,8 @@ any C++ code.
 1. Requirements
 
 * cmake >= 3.17
+* numpy
+* grpcio-tools
 
 2. Build Python backend
 
@@ -237,6 +239,17 @@ models
 
 It is recommended to have one copy of `triton_python_backend_utils.py` along
 with every `model.py` file like the tree structure shown above.
+
+## Changing Python Runtime Path
+
+Python backend by default uses `python3` available inside `PATH`. In order to change
+the Python runtime used by Python backend, you can use the `--backend-config` flag:
+
+```
+/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,python-runtime=<full path to custom Python location>
+```
+
+Ensure that in the new Python environment `numpy` and `grpcio-tools` packages are installed.
 
 ## Error Handling
 
