@@ -129,7 +129,7 @@ add_custom_command(
   DEPENDS "${python_host_proto_abspath}" ${_PROTOBUF_LIBPROTOBUF}
 )
 
-find_package(Python REQUIRED COMPONENTS Interpreter)   
+find_package(Python REQUIRED COMPONENTS Interpreter)
 add_custom_command(
   OUTPUT ${GRPC_PY}
   COMMAND ${Python_EXECUTABLE}
@@ -147,7 +147,7 @@ add_custom_target(python-grpc-py-library ALL
 
 add_library(
   python-grpc-library EXCLUDE_FROM_ALL OBJECT
-  ${GRPC_SRCS} ${GRPC_HDRS} 
+  ${GRPC_SRCS} ${GRPC_HDRS}
 )
 
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
@@ -174,7 +174,7 @@ target_compile_features(triton-python-backend PRIVATE cxx_std_11)
 target_compile_options(
   triton-python-backend PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
-    -Wall -Wextra -Wno-unused-parameter -Werror>
+    -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
 )
 
 target_link_libraries(
