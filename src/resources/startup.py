@@ -35,6 +35,10 @@ import signal
 import time
 import struct
 
+from grpc_channelz.v1 import channelz
+from grpc_channelz.v1 import channelz_pb2
+from grpc_channelz.v1 import channelz_pb2_grpc
+
 import numpy as np
 
 from python_host_pb2 import *
@@ -293,10 +297,25 @@ class PythonHost(PythonInterpreterServicer):
         return execute_response
 
 
+def watch_connections(address, event):
+    while True:
+        with grpc.insecure_channel(address) as channel:
+            channelz_stub = channelz_pb2_grpc.ChannelzStub(channel)
+            servers = channelz_stub.GetServers(
+                channelz_pb2.GetServersRequest(start_server_id=0))
+            sockets = channelz_stub.GetServerSockets(
+                channelz_pb2.GetServerSocketsRequest(
+                server_id=servers.server[0].ref.server_id, start_socket_id=0))
+    
+        if len(sockets.socket_ref) == 1:
+            event.set()
+        time.sleep(4)
+
 if __name__ == "__main__":
     signal_received = False
     FLAGS = parse_startup_arguments()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    channelz.add_channelz_servicer(server)
     # Create an Event to keep the GRPC server running
     event = threading.Event()
     python_host = PythonHost(module_path=FLAGS.model_path)
@@ -316,8 +335,12 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGINT, interrupt_handler)
     signal.signal(signal.SIGTERM, sigterm_handler)
+    print(FLAGS.socket)
 
     server.add_insecure_port(FLAGS.socket)
     server.start()
+    time.sleep(4)
+    background_thread = threading.Thread(target=watch_connections, args=(FLAGS.socket, event))
+    background_thread.start()
     event.wait()
     server.stop(grace=5)
