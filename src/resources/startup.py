@@ -355,7 +355,6 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGINT, interrupt_handler)
     signal.signal(signal.SIGTERM, sigterm_handler)
-    print(FLAGS.socket)
 
     server.add_insecure_port(FLAGS.socket)
     server.start()
