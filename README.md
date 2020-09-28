@@ -41,6 +41,7 @@ any C++ code.
 * cmake >= 3.17
 * numpy
 * grpcio-tools
+* grpcio-channelz
 
 2. Build Python backend
 
