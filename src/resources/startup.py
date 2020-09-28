@@ -35,6 +35,10 @@ import signal
 import time
 import struct
 
+from grpc_channelz.v1 import channelz
+from grpc_channelz.v1 import channelz_pb2
+from grpc_channelz.v1 import channelz_pb2_grpc
+
 import numpy as np
 
 from python_host_pb2 import *
@@ -293,10 +297,48 @@ class PythonHost(PythonInterpreterServicer):
         return execute_response
 
 
+def watch_connections(address, event):
+    # Sleep for 4 seconds to ensure that the Python gRPC server has started
+    time.sleep(4)
+
+    number_of_failures = 0
+    timeout_sec = 1
+
+    while True:
+        # If there are three failures, shutdown the gRPC server.
+        if number_of_failures == 3:
+            event.set()
+            break
+
+        channel = grpc.insecure_channel(address)
+        try:
+            channelz_stub = channelz_pb2_grpc.ChannelzStub(channel)
+            # Wait for the channel to be ready.
+            grpc.channel_ready_future(channel).result(timeout=timeout_sec)
+        except grpc.FutureTimeoutError:
+            number_of_failures += 1
+            continue
+        servers = channelz_stub.GetServers(
+            channelz_pb2.GetServersRequest(start_server_id=0))
+        sockets = channelz_stub.GetServerSockets(
+            channelz_pb2.GetServerSocketsRequest(
+                server_id=servers.server[0].ref.server_id, start_socket_id=0))
+
+        # There should be always more than one socket connected to the server
+        if len(sockets.socket_ref) == 1:
+            number_of_failures += 1
+        else:
+            number_of_failures = 0
+
+        # Sleep for 2 seconds before polling next time
+        time.sleep(2)
+
+
 if __name__ == "__main__":
     signal_received = False
     FLAGS = parse_startup_arguments()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    channelz.add_channelz_servicer(server)
     # Create an Event to keep the GRPC server running
     event = threading.Event()
     python_host = PythonHost(module_path=FLAGS.model_path)
@@ -319,5 +361,10 @@ if __name__ == "__main__":
 
     server.add_insecure_port(FLAGS.socket)
     server.start()
+
+    # A Background thread to monitor the status of the gRPC server
+    background_thread = threading.Thread(target=watch_connections,
+                                         args=(FLAGS.socket, event))
+    background_thread.start()
     event.wait()
     server.stop(grace=5)
