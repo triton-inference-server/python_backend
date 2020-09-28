@@ -298,6 +298,9 @@ class PythonHost(PythonInterpreterServicer):
 
 
 def watch_connections(address, event):
+    # Sleep for 4 seconds to ensure that the Python gRPC server has started
+    time.sleep(4)
+
     number_of_failures = 0
     timeout_sec = 1
 
@@ -327,8 +330,8 @@ def watch_connections(address, event):
         else:
             number_of_failures = 0
 
-        # Sleep for 4 seconds before polling next time
-        time.sleep(4)
+        # Sleep for 2 seconds before polling next time
+        time.sleep(2)
 
 
 if __name__ == "__main__":
@@ -358,7 +361,6 @@ if __name__ == "__main__":
 
     server.add_insecure_port(FLAGS.socket)
     server.start()
-    time.sleep(4)
 
     # A Background thread to monitor the status of the gRPC server
     background_thread = threading.Thread(target=watch_connections,
