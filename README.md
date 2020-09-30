@@ -42,6 +42,16 @@ any C++ code.
 * numpy
 * grpcio-tools
 * grpcio-channelz
+* rapidjson-dev
+
+```
+pip3 install grpcio-tools grpcio-channelz numpy
+```
+
+On Ubuntu or Debian you can use the command below to install `rapidjson`:
+```
+sudo apt-get install rapidjson-dev
+```
 
 2. Build Python backend
 
