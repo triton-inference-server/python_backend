@@ -24,11 +24,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "python_host.grpc.pb.h"
-#include "triton/backend/backend_common.h"
-#include "triton/common/triton_json.h"
-#include "triton/core/tritonbackend.h"
-#include "triton/core/tritonserver.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -55,6 +50,12 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
+
+#include "python_host.grpc.pb.h"
+#include "triton/backend/backend_common.h"
+#include "triton/common/triton_json.h"
+#include "triton/core/tritonbackend.h"
+#include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
 
