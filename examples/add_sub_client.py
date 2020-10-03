@@ -4,7 +4,7 @@ import tritonhttpclient as httpclient
 
 import numpy as np
 
-model_name = "python_float32_float32_float32"
+model_name = "add_sub"
 shape = [4]
 
 with httpclient.InferenceServerClient("localhost:8000") as client:
@@ -31,5 +31,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
                             outputs=outputs)
 
     result = response.get_response()
-    print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(input0_data, input1_data, response.as_numpy("OUTPUT0")))
-    print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(input0_data, input1_data, response.as_numpy("OUTPUT1")))
+    print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
+        input0_data, input1_data, response.as_numpy("OUTPUT0")))
+    print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(
+        input0_data, input1_data, response.as_numpy("OUTPUT1")))
