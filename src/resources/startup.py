@@ -34,6 +34,7 @@ import threading
 import signal
 import time
 import struct
+import traceback
 
 from grpc_channelz.v1 import channelz
 from grpc_channelz.v1 import channelz_pb2
@@ -182,9 +183,10 @@ class PythonHost(PythonInterpreterServicer):
             args = {x.key: x.value for x in request.args}
             try:
                 self.backend.initialize(args)
-            except tpb_utils.TritonModelException as e:
+            except Exception as e:
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(e.message())
+                tb = traceback.format_exc()
+                context.set_details(tb)
 
         return Empty()
 
@@ -195,9 +197,10 @@ class PythonHost(PythonInterpreterServicer):
         if hasattr(self.backend, 'finalize'):
             try:
                 self.backend.finalize()
-            except tpb_utils.TritonModelException as e:
+            except Exception as e:
                 context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details(e.message())
+                tb = traceback.format_exc()
+                context.set_details(tb)
 
         return Empty()
 
@@ -222,7 +225,7 @@ class PythonHost(PythonInterpreterServicer):
                 numpy_type = tpb_utils.triton_to_numpy_type(x.dtype)
 
                 # We need to deserialize TYPE_STRING
-                if numpy_type == np.object or numpy_type == np.bytes_:
+                if numpy_type == np.object_ or numpy_type == np.bytes_:
                     numpy_data = deserialize_bytes_tensor(x.raw_data)
                     tensor = tpb_utils.Tensor(x.name,
                                               numpy_data.reshape(x.dims))
@@ -250,7 +253,12 @@ class PythonHost(PythonInterpreterServicer):
             context.set_details('Backend does not implement `execute` method')
             return ExecuteResponse()
 
-        responses = self.backend.execute(inference_requests)
+        try:
+            responses = self.backend.execute(inference_requests)
+        except Exception as e:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            tb = traceback.format_exc()
+            context.set_details(tb)
 
         # Make sure that number of InferenceResponse and InferenceRequest
         # objects match
