@@ -373,6 +373,11 @@ if __name__ == "__main__":
     # A Background thread to monitor the status of the gRPC server
     background_thread = threading.Thread(target=watch_connections,
                                          args=(FLAGS.socket, event))
+
+    # Set background_thread as a daemon thread so that it doesn't interrupt the
+    # program termination
+    background_thread.daemon = True
     background_thread.start()
     event.wait()
     server.stop(grace=5)
+    sys.exit()

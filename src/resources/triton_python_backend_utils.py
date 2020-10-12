@@ -26,7 +26,7 @@
 
 import numpy as np
 
-TRITION_TO_NUMPY_TYPE = {
+TRITON_TO_NUMPY_TYPE = {
     # TRITONSERVER_TYPE_BOOL
     1: np.bool,
     # TRITONSERVER_TYPE_UINT8
@@ -55,7 +55,7 @@ TRITION_TO_NUMPY_TYPE = {
     13: np.bytes_
 }
 
-TRITION_STRING_TO_NUMPY = {
+TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': np.bool,
     'TYPE_UINT8': np.uint8,
     'TYPE_UINT16': np.uint16,
@@ -71,8 +71,8 @@ TRITION_STRING_TO_NUMPY = {
     'TYPE_STRING': np.bytes_
 }
 
-NUMPY_TO_TRITION_TYPE = {v: k for k, v in TRITION_TO_NUMPY_TYPE.items()}
-NUMPY_TO_TRITION_STRING = {v: k for k, v in TRITION_TO_NUMPY_TYPE.items()}
+NUMPY_TO_TRITON_TYPE = {v: k for k, v in TRITON_TO_NUMPY_TYPE.items()}
+NUMPY_TO_TRITON_STRING = {v: k for k, v in TRITON_TO_NUMPY_TYPE.items()}
 
 
 class InferenceRequest:
@@ -342,12 +342,15 @@ def get_output_config_by_name(model_config, name):
 
 
 def triton_to_numpy_type(data_type):
-    return TRITION_TO_NUMPY_TYPE[data_type]
+    return TRITON_TO_NUMPY_TYPE[data_type]
 
 
 def numpy_to_triton_type(data_type):
-    return NUMPY_TO_TRITION_TYPE[data_type]
+    if data_type == np.object_:
+        return 'TYPE_STRING'
+
+    return NUMPY_TO_TRITON_TYPE[data_type]
 
 
 def triton_string_to_numpy(triton_type_string):
-    return TRITION_STRING_TO_NUMPY[triton_type_string]
+    return TRITON_STRING_TO_NUMPY[triton_type_string]
