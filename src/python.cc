@@ -26,6 +26,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <functional>
 #include <grpc/grpc.h>
@@ -389,9 +390,9 @@ ModelInstanceState::~ModelInstanceState() {
   waitpid(interpreter_pid_, &status, 0);
 
   // Check if the domain socket has been set.
-  if (domain_socket_.length() >= 7) {
+  if (domain_socket_ != "") {
     // We want to remove "unix://" from the beginning of domain_socket_
-    unlink(domain_socket_.substr(7).c_str());
+    unlink(domain_socket_.substr(strlen("unix://")).c_str());
 
     // FIXME currently GRPC client uses an async thread for cleaning up and
     // shutting down the connection, however, as reported in
