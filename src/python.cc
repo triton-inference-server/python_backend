@@ -86,6 +86,10 @@ namespace python {
     }                                                                          \
   } while (false)
 
+extern "C" {
+extern char **environ;
+}
+
 class ModelState;
 
 struct BackendState {
@@ -234,7 +238,7 @@ TRITONSERVER_Error *ModelInstanceState::CreatePythonInterpreter() {
     subinterpreter_commandline[5] = pymodule_path_.c_str();
     subinterpreter_commandline[7] = name_.c_str();
     if (execvpe(subinterpreter_commandline[0],
-                (char **)subinterpreter_commandline, nullptr) == -1) {
+                (char **)subinterpreter_commandline, environ) == -1) {
       std::stringstream ss;
       ss << "Cannot run interpreter host. Errno = " << errno << '\n'
          << "python_interpreter_path: " << python_interpreter_path << '\n'
