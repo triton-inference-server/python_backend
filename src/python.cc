@@ -24,31 +24,24 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <algorithm>
 #include <chrono>
-#include <condition_variable>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <deque>
 #include <functional>
-#include <future>
 #include <grpc/grpc.h>
 #include <grpc/support/time.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
-#include <iostream>
 #include <memory>
-#include <mutex>
 #include <numeric>
 #include <sstream>
-#include <stdio.h>
 #include <string>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
-#include <unordered_map>
 #include <vector>
 
 #include "python_host.grpc.pb.h"
@@ -57,7 +50,9 @@
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
-namespace triton { namespace backend { namespace python {
+namespace triton {
+namespace backend {
+namespace python {
 
 #define RESPOND_AND_RETURN_IF_ERROR(REQUEST, X)                                \
   do {                                                                         \
@@ -393,16 +388,22 @@ ModelInstanceState::~ModelInstanceState() {
   int status;
   kill(interpreter_pid_, SIGTERM);
   waitpid(interpreter_pid_, &status, 0);
-  unlink(domain_socket_.substr(7).c_str());
 
-  // FIXME currently GRPC client uses an async thread for cleaning up and
-  // shutting down the connection, however, as reported in
-  // https://github.com/grpc/grpc/issues/22479 the clean up thread may continue
-  // to live after resources have been deallocated an cause a segfault. This is
-  // a workaround to do a blocking shutdown of the GRPC client
-  grpc_shutdown_blocking();
+  // Check if the domain socket has been set.
+  if (domain_socket_ != "") {
+    // We want to remove "unix://" from the beginning of domain_socket_
+    unlink(domain_socket_.substr(strlen("unix://")).c_str());
 
-  LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "GRPC shutdown complete");
+    // FIXME currently GRPC client uses an async thread for cleaning up and
+    // shutting down the connection, however, as reported in
+    // https://github.com/grpc/grpc/issues/22479 the clean up thread may
+    // continue to live after resources have been deallocated an cause a
+    // segfault. This is a workaround to do a blocking shutdown of the GRPC
+    // client
+    grpc_shutdown_blocking();
+
+    LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "GRPC shutdown complete");
+  }
 }
 
 TRITONSERVER_Error *ModelInstanceState::GetInputTensor(
@@ -665,11 +666,6 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance *instance) {
       ModelInstanceState::Create(model_state, instance, &instance_state));
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceSetState(
       instance, reinterpret_cast<void *>(instance_state)));
-
-  RETURN_ERROR_IF_FALSE(
-      instance_state->Kind() == TRITONSERVER_INSTANCEGROUPKIND_CPU,
-      TRITONSERVER_ERROR_INVALID_ARG,
-      std::string("python backend only supports CPU instances"));
 
   RETURN_IF_ERROR(instance_state->CreatePythonInterpreter());
 
