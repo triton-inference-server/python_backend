@@ -87,6 +87,8 @@ namespace triton { namespace backend { namespace python {
     }                                                                   \
   } while (false)
 
+constexpr int MAX_GRPC_MESSAGE_SIZE = INT32_MAX;
+
 class ModelState;
 
 struct BackendState {
@@ -261,8 +263,11 @@ TRITONSERVER_Error*
 ModelInstanceState::ConnectPythonInterpreter()
 {
   grpc_init();
-  auto grpc_channel =
-      grpc::CreateChannel(domain_socket_, grpc::InsecureChannelCredentials());
+  grpc::ChannelArguments arguments;
+  arguments.SetMaxSendMessageSize(MAX_GRPC_MESSAGE_SIZE);
+  arguments.SetMaxReceiveMessageSize(MAX_GRPC_MESSAGE_SIZE);
+  auto grpc_channel = grpc::CreateCustomChannel(
+      domain_socket_, grpc::InsecureChannelCredentials(), arguments);
 
   stub = PythonInterpreter::NewStub(grpc_channel);
 
@@ -440,6 +445,12 @@ ModelInstanceState::GetInputTensor(
   RETURN_IF_ERROR(TRITONBACKEND_InputProperties(
       in, &input_name, &input_dtype, &input_shape, &input_dims_count,
       &input_byte_size, &input_buffer_count));
+
+  if (input_byte_size >= MAX_GRPC_MESSAGE_SIZE)
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNSUPPORTED,
+        "Python backend does not support input size larger than 2GBs, consider "
+        "parititioning your input into multiple inputs.");
 
   // Update input_tensor
   input_tensor->set_name(input_name);

@@ -46,6 +46,8 @@ from python_host_pb2 import *
 from python_host_pb2_grpc import PythonInterpreterServicer, add_PythonInterpreterServicer_to_server
 import grpc
 
+MAX_GRPC_MESSAGE_SIZE = 2147483647
+
 
 def serialize_byte_tensor(input_tensor):
     """
@@ -345,7 +347,13 @@ def watch_connections(address, event):
 if __name__ == "__main__":
     signal_received = False
     FLAGS = parse_startup_arguments()
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1),
+                         options=[
+                             ('grpc.max_send_message_length',
+                              MAX_GRPC_MESSAGE_SIZE),
+                             ('grpc.max_receive_message_length',
+                              MAX_GRPC_MESSAGE_SIZE),
+                         ])
     channelz.add_channelz_servicer(server)
     # Create an Event to keep the GRPC server running
     event = threading.Event()
