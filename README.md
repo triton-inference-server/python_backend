@@ -36,6 +36,56 @@ any C++ code.
 
 ## Quick Start
 
+1. Run the Triton Inference Server container.
+```
+$ docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:20.10-py3
+```
+
+2. Inside the container, clone the Python backend repository.
+
+```
+$ git clone https://github.com/triton-inference-server/python_backend -b r20.10
+```
+
+3. Install example model.
+```
+$ cd python_backend
+$ mkdir -p models/add_sub/1/
+$ cp examples/add_sub.py models/add_sub/1/model.py
+$ cp examples/config.pbtxt models/add_sub/config.pbtxt
+```
+
+4. Copy `triton_python_backend_utils.py`
+
+```
+$ cp src/resources/triton_python_backend_utils.py models/add_sub/1/
+```
+
+5. Start the Triton server.
+
+```
+$ tritonserver --model-repository `pwd`/models
+```
+
+6. In the host machine, start the client container.
+
+```
+ docker run -ti --net host nvcr.io/nvidia/tritonserver:20.10-py3-clientsdk /bin/bash
+```
+
+7. In the client container, clone the Python backend repository.
+
+```
+$ git clone https://github.com/triton-inference-server/python_backend -b r20.10
+```
+
+8. Run the example client.
+```
+$ python3 python_backend/examples/add_sub_client.py
+```
+
+## Building from Source
+
 1. Requirements
 
 * cmake >= 3.17
@@ -68,6 +118,9 @@ but the listed CMake argument can be used to override.
 
 * triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=[tag]
 * triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
+
+Set `DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
+this location is `/opt/tritonserver`.
 
 2. Copy example model and configuration
 
