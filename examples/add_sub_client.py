@@ -1,6 +1,6 @@
 from tritonclient.utils import *
-import tritongrpc.client as grpcclient
-import tritonhttp.client as httpclient
+import tritonclient.grpc as grpcclient
+import tritonclient.http as httpclient
 
 import numpy as np
 
