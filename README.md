@@ -126,8 +126,8 @@ this location is `/opt/tritonserver`.
 
 ```
 $ mkdir -p models/add_sub/1/
-$ cp examples/add_sub.py models/add_sub/1/model.py
-$ cp examples/config.pbtxt models/add_sub/config.pbtxt
+$ cp examples/add_sub/model.py models/add_sub/1/model.py
+$ cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
 ```
 
 3. Copy `triton_python_backend_utils.py`
@@ -145,7 +145,7 @@ $ /opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models
 5. Use the client app to perform inference
 
 ```
-$ python3 examples/add_sub_client.py
+$ python3 examples/add_sub/client.py
 ```
 
 ## Usage
@@ -165,7 +165,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -181,9 +181,9 @@ class TritonPythonModel:
         print('Initialized...')
 
     def execute(self, requests):
-        """`execute` MUST be implemented in every Python model. `execute`
+        """`execute` must be implemented in every Python model. `execute`
         function receives a list of pb_utils.InferenceRequest as the only
-        argument. This function is called when an inference request is made
+        argument. This function is called when an inference is requested
         for this model.
 
         Parameters
@@ -231,7 +231,7 @@ keys in the `args` dictionary along with their description in the table
 below:
 
 | key                      | description                                      |
-|--------------------------|--------------------------------------------------|
+| ------------------------ | ------------------------------------------------ |
 | model_config             | A JSON string containing the model configuration |
 | model_instance_kind      | A string containing model instance kind          |
 | model_instance_device_id | A string containing model instance device ID     |
@@ -242,10 +242,10 @@ below:
 ### `execute`
 
 `execute` function is called whenever an inference request is made. Every Python
-model **MUST** implement `execute` function. In the `execute` function you are given
-a list of `InferenceRequest` objects. In this fucntion, your `execute` function
+model must implement `execute` function. In the `execute` function you are given
+a list of `InferenceRequest` objects. In this function, your `execute` function
 must return a list of `InferenceResponse` objects that has the same length as 
-`requets`.
+`requests`.
 
 In case one of the inputs has an error, you can use the `TritonError` object
 to set the error message for that specific request. Below is an example of
@@ -262,10 +262,10 @@ class TritonPythonModel:
         responses = []
 
         for request in requests:
-            if an_error_occured:
+            if an_error_occurred:
               # If there is an error, the output_tensors are ignored
               responses.append(pb_utils.InferenceResponse(
-                output_tensors=[], error=pb_utils.TritonError("An Error Occured")))
+                output_tensors=[], error=pb_utils.TritonError("An Error Occurred")))
 
         return responses
 ```
@@ -313,7 +313,8 @@ the Python runtime used by Python backend, you can use the `--backend-config` fl
 /opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,python-runtime=<full path to custom Python location>
 ```
 
-Ensure that in the new Python environment `numpy` and `grpcio-tools` packages are installed.
+You will also need to install all the dependencies mentioned in the "Install
+from Source" section in the new environment too. 
 
 ## Error Handling
 
@@ -330,8 +331,26 @@ class TritonPythonModel:
 
     def finalize(self):
       if error_during_finalize:
-        raise pb_utils.TritonModelException("An error occured during finalize.")
+        raise pb_utils.TritonModelException("An error occurred during finalize.")
 ```
+
+# Examples
+
+## AddSub in Numpy
+
+There is no dependencies required for the AddSub numpy example. Instructions
+on how to use this model is explained in the quick start section. You can
+find the files in [examples/add_sub](examples/add_sub).
+
+## AddSubNet in PyTorch
+
+In order to use this model, you need to install PyTorch. We recommend using
+`pip` method mentioned in the [PyTorch
+website](https://pytorch.org/get-started/locally/). Make sure that PyTorch is
+available in the same Python environment as other dependencies. If you need
+to create another Python environment, please refer to the "Changing Python
+Runtime Path" section of this readme. You can find the files for this example
+in [examples/pytorch](examples/pytorch).
 
 # Reporting problems, asking questions
 
