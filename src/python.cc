@@ -94,6 +94,7 @@ class ModelState;
 struct BackendState {
   std::string python_lib;
   std::string python_runtime;
+  int64_t grpc_timeout;
 };
 
 class ModelInstanceState {
@@ -298,6 +299,9 @@ ModelInstanceState::ConnectPythonInterpreter()
       "model_version", std::to_string(model_state_->ModelVersion()));
   insert_model_param("model_name", model_state_->ModelName());
 
+  // GRPC timeout
+  int64_t grpc_timeout = model_state_->StateForBackend()->grpc_timeout;
+
   // Attempting to connect to the python runtime
   grpc::Status status;
   constexpr uint8_t conn_attempts = 5;
@@ -314,7 +318,7 @@ ModelInstanceState::ConnectPythonInterpreter()
       connected_ = true;
       return nullptr;
     } else {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+      std::this_thread::sleep_for(std::chrono::milliseconds(grpc_timeout));
     }
   }
 
@@ -593,13 +597,20 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
-  bool found_py_runtime_config = false;
+  backend_state->python_runtime = "python3";
+  backend_state->grpc_timeout = 2000;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value python_runtime;
     if (cmdline.Find("python-runtime", &python_runtime)) {
       RETURN_IF_ERROR(python_runtime.AsString(&backend_state->python_runtime));
-      found_py_runtime_config = true;
+    }
+
+    triton::common::TritonJson::Value grpc_timeout;
+    if (cmdline.Find("grpc-timeout-milliseconds", &grpc_timeout)) {
+      std::string grpc_timeout_str;
+      RETURN_IF_ERROR(grpc_timeout.AsString(&grpc_timeout_str));
+      RETURN_IF_ERROR(ParseLongLongValue(grpc_timeout_str, &backend_state->grpc_timeout));
     }
   }
 
@@ -609,10 +620,6 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
   backend_state->python_lib = location;
-
-  if (!found_py_runtime_config) {
-    backend_state->python_runtime = "python3";
-  }
 
   RETURN_IF_ERROR(TRITONBACKEND_BackendSetState(
       backend, reinterpret_cast<void*>(backend_state.get())));

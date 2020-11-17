@@ -316,6 +316,17 @@ the Python runtime used by Python backend, you can use the `--backend-config` fl
 You will also need to install all the dependencies mentioned in the "Install
 from Source" section in the new environment too. 
 
+## Changing GRPC Timeout
+
+Python backend uses gRPC to connect Triton to the Python model. You can change the 
+timeout using the backend config:
+
+```
+/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,grpc-timeout-milliseconds=3000
+```
+
+The default timeout value is 2000 milliseconds.
+
 ## Error Handling
 
 If there is an error that affects the `initialize`, `execute`, or `finalize`
