@@ -322,10 +322,10 @@ Python backend uses gRPC to connect Triton to the Python model. You can change t
 timeout using the backend config:
 
 ```
-/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,grpc-timeout=3000
+/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,grpc-timeout-milliseconds=3000
 ```
 
-The timeout value is in milliseconds.
+The default timeout value is 2000 milliseconds.
 
 ## Error Handling
 

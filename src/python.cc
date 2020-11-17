@@ -607,10 +607,10 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     }
 
     triton::common::TritonJson::Value grpc_timeout;
-    if (cmdline.Find("grpc-timeout", &grpc_timeout)) {
+    if (cmdline.Find("grpc-timeout-milliseconds", &grpc_timeout)) {
       std::string grpc_timeout_str;
       RETURN_IF_ERROR(grpc_timeout.AsString(&grpc_timeout_str));
-      backend_state->grpc_timeout = std::stoi(grpc_timeout_str);
+      RETURN_IF_ERROR(ParseLongLongValue(grpc_timeout_str, &backend_state->grpc_timeout));
     }
   }
 
