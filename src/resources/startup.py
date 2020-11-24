@@ -35,6 +35,7 @@ import signal
 import time
 import struct
 import traceback
+from pathlib import Path
 
 from grpc_channelz.v1 import channelz
 from grpc_channelz.v1 import channelz_pb2
@@ -155,10 +156,19 @@ class PythonHost(PythonInterpreterServicer):
 
     def __init__(self, module_path, *args, **kwargs):
         super(PythonInterpreterServicer, self).__init__(*args, **kwargs)
-        spec = importlib.util.spec_from_file_location('TritonPythonModel',
-                                                      module_path)
+
+        module_path = Path(module_path).resolve()
+        # Add model parent directories so that relative and absolute import work
+        sys.path.append(str(module_path.parent))
+        sys.path.append(str(module_path.parent.parent))
+
+        # We need to import the parent directory of the module
+        # so that the relative imports work too.
+        spec = importlib.util.spec_from_file_location(
+            f'{module_path.parent.name}.{module_path.name}', str(module_path))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+
         self.module_path = module_path
 
         if hasattr(module, 'TritonPythonModel'):

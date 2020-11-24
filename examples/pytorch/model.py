@@ -29,12 +29,10 @@ import sys
 import json
 from torch import nn
 
-# You need to include triton_python_backend_utils here to be able to work with
-# inference requests and responses. It also contains some utility functions for
-# extracting information from model_config and converting Triton input/output
-# types to numpy types. You must copy
-# src/resources/triton_python_backend_utils.py in the appropriate location so
-# that the import below works properly.
+# triton_python_backend_utils is available in every Triton Python model. You
+# need to use this module to create inference requests and responses. It also
+# contains some utility functions for extracting information from model_config
+# and converting Triton input/output types to numpy types.
 import triton_python_backend_utils as pb_utils
 
 
@@ -51,7 +49,6 @@ class AddSubNet(nn.Module):
         """ 
         """
         return (input0 + input1), (input0 - input1)
-
 
 
 class TritonPythonModel:
@@ -92,7 +89,7 @@ class TritonPythonModel:
             output0_config['data_type'])
         self.output1_dtype = pb_utils.triton_string_to_numpy(
             output1_config['data_type'])
-        
+
         # Instantiate the PyTorch model
         self.add_sub_model = AddSubNet()
 
