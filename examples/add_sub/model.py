@@ -28,12 +28,10 @@ import numpy as np
 import sys
 import json
 
-# You need to include triton_python_backend_utils here to be able to work with
-# inference requests and responses. It also contains some utility functions for
-# extracting information from model_config and converting Triton input/output
-# types to numpy types. You must copy
-# src/resources/triton_python_backend_utils.py in the appropriate location so
-# that the import below works properly.
+# triton_python_backend_utils is available in every Triton Python model. You
+# need to use this module to create inference requests and responses. It also
+# contains some utility functions for extracting information from model_config
+# and converting Triton input/output types to numpy types.
 import triton_python_backend_utils as pb_utils
 
 
