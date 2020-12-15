@@ -172,7 +172,7 @@ class PythonHost(PythonInterpreterServicer):
         self.module_path = module_path
 
         if hasattr(module, 'TritonPythonModel'):
-            self.backend = module.TritonPythonModel()
+            self.model_instance = module.TritonPythonModel()
         else:
             raise NotImplementedError(
                 'TritonPythonModel class doesn\'t exist in ' + module_path)
@@ -184,17 +184,17 @@ class PythonHost(PythonInterpreterServicer):
         default to every ModelInstance.
         """
 
-        backend = self.backend
+        model_instance = self.model_instance
 
         if not hasattr(request, 'args'):
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details('request objects does\'nt have args attribute')
             return Empty()
 
-        if hasattr(backend, 'initialize'):
+        if hasattr(model_instance, 'initialize'):
             args = {x.key: x.value for x in request.args}
             try:
-                self.backend.initialize(args)
+                self.model_instance.initialize(args)
             except Exception as e:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 tb = traceback.format_exc()
@@ -206,9 +206,10 @@ class PythonHost(PythonInterpreterServicer):
         """Fini is called on TRITONBACKEND_ModelInstanceFinalize. Model
         can perform any necessary clean up in the `finalize` function.
         """
-        if hasattr(self.backend, 'finalize'):
+
+        if hasattr(self.model_instance, 'finalize'):
             try:
-                self.backend.finalize()
+                self.model_instance.finalize()
             except Exception as e:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 tb = traceback.format_exc()
@@ -221,6 +222,7 @@ class PythonHost(PythonInterpreterServicer):
         happens in this function. This function mainly converts gRPC
         protobufs to the triton_python_backend_utils.InferenceRequest and
         triton_python_backend_utils.InferenceResponse.
+
         Parameters
         ----------
         request : python_host_pb2.ExecuteRequest
@@ -257,16 +259,18 @@ class PythonHost(PythonInterpreterServicer):
                 requested_output_names)
             inference_requests.append(inference_request)
 
-        # Execute inference on the Python backend responses contains a list of
-        # triton_python_backend_utils.InferenceResponse. Each backend must
-        # implement an execute method
-        if not hasattr(self.backend, 'execute'):
+        # Execute inference on the Python model instance. `responses` contains
+        # a list of triton_python_backend_utils.InferenceResponse. Each backend
+        # must implement an execute method.
+        if not hasattr(self.model_instance, 'execute'):
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details('Backend does not implement `execute` method')
+            context.set_details(
+                f'Python model {self.module_path} does not implement `execute` method.'
+            )
             return ExecuteResponse()
 
         try:
-            responses = self.backend.execute(inference_requests)
+            responses = self.model_instance.execute(inference_requests)
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
             tb = traceback.format_exc()
