@@ -38,13 +38,14 @@ any C++ code.
 
 1. Run the Triton Inference Server container.
 ```
-$ docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:20.10-py3
+$ docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
+Replace <xx.yy> with the Triton version (e.g. 20.11).
 
 2. Inside the container, clone the Python backend repository.
 
 ```
-$ git clone https://github.com/triton-inference-server/python_backend -b r20.10
+$ git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy>
 ```
 
 3. Install example model.
@@ -64,13 +65,13 @@ $ tritonserver --model-repository `pwd`/models
 5. In the host machine, start the client container.
 
 ```
- docker run -ti --net host nvcr.io/nvidia/tritonserver:20.10-py3-sdk /bin/bash
+ docker run -ti --net host nvcr.io/nvidia/tritonserver:<xx.yy>-py3-sdk /bin/bash
 ```
 
 6. In the client container, clone the Python backend repository.
 
 ```
-$ git clone https://github.com/triton-inference-server/python_backend -b r20.10
+$ git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy>
 ```
 
 7. Run the example client.
@@ -326,6 +327,10 @@ class TritonPythonModel:
 ```
 
 # Examples
+
+For using the Triton Python client in these examples you need to install
+the [Triton Python Client Library](https://github.com/triton-inference-server/server/blob/master/docs/client_libraries.md#getting-the-client-libraries).
+The Python client for each of the examples is in the `client.py` file.
 
 ## AddSub in Numpy
 
