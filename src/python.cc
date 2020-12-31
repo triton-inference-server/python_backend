@@ -49,6 +49,9 @@
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
+#ifdef TRITON_ENABLE_GPU
+#include <cuda_runtime_api.h>
+#endif  // TRITON_ENABLE_GPU
 
 namespace triton { namespace backend { namespace python {
 
@@ -142,6 +145,11 @@ class ModelInstanceState {
   const TRITONSERVER_InstanceGroupKind kind_;
   const int32_t device_id_;
   bool connected_ = false;
+
+#ifdef TRITON_ENABLE_GPU
+  cudaStream_t stream_;
+  cudaEvent_t event_;
+#endif  // TRITON_ENABLE_GPU
 
  public:
   triton::common::TritonJson::Value model_config;
@@ -335,6 +343,24 @@ ModelInstanceState::ModelInstanceState(
       name_(name), kind_(kind), device_id_(device_id),
       model_config(std::move(model_config)), triton_model_(triton_model)
 {
+#ifdef TRITON_ENABLE_GPU
+  int device_cnt;
+  auto cuerr = cudaGetDeviceCount(&device_cnt);
+  // Do nothing if there is no CUDA device since all data transfer will be done
+  // within CPU memory
+  if ((cuerr != cudaErrorNoDevice) && (cuerr != cudaErrorInsufficientDriver)) {
+    if (cuerr == cudaSuccess) {
+      cuerr = cudaStreamCreate(&stream_);
+    }
+    if (cuerr != cudaSuccess) {
+      stream_ = nullptr;
+    }
+    cuerr = cudaEventCreate(&event_);
+    if (cuerr != cudaSuccess) {
+      event_= nullptr;
+    }
+  }
+#endif  // TRITON_ENABLE_GPU
 }
 
 TRITONSERVER_Error*
@@ -382,6 +408,26 @@ ModelInstanceState::Create(
 
 ModelInstanceState::~ModelInstanceState()
 {
+#ifdef TRITON_ENABLE_GPU
+  if(stream_!=nullptr){
+    cudaError_t err = cudaStreamDestroy(stream_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          ("Failed to destroy cuda stream: " + std::string(cudaGetErrorString(err)))
+          .c_str());
+    }
+  }
+  if(event_!=nullptr){
+    cudaError_t err = cudaEventDestroy(event_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          ("Failed to destroy cuda event: " + std::string(cudaGetErrorString(err)))
+          .c_str());
+    }
+  }
+#endif  // TRITON_ENABLE_GPU
   // Intentional empty scope, without this empty scope
   // GRPC will NOT shutdown gracefully
   {
@@ -475,11 +521,36 @@ ModelInstanceState::GetInputTensor(
         in, j, &input_buffer, &buffer_byte_size, &input_memory_type,
         &input_memory_type_id));
 
+#ifdef TRITON_ENABLE_GPU
     if (input_memory_type == TRITONSERVER_MEMORY_GPU) {
-      RETURN_IF_ERROR(TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_UNSUPPORTED,
-          "failed to get input buffer in CPU memory"));
+      char* input_buffer_pinned;
+      cudaMallocHost((void**)&input_buffer_pinned, buffer_byte_size);
+
+      bool cuda_copy=false;
+      cudaError_t err = cudaMemcpyAsync(input_buffer_pinned , input_buffer, buffer_byte_size,cudaMemcpyDeviceToHost, stream_);
+      if (err != cudaSuccess) {
+        RETURN_IF_ERROR(TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              "failed to copy input buffer from GPU to CPU"));
+      } else {
+        cuda_copy = true;
+        if(event_!=nullptr){
+          cudaEventRecord(event_,stream_);
+        }
+      }
+      if(cuda_copy){
+        if(event_!=nullptr){
+          cudaEventSynchronize(event_);
+        }else{
+          cudaStreamSynchronize(stream_);
+        }
+      }
+      data_buffer->append((const char*)input_buffer_pinned, buffer_byte_size);
+      cudaFreeHost(input_buffer_pinned);
+      continue;
     }
+
+#endif  // TRITON_ENABLE_GPU
     data_buffer->append((const char*)input_buffer, buffer_byte_size);
   }
 
