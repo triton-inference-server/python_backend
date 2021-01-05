@@ -52,7 +52,7 @@ TRITON_TO_NUMPY_TYPE = {
     # TRITONSERVER_TYPE_FP64
     12: np.float64,
     # TRITONSERVER_TYPE_STRING
-    13: np.bytes_
+    13: np.object
 }
 
 TRITON_STRING_TO_NUMPY = {
@@ -68,7 +68,7 @@ TRITON_STRING_TO_NUMPY = {
     'TYPE_FP16': np.float16,
     'TYPE_FP32': np.float32,
     'TYPE_FP64': np.float64,
-    'TYPE_STRING': np.bytes_
+    'TYPE_STRING': np.object
 }
 
 NUMPY_TO_TRITON_TYPE = {v: k for k, v in TRITON_TO_NUMPY_TYPE.items()}
