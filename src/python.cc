@@ -47,6 +47,7 @@
 #include "python_host.grpc.pb.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_input_collector.h"
+#include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
 #include "triton/common/triton_json.h"
@@ -133,12 +134,10 @@ class ModelInstanceState : public BackendModelInstance {
   const std::string name_;
   bool connected_ = false;
 
- public:
-  triton::common::TritonJson::Value model_config;
-
  private:
   TRITONBACKEND_Model* triton_model_;
   pid_t interpreter_pid_;
+  std::vector<BackendMemory*> input_tensor_memories_;
 };
 
 class ModelState : public BackendModel {
@@ -151,12 +150,7 @@ class ModelState : public BackendModel {
 
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
-
-  TRITONSERVER_Server* triton_server_;
-  TRITONBACKEND_Model* triton_model_;
-  triton::common::TritonJson::Value model_config_;
   BackendState* backend_state_;
-  const char* model_path_;
 };
 
 TRITONSERVER_Error*
@@ -250,7 +244,7 @@ ModelInstanceState::ConnectPythonInterpreter()
       new InitializationCommand());
 
   std::vector<std::string> keys;
-  LOG_IF_ERROR(model_config.Members(&keys), "can't get key names");
+  LOG_IF_ERROR(Model()->ModelConfig().Members(&keys), "can't get key names");
   std::string val;
 
   const auto insert_model_param =
@@ -261,7 +255,7 @@ ModelInstanceState::ConnectPythonInterpreter()
       };
 
   triton::common::TritonJson::WriteBuffer buffer;
-  model_config.Write(&buffer);
+  Model()->ModelConfig().Write(&buffer);
 
   insert_model_param("model_config", std::move(buffer.MutableContents()));
   insert_model_param(
@@ -343,6 +337,12 @@ ModelInstanceState::~ModelInstanceState()
     }
   }
 
+  // Remove input tensor memories
+  for (BackendMemory* mem : input_tensor_memories_) {
+    delete mem;
+  }
+  input_tensor_memories_.clear();
+
   stub.reset();
 
   int status;
@@ -382,6 +382,7 @@ ModelInstanceState::GetInputTensor(
   RESPOND_AND_RETURN_IF_ERROR(
       request, TRITONBACKEND_RequestInput(request, input_name, &in));
 
+
   // Load input properties
   TRITONSERVER_DataType input_dtype;
   const int64_t* input_shape;
@@ -392,6 +393,12 @@ ModelInstanceState::GetInputTensor(
   RETURN_IF_ERROR(TRITONBACKEND_InputProperties(
       in, &input_name, &input_dtype, &input_shape, &input_dims_count,
       &input_byte_size, &input_buffer_count));
+
+  // We need to create a new collector for every request because python backend
+  // sends each request individually to the python model
+  BackendInputCollector collector(
+      &request, 1, &responses, Model()->TritonMemoryManager(),
+      false /* pinned_enable */, CudaStream());
 
   if (input_byte_size >= MAX_GRPC_MESSAGE_SIZE)
     return TRITONSERVER_ErrorNew(
@@ -409,22 +416,12 @@ ModelInstanceState::GetInputTensor(
 
   // Load raw data into input_tensor raw data.
   std::string* data_buffer = input_tensor->mutable_raw_data();
-  const void* input_buffer = nullptr;
-  uint64_t buffer_byte_size = 0;
-  TRITONSERVER_MemoryType input_memory_type = TRITONSERVER_MEMORY_CPU;
-  int64_t input_memory_type_id = 0;
-  for (size_t j = 0; j < input_buffer_count; ++j) {
-    RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
-        in, j, &input_buffer, &buffer_byte_size, &input_memory_type,
-        &input_memory_type_id));
+  data_buffer->resize(input_byte_size);
 
-    if (input_memory_type == TRITONSERVER_MEMORY_GPU) {
-      RETURN_IF_ERROR(TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_UNSUPPORTED,
-          "failed to get input buffer in CPU memory"));
-    }
-    data_buffer->append((const char*)input_buffer, buffer_byte_size);
-  }
+  char* input_buffer = (char*)data_buffer->c_str();
+
+  collector.ProcessTensor(
+      input_name, input_buffer, input_byte_size, TRITONSERVER_MEMORY_CPU, 0);
 
   return nullptr;
 }
@@ -452,14 +449,14 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   THROW_IF_BACKEND_MODEL_ERROR(
       TRITONBACKEND_ModelBackend(triton_model, &backend));
 
-  void* bstate;
-  THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
-  backend_state_ = reinterpret_cast<BackendState*>(bstate);
-
   const char* path = nullptr;
   TRITONBACKEND_ArtifactType artifact_type;
   THROW_IF_BACKEND_MODEL_ERROR(
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
+
+  void* bstate;
+  THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
+  backend_state_ = reinterpret_cast<BackendState*>(bstate);
 
   if (artifact_type != TRITONBACKEND_ARTIFACT_FILESYSTEM) {
     throw triton::backend::BackendModelException(TRITONSERVER_ErrorNew(
