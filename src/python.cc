@@ -46,6 +46,9 @@
 
 #include "python_host.grpc.pb.h"
 #include "triton/backend/backend_common.h"
+#include "triton/backend/backend_input_collector.h"
+#include "triton/backend/backend_model.h"
+#include "triton/backend/backend_model_instance.h"
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
@@ -97,26 +100,18 @@ struct BackendState {
   int64_t grpc_timeout;
 };
 
-class ModelInstanceState {
+class ModelInstanceState : public BackendModelInstance {
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
       ModelInstanceState** model_instance_state);
 
-  /// Get the name, kind and device ID of the instance.
-  const std::string& Name() const { return name_; }
-  TRITONSERVER_InstanceGroupKind Kind() const { return kind_; }
-  int32_t DeviceId() const { return device_id_; }
-
-  /// Get the state of the model that corresponds to this instance.
-  ModelState* StateForModel() const { return model_state_; }
-
   ~ModelInstanceState();
 
-  /// Creates a python child process running startup.py
+  // Creates a python child process running startup.py
   TRITONSERVER_Error* CreatePythonInterpreter();
 
-  /// Load Triton inputs to the appropriate Protobufs
+  // Load Triton inputs to the appropriate Protobufs
   TRITONSERVER_Error* GetInputTensor(
       const uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
       std::vector<TRITONBACKEND_Response*>& responses, size_t r,
@@ -127,10 +122,7 @@ class ModelInstanceState {
 
  private:
   ModelInstanceState(
-      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
-      const char* name, const TRITONSERVER_InstanceGroupKind kind,
-      const int32_t device_id, triton::common::TritonJson::Value&& model_config,
-      TRITONBACKEND_Model* trition_model);
+      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
 
   TRITONSERVER_Error* ConnectPythonInterpreter();
 
@@ -139,8 +131,6 @@ class ModelInstanceState {
   std::string domain_socket_;
   TRITONBACKEND_ModelInstance* triton_model_instance_;
   const std::string name_;
-  const TRITONSERVER_InstanceGroupKind kind_;
-  const int32_t device_id_;
   bool connected_ = false;
 
  public:
@@ -151,35 +141,19 @@ class ModelInstanceState {
   pid_t interpreter_pid_;
 };
 
-class ModelState {
+class ModelState : public BackendModel {
  public:
   static TRITONSERVER_Error* Create(
       TRITONBACKEND_Model* triton_model, ModelState** state);
 
-  // Get the handle to the TRITONBACKEND model.
-  TRITONBACKEND_Model* TritonModel() { return triton_model_; }
-
-  // Get the name and version of the model.
-  const std::string& ModelName() const { return model_name_; }
-  uint64_t ModelVersion() const { return model_version_; }
-
   // Get backend state
   BackendState* StateForBackend() { return backend_state_; }
 
-  // Get Model Path
-  const char* ModelPath() { return model_path_; }
-
  private:
-  ModelState(
-      TRITONSERVER_Server* triton_server, TRITONBACKEND_Model* triton_model,
-      const char* model_name, const uint64_t model_version,
-      triton::common::TritonJson::Value&& model_config,
-      BackendState* backend_state, const char* model_path);
+  ModelState(TRITONBACKEND_Model* triton_model);
 
   TRITONSERVER_Server* triton_server_;
   TRITONBACKEND_Model* triton_model_;
-  const std::string model_name_;
-  const uint64_t model_version_;
   triton::common::TritonJson::Value model_config_;
   BackendState* backend_state_;
   const char* model_path_;
@@ -214,8 +188,8 @@ ModelInstanceState::CreatePythonInterpreter()
     domain_socket_ = std::string(full_socket_name);
   }
 
-  uint64_t model_version = model_state_->ModelVersion();
-  const char* model_path = model_state_->ModelPath();
+  uint64_t model_version = model_state_->Version();
+  const char* model_path = model_state_->RepositoryPath().c_str();
 
   std::stringstream ss;
   // Use <path>/version/model.py as the model location
@@ -294,10 +268,9 @@ ModelInstanceState::ConnectPythonInterpreter()
       "model_instance_kind", TRITONSERVER_InstanceGroupKindString(kind_));
   insert_model_param("model_instance_name", name_);
   insert_model_param("model_instance_device_id", std::to_string(device_id_));
-  insert_model_param("model_repository", model_state_->ModelPath());
-  insert_model_param(
-      "model_version", std::to_string(model_state_->ModelVersion()));
-  insert_model_param("model_name", model_state_->ModelName());
+  insert_model_param("model_repository", model_state_->RepositoryPath());
+  insert_model_param("model_version", std::to_string(model_state_->Version()));
+  insert_model_param("model_name", model_state_->Name());
 
   // GRPC timeout
   int64_t grpc_timeout = model_state_->StateForBackend()->grpc_timeout;
@@ -327,13 +300,9 @@ ModelInstanceState::ConnectPythonInterpreter()
 }
 
 ModelInstanceState::ModelInstanceState(
-    ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
-    const char* name, const TRITONSERVER_InstanceGroupKind kind,
-    const int32_t device_id, triton::common::TritonJson::Value&& model_config,
-    TRITONBACKEND_Model* triton_model)
-    : model_state_(model_state), triton_model_instance_(triton_model_instance),
-      name_(name), kind_(kind), device_id_(device_id),
-      model_config(std::move(model_config)), triton_model_(triton_model)
+    ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
+    : BackendModelInstance(model_state, triton_model_instance),
+      model_state_(model_state)
 {
 }
 
@@ -342,42 +311,16 @@ ModelInstanceState::Create(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance,
     ModelInstanceState** state)
 {
-  const char* instance_name;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceName(triton_model_instance, &instance_name));
-
-  TRITONSERVER_InstanceGroupKind instance_kind;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceKind(triton_model_instance, &instance_kind));
-
-  int32_t instance_id;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceDeviceId(triton_model_instance, &instance_id));
-
-  TRITONBACKEND_Model* triton_model;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ModelInstanceModel(triton_model_instance, &triton_model));
-
-  TRITONSERVER_Message* config_message;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelConfig(triton_model, 1, &config_message));
-
-  // Parse JSON config
-  const char* buffer;
-  size_t byte_size;
-  RETURN_IF_ERROR(
-      TRITONSERVER_MessageSerializeToJson(config_message, &buffer, &byte_size));
-
-  triton::common::TritonJson::Value model_config;
-
-  TRITONSERVER_Error* err = model_config.Parse(buffer, byte_size);
-  RETURN_IF_ERROR(TRITONSERVER_MessageDelete(config_message));
-  RETURN_IF_ERROR(err);
-
-  *state = new ModelInstanceState(
-      model_state, triton_model_instance, instance_name, instance_kind,
-      instance_id, std::move(model_config), triton_model);
-
-  return nullptr;
+  try {
+    *state = new ModelInstanceState(model_state, triton_model_instance);
+  }
+  catch (const BackendModelInstanceException& ex) {
+    RETURN_ERROR_IF_TRUE(
+        ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
+        std::string("unexpected nullptr in BackendModelInstanceException"));
+    RETURN_IF_ERROR(ex.err_);
+  }
+  return nullptr;  // success
 }
 
 ModelInstanceState::~ModelInstanceState()
@@ -489,65 +432,41 @@ ModelInstanceState::GetInputTensor(
 TRITONSERVER_Error*
 ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 {
-  TRITONSERVER_Message* config_message;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelConfig(triton_model, 1, &config_message));
+  try {
+    *state = new ModelState(triton_model);
+  }
+  catch (const BackendModelException& ex) {
+    RETURN_ERROR_IF_TRUE(
+        ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
+        std::string("unexpected nullptr in BackendModelException"));
+    RETURN_IF_ERROR(ex.err_);
+  }
 
-  const char* buffer;
-  size_t byte_size;
-  RETURN_IF_ERROR(
-      TRITONSERVER_MessageSerializeToJson(config_message, &buffer, &byte_size));
+  return nullptr;  // success
+}
 
-  triton::common::TritonJson::Value model_config;
-  TRITONSERVER_Error* err = model_config.Parse(buffer, byte_size);
-  RETURN_IF_ERROR(TRITONSERVER_MessageDelete(config_message));
-  RETURN_IF_ERROR(err);
-
-  const char* model_name;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelName(triton_model, &model_name));
-
-  uint64_t model_version;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelVersion(triton_model, &model_version));
-
-  TRITONSERVER_Server* triton_server;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelServer(triton_model, &triton_server));
-
+ModelState::ModelState(TRITONBACKEND_Model* triton_model)
+    : BackendModel(triton_model)
+{
   TRITONBACKEND_Backend* backend;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelBackend(triton_model, &backend));
+  THROW_IF_BACKEND_MODEL_ERROR(
+      TRITONBACKEND_ModelBackend(triton_model, &backend));
 
   void* bstate;
-  RETURN_IF_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
-  BackendState* backend_state = reinterpret_cast<BackendState*>(bstate);
+  THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
+  backend_state_ = reinterpret_cast<BackendState*>(bstate);
 
   const char* path = nullptr;
   TRITONBACKEND_ArtifactType artifact_type;
-  RETURN_IF_ERROR(
+  THROW_IF_BACKEND_MODEL_ERROR(
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
 
   if (artifact_type != TRITONBACKEND_ARTIFACT_FILESYSTEM) {
-    return TRITONSERVER_ErrorNew(
+    throw triton::backend::BackendModelException(TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_UNSUPPORTED,
-        (std::string("unsupported artifact type for model '") + model_name +
-         "'")
-            .c_str());
+        (std::string("unsupported artifact type for model '") + Name() + "'")
+            .c_str()));
   }
-
-  *state = new ModelState(
-      triton_server, triton_model, model_name, model_version,
-      std::move(model_config), backend_state, path);
-
-  return nullptr;
-}
-
-ModelState::ModelState(
-    TRITONSERVER_Server* triton_server, TRITONBACKEND_Model* triton_model,
-    const char* model_name, const uint64_t model_version,
-    triton::common::TritonJson::Value&& model_config,
-    BackendState* backend_state, const char* model_path)
-    : triton_server_(triton_server), triton_model_(triton_model),
-      model_name_(model_name), model_version_(model_version),
-      model_config_(std::move(model_config)), backend_state_(backend_state),
-      model_path_(model_path)
-{
 }
 
 extern "C" {
@@ -610,7 +529,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     if (cmdline.Find("grpc-timeout-milliseconds", &grpc_timeout)) {
       std::string grpc_timeout_str;
       RETURN_IF_ERROR(grpc_timeout.AsString(&grpc_timeout_str));
-      RETURN_IF_ERROR(ParseLongLongValue(grpc_timeout_str, &backend_state->grpc_timeout));
+      RETURN_IF_ERROR(
+          ParseLongLongValue(grpc_timeout_str, &backend_state->grpc_timeout));
     }
   }
 
