@@ -305,7 +305,7 @@ class PythonHost(PythonInterpreterServicer):
                 output_shape = output_np_array.shape
 
                 # We need to serialize TYPE_STRING
-                if output_np_array.dtype.type is np.object or output_np_array.dtype.type is np.bytes_:
+                if output_np_array.dtype == np.object or output_np_array.dtype.type is np.bytes_:
                     output_np_array = serialize_byte_tensor(output_np_array)
 
                 tensor = Tensor(name=output_tensor.name(),
