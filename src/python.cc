@@ -130,8 +130,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::string pymodule_path_;
   ModelState* model_state_;
   std::string domain_socket_;
-  TRITONBACKEND_ModelInstance* triton_model_instance_;
-  const std::string name_;
   bool connected_ = false;
 
  private:
