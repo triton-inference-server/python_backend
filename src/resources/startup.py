@@ -142,11 +142,6 @@ def parse_startup_arguments():
                         required=True,
                         type=str,
                         help="Path to model code")
-    parser.add_argument("--instance-name",
-                        default=None,
-                        required=True,
-                        type=str,
-                        help="Triton instance name")
     return parser.parse_args()
 
 

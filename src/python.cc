@@ -1,4 +1,4 @@
-// Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -130,8 +130,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::string pymodule_path_;
   ModelState* model_state_;
   std::string domain_socket_;
-  TRITONBACKEND_ModelInstance* triton_model_instance_;
-  const std::string name_;
   bool connected_ = false;
 
  private:
@@ -158,7 +156,7 @@ ModelInstanceState::CreatePythonInterpreter()
 {
   const char* subinterpreter_commandline[] = {
       nullptr, nullptr,           "--socket", nullptr, "--model-path",
-      nullptr, "--instance-name", nullptr,    nullptr};
+      nullptr, nullptr};
 
   constexpr int max_tmpfile_name = 255;
   char tmp_dir_name[max_tmpfile_name] = "/tmp/XXXXXX";
@@ -203,7 +201,6 @@ ModelInstanceState::CreatePythonInterpreter()
     subinterpreter_commandline[0] = python_interpreter_path.c_str();
     subinterpreter_commandline[1] = python_interpreter_startup.c_str();
     subinterpreter_commandline[5] = pymodule_path_.c_str();
-    subinterpreter_commandline[7] = name_.c_str();
     if (execvp(
             subinterpreter_commandline[0],
             (char**)subinterpreter_commandline) == -1) {
@@ -211,8 +208,7 @@ ModelInstanceState::CreatePythonInterpreter()
       ss << "Cannot run interpreter host. Errno = " << errno << '\n'
          << "python_interpreter_path: " << python_interpreter_path << '\n'
          << "python_interpreter_startup: " << python_interpreter_startup << '\n'
-         << "pymodule_path_: " << pymodule_path_ << '\n'
-         << "instance_name: " << name_ << '\n';
+         << "pymodule_path_: " << pymodule_path_ << '\n';
       std::string log_message = ss.str();
       LOG_MESSAGE(TRITONSERVER_LOG_ERROR, log_message.c_str());
 
