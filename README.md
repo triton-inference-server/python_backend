@@ -1,5 +1,5 @@
 <!--
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -40,7 +40,7 @@ any C++ code.
 ```
 $ docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
-Replace <xx.yy> with the Triton version (e.g. 20.11).
+Replace \<xx.yy\> with the Triton version (e.g. 20.11).
 
 2. Inside the container, clone the Python backend repository.
 
@@ -233,7 +233,7 @@ below:
 `execute` function is called whenever an inference request is made. Every Python
 model must implement `execute` function. In the `execute` function you are given
 a list of `InferenceRequest` objects. In this function, your `execute` function
-must return a list of `InferenceResponse` objects that has the same length as 
+must return a list of `InferenceResponse` objects that has the same length as
 `requests`.
 
 In case one of the inputs has an error, you can use the `TritonError` object
@@ -271,7 +271,7 @@ necessary functions, you should save this file as `model.py`.
 
 ## Model Config File
 
-Every Python Triton model must provide a `config.pbtxt` file describing 
+Every Python Triton model must provide a `config.pbtxt` file describing
 the model configuration. In order to use this backend you must set the `backend`
 field of your model `config.pbtxt` file to `python`. You shouldn't set
 `platform` field of the configuration.
@@ -295,11 +295,11 @@ the Python runtime used by Python backend, you can use the `--backend-config` fl
 ```
 
 You will also need to install all the dependencies mentioned in the "Install
-from Source" section in the new environment too. 
+from Source" section in the new environment too.
 
 ## Changing GRPC Timeout
 
-Python backend uses gRPC to connect Triton to the Python model. You can change the 
+Python backend uses gRPC to connect Triton to the Python model. You can change the
 timeout using the backend config:
 
 ```
@@ -311,7 +311,7 @@ The default timeout value is 2000 milliseconds.
 ## Error Handling
 
 If there is an error that affects the `initialize`, `execute`, or `finalize`
-function of the Python model you can use `TritonInferenceException`. 
+function of the Python model you can use `TritonInferenceException`.
 Example below shows how you can do error handling in `finalize`:
 
 ```python
