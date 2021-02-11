@@ -44,7 +44,8 @@ from grpc_channelz.v1 import channelz_pb2_grpc
 import numpy as np
 
 from python_host_pb2 import *
-from python_host_pb2_grpc import PythonInterpreterServicer, add_PythonInterpreterServicer_to_server
+from python_host_pb2_grpc import \
+    PythonInterpreterServicer, add_PythonInterpreterServicer_to_server
 import grpc
 
 MAX_GRPC_MESSAGE_SIZE = 2147483647
@@ -72,9 +73,9 @@ def serialize_byte_tensor(input_tensor):
     if input_tensor.size == 0:
         return np.empty([0])
 
-    # If the input is a tensor of string/bytes objects, then must flatten those into
-    # a 1-dimensional array containing the 4-byte byte size followed by the
-    # actual element bytes. All elements are concatenated together in "C"
+    # If the input is a tensor of string/bytes objects, then must flatten those
+    # into a 1-dimensional array containing the 4-byte byte size followed by
+    # the actual element bytes. All elements are concatenated together in "C"
     # order.
     if (input_tensor.dtype == np.object) or (input_tensor.dtype.type
                                              == np.bytes_):
@@ -153,7 +154,9 @@ class PythonHost(PythonInterpreterServicer):
         super(PythonInterpreterServicer, self).__init__(*args, **kwargs)
 
         module_path = Path(module_path).resolve()
-        # Add model parent directories so that relative and absolute import work
+
+        # Add model parent directories so that relative and absolute imports
+        # work.
         sys.path.append(str(module_path.parent))
         sys.path.append(str(module_path.parent.parent))
 
@@ -190,7 +193,7 @@ class PythonHost(PythonInterpreterServicer):
             args = {x.key: x.value for x in request.args}
             try:
                 self.model_instance.initialize(args)
-            except Exception as e:
+            except Exception:
                 context.set_code(grpc.StatusCode.INTERNAL)
                 tb = traceback.format_exc()
                 context.set_details(tb)

@@ -135,7 +135,6 @@ class ModelInstanceState : public BackendModelInstance {
  private:
   TRITONBACKEND_Model* triton_model_;
   pid_t interpreter_pid_;
-  std::vector<BackendMemory*> input_tensor_memories_;
 };
 
 class ModelState : public BackendModel {
@@ -332,12 +331,6 @@ ModelInstanceState::~ModelInstanceState()
       }
     }
   }
-
-  // Remove input tensor memories
-  for (BackendMemory* mem : input_tensor_memories_) {
-    delete mem;
-  }
-  input_tensor_memories_.clear();
 
   stub.reset();
 

@@ -28,7 +28,7 @@ import numpy as np
 
 TRITON_TO_NUMPY_TYPE = {
     # TRITONSERVER_TYPE_BOOL
-    1: np.bool,
+    1: np.bool_,
     # TRITONSERVER_TYPE_UINT8
     2: np.uint8,
     # TRITONSERVER_TYPE_UINT16
