@@ -309,12 +309,18 @@ class PythonHost(PythonInterpreterServicer):
                 # We need to serialize TYPE_STRING
                 if output_np_array.dtype == np.object or output_np_array.dtype.type is np.bytes_:
                     output_np_array = serialize_byte_tensor(output_np_array)
-
-                tensor = Tensor(name=output_tensor.name(),
-                                dtype=tpb_utils.numpy_to_triton_type(
-                                    output_np_array.dtype.type),
-                                dims=output_shape,
-                                raw_data=output_np_array.tobytes())
+                    raw_data = output_np_array.item() if output_np_array.size > 0 else b''
+                    tensor = Tensor(name=output_tensor.name(),
+                                    dtype=tpb_utils.numpy_to_triton_type(
+                                        output_np_array.dtype.type),
+                                    dims=output_shape,
+                                    raw_data=raw_data)
+                else:
+                    tensor = Tensor(name=output_tensor.name(),
+                                    dtype=tpb_utils.numpy_to_triton_type(
+                                        output_np_array.dtype.type),
+                                    dims=output_shape,
+                                    raw_data=output_np_array.tobytes())
 
                 response_tensors.append(tensor)
             exec_responses.append(InferenceResponse(outputs=response_tensors))
