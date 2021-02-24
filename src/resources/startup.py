@@ -53,34 +53,29 @@ MAX_GRPC_MESSAGE_SIZE = 2147483647
 
 def serialize_byte_tensor(input_tensor):
     """
-    Serializes a bytes tensor into a flat numpy array of length prepended bytes.
-    Can pass bytes tensor as numpy array of bytes with dtype of np.bytes_,
-    or python strings with dtype of np.object_. np.object_ is the recommended
-    type to be used. np.str_ and np.bytes_ remove trailing zeros at the end of
-    byte sequence and because of this it should be avoided.
-
-    Parameters
-    ----------
-    input_tensor : np.array
-        The bytes tensor to serialize.
-
-    Returns
-    -------
-    serialized_bytes_tensor : np.array
-        The 1-D numpy array of type uint8 containing the serialized bytes in 'C' order.
-
-    Raises
-    ------
-    InferenceServerException
-        If unable to serialize the given tensor.
-    """
+        Serializes a bytes tensor into a flat numpy array of length prepend bytes.
+        Can pass bytes tensor as numpy array of bytes with dtype of np.bytes_,
+        numpy strings with dtype of np.str_ or python strings with dtype of np.object.
+        Parameters
+        ----------
+        input_tensor : np.array
+            The bytes tensor to serialize.
+        Returns
+        -------
+        serialized_bytes_tensor : np.array
+            The 1-D numpy array of type uint8 containing the serialized bytes in 'C' order.
+        Raises
+        ------
+        InferenceServerException
+            If unable to serialize the given tensor.
+        """
 
     if input_tensor.size == 0:
         return np.empty([0])
 
-    # If the input is a tensor of string/bytes objects, then must flatten those into
-    # a 1-dimensional array containing the 4-byte byte size followed by the
-    # actual element bytes. All elements are concatenated together in "C"
+    # If the input is a tensor of string/bytes objects, then must flatten those
+    # into a 1-dimensional array containing the 4-byte byte size followed by
+    # the actual element bytes. All elements are concatenated together in "C"
     # order.
     if (input_tensor.dtype == np.object) or (input_tensor.dtype.type
                                              == np.bytes_):
@@ -89,10 +84,13 @@ def serialize_byte_tensor(input_tensor):
             # If directly passing bytes to BYTES type,
             # don't convert it to str as Python will encode the
             # bytes which may distort the meaning
-            if type(obj.item()) == bytes:
-                s = obj.item()
+            if obj.dtype.type == np.bytes_:
+                if type(obj.item()) == bytes:
+                    s = obj.item()
+                else:
+                    s = bytes(obj)
             else:
-                s = bytes(obj)
+                s = str(obj).encode('utf-8')
             flattened += struct.pack("<I", len(s))
             flattened += s
         flattened_array = np.asarray(flattened)
@@ -130,7 +128,7 @@ def deserialize_bytes_tensor(encoded_tensor):
         sb = struct.unpack_from("<{}s".format(l), val_buf, offset)[0]
         offset += l
         strs.append(sb)
-    return (np.array(strs, dtype=np.bytes_))
+    return (np.array(strs, dtype=bytes))
 
 
 def parse_startup_arguments():
@@ -151,6 +149,7 @@ def parse_startup_arguments():
 class PythonHost(PythonInterpreterServicer):
     """This class handles inference request for python script.
     """
+
     def __init__(self, module_path, *args, **kwargs):
         super(PythonInterpreterServicer, self).__init__(*args, **kwargs)
 
@@ -306,6 +305,7 @@ class PythonHost(PythonInterpreterServicer):
                 # We need to serialize TYPE_STRING
                 if output_np_array.dtype == np.object or output_np_array.dtype.type is np.bytes_:
                     output_np_array = serialize_byte_tensor(output_np_array)
+
                 tensor = Tensor(name=output_tensor.name(),
                                 dtype=tpb_utils.numpy_to_triton_type(
                                     output_np_array.dtype.type),
