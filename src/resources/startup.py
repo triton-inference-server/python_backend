@@ -77,9 +77,9 @@ def serialize_byte_tensor(input_tensor):
     if input_tensor.size == 0:
         return np.empty([0])
 
-    # If the input is a tensor of string/bytes objects, then must flatten those
-    # into a 1-dimensional array containing the 4-byte byte size followed by
-    # the actual element bytes. All elements are concatenated together in "C"
+    # If the input is a tensor of string/bytes objects, then must flatten those into
+    # a 1-dimensional array containing the 4-byte byte size followed by the
+    # actual element bytes. All elements are concatenated together in "C"
     # order.
     if (input_tensor.dtype == np.object) or (input_tensor.dtype.type
                                              == np.bytes_):
@@ -88,13 +88,10 @@ def serialize_byte_tensor(input_tensor):
             # If directly passing bytes to BYTES type,
             # don't convert it to str as Python will encode the
             # bytes which may distort the meaning
-            if obj.dtype.type == np.bytes_:
-                if type(obj.item()) == bytes:
-                    s = obj.item()
-                else:
-                    s = bytes(obj)
+            if type(obj.item()) == bytes:
+                s = obj.item()
             else:
-                s = str(obj).encode('utf-8')
+                s = bytes(obj)
             flattened += struct.pack("<I", len(s))
             flattened += s
         flattened_array = np.asarray(flattened, dtype=np.object_)
@@ -153,7 +150,6 @@ def parse_startup_arguments():
 class PythonHost(PythonInterpreterServicer):
     """This class handles inference request for python script.
     """
-
     def __init__(self, module_path, *args, **kwargs):
         super(PythonInterpreterServicer, self).__init__(*args, **kwargs)
 
@@ -321,7 +317,6 @@ class PythonHost(PythonInterpreterServicer):
                                         output_np_array.dtype.type),
                                     dims=output_shape,
                                     raw_data=output_np_array.tobytes())
-
                 response_tensors.append(tensor)
             exec_responses.append(InferenceResponse(outputs=response_tensors))
         execute_response = ExecuteResponse(responses=exec_responses)
