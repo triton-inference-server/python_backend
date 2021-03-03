@@ -75,28 +75,32 @@ def serialize_byte_tensor(input_tensor):
     """
 
     if input_tensor.size == 0:
-        return np.empty([0])
+        return np.empty([0], dtype=np.object_)
 
     # If the input is a tensor of string/bytes objects, then must flatten those into
     # a 1-dimensional array containing the 4-byte byte size followed by the
     # actual element bytes. All elements are concatenated together in "C"
     # order.
-    if (input_tensor.dtype == np.object) or (input_tensor.dtype.type
-                                             == np.bytes_):
+    if (input_tensor.dtype == np.object_) or (input_tensor.dtype.type
+                                              == np.bytes_):
         flattened = bytes()
         for obj in np.nditer(input_tensor, flags=["refs_ok"], order='C'):
             # If directly passing bytes to BYTES type,
             # don't convert it to str as Python will encode the
             # bytes which may distort the meaning
-            if type(obj.item()) == bytes:
-                s = obj.item()
+            if input_tensor.dtype == np.object_:
+                if type(obj.item()) == bytes:
+                    s = obj.item()
+                else:
+                    s = str(obj.item()).encode('utf-8')
             else:
-                s = bytes(obj)
+                s = obj.item()
             flattened += struct.pack("<I", len(s))
             flattened += s
         flattened_array = np.asarray(flattened, dtype=np.object_)
         if not flattened_array.flags['C_CONTIGUOUS']:
-            flattened_array = np.ascontiguousarray(flattened_array, dtype=np.object_)
+            flattened_array = np.ascontiguousarray(flattened_array,
+                                                   dtype=np.object_)
         return flattened_array
     else:
         raise TritonModelException(
@@ -305,7 +309,8 @@ class PythonHost(PythonInterpreterServicer):
                 # We need to serialize TYPE_STRING
                 if output_np_array.dtype == np.object or output_np_array.dtype.type is np.bytes_:
                     output_np_array = serialize_byte_tensor(output_np_array)
-                    raw_data = output_np_array.item() if output_np_array.size > 0 else b''
+                    raw_data = output_np_array.item(
+                    ) if output_np_array.size > 0 else b''
                     tensor = Tensor(name=output_tensor.name(),
                                     dtype=tpb_utils.numpy_to_triton_type(
                                         output_np_array.dtype.type),

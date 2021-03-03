@@ -197,6 +197,10 @@ class Tensor:
     def __init__(self, name, numpy_array):
         if not isinstance(numpy_array, (np.ndarray,)):
             raise TritonModelException("numpy_array must be a numpy array")
+        elif numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
+            raise TritonModelException(
+                'Tensor dtype used for numpy_array is not support by Python backend.'
+                ' Please use np.object_ instead.')
 
         self._name = name
         self._numpy_array = numpy_array
