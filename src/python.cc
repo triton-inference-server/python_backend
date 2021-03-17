@@ -118,6 +118,8 @@ class ModelInstanceState : public BackendModelInstance {
       std::vector<TRITONBACKEND_Response*>& responses, size_t r,
       uint32_t& batch_size);
 
+  ModelState* GetModelState();
+
   // TODO: Create getter and setters
   std::unique_ptr<PythonInterpreter::Stub> stub;
 
@@ -154,8 +156,7 @@ TRITONSERVER_Error*
 ModelInstanceState::CreatePythonInterpreter()
 {
   const char* subinterpreter_commandline[] = {
-      nullptr, nullptr,           "--socket", nullptr, "--model-path",
-      nullptr, nullptr};
+      nullptr, nullptr, "--socket", nullptr, "--model-path", nullptr, nullptr};
 
   constexpr int max_tmpfile_name = 255;
   char tmp_dir_name[max_tmpfile_name] = "/tmp/XXXXXX";
@@ -353,6 +354,12 @@ ModelInstanceState::~ModelInstanceState()
 
     LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "GRPC shutdown complete");
   }
+}
+
+ModelState*
+ModelInstanceState::GetModelState()
+{
+  return model_state_;
 }
 
 TRITONSERVER_Error*
@@ -642,11 +649,76 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
-  std::vector<TRITONBACKEND_Response*> responses;
-  responses.reserve(request_count);
-
+  ModelState* model_state = instance_state->GetModelState();
   uint64_t exec_start_ns = 0;
   SET_TIMESTAMP(exec_start_ns);
+
+  const int max_batch_size = model_state->MaxBatchSize();
+  std::string name = model_state->Name();
+
+  // For each request collect the total batch size for this inference
+  // execution. The batch-size, number of inputs, and size of each
+  // input has already been checked so don't need to do that here.
+  size_t total_batch_size = 0;
+  for (size_t i = 0; i < request_count; i++) {
+    // If we get a nullptr request then something is badly wrong. Fail
+    // and release all requests.
+    if (requests[i] == nullptr) {
+      RequestsRespondWithError(
+          requests, request_count,
+          TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "null request given to Python backend for '" + name + "'")
+                  .c_str()));
+      return nullptr;
+    }
+
+    if (max_batch_size > 0) {
+      // Retrieve the batch size from one of the inputs, if the model
+      // supports batching, the first dimension size is batch size
+      TRITONBACKEND_Input* input;
+      TRITONSERVER_Error* err =
+          TRITONBACKEND_RequestInputByIndex(requests[i], 0 /* index */, &input);
+      if (err == nullptr) {
+        const int64_t* shape;
+        err = TRITONBACKEND_InputProperties(
+            input, nullptr, nullptr, &shape, nullptr, nullptr, nullptr);
+        total_batch_size += shape[0];
+      }
+      if (err != nullptr) {
+        RequestsRespondWithError(requests, request_count, err);
+        return nullptr;
+      }
+    } else {
+      total_batch_size += 1;
+    }
+  }
+
+  // If there are no valid payloads then no need to run the inference.
+  if (total_batch_size == 0) {
+    return nullptr;
+  }
+
+  // Make sure the maximum batch size is not exceeded. The
+  // total_batch_size must be 1 for models that don't support batching
+  // (i.e. max_batch_size == 0). If max_batch_size is exceeded then
+  // scheduler has done something badly wrong so fail and release all
+  // requests.
+  if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
+    RequestsRespondWithError(
+        requests, request_count,
+        TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            std::string(
+                "batch size " + std::to_string(total_batch_size) + " for '" +
+                name + "', max allowed is " + std::to_string(max_batch_size))
+                .c_str()));
+    return nullptr;
+  }
+
+  std::vector<TRITONBACKEND_Response*> responses;
+  responses.reserve(request_count);
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* req = requests[r];
@@ -899,12 +971,10 @@ TRITONBACKEND_ModelInstanceExecute(
         "failed releasing request");
   }
 
-  // Report the entire batch statistics. This backend does not support
-  // batching so the total batch size is always 1.
   LOG_IF_ERROR(
       TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          instance, 1, exec_start_ns, compute_start_ns, compute_end_ns,
-          exec_end_ns),
+          instance, total_batch_size, exec_start_ns, compute_start_ns,
+          compute_end_ns, exec_end_ns),
       "failed reporting batch request statistics");
 
   LOG_MESSAGE(
