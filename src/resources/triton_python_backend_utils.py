@@ -56,7 +56,7 @@ TRITON_TO_NUMPY_TYPE = {
 }
 
 TRITON_STRING_TO_NUMPY = {
-    'TYPE_BOOL': np.bool,
+    'TYPE_BOOL': bool,
     'TYPE_UINT8': np.uint8,
     'TYPE_UINT16': np.uint16,
     'TYPE_UINT32': np.uint32,
