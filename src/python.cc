@@ -93,48 +93,10 @@ namespace triton { namespace backend { namespace python {
 
 constexpr int MAX_GRPC_MESSAGE_SIZE = INT32_MAX;
 
-class ModelState;
-
 struct BackendState {
   std::string python_lib;
   std::string python_runtime;
   int64_t grpc_timeout;
-};
-
-class ModelInstanceState : public BackendModelInstance {
- public:
-  static TRITONSERVER_Error* Create(
-      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
-      ModelInstanceState** model_instance_state);
-
-  ~ModelInstanceState();
-
-  // Creates a python child process running startup.py
-  TRITONSERVER_Error* CreatePythonInterpreter();
-
-  // Load Triton inputs to the appropriate Protobufs
-  TRITONSERVER_Error* GetInputTensor(
-      const uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
-      std::vector<TRITONBACKEND_Response*>& responses, size_t r,
-      uint32_t& batch_size);
-
-  // TODO: Create getter and setters
-  std::unique_ptr<PythonInterpreter::Stub> stub;
-
- private:
-  ModelInstanceState(
-      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
-
-  TRITONSERVER_Error* ConnectPythonInterpreter();
-
-  std::string pymodule_path_;
-  ModelState* model_state_;
-  std::string domain_socket_;
-  bool connected_ = false;
-
- private:
-  TRITONBACKEND_Model* triton_model_;
-  pid_t interpreter_pid_;
 };
 
 class ModelState : public BackendModel {
@@ -150,12 +112,46 @@ class ModelState : public BackendModel {
   BackendState* backend_state_;
 };
 
+class ModelInstanceState : public BackendModelInstance {
+ public:
+  static TRITONSERVER_Error* Create(
+      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
+      ModelInstanceState** model_instance_state);
+
+  ~ModelInstanceState();
+
+  // Creates a python child process running startup.py
+  TRITONSERVER_Error* CreatePythonInterpreter();
+
+  // Load Triton inputs to the appropriate Protobufs
+  TRITONSERVER_Error* GetInputTensor(
+      uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
+      std::vector<TRITONBACKEND_Response*>& responses, size_t r,
+      uint32_t& batch_size);
+
+  // TODO: Create getter and setters
+  std::unique_ptr<PythonInterpreter::Stub> stub;
+
+ private:
+  ModelInstanceState(
+      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
+
+  TRITONSERVER_Error* ConnectPythonInterpreter();
+
+  std::string pymodule_path_;
+  std::string domain_socket_;
+  bool connected_ = false;
+
+ private:
+  TRITONBACKEND_Model* triton_model_;
+  pid_t interpreter_pid_;
+};
+
 TRITONSERVER_Error*
 ModelInstanceState::CreatePythonInterpreter()
 {
   const char* subinterpreter_commandline[] = {
-      nullptr, nullptr,           "--socket", nullptr, "--model-path",
-      nullptr, nullptr};
+      nullptr, nullptr, "--socket", nullptr, "--model-path", nullptr, nullptr};
 
   constexpr int max_tmpfile_name = 255;
   char tmp_dir_name[max_tmpfile_name] = "/tmp/XXXXXX";
@@ -179,8 +175,10 @@ ModelInstanceState::CreatePythonInterpreter()
     domain_socket_ = std::string(full_socket_name);
   }
 
-  uint64_t model_version = model_state_->Version();
-  const char* model_path = model_state_->RepositoryPath().c_str();
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+
+  uint64_t model_version = model_state->Version();
+  const char* model_path = model_state->RepositoryPath().c_str();
 
   std::stringstream ss;
   // Use <path>/version/model.py as the model location
@@ -191,10 +189,10 @@ ModelInstanceState::CreatePythonInterpreter()
   if (interpreter_pid_ == 0) {
     // Use the python available in $PATH
     std::string python_interpreter_path =
-        model_state_->StateForBackend()->python_runtime;
+        model_state->StateForBackend()->python_runtime;
 
     std::stringstream ss;
-    ss << model_state_->StateForBackend()->python_lib << "/startup.py";
+    ss << model_state->StateForBackend()->python_lib << "/startup.py";
     std::string python_interpreter_startup = ss.str();
 
     subinterpreter_commandline[0] = python_interpreter_path.c_str();
@@ -251,18 +249,19 @@ ModelInstanceState::ConnectPythonInterpreter()
 
   triton::common::TritonJson::WriteBuffer buffer;
   Model()->ModelConfig().Write(&buffer);
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
 
   insert_model_param("model_config", std::move(buffer.MutableContents()));
   insert_model_param(
       "model_instance_kind", TRITONSERVER_InstanceGroupKindString(kind_));
   insert_model_param("model_instance_name", name_);
   insert_model_param("model_instance_device_id", std::to_string(device_id_));
-  insert_model_param("model_repository", model_state_->RepositoryPath());
-  insert_model_param("model_version", std::to_string(model_state_->Version()));
-  insert_model_param("model_name", model_state_->Name());
+  insert_model_param("model_repository", model_state->RepositoryPath());
+  insert_model_param("model_version", std::to_string(model_state->Version()));
+  insert_model_param("model_name", model_state->Name());
 
   // GRPC timeout
-  int64_t grpc_timeout = model_state_->StateForBackend()->grpc_timeout;
+  int64_t grpc_timeout = model_state->StateForBackend()->grpc_timeout;
 
   // Attempting to connect to the python runtime
   grpc::Status status;
@@ -290,8 +289,7 @@ ModelInstanceState::ConnectPythonInterpreter()
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
-    : BackendModelInstance(model_state, triton_model_instance),
-      model_state_(model_state)
+    : BackendModelInstance(model_state, triton_model_instance)
 {
 }
 
@@ -642,11 +640,77 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
-  std::vector<TRITONBACKEND_Response*> responses;
-  responses.reserve(request_count);
-
+  ModelState* model_state =
+      reinterpret_cast<ModelState*>(instance_state->Model());
   uint64_t exec_start_ns = 0;
   SET_TIMESTAMP(exec_start_ns);
+
+  int max_batch_size = model_state->MaxBatchSize();
+  std::string name = model_state->Name();
+
+  // For each request collect the total batch size for this inference
+  // execution. The batch-size, number of inputs, and size of each
+  // input has already been checked so don't need to do that here.
+  size_t total_batch_size = 0;
+  for (size_t i = 0; i < request_count; i++) {
+    // If we get a nullptr request then something is badly wrong. Fail
+    // and release all requests.
+    if (requests[i] == nullptr) {
+      RequestsRespondWithError(
+          requests, request_count,
+          TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "null request given to Python backend for '" + name + "'")
+                  .c_str()));
+      return nullptr;
+    }
+
+    if (max_batch_size > 0) {
+      // Retrieve the batch size from one of the inputs, if the model
+      // supports batching, the first dimension size is batch size
+      TRITONBACKEND_Input* input;
+      TRITONSERVER_Error* err =
+          TRITONBACKEND_RequestInputByIndex(requests[i], 0 /* index */, &input);
+      if (err == nullptr) {
+        const int64_t* shape;
+        err = TRITONBACKEND_InputProperties(
+            input, nullptr, nullptr, &shape, nullptr, nullptr, nullptr);
+        total_batch_size += shape[0];
+      }
+      if (err != nullptr) {
+        RequestsRespondWithError(requests, request_count, err);
+        return nullptr;
+      }
+    } else {
+      total_batch_size += 1;
+    }
+  }
+
+  // If there are no valid payloads then no need to run the inference.
+  if (total_batch_size == 0) {
+    return nullptr;
+  }
+
+  // Make sure the maximum batch size is not exceeded. The
+  // total_batch_size must be 1 for models that don't support batching
+  // (i.e. max_batch_size == 0). If max_batch_size is exceeded then
+  // scheduler has done something badly wrong so fail and release all
+  // requests.
+  if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
+    RequestsRespondWithError(
+        requests, request_count,
+        TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            std::string(
+                "batch size " + std::to_string(total_batch_size) + " for '" +
+                name + "', max allowed is " + std::to_string(max_batch_size))
+                .c_str()));
+    return nullptr;
+  }
+
+  std::vector<TRITONBACKEND_Response*> responses;
+  responses.reserve(request_count);
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* req = requests[r];
@@ -899,12 +963,10 @@ TRITONBACKEND_ModelInstanceExecute(
         "failed releasing request");
   }
 
-  // Report the entire batch statistics. This backend does not support
-  // batching so the total batch size is always 1.
   LOG_IF_ERROR(
       TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          instance, 1, exec_start_ns, compute_start_ns, compute_end_ns,
-          exec_end_ns),
+          instance, total_batch_size, exec_start_ns, compute_start_ns,
+          compute_end_ns, exec_end_ns),
       "failed reporting batch request statistics");
 
   LOG_MESSAGE(
