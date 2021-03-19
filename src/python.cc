@@ -93,12 +93,23 @@ namespace triton { namespace backend { namespace python {
 
 constexpr int MAX_GRPC_MESSAGE_SIZE = INT32_MAX;
 
-class ModelState;
-
 struct BackendState {
   std::string python_lib;
   std::string python_runtime;
   int64_t grpc_timeout;
+};
+
+class ModelState : public BackendModel {
+ public:
+  static TRITONSERVER_Error* Create(
+      TRITONBACKEND_Model* triton_model, ModelState** state);
+
+  // Get backend state
+  BackendState* StateForBackend() { return backend_state_; }
+
+ private:
+  ModelState(TRITONBACKEND_Model* triton_model);
+  BackendState* backend_state_;
 };
 
 class ModelInstanceState : public BackendModelInstance {
@@ -114,11 +125,9 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Load Triton inputs to the appropriate Protobufs
   TRITONSERVER_Error* GetInputTensor(
-      const uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
+      uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
       std::vector<TRITONBACKEND_Response*>& responses, size_t r,
       uint32_t& batch_size);
-
-  ModelState* GetModelState();
 
   // TODO: Create getter and setters
   std::unique_ptr<PythonInterpreter::Stub> stub;
@@ -130,26 +139,12 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* ConnectPythonInterpreter();
 
   std::string pymodule_path_;
-  ModelState* model_state_;
   std::string domain_socket_;
   bool connected_ = false;
 
  private:
   TRITONBACKEND_Model* triton_model_;
   pid_t interpreter_pid_;
-};
-
-class ModelState : public BackendModel {
- public:
-  static TRITONSERVER_Error* Create(
-      TRITONBACKEND_Model* triton_model, ModelState** state);
-
-  // Get backend state
-  BackendState* StateForBackend() { return backend_state_; }
-
- private:
-  ModelState(TRITONBACKEND_Model* triton_model);
-  BackendState* backend_state_;
 };
 
 TRITONSERVER_Error*
@@ -180,8 +175,10 @@ ModelInstanceState::CreatePythonInterpreter()
     domain_socket_ = std::string(full_socket_name);
   }
 
-  uint64_t model_version = model_state_->Version();
-  const char* model_path = model_state_->RepositoryPath().c_str();
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+
+  uint64_t model_version = model_state->Version();
+  const char* model_path = model_state->RepositoryPath().c_str();
 
   std::stringstream ss;
   // Use <path>/version/model.py as the model location
@@ -192,10 +189,10 @@ ModelInstanceState::CreatePythonInterpreter()
   if (interpreter_pid_ == 0) {
     // Use the python available in $PATH
     std::string python_interpreter_path =
-        model_state_->StateForBackend()->python_runtime;
+        model_state->StateForBackend()->python_runtime;
 
     std::stringstream ss;
-    ss << model_state_->StateForBackend()->python_lib << "/startup.py";
+    ss << model_state->StateForBackend()->python_lib << "/startup.py";
     std::string python_interpreter_startup = ss.str();
 
     subinterpreter_commandline[0] = python_interpreter_path.c_str();
@@ -252,18 +249,19 @@ ModelInstanceState::ConnectPythonInterpreter()
 
   triton::common::TritonJson::WriteBuffer buffer;
   Model()->ModelConfig().Write(&buffer);
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
 
   insert_model_param("model_config", std::move(buffer.MutableContents()));
   insert_model_param(
       "model_instance_kind", TRITONSERVER_InstanceGroupKindString(kind_));
   insert_model_param("model_instance_name", name_);
   insert_model_param("model_instance_device_id", std::to_string(device_id_));
-  insert_model_param("model_repository", model_state_->RepositoryPath());
-  insert_model_param("model_version", std::to_string(model_state_->Version()));
-  insert_model_param("model_name", model_state_->Name());
+  insert_model_param("model_repository", model_state->RepositoryPath());
+  insert_model_param("model_version", std::to_string(model_state->Version()));
+  insert_model_param("model_name", model_state->Name());
 
   // GRPC timeout
-  int64_t grpc_timeout = model_state_->StateForBackend()->grpc_timeout;
+  int64_t grpc_timeout = model_state->StateForBackend()->grpc_timeout;
 
   // Attempting to connect to the python runtime
   grpc::Status status;
@@ -291,8 +289,7 @@ ModelInstanceState::ConnectPythonInterpreter()
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
-    : BackendModelInstance(model_state, triton_model_instance),
-      model_state_(model_state)
+    : BackendModelInstance(model_state, triton_model_instance)
 {
 }
 
@@ -354,12 +351,6 @@ ModelInstanceState::~ModelInstanceState()
 
     LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "GRPC shutdown complete");
   }
-}
-
-ModelState*
-ModelInstanceState::GetModelState()
-{
-  return model_state_;
 }
 
 TRITONSERVER_Error*
@@ -649,11 +640,12 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
-  ModelState* model_state = instance_state->GetModelState();
+  ModelState* model_state =
+      reinterpret_cast<ModelState*>(instance_state->Model());
   uint64_t exec_start_ns = 0;
   SET_TIMESTAMP(exec_start_ns);
 
-  const int max_batch_size = model_state->MaxBatchSize();
+  int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
 
   // For each request collect the total batch size for this inference
