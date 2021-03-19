@@ -24,14 +24,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <grpc/grpc.h>
-#include <grpc/support/time.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/client_context.h>
-#include <grpcpp/create_channel.h>
-#include <grpcpp/security/credentials.h>
+#include <pybind11/embed.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -41,10 +37,10 @@
 #include <numeric>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
-#include "python_host.grpc.pb.h"
+#include "pb_utils.h"
+#include "shm_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_input_collector.h"
 #include "triton/backend/backend_memory.h"
@@ -53,6 +49,8 @@
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
+
+namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
@@ -91,12 +89,10 @@ namespace triton { namespace backend { namespace python {
     }                                                                   \
   } while (false)
 
-constexpr int MAX_GRPC_MESSAGE_SIZE = INT32_MAX;
 
 struct BackendState {
   std::string python_lib;
   std::string python_runtime;
-  int64_t grpc_timeout;
 };
 
 class ModelState : public BackendModel {
@@ -113,6 +109,19 @@ class ModelState : public BackendModel {
 };
 
 class ModelInstanceState : public BackendModelInstance {
+    ModelInstanceState(
+        ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
+
+    TRITONBACKEND_Model* triton_model_;
+    pthread_mutex_t *child_mutex_;
+    pthread_cond_t *child_cond_;
+    pthread_mutex_t *parent_mutex_;
+    pthread_cond_t *parent_cond_;
+    std::string model_path_;
+    IPCMessage* ipc_message_;
+    std::unique_ptr<SharedMemory> shm_pool_;
+    // Child process pid
+    pid_t pid_;
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -120,172 +129,27 @@ class ModelInstanceState : public BackendModelInstance {
 
   ~ModelInstanceState();
 
-  // Creates a python child process running startup.py
-  TRITONSERVER_Error* CreatePythonInterpreter();
-
   // Load Triton inputs to the appropriate Protobufs
-  TRITONSERVER_Error* GetInputTensor(
-      uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
-      std::vector<TRITONBACKEND_Response*>& responses, size_t r,
-      uint32_t& batch_size);
+  TRITONSERVER_Error*
+  GetInputTensor(
+    const uint32_t request_idx, Tensor *input_tensor, TRITONBACKEND_Request* request,
+    std::vector<TRITONBACKEND_Response*>& responses);
+  
+  TRITONSERVER_Error* ProcessRequests(TRITONBACKEND_Request** requests,
+    const uint32_t request_count);
+  
+  // Child process loop
+  void WaitForMessageCallback();
+  
+  // Create the child process.
+  TRITONSERVER_Error* SetupChildProcess();
 
-  // TODO: Create getter and setters
-  std::unique_ptr<PythonInterpreter::Stub> stub;
+  // Notifies the child process on the new request
+  void NotifyChild();
 
- private:
-  ModelInstanceState(
-      ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
-
-  TRITONSERVER_Error* ConnectPythonInterpreter();
-
-  std::string pymodule_path_;
-  std::string domain_socket_;
-  bool connected_ = false;
-
- private:
-  TRITONBACKEND_Model* triton_model_;
-  pid_t interpreter_pid_;
+  // Notifies the process on the new request
+  void NotifyParent();
 };
-
-TRITONSERVER_Error*
-ModelInstanceState::CreatePythonInterpreter()
-{
-  const char* subinterpreter_commandline[] = {
-      nullptr, nullptr, "--socket", nullptr, "--model-path", nullptr, nullptr};
-
-  constexpr int max_tmpfile_name = 255;
-  char tmp_dir_name[max_tmpfile_name] = "/tmp/XXXXXX";
-  char full_socket_name[max_tmpfile_name];
-
-  // Create a temporary directory and use <tmp_dir>/unix.socket for GRPC socket
-  // This is the only way that we can make sure that the unix socket path used
-  // for GRPC is unique
-  char* tmp_dir_response = mkdtemp(tmp_dir_name);
-
-  if (!tmp_dir_response) {
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        "Failed to create a temporary socket name");
-    return err;
-  } else {
-    std::stringstream ss;
-    ss << tmp_dir_name << "/unix.socket";
-    snprintf(full_socket_name, max_tmpfile_name, "unix://%s", ss.str().c_str());
-    subinterpreter_commandline[3] = full_socket_name;
-    domain_socket_ = std::string(full_socket_name);
-  }
-
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-
-  uint64_t model_version = model_state->Version();
-  const char* model_path = model_state->RepositoryPath().c_str();
-
-  std::stringstream ss;
-  // Use <path>/version/model.py as the model location
-  ss << model_path << "/" << model_version << "/model.py";
-  pymodule_path_ = ss.str();
-  interpreter_pid_ = fork();
-
-  if (interpreter_pid_ == 0) {
-    // Use the python available in $PATH
-    std::string python_interpreter_path =
-        model_state->StateForBackend()->python_runtime;
-
-    std::stringstream ss;
-    ss << model_state->StateForBackend()->python_lib << "/startup.py";
-    std::string python_interpreter_startup = ss.str();
-
-    subinterpreter_commandline[0] = python_interpreter_path.c_str();
-    subinterpreter_commandline[1] = python_interpreter_startup.c_str();
-    subinterpreter_commandline[5] = pymodule_path_.c_str();
-    if (execvp(
-            subinterpreter_commandline[0],
-            (char**)subinterpreter_commandline) == -1) {
-      std::stringstream ss;
-      ss << "Cannot run interpreter host. Errno = " << errno << '\n'
-         << "python_interpreter_path: " << python_interpreter_path << '\n'
-         << "python_interpreter_startup: " << python_interpreter_startup << '\n'
-         << "pymodule_path_: " << pymodule_path_ << '\n';
-      std::string log_message = ss.str();
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, log_message.c_str());
-
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INVALID_ARG,
-          (std::string("Failed to initialize model instance ") + name_)
-              .c_str());
-    }
-  } else {
-    RETURN_IF_ERROR(ConnectPythonInterpreter());
-  }
-
-  return nullptr;
-}
-
-TRITONSERVER_Error*
-ModelInstanceState::ConnectPythonInterpreter()
-{
-  grpc_init();
-  grpc::ChannelArguments arguments;
-  arguments.SetMaxSendMessageSize(MAX_GRPC_MESSAGE_SIZE);
-  arguments.SetMaxReceiveMessageSize(MAX_GRPC_MESSAGE_SIZE);
-  auto grpc_channel = grpc::CreateCustomChannel(
-      domain_socket_, grpc::InsecureChannelCredentials(), arguments);
-
-  stub = PythonInterpreter::NewStub(grpc_channel);
-
-  std::shared_ptr<InitializationCommand> initialization_params(
-      new InitializationCommand());
-
-  std::vector<std::string> keys;
-  LOG_IF_ERROR(Model()->ModelConfig().Members(&keys), "can't get key names");
-  std::string val;
-
-  const auto insert_model_param =
-      [&initialization_params](const std::string& key, const std::string& val) {
-        auto* value_pair = initialization_params->add_args();
-        value_pair->set_key(key);
-        value_pair->set_value(val);
-      };
-
-  triton::common::TritonJson::WriteBuffer buffer;
-  Model()->ModelConfig().Write(&buffer);
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-
-  insert_model_param("model_config", std::move(buffer.MutableContents()));
-  insert_model_param(
-      "model_instance_kind", TRITONSERVER_InstanceGroupKindString(kind_));
-  insert_model_param("model_instance_name", name_);
-  insert_model_param("model_instance_device_id", std::to_string(device_id_));
-  insert_model_param("model_repository", model_state->RepositoryPath());
-  insert_model_param("model_version", std::to_string(model_state->Version()));
-  insert_model_param("model_name", model_state->Name());
-
-  // GRPC timeout
-  int64_t grpc_timeout = model_state->StateForBackend()->grpc_timeout;
-
-  // Attempting to connect to the python runtime
-  grpc::Status status;
-  constexpr uint8_t conn_attempts = 5;
-  for (int i = 0; i < conn_attempts; ++i) {
-    grpc::ClientContext context;
-    Empty null_msg;
-    status = stub->Init(&context, *initialization_params, &null_msg);
-    if (status.ok()) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_VERBOSE,
-          (std::string("GRPC connection was successful ") + name_ +
-           " (device " + std::to_string(device_id_) + ")")
-              .c_str());
-      connected_ = true;
-      return nullptr;
-    } else {
-      std::this_thread::sleep_for(std::chrono::milliseconds(grpc_timeout));
-    }
-  }
-
-  return TRITONSERVER_ErrorNew(
-      TRITONSERVER_ERROR_INTERNAL, status.error_message().c_str());
-}
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
@@ -310,65 +174,487 @@ ModelInstanceState::Create(
   return nullptr;  // success
 }
 
+void ModelInstanceState::NotifyChild() {
+  pthread_mutex_lock(child_mutex_);
+  pthread_cond_signal(child_cond_);
+  pthread_mutex_unlock(child_mutex_);
+}
+
+void ModelInstanceState::NotifyParent() {
+  pthread_mutex_lock(parent_mutex_);
+  pthread_cond_signal(parent_cond_);
+  pthread_mutex_unlock(parent_mutex_);
+}
+
+TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
+  TRITONBACKEND_Request ** requests, const uint32_t request_count) {
+  std::vector<TRITONBACKEND_Response*> responses;
+  responses.reserve(request_count);
+
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* req = requests[r];
+
+    TRITONBACKEND_Response* response;
+    RETURN_IF_ERROR(TRITONBACKEND_ResponseNew(&response, req));
+    responses.push_back(response);
+  }
+
+  // Create Python inference requests
+  RequestBatch* request_batch;
+  off_t request_batch_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &request_batch, sizeof(RequestBatch), request_batch_offset));
+
+  ipc_message_->request_batch = request_batch_offset;
+  request_batch->batch_size = request_count;
+
+  Request* requests_shm;
+  off_t requests_shm_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &requests_shm, sizeof(Request) * request_count, requests_shm_offset));
+  request_batch->requests = requests_shm_offset;
+
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* request = requests[r];
+
+    Request* python_infer_request = &requests_shm[r];
+
+    uint32_t requested_input_count = 0;
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r,
+        TRITONBACKEND_RequestInputCount(request, &requested_input_count));
+    
+    python_infer_request->requested_input_count = requested_input_count;
+
+    uint32_t requested_output_count = 0;
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r,
+        TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
+    python_infer_request->requested_output_count = requested_output_count;
+
+    Tensor* input_tensors;
+    off_t input_tensors_offset;
+    RETURN_IF_ERROR(shm_pool_->Map((char **) &input_tensors, sizeof(Tensor) * requested_input_count, input_tensors_offset));
+    python_infer_request->inputs = input_tensors_offset;
+
+    for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
+      Tensor *input_tensor = &input_tensors[iidx];
+
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          GetInputTensor(
+              r, input_tensor, request, responses));
+    }
+
+    off_t *requested_output_names;
+    off_t requested_output_names_offset;
+    RETURN_IF_ERROR(shm_pool_->Map((char **) &requested_output_names, sizeof(off_t) * requested_output_count, requested_output_names_offset));
+    python_infer_request->requested_output_names = requested_output_names_offset;
+
+    // Append the list of requested outputs to the inference_request
+    for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
+
+      const char* requested_output_name;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_RequestOutputName(
+              request, iidx, &requested_output_name));
+
+      // output name
+      String *output_name_shm;
+      off_t output_name_offset;
+      RETURN_IF_ERROR(shm_pool_->Map((char **) &output_name_shm, sizeof(String), output_name_offset));
+      requested_output_names[iidx] = output_name_offset;
+
+      output_name_shm->length = sizeof(requested_output_name);
+
+      char *output_name_data;
+      off_t output_name_data_offset;
+      RETURN_IF_ERROR(shm_pool_->Map((char **) &output_name_data, sizeof(requested_output_name), output_name_data_offset));
+      output_name_shm->data = output_name_data_offset;
+      strcpy(output_name_data, requested_output_name);
+    }
+
+    // request id
+    const char* id;
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r, TRITONBACKEND_RequestId(request, &id));
+
+    String *id_shm;
+    off_t id_offset;
+    RETURN_IF_ERROR(shm_pool_->Map((char **) &id_shm, sizeof(String), id_offset));
+    python_infer_request->id = id_offset;
+    id_shm->length = sizeof(id);
+
+    char *id_data;
+    off_t id_data_offset;
+    RETURN_IF_ERROR(shm_pool_->Map((char **) &id_data, sizeof(id), id_data_offset));
+    id_shm->data = id_data_offset;
+    strcpy(id_data, id);
+
+    uint64_t correlation_id;
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r,
+        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
+    python_infer_request->correlation_id = correlation_id;
+  }
+
+  NotifyChild();
+
+  // Wait for child notification
+  pthread_mutex_lock(parent_mutex_);
+  pthread_cond_wait(parent_cond_, parent_mutex_);
+  pthread_mutex_unlock(parent_mutex_);
+
+  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "server woke up!");
+
+  // // ExecuteResponse
+  // grpc::ClientContext context;
+  // ExecuteResponse execute_response;
+
+  // uint64_t compute_start_ns = 0;
+  // SET_TIMESTAMP(compute_start_ns);
+
+  // // Perform inference on the Python side
+  // const auto status = instance_state->stub->Execute(
+  //     &context, execute_request, &execute_response);
+
+  // uint64_t compute_end_ns = 0;
+  // SET_TIMESTAMP(compute_end_ns);
+
+  // If inference fails, release all the requests and send an error response If
+  // inference fails at this stage, it usually indicates a bug in the model code
+  // if (!status.ok()) {
+  //   for (uint32_t r = 0; r < request_count; ++r) {
+  //     if (responses[r] == nullptr) {
+  //       continue;
+  //     }
+  //     TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+  //         TRITONSERVER_ERROR_INTERNAL, ("GRPC Execute Failed, message: " +
+  //                                       std::string(status.error_message()))
+  //                                          .c_str());
+  //     LOG_IF_ERROR(
+  //         TRITONBACKEND_ResponseSend(
+  //             responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+  //         "failed sending response");
+  //     responses[r] = nullptr;
+  //     TRITONSERVER_ErrorDelete(err);
+  //   }
+
+  //   for (uint32_t r = 0; r < request_count; ++r) {
+  //     TRITONBACKEND_Request* request = requests[r];
+  //     LOG_IF_ERROR(
+  //         TRITONBACKEND_ModelInstanceReportStatistics(
+  //             instance, request, false /* success */, exec_start_ns,
+  //             compute_start_ns, compute_end_ns, compute_end_ns),
+  //         "failed reporting request statistics");
+
+  //     LOG_IF_ERROR(
+  //         TRITONBACKEND_RequestRelease(
+  //             request, TRITONSERVER_REQUEST_RELEASE_ALL),
+  //         "failed releasing request");
+  //   }
+
+  //   return nullptr;
+  // }
+
+  // for (uint32_t r = 0; r < request_count; ++r) {
+  //   TRITONBACKEND_Response* response = responses[r];
+  //   TRITONBACKEND_Request* request = requests[r];
+  //   uint32_t requested_output_count = 0;
+
+  //   // Get response r
+  //   InferenceResponse inference_response = execute_response.responses(r);
+
+  //   if (inference_response.failed()) {
+  //     TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+  //         TRITONSERVER_ERROR_INTERNAL,
+  //         (inference_response.error().message()).c_str());
+  //     LOG_IF_ERROR(
+  //         TRITONBACKEND_ResponseSend(
+  //             responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+  //         "failed sending response");
+  //     responses[r] = nullptr;
+  //     TRITONSERVER_ErrorDelete(err);
+
+  //     // If has_error is true, we do not look at the response even if the
+  //     // response is set.
+  //     continue;
+  //   }
+
+  //   GUARDED_RESPOND_IF_ERROR(
+  //       responses, r,
+  //       TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
+  //   for (size_t j = 0; j < requested_output_count; ++j) {
+  //     // Prepare output buffers.
+  //     const Tensor python_output_result = inference_response.outputs(j);
+  //     TRITONBACKEND_Output* triton_output;
+  //     TRITONSERVER_DataType triton_dt =
+  //         static_cast<TRITONSERVER_DataType>(python_output_result.dtype());
+
+  //     auto python_output_dims = python_output_result.dims();
+  //     const std::string output_tensor_name = python_output_result.name();
+
+  //     uint32_t dims_count = python_output_dims.size();
+
+  //     GUARDED_RESPOND_IF_ERROR(
+  //         responses, r,
+  //         TRITONBACKEND_ResponseOutput(
+  //             response, &triton_output, python_output_result.name().c_str(),
+  //             triton_dt, python_output_dims.data(), dims_count));
+
+  //     int64_t output_byte_size;
+
+  //     // Custom handling for TRITONSERVER_TYPE_BYTES
+  //     if (triton_dt == TRITONSERVER_TYPE_BYTES) {
+  //       output_byte_size = python_output_result.raw_data().size();
+  //     } else {
+  //       std::vector<int64_t> output_dims(
+  //           python_output_dims.begin(), python_output_dims.end());
+  //       output_byte_size = GetByteSize(triton_dt, output_dims);
+  //     }
+
+  //     void* output_buffer;
+
+  //     TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
+  //     int64_t output_memory_type_id = 0;
+  //     GUARDED_RESPOND_IF_ERROR(
+  //         responses, r,
+  //         TRITONBACKEND_OutputBuffer(
+  //             triton_output, &output_buffer, output_byte_size,
+  //             &output_memory_type, &output_memory_type_id));
+
+  //     if ((responses[r] == nullptr) ||
+  //         (output_memory_type == TRITONSERVER_MEMORY_GPU)) {
+  //       GUARDED_RESPOND_IF_ERROR(
+  //           responses, r,
+  //           TRITONSERVER_ErrorNew(
+  //               TRITONSERVER_ERROR_UNSUPPORTED,
+  //               "can't create response in GPU memory."));
+  //       TRITONSERVER_LogMessage(
+  //           TRITONSERVER_LOG_ERROR, __FILE__, __LINE__,
+  //           (std::string("request ") + std::to_string(r) +
+  //            ": failed to create output buffer in CPU memory.")
+  //               .c_str());
+  //       continue;
+  //     }
+
+  //     // Try to find the matching output name we don't use indexing here because
+  //     // the output inference batch may be missing from the response
+  //     auto output_response_tensor = std::find_if(
+  //         inference_response.outputs().begin(),
+  //         inference_response.outputs().end(),
+  //         [&output_tensor_name](const Tensor& itr) {
+  //           return itr.name() == output_tensor_name;
+  //         });
+
+  //     // Continue to the next inference batch if the corresponding output
+  //     // response can't be found
+  //     if (output_response_tensor == inference_response.outputs().end()) {
+  //       LOG_MESSAGE(
+  //           TRITONSERVER_LOG_ERROR,
+  //           ("can't find output tensor with name " + output_tensor_name)
+  //               .c_str());
+  //       continue;
+  //     }
+
+  //     // Copy Python output to Triton output buffers
+  //     std::copy(
+  //         output_response_tensor->raw_data().begin(),
+  //         output_response_tensor->raw_data().end(), (char*)output_buffer);
+  //   }
+
+  //   if (responses[r] == nullptr) {
+  //     LOG_MESSAGE(
+  //         TRITONSERVER_LOG_ERROR, (std::string("Request ") + std::to_string(r) +
+  //                                  ": failed to create output response")
+  //                                     .c_str());
+  //     continue;
+  //   }
+
+  //   // If error happens at this stage, we can only log it
+  //   LOG_IF_ERROR(
+  //       TRITONBACKEND_ResponseSend(
+  //           responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr),
+  //       "failed sending response");
+  // }
+
+  // uint64_t exec_end_ns = 0;
+  // SET_TIMESTAMP(exec_end_ns);
+
+  // for (uint32_t r = 0; r < request_count; ++r) {
+  //   TRITONBACKEND_Request* request = requests[r];
+
+  //   // Report statistics for the request. Note that there could
+  //   // still be responses that have not yet been sent but those
+  //   // cannot be captured in the statistics as they reflect only the
+  //   // request object. We use the execution start/end time for
+  //   // compute also so that the entire execution time is associated
+  //   // with the inference computation.
+  //   LOG_IF_ERROR(
+  //       TRITONBACKEND_ModelInstanceReportStatistics(
+  //           instance, request, (responses[r] != nullptr) /* success */,
+  //           exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
+  //       "failed reporting request statistics");
+
+  //   LOG_IF_ERROR(
+  //       TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
+  //       "failed releasing request");
+  // }
+
+  // // Report the entire batch statistics. This backend does not support
+  // // batching so the total batch size is always 1.
+  // LOG_IF_ERROR(
+  //     TRITONBACKEND_ModelInstanceReportBatchStatistics(
+  //         instance, 1, exec_start_ns, compute_start_ns, compute_end_ns,
+  //         exec_end_ns),
+  //     "failed reporting batch request statistics");
+
+  // LOG_MESSAGE(
+  //     TRITONSERVER_LOG_VERBOSE,
+  //     (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
+  //      instance_state->Name() + " released " + std::to_string(request_count) +
+  //      " requests")
+  //         .c_str());
+
+  return nullptr;
+}
+
+void ModelInstanceState::WaitForMessageCallback() {
+  py::scoped_interpreter guard{};
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  std::string python_lib = model_state->StateForBackend()->python_lib;
+  py::module sys = py::module::import("sys");
+  sys.attr("path").attr("insert")(0, model_path_);
+  sys.attr("path").attr("insert")(0, python_lib);
+  py::object TritonPythonModel = py::module::import("model").attr("TritonPythonModel");
+
+  triton::common::TritonJson::WriteBuffer buffer;
+  Model()->ModelConfig().Write(&buffer);
+
+  py::object model_instance = TritonPythonModel();
+  py::dict model_config_params;
+
+  // Prepare and call the model initialize function
+  model_config_params["model_config"] = buffer.MutableContents();
+  model_config_params["model_instance_kind"] = TRITONSERVER_InstanceGroupKindString(kind_);
+  model_config_params["model_instance_name"] = name_;
+  model_config_params["model_instance_device_id"] = std::to_string(device_id_);
+  model_config_params["model_repository"] = model_state->RepositoryPath();
+  model_config_params["model_version"] = std::to_string(model_state->Version());
+  model_config_params["model_name"] = model_state->Name();
+  model_instance.attr("initialize")(model_config_params);
+
+  while (true) {
+    pthread_mutex_lock(child_mutex_);
+    pthread_cond_wait(child_cond_, child_mutex_);
+    pthread_mutex_unlock(child_mutex_);
+
+    LOG_MESSAGE(TRITONSERVER_LOG_INFO, "message received.");
+    RequestBatch* request_batch;
+    shm_pool_->MapOffset((char **) &request_batch, sizeof(RequestBatch), ipc_message_->request_batch);
+    uint32_t batch_size = request_batch->batch_size;
+
+    Request* requests;
+    shm_pool_->MapOffset((char **) &requests, sizeof(Request) * batch_size, request_batch->requests);
+
+    for (size_t i = 0; i < batch_size; i++) {
+      Request request = requests[i];
+
+      String *request_id;
+      shm_pool_->MapOffset((char **) &request_id, sizeof(String), request.id);
+      char *id;
+      shm_pool_->MapOffset((char **) &id, request_id->length, request_id->data);
+      LOG_MESSAGE(TRITONSERVER_LOG_INFO, id);
+
+      uint32_t requested_input_count = request.requested_input_count;
+      Tensor* input_tensors;
+      shm_pool_->MapOffset((char **) &input_tensors, sizeof(Tensor) * requested_input_count, request.inputs);
+
+      LOG_MESSAGE(TRITONSERVER_LOG_INFO, std::to_string(requested_input_count).c_str());
+    }
+    NotifyParent();
+  }
+}
+
+TRITONSERVER_Error* ModelInstanceState::SetupChildProcess() {
+  std::string shm_region_name = std::string("/") + Name();
+  shm_pool_ = std::make_unique<SharedMemory>(shm_region_name);
+
+  // Child Mutex and CV
+  pthread_mutex_t *child_mutex;
+  off_t child_mutex_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &child_mutex, sizeof(pthread_mutex_t), child_mutex_offset));
+  CreateIPCMutex(&child_mutex);
+
+  pthread_cond_t *child_cv;
+  off_t child_cv_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &child_cv, sizeof(pthread_cond_t), child_cv_offset));
+  CreateIPCCondVariable(&child_cv);
+
+  child_cond_ = child_cv;
+  child_mutex_ = child_mutex;
+
+  // Parent Mutex and CV
+  pthread_mutex_t *parent_mutex;
+  off_t parent_mutex_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset));
+  CreateIPCMutex(&parent_mutex);
+
+  pthread_cond_t *parent_cv;
+  off_t parent_cv_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &parent_cv, sizeof(pthread_cond_t), parent_cv_offset));
+  CreateIPCCondVariable(&parent_cv);
+
+  parent_cond_ = parent_cv;
+  parent_mutex_ = parent_mutex;
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  off_t ipc_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &ipc_message_, sizeof(IPCMessage), ipc_offset));
+
+  uint64_t model_version = model_state->Version();
+  const char* model_path = model_state->RepositoryPath().c_str();
+
+  std::stringstream ss;
+  // Use <path>/version/model.py as the model location
+  ss << model_path << "/" << model_version;
+  model_path_ = ss.str();
+
+  pid_t pid = fork();
+
+  if (pid < 0) {
+    return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, "Failed to fork the child process.");
+  }
+
+  // Child process
+  if (pid == 0) {
+    WaitForMessageCallback();
+  } else {
+    pid_ = pid;
+  }
+
+  return nullptr;
+}
+
 ModelInstanceState::~ModelInstanceState()
 {
-  // Intentional empty scope, without this empty scope
-  // GRPC will NOT shutdown gracefully
-  {
-    // Close python interpreter.
-    grpc::ClientContext context;
-    Empty null_msg;
 
-    if (connected_) {
-      auto err = stub->Fini(&context, null_msg, &null_msg);
-      if (!err.ok()) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            ("Cannot shutdown interpreter gracefully: " + err.error_message())
-                .c_str());
-      }
-    }
-  }
-
-  stub.reset();
-
-  int status;
-  kill(interpreter_pid_, SIGTERM);
-  waitpid(interpreter_pid_, &status, 0);
-
-  // Check if the domain socket has been set.
-  if (domain_socket_ != "") {
-    // We want to remove "unix://" from the beginning of domain_socket_
-    unlink(domain_socket_.substr(strlen("unix://")).c_str());
-
-    // FIXME currently GRPC client uses an async thread for cleaning up and
-    // shutting down the connection, however, as reported in
-    // https://github.com/grpc/grpc/issues/22479 the clean up thread may
-    // continue to live after resources have been deallocated an cause a
-    // segfault. This is a workaround to do a blocking shutdown of the GRPC
-    // client
-    grpc_shutdown_blocking();
-
-    LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "GRPC shutdown complete");
-  }
 }
 
 TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(
-    const uint32_t iidx, TRITONBACKEND_Request* request, Tensor* input_tensor,
-    std::vector<TRITONBACKEND_Response*>& responses, size_t r,
-    uint32_t& batch_size)
+    const uint32_t request_idx, Tensor *input_tensor, TRITONBACKEND_Request* request,
+    std::vector<TRITONBACKEND_Response*>& responses)
 {
   const char* input_name;
   // Load iidx'th input name
   RESPOND_AND_RETURN_IF_ERROR(
-      request, TRITONBACKEND_RequestInputName(request, iidx, &input_name));
+      request, TRITONBACKEND_RequestInputName(request, request_idx, &input_name));
 
   // Load iidx'th input
   TRITONBACKEND_Input* in;
   RESPOND_AND_RETURN_IF_ERROR(
       request, TRITONBACKEND_RequestInput(request, input_name, &in));
-
 
   // Load input properties
   TRITONSERVER_DataType input_dtype;
@@ -387,28 +673,58 @@ ModelInstanceState::GetInputTensor(
       &request, 1, &responses, Model()->TritonMemoryManager(),
       false /* pinned_enable */, CudaStream());
 
-  if (input_byte_size >= MAX_GRPC_MESSAGE_SIZE)
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_UNSUPPORTED,
-        "Python backend does not support input size larger than 2GBs, consider "
-        "parititioning your input into multiple inputs.");
+  // input name
+  String *input_name_shm;
+  off_t input_name_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_name_shm, sizeof(String), input_name_offset));
+  input_tensor->name = input_name_offset;
 
-  // Update input_tensor
-  input_tensor->set_name(input_name);
-  input_tensor->set_dtype(static_cast<int>(input_dtype));
+  input_name_shm->length = sizeof(input_name);
+
+  char *input_name_data;
+  off_t input_name_data_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_name_data, sizeof(input_name), input_name_data_offset));
+  input_name_shm->data = input_name_data_offset;
+  strcpy(input_name_data, input_name);
+
+  // input dtype
+  input_tensor->dtype = input_dtype;
+
+  // input dims
+  int64_t *input_dims;
+  input_tensor->dims_count = input_dims_count;
+  off_t input_dims_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_dims, sizeof(int64_t) * input_dims_count, input_dims_offset));
+  input_tensor->dims = input_dims_offset;
 
   for (size_t j = 0; j < input_dims_count; ++j) {
-    input_tensor->add_dims(input_shape[j]);
+    input_dims[j] = input_shape[j];
   }
 
+  const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
+  const int memory_type_id = 0;
+  // input_tensor->raw_data = 
+
+  // raw data
+  RawData *raw_data;
+  off_t raw_data_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &raw_data, sizeof(RawData), raw_data_offset));
+  input_tensor->raw_data = raw_data_offset;
+
+  raw_data->memory_type = memory_type;
+  raw_data->memory_type_id = memory_type_id;
+  raw_data->byte_size = input_byte_size;
+
+  char *input_buffer;
+  off_t input_buffer_offset;
+  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_buffer, input_byte_size, input_buffer_offset));
+  input_tensor->raw_data = raw_data_offset;
+
   // Load raw data into input_tensor raw data.
-  std::string* data_buffer = input_tensor->mutable_raw_data();
-  data_buffer->resize(input_byte_size);
-
-  char* input_buffer = (char*)data_buffer->c_str();
-
+  // FIXME: Avoid the copy to CPU Memory when
+  // the data is in GPU.
   collector.ProcessTensor(
-      input_name, input_buffer, input_byte_size, TRITONSERVER_MEMORY_CPU, 0);
+      input_name, input_buffer, input_byte_size, memory_type, memory_type_id);
 
   return nullptr;
 }
@@ -501,20 +817,11 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
   backend_state->python_runtime = "python3";
-  backend_state->grpc_timeout = 2000;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value python_runtime;
     if (cmdline.Find("python-runtime", &python_runtime)) {
       RETURN_IF_ERROR(python_runtime.AsString(&backend_state->python_runtime));
-    }
-
-    triton::common::TritonJson::Value grpc_timeout;
-    if (cmdline.Find("grpc-timeout-milliseconds", &grpc_timeout)) {
-      std::string grpc_timeout_str;
-      RETURN_IF_ERROR(grpc_timeout.AsString(&grpc_timeout_str));
-      RETURN_IF_ERROR(
-          ParseLongLongValue(grpc_timeout_str, &backend_state->grpc_timeout));
     }
   }
 
@@ -619,14 +926,13 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceSetState(
       instance, reinterpret_cast<void*>(instance_state)));
 
-  RETURN_IF_ERROR(instance_state->CreatePythonInterpreter());
-
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       (std::string("TRITONBACKEND_ModelInstanceInitialize: instance "
                    "initialization successful ") +
        name + " (device " + std::to_string(device_id) + ")")
           .c_str());
+  RETURN_IF_ERROR(instance_state->SetupChildProcess());
 
   return nullptr;
 }
@@ -640,17 +946,17 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
-  ModelState* model_state =
-      reinterpret_cast<ModelState*>(instance_state->Model());
-  uint64_t exec_start_ns = 0;
-  SET_TIMESTAMP(exec_start_ns);
+  // uint64_t exec_start_ns = 0;
+  // SET_TIMESTAMP(exec_start_ns);
 
+  ModelState* model_state = reinterpret_cast<ModelState*>(instance_state->Model());
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
 
   // For each request collect the total batch size for this inference
   // execution. The batch-size, number of inputs, and size of each
   // input has already been checked so don't need to do that here.
+
   size_t total_batch_size = 0;
   for (size_t i = 0; i < request_count; i++) {
     // If we get a nullptr request then something is badly wrong. Fail
@@ -709,274 +1015,7 @@ TRITONBACKEND_ModelInstanceExecute(
     return nullptr;
   }
 
-  std::vector<TRITONBACKEND_Response*> responses;
-  responses.reserve(request_count);
-
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* req = requests[r];
-
-    TRITONBACKEND_Response* response;
-    RETURN_IF_ERROR(TRITONBACKEND_ResponseNew(&response, req));
-    responses.push_back(response);
-  }
-
-  // Create ExecuteRequest
-  ExecuteRequest execute_request;
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-
-    InferenceRequest* inference_request = execute_request.add_requests();
-
-    uint32_t requested_input_count = 0;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
-        TRITONBACKEND_RequestInputCount(request, &requested_input_count));
-
-    uint32_t requested_output_count = 0;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
-        TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-
-    uint32_t batch_size = 0;
-    for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
-      Tensor* input_tensor = inference_request->add_inputs();
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          instance_state->GetInputTensor(
-              iidx, request, input_tensor, responses, r, batch_size));
-    }
-
-    // Append the list of requested outputs to the inference_request
-    for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
-      const char* requested_output_name;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_RequestOutputName(
-              request, iidx, &requested_output_name));
-
-      inference_request->add_requested_output_names(requested_output_name);
-    }
-
-    const char* id;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r, TRITONBACKEND_RequestId(request, &id));
-    inference_request->set_id(id);
-
-    uint64_t correlation_id;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
-        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
-    inference_request->set_correlation_id(correlation_id);
-  }
-
-  // ExecuteResponse
-  grpc::ClientContext context;
-  ExecuteResponse execute_response;
-
-  uint64_t compute_start_ns = 0;
-  SET_TIMESTAMP(compute_start_ns);
-
-  // Perform inference on the Python side
-  const auto status = instance_state->stub->Execute(
-      &context, execute_request, &execute_response);
-
-  uint64_t compute_end_ns = 0;
-  SET_TIMESTAMP(compute_end_ns);
-
-  // If inference fails, release all the requests and send an error response If
-  // inference fails at this stage, it usually indicates a bug in the model code
-  if (!status.ok()) {
-    for (uint32_t r = 0; r < request_count; ++r) {
-      if (responses[r] == nullptr) {
-        continue;
-      }
-      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, ("GRPC Execute Failed, message: " +
-                                        std::string(status.error_message()))
-                                           .c_str());
-      LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(
-              responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-          "failed sending response");
-      responses[r] = nullptr;
-      TRITONSERVER_ErrorDelete(err);
-    }
-
-    for (uint32_t r = 0; r < request_count; ++r) {
-      TRITONBACKEND_Request* request = requests[r];
-      LOG_IF_ERROR(
-          TRITONBACKEND_ModelInstanceReportStatistics(
-              instance, request, false /* success */, exec_start_ns,
-              compute_start_ns, compute_end_ns, compute_end_ns),
-          "failed reporting request statistics");
-
-      LOG_IF_ERROR(
-          TRITONBACKEND_RequestRelease(
-              request, TRITONSERVER_REQUEST_RELEASE_ALL),
-          "failed releasing request");
-    }
-
-    return nullptr;
-  }
-
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Response* response = responses[r];
-    TRITONBACKEND_Request* request = requests[r];
-    uint32_t requested_output_count = 0;
-
-    // Get response r
-    InferenceResponse inference_response = execute_response.responses(r);
-
-    if (inference_response.failed()) {
-      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (inference_response.error().message()).c_str());
-      LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(
-              responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-          "failed sending response");
-      responses[r] = nullptr;
-      TRITONSERVER_ErrorDelete(err);
-
-      // If has_error is true, we do not look at the response even if the
-      // response is set.
-      continue;
-    }
-
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
-        TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-    for (size_t j = 0; j < requested_output_count; ++j) {
-      // Prepare output buffers.
-      const Tensor python_output_result = inference_response.outputs(j);
-      TRITONBACKEND_Output* triton_output;
-      TRITONSERVER_DataType triton_dt =
-          static_cast<TRITONSERVER_DataType>(python_output_result.dtype());
-
-      auto python_output_dims = python_output_result.dims();
-      const std::string output_tensor_name = python_output_result.name();
-
-      uint32_t dims_count = python_output_dims.size();
-
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_ResponseOutput(
-              response, &triton_output, python_output_result.name().c_str(),
-              triton_dt, python_output_dims.data(), dims_count));
-
-      int64_t output_byte_size;
-
-      // Custom handling for TRITONSERVER_TYPE_BYTES
-      if (triton_dt == TRITONSERVER_TYPE_BYTES) {
-        output_byte_size = python_output_result.raw_data().size();
-      } else {
-        std::vector<int64_t> output_dims(
-            python_output_dims.begin(), python_output_dims.end());
-        output_byte_size = GetByteSize(triton_dt, output_dims);
-      }
-
-      void* output_buffer;
-
-      TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
-      int64_t output_memory_type_id = 0;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_OutputBuffer(
-              triton_output, &output_buffer, output_byte_size,
-              &output_memory_type, &output_memory_type_id));
-
-      if ((responses[r] == nullptr) ||
-          (output_memory_type == TRITONSERVER_MEMORY_GPU)) {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_UNSUPPORTED,
-                "can't create response in GPU memory."));
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_ERROR, __FILE__, __LINE__,
-            (std::string("request ") + std::to_string(r) +
-             ": failed to create output buffer in CPU memory.")
-                .c_str());
-        continue;
-      }
-
-      // Try to find the matching output name we don't use indexing here because
-      // the output inference batch may be missing from the response
-      auto output_response_tensor = std::find_if(
-          inference_response.outputs().begin(),
-          inference_response.outputs().end(),
-          [&output_tensor_name](const Tensor& itr) {
-            return itr.name() == output_tensor_name;
-          });
-
-      // Continue to the next inference batch if the corresponding output
-      // response can't be found
-      if (output_response_tensor == inference_response.outputs().end()) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            ("can't find output tensor with name " + output_tensor_name)
-                .c_str());
-        continue;
-      }
-
-      // Copy Python output to Triton output buffers
-      std::copy(
-          output_response_tensor->raw_data().begin(),
-          output_response_tensor->raw_data().end(), (char*)output_buffer);
-    }
-
-    if (responses[r] == nullptr) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR, (std::string("Request ") + std::to_string(r) +
-                                   ": failed to create output response")
-                                      .c_str());
-      continue;
-    }
-
-    // If error happens at this stage, we can only log it
-    LOG_IF_ERROR(
-        TRITONBACKEND_ResponseSend(
-            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr),
-        "failed sending response");
-  }
-
-  uint64_t exec_end_ns = 0;
-  SET_TIMESTAMP(exec_end_ns);
-
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-
-    // Report statistics for the request. Note that there could
-    // still be responses that have not yet been sent but those
-    // cannot be captured in the statistics as they reflect only the
-    // request object. We use the execution start/end time for
-    // compute also so that the entire execution time is associated
-    // with the inference computation.
-    LOG_IF_ERROR(
-        TRITONBACKEND_ModelInstanceReportStatistics(
-            instance, request, (responses[r] != nullptr) /* success */,
-            exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
-        "failed reporting request statistics");
-
-    LOG_IF_ERROR(
-        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
-        "failed releasing request");
-  }
-
-  LOG_IF_ERROR(
-      TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          instance, total_batch_size, exec_start_ns, compute_start_ns,
-          compute_end_ns, exec_end_ns),
-      "failed reporting batch request statistics");
-
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
-       instance_state->Name() + " released " + std::to_string(request_count) +
-       " requests")
-          .c_str());
-
-  return nullptr;
+  return instance_state->ProcessRequests(requests, request_count);
 }
 
 TRITONSERVER_Error*
