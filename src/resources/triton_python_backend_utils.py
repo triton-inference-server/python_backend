@@ -93,7 +93,6 @@ class InferenceRequest:
         The names of the output tensors that should be calculated and
         returned for this request.
     """
-
     def __init__(self, inputs, request_id, correlation_id,
                  requested_output_names):
         self._inputs = inputs
@@ -150,7 +149,6 @@ class InferenceResponse:
         A TritonError object describing any errror encountered while creating
         resposne
     """
-
     def __init__(self, output_tensors, error=None):
         self._output_tensors = output_tensors
         self._err = error
@@ -193,17 +191,16 @@ class Tensor:
     numpy_array : numpy.ndarray
         A numpy array containing input/output data
     """
-
-    def __init__(self, name, numpy_array):
-        if not isinstance(numpy_array, (np.ndarray,)):
-            raise TritonModelException("numpy_array must be a numpy array")
-        elif numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
+    def __init__(self, name, numpy_array=None):
+        if isinstance(numpy_array, (np.ndarray,)) and \
+            numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
             raise TritonModelException(
                 'Tensor dtype used for numpy_array is not support by Python backend.'
                 ' Please use np.object_ instead.')
 
         self._name = name
         self._numpy_array = numpy_array
+        self._data = None
 
     def name(self):
         """Get the name of tensor
@@ -213,6 +210,29 @@ class Tensor:
             The name of tensor
         """
         return self._name
+
+    def set_data_from_numpy(self, numpy_array):
+        if not isinstance(numpy_array, (np.ndarray)):
+            raise TritonModelException(
+                '"numpy_array" must be instance of "np.ndarray"')
+
+        if isinstance(numpy_array, (np.ndarray,)) and \
+            numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
+            raise TritonModelException(
+                'Tensor dtype used for numpy_array is not support by Python backend.'
+                ' Please use np.object_ instead.')
+    
+    def set_data(self, data):
+        """Set data using the ctype pointer.
+        """
+
+        self._data = data
+    
+    def as_raw(self):
+        """
+        """
+
+        return self._data
 
     def as_numpy(self):
         """Get the underlying numpy array
@@ -231,7 +251,6 @@ class TritonError:
     msg : str
         A brief description of error
     """
-
     def __init__(self, msg):
         self._msg = msg
 
@@ -256,7 +275,6 @@ class TritonModelException(Exception):
     msg : str
         A brief description of error
     """
-
     def __init__(self, msg):
         self._msg = msg
 

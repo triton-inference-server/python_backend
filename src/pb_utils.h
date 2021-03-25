@@ -27,6 +27,8 @@
 #pragma once
 
 #include "triton/core/tritonserver.h"
+#include "triton/backend/backend_common.h"
+#include "shm_manager.h"
 
 #include <string>
 #include <memory>
@@ -101,5 +103,28 @@ struct IPCMessage {
     // response points to a ResponseBatch struct.
     off_t response_batch;
 };
+
+TRITONSERVER_Error* SaveStringToSharedMemory(std::unique_ptr<SharedMemory> &shm_pool, off_t &shm_offset, const char *str);
+TRITONSERVER_Error* LoadStringFromSharedMemory(std::unique_ptr<SharedMemory> &shm_pool, off_t shm_offset, char *&str);
+
+TRITONSERVER_Error* LoadRawDataFromSharedLibrary(std::unique_ptr<SharedMemory> &shm_pool, off_t &tensor_shm_offset, const Tensor& tensor);
+TRITONSERVER_Error* SaveRawDataToSharedMemory(
+    std::unique_ptr<SharedMemory> &shm_pool,
+    off_t &raw_data_offset,
+    char *&raw_data_ptr,
+    TRITONSERVER_MemoryType memory_type,
+    int memory_type_id, uint64_t byte_size);
+
+TRITONSERVER_Error* SaveTensorToSharedMemory(
+    std::unique_ptr<SharedMemory> &shm_pool,
+    Tensor* tensor,
+    char *&raw_data_ptr,
+    TRITONSERVER_MemoryType memory_type,
+    int memory_type_id, uint64_t byte_size, const char *name, const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype);
+TRITONSERVER_Error* LoadTensorFromSharedMemory(std::unique_ptr<SharedMemory> &shm_pool, off_t tensor_shm_offset, Tensor& tensor);
+
+// 
+// template<typename T>
+// void AppendToTensorArray(py::list &py_tensors, const char* name);
 
 }}}  // namespace triton::backend::python

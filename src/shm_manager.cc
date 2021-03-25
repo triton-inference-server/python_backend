@@ -124,6 +124,11 @@ TRITONSERVER_Error* SharedMemory::MapOffset(char **shm_addr, size_t byte_size, o
   return nullptr; // success
 }
 
+void SharedMemory::SetOffset(off_t offset)
+{
+  offset_ = offset;
+}
+
 // MapSharedMemory(int shm_fd, size_t offset, size_t byte_size, void** shm_addr)
 // {
 //   // map shared memory to process address space

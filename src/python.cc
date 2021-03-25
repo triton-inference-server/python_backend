@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <pybind11/embed.h>
+#include <pybind11/numpy.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -132,7 +133,7 @@ class ModelInstanceState : public BackendModelInstance {
   // Load Triton inputs to the appropriate Protobufs
   TRITONSERVER_Error*
   GetInputTensor(
-    const uint32_t request_idx, Tensor *input_tensor, TRITONBACKEND_Request* request,
+    const uint32_t input_idx, Tensor *input_tensor, TRITONBACKEND_Request* request,
     std::vector<TRITONBACKEND_Response*>& responses);
   
   TRITONSERVER_Error* ProcessRequests(TRITONBACKEND_Request** requests,
@@ -241,7 +242,7 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           GetInputTensor(
-              r, input_tensor, request, responses));
+              iidx, input_tensor, request, responses));
     }
 
     off_t *requested_output_names;
@@ -259,18 +260,9 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
               request, iidx, &requested_output_name));
 
       // output name
-      String *output_name_shm;
       off_t output_name_offset;
-      RETURN_IF_ERROR(shm_pool_->Map((char **) &output_name_shm, sizeof(String), output_name_offset));
+      RETURN_IF_ERROR(SaveStringToSharedMemory(shm_pool_, output_name_offset, requested_output_name));
       requested_output_names[iidx] = output_name_offset;
-
-      output_name_shm->length = sizeof(requested_output_name);
-
-      char *output_name_data;
-      off_t output_name_data_offset;
-      RETURN_IF_ERROR(shm_pool_->Map((char **) &output_name_data, sizeof(requested_output_name), output_name_data_offset));
-      output_name_shm->data = output_name_data_offset;
-      strcpy(output_name_data, requested_output_name);
     }
 
     // request id
@@ -278,17 +270,9 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
     GUARDED_RESPOND_IF_ERROR(
         responses, r, TRITONBACKEND_RequestId(request, &id));
 
-    String *id_shm;
     off_t id_offset;
-    RETURN_IF_ERROR(shm_pool_->Map((char **) &id_shm, sizeof(String), id_offset));
+    RETURN_IF_ERROR(SaveStringToSharedMemory(shm_pool_, id_offset, id));
     python_infer_request->id = id_offset;
-    id_shm->length = sizeof(id);
-
-    char *id_data;
-    off_t id_data_offset;
-    RETURN_IF_ERROR(shm_pool_->Map((char **) &id_data, sizeof(id), id_data_offset));
-    id_shm->data = id_data_offset;
-    strcpy(id_data, id);
 
     uint64_t correlation_id;
     GUARDED_RESPOND_IF_ERROR(
@@ -526,7 +510,10 @@ void ModelInstanceState::WaitForMessageCallback() {
   py::module sys = py::module::import("sys");
   sys.attr("path").attr("insert")(0, model_path_);
   sys.attr("path").attr("insert")(0, python_lib);
+  py::module python_backend_utils = py::module::import("triton_python_backend_utils");
   py::object TritonPythonModel = py::module::import("model").attr("TritonPythonModel");
+  py::object PyRequest = python_backend_utils.attr("InferenceRequest");
+  py::object PyTensor = python_backend_utils.attr("Tensor");
 
   triton::common::TritonJson::WriteBuffer buffer;
   Model()->ModelConfig().Write(&buffer);
@@ -534,15 +521,24 @@ void ModelInstanceState::WaitForMessageCallback() {
   py::object model_instance = TritonPythonModel();
   py::dict model_config_params;
 
-  // Prepare and call the model initialize function
-  model_config_params["model_config"] = buffer.MutableContents();
-  model_config_params["model_instance_kind"] = TRITONSERVER_InstanceGroupKindString(kind_);
-  model_config_params["model_instance_name"] = name_;
-  model_config_params["model_instance_device_id"] = std::to_string(device_id_);
-  model_config_params["model_repository"] = model_state->RepositoryPath();
-  model_config_params["model_version"] = std::to_string(model_state->Version());
-  model_config_params["model_name"] = model_state->Name();
-  model_instance.attr("initialize")(model_config_params);
+  // Call initialize if exists.
+  if (py::hasattr(model_instance, "initialize")) {
+    model_config_params["model_config"] = buffer.MutableContents();
+    model_config_params["model_instance_kind"] = TRITONSERVER_InstanceGroupKindString(kind_);
+    model_config_params["model_instance_name"] = name_;
+    model_config_params["model_instance_device_id"] = std::to_string(device_id_);
+    model_config_params["model_repository"] = model_state->RepositoryPath();
+    model_config_params["model_version"] = std::to_string(model_state->Version());
+    model_config_params["model_name"] = model_state->Name();
+
+    try {
+      model_instance.attr("initialize")(model_config_params);
+    } catch (const py::error_already_set &e) {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, e.what());
+    }
+  }
+
+  // TODO: Fix error handling in here.
 
   while (true) {
     pthread_mutex_lock(child_mutex_);
@@ -550,6 +546,8 @@ void ModelInstanceState::WaitForMessageCallback() {
     pthread_mutex_unlock(child_mutex_);
 
     LOG_MESSAGE(TRITONSERVER_LOG_INFO, "message received.");
+
+    // TODO: Add check whether the the initialize/execute/finalize functions exist.
     RequestBatch* request_batch;
     shm_pool_->MapOffset((char **) &request_batch, sizeof(RequestBatch), ipc_message_->request_batch);
     uint32_t batch_size = request_batch->batch_size;
@@ -557,22 +555,158 @@ void ModelInstanceState::WaitForMessageCallback() {
     Request* requests;
     shm_pool_->MapOffset((char **) &requests, sizeof(Request) * batch_size, request_batch->requests);
 
+    py::list py_request_list;
     for (size_t i = 0; i < batch_size; i++) {
       Request request = requests[i];
 
-      String *request_id;
-      shm_pool_->MapOffset((char **) &request_id, sizeof(String), request.id);
-      char *id;
-      shm_pool_->MapOffset((char **) &id, request_id->length, request_id->data);
-      LOG_MESSAGE(TRITONSERVER_LOG_INFO, id);
+      char *id = nullptr;
+      LoadStringFromSharedMemory(shm_pool_, request.id, id);
 
       uint32_t requested_input_count = request.requested_input_count;
       Tensor* input_tensors;
       shm_pool_->MapOffset((char **) &input_tensors, sizeof(Tensor) * requested_input_count, request.inputs);
 
-      LOG_MESSAGE(TRITONSERVER_LOG_INFO, std::to_string(requested_input_count).c_str());
+      py::list py_input_tensors;
+      for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
+        Tensor input_tensor = input_tensors[input_idx];
+
+        char *name = nullptr;
+        LoadStringFromSharedMemory(shm_pool_, input_tensor.name, name);
+
+        RawData *raw_data;
+        shm_pool_->MapOffset((char **) &raw_data, sizeof(RawData), input_tensor.raw_data);
+
+        char *data;
+        shm_pool_->MapOffset((char **) &data, sizeof(raw_data->byte_size), raw_data->memory_ptr);
+
+        size_t dims_count = input_tensor.dims_count;
+        
+        int64_t *dims;
+        shm_pool_->MapOffset((char **) &dims, sizeof(int64_t) * dims_count, input_tensor.dims);
+        TRITONSERVER_DataType dtype = input_tensor.dtype;
+        std::vector<int64_t> shape{dims, dims+dims_count};
+
+        switch (dtype) {
+          case TRITONSERVER_TYPE_BOOL:
+            break;
+          case TRITONSERVER_TYPE_UINT8:
+//            py::array_t<uint8_t, py::array::c_style | py::array::forcecast> array(raw_data->byte_size);
+            break;
+          case TRITONSERVER_TYPE_UINT16:
+//            py::array_t<uint16_t, py::array::c_style | py::array::forcecast> array(raw_data->byte_size);
+            break;
+          case TRITONSERVER_TYPE_UINT32:
+//            py::array_t<uint32_t, py::array::c_style | py::array::forcecast> array(raw_data->byte_size);
+            break;
+          case TRITONSERVER_TYPE_UINT64:
+//            py::array_t<uint64_t, py::array::c_style | py::array::forcecast> array(raw_data->byte_size);
+            break;
+          case TRITONSERVER_TYPE_INT8:
+          {
+            auto dtype = pybind11::dtype(pybind11::format_descriptor<int8_t>::format());
+            py::array numpy_array(dtype, shape, (void *) data);
+            py::object py_input_tensor = PyTensor(name, numpy_array);
+            py_input_tensors.append(py_input_tensor);
+            break;
+          }
+          case TRITONSERVER_TYPE_INT16:
+//            py::array_t<int16_t, py::array::c_style | py::array::forcecast> array;
+            break;
+          case TRITONSERVER_TYPE_INT32:
+//            py::array_t<int32_t, py::array::c_style | py::array::forcecast> array;
+            break;
+          case TRITONSERVER_TYPE_INT64:
+//            py::array_t<int32_t, py::array::c_style | py::array::forcecast> array;
+            break;
+          case TRITONSERVER_TYPE_FP32:
+//            py::array_t<int32_t, py::array::c_style | py::array::forcecast> array;
+            break;
+          case TRITONSERVER_TYPE_FP64:
+//            py::array_t<int32_t, py::array::c_style | py::array::forcecast> array;
+            break;
+          default:
+            break;
+        }
+      }
+
+      py::list py_requested_output_names;
+
+      uint32_t requested_output_count = request.requested_output_count;
+      off_t *output_names;
+      shm_pool_->MapOffset((char **) &output_names, sizeof(off_t) * requested_output_count, request.requested_output_names);
+      for (size_t output_idx = 0; output_idx < requested_output_count; ++output_idx) {
+        char *output_name = nullptr;
+        LoadStringFromSharedMemory(shm_pool_, output_names[output_idx], output_name);
+        py_requested_output_names.append(output_name);
+      }
+
+      py::object infer_request = PyRequest(py_input_tensors, id, request.correlation_id, py_requested_output_names);
+      py_request_list.append(infer_request);
     }
+    
+    py::list responses;
+    // Execute Response
+    try {
+      responses = model_instance.attr("execute")(py_request_list);
+    } catch (const py::error_already_set &e) {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, e.what());
+    }
+
+    ResponseBatch* response_batch;
+    off_t response_batch_offset;
+    RETURN_IF_ERROR(shm_pool_->Map((char **) &response_batch, sizeof(Response), response_batch_offset));
+    ipc_message_->response_batch_offset;
+
+    Response* responses_shm;
+    off_t responses_shm_offset;
+    size_t response_size = py::len(response);
+    RETURN_IF_ERROR(shm_pool_->Map((char **) &responses_shm, sizeof(Response) * response_size, responses_shm_offset));
+    response_batch->responses = responses_shm_offset;
+    response_batch->batch_size = response_size;
+  
+    size_t i = 0;
+    for (auto& response : responses) {
+      size_t j = 0;
+      Response *response_shm = &responses_shm[i];
+
+      py::list output_tensors = response.attr("output_tensors")();
+      size_t output_tensor_length = py::len(output_tensors);
+
+      Tensor* output_tensors_shm;
+      off_t output_tensors_offset;
+      RETURN_IF_ERROR(shm_pool_->Map((char **) &output_tensors_shm, sizeof(Tensor) * output_tensor_length, output_tensors_offset));
+
+      for (auto& output_tensor : output_tensors) {
+        Tensor *output_tensor_shm = &output_tensors_shm[j];
+        std::string name = output_tensor.attr("name")();
+
+        py::array numpy_array = output_tensor.attr("as_numpy")();
+        py::buffer_info buffer = numpy_array.request();
+
+        // TODO: If the data_ptr is in shared memory the copy is not required.
+        void *data_ptr = static_cast<void *>(buffer.ptr);
+
+        char *data_in_shm;
+        const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU
+        const int memory_type_id = 0;
+
+        SaveTensorToSharedMemory(shm_pool_, output_tensor_shm, data_in_shm, memory_type, memory_type_id, name.c_str(), )
+        j += 1;
+      }
+      i+=1;
+      
+    }
+
     NotifyParent();
+  }
+
+  // Call finalize if exists.
+  if (py::hasattr(model_instance, "finalize")) {
+    try {
+      model_instance.attr("finalize")();
+    } catch (const py::error_already_set &e) {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, e.what());
+    }
   }
 }
 
@@ -643,13 +777,13 @@ ModelInstanceState::~ModelInstanceState()
 
 TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(
-    const uint32_t request_idx, Tensor *input_tensor, TRITONBACKEND_Request* request,
+    const uint32_t input_idx, Tensor *input_tensor, TRITONBACKEND_Request* request,
     std::vector<TRITONBACKEND_Response*>& responses)
 {
   const char* input_name;
   // Load iidx'th input name
   RESPOND_AND_RETURN_IF_ERROR(
-      request, TRITONBACKEND_RequestInputName(request, request_idx, &input_name));
+      request, TRITONBACKEND_RequestInputName(request, input_idx, &input_name));
 
   // Load iidx'th input
   TRITONBACKEND_Input* in;
@@ -673,52 +807,12 @@ ModelInstanceState::GetInputTensor(
       &request, 1, &responses, Model()->TritonMemoryManager(),
       false /* pinned_enable */, CudaStream());
 
-  // input name
-  String *input_name_shm;
-  off_t input_name_offset;
-  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_name_shm, sizeof(String), input_name_offset));
-  input_tensor->name = input_name_offset;
-
-  input_name_shm->length = sizeof(input_name);
-
-  char *input_name_data;
-  off_t input_name_data_offset;
-  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_name_data, sizeof(input_name), input_name_data_offset));
-  input_name_shm->data = input_name_data_offset;
-  strcpy(input_name_data, input_name);
-
-  // input dtype
-  input_tensor->dtype = input_dtype;
-
-  // input dims
-  int64_t *input_dims;
-  input_tensor->dims_count = input_dims_count;
-  off_t input_dims_offset;
-  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_dims, sizeof(int64_t) * input_dims_count, input_dims_offset));
-  input_tensor->dims = input_dims_offset;
-
-  for (size_t j = 0; j < input_dims_count; ++j) {
-    input_dims[j] = input_shape[j];
-  }
 
   const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
   const int memory_type_id = 0;
-  // input_tensor->raw_data = 
-
-  // raw data
-  RawData *raw_data;
-  off_t raw_data_offset;
-  RETURN_IF_ERROR(shm_pool_->Map((char **) &raw_data, sizeof(RawData), raw_data_offset));
-  input_tensor->raw_data = raw_data_offset;
-
-  raw_data->memory_type = memory_type;
-  raw_data->memory_type_id = memory_type_id;
-  raw_data->byte_size = input_byte_size;
 
   char *input_buffer;
-  off_t input_buffer_offset;
-  RETURN_IF_ERROR(shm_pool_->Map((char **) &input_buffer, input_byte_size, input_buffer_offset));
-  input_tensor->raw_data = raw_data_offset;
+  RETURN_IF_ERROR(SaveTensorToSharedMemory(shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id, input_byte_size, input_name, input_shape, input_dims_count, input_dtype));
 
   // Load raw data into input_tensor raw data.
   // FIXME: Avoid the copy to CPU Memory when

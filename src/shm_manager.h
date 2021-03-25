@@ -44,6 +44,7 @@ public:
   SharedMemory(const std::string& shm_key);
   TRITONSERVER_Error* MapOffset(char **shm_addr, size_t byte_size, off_t offset);
   TRITONSERVER_Error* Map(char **shm_addr, size_t byte_size, off_t &offset);
+  void SetOffset(off_t offset);
   ~SharedMemory() noexcept(false);
 };
 
