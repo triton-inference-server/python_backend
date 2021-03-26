@@ -84,10 +84,12 @@ struct Request {
 struct Response {
     off_t outputs; // Offset for Tensor output.
     uint32_t outputs_size;
+    off_t error;
+    bool has_error;
 };
 
 struct ResponseBatch {
-    off_t reponses; // Offset for response object.
+    off_t responses; // Offset for response object.
     uint32_t batch_size;
 };
 

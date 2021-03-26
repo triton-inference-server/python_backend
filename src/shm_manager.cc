@@ -53,8 +53,25 @@ SharedMemory::SharedMemory(const std::string& shm_key) {
     throw BackendModelException(err);
   }
 
-  capacity_ = default_byte_size;
-  offset_ = 0;
+  void *map_addr =
+      mmap(NULL, sizeof(off_t) + sizeof(size_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
+
+  if (map_addr == MAP_FAILED) {
+    auto err =  TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("unable to process address space or shared-memory descriptor: " +
+        std::to_string(shm_fd_)).c_str());
+    throw BackendModelException(err);
+  }
+
+  capacity_ = (size_t *) map_addr;
+  *capacity_ = default_byte_size;
+
+  offset_ = (off_t *) ((char *) map_addr + sizeof(size_t));
+
+  *offset_ = 0;
+  *offset_ += sizeof(off_t);
+  *offset_ += sizeof(size_t);
 }
 
 SharedMemory::~SharedMemory() noexcept(false) {
@@ -68,24 +85,24 @@ SharedMemory::~SharedMemory() noexcept(false) {
 
 TRITONSERVER_Error* SharedMemory::Map(char **shm_addr, size_t byte_size, off_t &offset)
 {
-  while (offset_ + byte_size >= capacity_) {
+  while (*offset_ + byte_size >= *capacity_) {
     // Increase the shared memory pool size by one page size.
-    capacity_ = capacity_ + PAGE_SIZE;
-    if (ftruncate(shm_fd_, capacity_) == -1) {
+    *capacity_ = *capacity_ + PAGE_SIZE;
+    if (ftruncate(shm_fd_, *capacity_) == -1) {
       TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL,
           ("Failed to increase the shared memory pool size for key '" + shm_key_ +
-          "' to " + std::to_string(capacity_) + " bytes").c_str());
+          "' to " + std::to_string(*capacity_) + " bytes").c_str());
       return err;
     }
   }
 
   // page aligned offset
-  off_t page_offset = offset_;
+  off_t page_offset = *offset_;
 
   // Find the appropriate page address.
-  page_offset = offset_ &~ (PAGE_SIZE - 1);
+  page_offset = *offset_ &~ (PAGE_SIZE - 1);
   void *map_addr =
-      mmap(NULL, byte_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, page_offset);
+      mmap(NULL, byte_size + *offset_ - page_offset, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, page_offset);
 
   if (map_addr == MAP_FAILED) {
     return TRITONSERVER_ErrorNew(
@@ -95,10 +112,10 @@ TRITONSERVER_Error* SharedMemory::Map(char **shm_addr, size_t byte_size, off_t &
   }
 
   *shm_addr = (char *) map_addr;
-  *shm_addr = *shm_addr + offset_ - page_offset;
-  offset = offset_;
+  *shm_addr = *shm_addr + *offset_ - page_offset;
+  offset = *offset_;
 
-  offset_ += byte_size;
+  *offset_ += byte_size;
 
   return nullptr; // success
 }
@@ -107,9 +124,9 @@ TRITONSERVER_Error* SharedMemory::MapOffset(char **shm_addr, size_t byte_size, o
 {
   off_t page_offset = offset;
 
-  page_offset = offset_ &~ (PAGE_SIZE - 1);
+  page_offset = offset &~ (PAGE_SIZE - 1);
   void *map_addr =
-      mmap(NULL, byte_size, PROT_READ, MAP_SHARED, shm_fd_, page_offset);
+      mmap(NULL, byte_size + offset - page_offset, PROT_READ, MAP_SHARED, shm_fd_, page_offset);
 
   if (map_addr == MAP_FAILED) {
     return TRITONSERVER_ErrorNew(
@@ -126,7 +143,7 @@ TRITONSERVER_Error* SharedMemory::MapOffset(char **shm_addr, size_t byte_size, o
 
 void SharedMemory::SetOffset(off_t offset)
 {
-  offset_ = offset;
+  *offset_ = offset;
 }
 
 // MapSharedMemory(int shm_fd, size_t offset, size_t byte_size, void** shm_addr)

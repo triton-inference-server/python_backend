@@ -37,8 +37,8 @@ namespace triton { namespace backend { namespace python {
 class SharedMemory {
   int shm_fd_;
   std::string shm_key_;
-  size_t capacity_;
-  size_t offset_;
+  size_t *capacity_;
+  off_t *offset_;
 
 public:
   SharedMemory(const std::string& shm_key);
