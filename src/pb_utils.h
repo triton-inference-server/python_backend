@@ -42,6 +42,8 @@ void CreateIPCCondVariable(pthread_cond_t** cv);
 
 // Create a mutex that is shared between different processes.
 void CreateIPCMutex(pthread_mutex_t** mutex);
+// Create a mutex that is shared between different processes.
+void CreateIPCMutex(pthread_mutex_t** mutex);
 
 //
 // Represents a raw data 
@@ -91,6 +93,8 @@ struct Response {
 struct ResponseBatch {
     off_t responses; // Offset for response object.
     uint32_t batch_size;
+    off_t error;
+    bool has_error;
 };
 
 struct RequestBatch {

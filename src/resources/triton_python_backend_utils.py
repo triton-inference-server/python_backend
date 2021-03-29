@@ -191,16 +191,21 @@ class Tensor:
     numpy_array : numpy.ndarray
         A numpy array containing input/output data
     """
-    def __init__(self, name, numpy_array=None):
+    def __init__(self, name, numpy_array=None, raw_data=None):
         if isinstance(numpy_array, (np.ndarray,)) and \
             numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
             raise TritonModelException(
                 'Tensor dtype used for numpy_array is not support by Python backend.'
                 ' Please use np.object_ instead.')
 
+        if numpy_array is not None and raw_data is not None:
+            raise TritonModelException(
+                'Both "numpy_array" and "data_ptr" are provided. You should provide only one of the two arguments.'
+            )
+
         self._name = name
         self._numpy_array = numpy_array
-        self._data = None
+        self._raw_data = raw_data
 
     def name(self):
         """Get the name of tensor
@@ -221,13 +226,13 @@ class Tensor:
             raise TritonModelException(
                 'Tensor dtype used for numpy_array is not support by Python backend.'
                 ' Please use np.object_ instead.')
-    
-    def set_data(self, data):
+
+    def set_data(self, data_ptr):
         """Set data using the ctype pointer.
         """
 
-        self._data = data
-    
+        self._data_ptr = data_ptr
+
     def as_raw(self):
         """
         """
@@ -242,6 +247,15 @@ class Tensor:
             The numpy array
         """
         return self._numpy_array
+
+class RawData:
+    """Representing a raw data object.
+    """
+
+    def __init__(self, data_ptr, shape, dtype):
+        self._data_ptr = data_ptr
+        self._shape = shape
+        self._dtype = dtype
 
 
 class TritonError:

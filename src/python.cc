@@ -190,6 +190,9 @@ void ModelInstanceState::NotifyParent() {
 TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
   TRITONBACKEND_Request ** requests, const uint32_t request_count) {
 
+  uint64_t exec_start_ns = 0;
+  SET_TIMESTAMP(exec_start_ns);
+
   // Create Python inference requests
   RequestBatch* request_batch;
   off_t request_batch_offset;
@@ -282,7 +285,6 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
     GUARDED_RESPOND_IF_ERROR(
         responses, r, TRITONBACKEND_RequestId(request, &id));
     
-
     off_t id_offset;
 
     GUARDED_RESPOND_IF_ERROR(
@@ -292,7 +294,6 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
 
     char *id_test;
     LoadStringFromSharedMemory(shm_pool_, id_offset, id_test);
-    LOG_MESSAGE(TRITONSERVER_LOG_INFO, id_test);
 
     uint64_t correlation_id;
     GUARDED_RESPOND_IF_ERROR(
@@ -301,19 +302,17 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
     python_infer_request->correlation_id = correlation_id;
   }
 
-  // uint64_t compute_start_ns = 0;
-  // SET_TIMESTAMP(compute_start_ns);
+  uint64_t compute_start_ns = 0;
+  SET_TIMESTAMP(compute_start_ns);
 
   pthread_mutex_lock(parent_mutex_);
-  // Wait for child notification
   NotifyChild();
+
+  // Wait for child notification
   pthread_cond_wait(parent_cond_, parent_mutex_);
 
-  pthread_mutex_unlock(parent_mutex_);
-
-  // uint64_t compute_end_ns = 0;
-  // SET_TIMESTAMP(compute_end_ns);
-  LOG_MESSAGE(TRITONSERVER_LOG_INFO, "server woke up!");
+  uint64_t compute_end_ns = 0;
+  SET_TIMESTAMP(compute_end_ns);
 
   // Parsing the request response
   ResponseBatch* response_batch;
@@ -396,8 +395,6 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
 
       TRITONBACKEND_Output* triton_output;
       TRITONSERVER_DataType triton_dt = output_tensor->dtype;
-      LOG_MESSAGE(TRITONSERVER_LOG_INFO, (std::string("Main ") + std::to_string(output_tensor->dims)).c_str());
-      LOG_MESSAGE(TRITONSERVER_LOG_INFO, (std::string("Main ") + std::to_string(output_tensor->raw_data)).c_str());
 
       size_t dims_count = output_tensor->dims_count;
       
@@ -420,7 +417,7 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
               response, &triton_output, name,
               triton_dt, dims, dims_count));
 
-      int64_t output_byte_size = raw_data->byte_size;
+      uint64_t output_byte_size = raw_data->byte_size;
 
       // Custom handling for TRITONSERVER_TYPE_BYTES
       if (triton_dt == TRITONSERVER_TYPE_BYTES) {
@@ -474,44 +471,46 @@ TRITONSERVER_Error* ModelInstanceState::ProcessRequests(
         "failed sending response");
   }
 
-  // uint64_t exec_end_ns = 0;
-  // SET_TIMESTAMP(exec_end_ns);
+  uint64_t exec_end_ns = 0;
+  SET_TIMESTAMP(exec_end_ns);
 
-  // for (uint32_t r = 0; r < request_count; ++r) {
-  //   TRITONBACKEND_Request* request = requests[r];
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* request = requests[r];
 
-  //   // Report statistics for the request. Note that there could
-  //   // still be responses that have not yet been sent but those
-  //   // cannot be captured in the statistics as they reflect only the
-  //   // request object. We use the execution start/end time for
-  //   // compute also so that the entire execution time is associated
-  //   // with the inference computation.
-  //   LOG_IF_ERROR(
-  //       TRITONBACKEND_ModelInstanceReportStatistics(
-  //           instance, request, (responses[r] != nullptr) /* success */,
-  //           exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
-  //       "failed reporting request statistics");
+    // Report statistics for the request. Note that there could
+    // still be responses that have not yet been sent but those
+    // cannot be captured in the statistics as they reflect only the
+    // request object. We use the execution start/end time for
+    // compute also so that the entire execution time is associated
+    // with the inference computation.
+    LOG_IF_ERROR(
+        TRITONBACKEND_ModelInstanceReportStatistics(
+            TritonModelInstance(), request, (responses[r] != nullptr) /* success */,
+            exec_start_ns, compute_start_ns, compute_end_ns, exec_end_ns),
+        "failed reporting request statistics");
 
-  //   LOG_IF_ERROR(
-  //       TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
-  //       "failed releasing request");
-  // }
+    LOG_IF_ERROR(
+        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
+        "failed releasing request");
+  }
 
-  // // Report the entire batch statistics. This backend does not support
-  // // batching so the total batch size is always 1.
-  // LOG_IF_ERROR(
-  //     TRITONBACKEND_ModelInstanceReportBatchStatistics(
-  //         instance, 1, exec_start_ns, compute_start_ns, compute_end_ns,
-  //         exec_end_ns),
-  //     "failed reporting batch request statistics");
+  // Report the entire batch statistics. This backend does not support
+  // batching so the total batch size is always 1.
+  LOG_IF_ERROR(
+      TRITONBACKEND_ModelInstanceReportBatchStatistics(
+          TritonModelInstance(), 1, exec_start_ns, compute_start_ns, compute_end_ns,
+          exec_end_ns),
+      "failed reporting batch request statistics");
 
-  // LOG_MESSAGE(
-  //     TRITONSERVER_LOG_VERBOSE,
-  //     (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
-  //      instance_state->Name() + " released " + std::to_string(request_count) +
-  //      " requests")
-  //         .c_str());
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
+       Name() + " released " + std::to_string(request_count) +
+       " requests")
+          .c_str());
+   shm_pool_->SetOffset(request_batch_offset);
 
+  pthread_mutex_unlock(parent_mutex_);
   return nullptr;
 }
 
@@ -552,14 +551,13 @@ void ModelInstanceState::WaitForMessageCallback() {
   }
 
   // TODO: Fix error handling in here.
-
   while (true) {
+    LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "child process waiting for messages...");
     pthread_mutex_lock(child_mutex_);
+    NotifyParent();
     pthread_cond_wait(child_cond_, child_mutex_);
+    LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "child process resumed.");
 
-    LOG_MESSAGE(TRITONSERVER_LOG_INFO, "message received.");
-
-    // TODO: Add check whether the the initialize/execute/finalize functions exist.
     RequestBatch* request_batch;
     shm_pool_->MapOffset((char **) &request_batch, sizeof(RequestBatch), ipc_message_->request_batch);
     uint32_t batch_size = request_batch->batch_size;
@@ -651,7 +649,6 @@ void ModelInstanceState::WaitForMessageCallback() {
         LoadStringFromSharedMemory(shm_pool_, output_names[output_idx], output_name);
         py_requested_output_names.append(output_name);
       }  
-      LOG_MESSAGE(TRITONSERVER_LOG_INFO, id);
       py::object infer_request = PyRequest(py_input_tensors, id, request->correlation_id, py_requested_output_names);
       py_request_list.append(infer_request);
     }
@@ -727,11 +724,11 @@ void ModelInstanceState::WaitForMessageCallback() {
         memcpy(data_in_shm, data_ptr, byte_size);
         j += 1;
       }
-      i+=1;
-      
+
+      i += 1;
     }
 
-    NotifyParent();
+    LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "Parent process signaled.");
     pthread_mutex_unlock(child_mutex_);
   }
 
@@ -809,7 +806,11 @@ TRITONSERVER_Error* ModelInstanceState::SetupChildProcess() {
 
 ModelInstanceState::~ModelInstanceState()
 {
+  int status;
 
+  // Terminate the child process.
+  kill(pid_, SIGTERM);
+  waitpid(pid_, &status, 0);
 }
 
 TRITONSERVER_Error*
@@ -1077,12 +1078,10 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
-  // uint64_t exec_start_ns = 0;
-  // SET_TIMESTAMP(exec_start_ns);
-
   ModelState* model_state = reinterpret_cast<ModelState*>(instance_state->Model());
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
+
 
   // For each request collect the total batch size for this inference
   // execution. The batch-size, number of inputs, and size of each
@@ -1145,6 +1144,13 @@ TRITONBACKEND_ModelInstanceExecute(
                 .c_str()));
     return nullptr;
   }
+
+  LOG_MESSAGE(
+    TRITONSERVER_LOG_VERBOSE,
+    (std::string("model ") + model_state->Name() + ", instance " +
+     instance_state->Name() + ", executing " + std::to_string(request_count) +
+     " requests")
+        .c_str());
 
   return instance_state->ProcessRequests(requests, request_count);
 }

@@ -72,11 +72,11 @@ TRITONSERVER_Error* LoadStringFromSharedMemory(std::unique_ptr<SharedMemory> &sh
 TRITONSERVER_Error* SaveStringToSharedMemory(std::unique_ptr<SharedMemory> &shm_pool, off_t &shm_offset, const char *str) {
   String *string_shm;
   RETURN_IF_ERROR(shm_pool->Map((char **) &string_shm, sizeof(String), shm_offset));
-  string_shm->length = sizeof(str);
+  string_shm->length = strlen(str) + 1;
 
   char *string_data;
   off_t str_data_offset;
-  RETURN_IF_ERROR(shm_pool->Map((char **) &string_data, sizeof(str), str_data_offset));
+  RETURN_IF_ERROR(shm_pool->Map((char **) &string_data, string_shm->length, str_data_offset));
   string_shm->data = str_data_offset;
   strcpy(string_data, str);
 

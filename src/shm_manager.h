@@ -30,6 +30,8 @@
 #include <memory>
 #include <string>
 #include <unistd.h>
+#include <vector>
+#include <utility>
 
 const long PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace triton { namespace backend { namespace python {
@@ -39,6 +41,15 @@ class SharedMemory {
   std::string shm_key_;
   size_t *capacity_;
   off_t *offset_;
+  char *shm_addr_;
+
+  // Current capcity, local to each process.
+  size_t current_capacity_; 
+
+  // List of old shared memory addresses that should be deallocated.
+  // First element of the pair is size and second element is the address.
+  std::vector<std::pair<size_t, char*>> old_shm_addresses_; 
+  TRITONSERVER_Error* UpdateSharedMemory();
 
 public:
   SharedMemory(const std::string& shm_key);
