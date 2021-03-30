@@ -26,12 +26,12 @@
 
 #pragma once
 
-#include "triton/core/tritonserver.h"
+#include <unistd.h>
 #include <memory>
 #include <string>
-#include <unistd.h>
-#include <vector>
 #include <utility>
+#include <vector>
+#include "triton/core/tritonserver.h"
 
 const long PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace triton { namespace backend { namespace python {
@@ -39,36 +39,25 @@ namespace triton { namespace backend { namespace python {
 class SharedMemory {
   int shm_fd_;
   std::string shm_key_;
-  size_t *capacity_;
-  off_t *offset_;
-  char *shm_addr_;
+  size_t* capacity_;
+  off_t* offset_;
+  char* shm_addr_;
 
   // Current capcity, local to each process.
-  size_t current_capacity_; 
+  size_t current_capacity_;
 
   // List of old shared memory addresses that should be deallocated.
   // First element of the pair is size and second element is the address.
-  std::vector<std::pair<size_t, char*>> old_shm_addresses_; 
+  std::vector<std::pair<size_t, char*>> old_shm_addresses_;
   TRITONSERVER_Error* UpdateSharedMemory();
 
-public:
+ public:
   SharedMemory(const std::string& shm_key);
-  TRITONSERVER_Error* MapOffset(char **shm_addr, size_t byte_size, off_t offset);
-  TRITONSERVER_Error* Map(char **shm_addr, size_t byte_size, off_t &offset);
+  TRITONSERVER_Error* MapOffset(
+      char** shm_addr, size_t byte_size, off_t offset);
+  TRITONSERVER_Error* Map(char** shm_addr, size_t byte_size, off_t& offset);
   void SetOffset(off_t offset);
   ~SharedMemory() noexcept(false);
 };
-
-// TRITONSERVER_Error* 
-// UnmapSharedMemory(void* shm_addr, size_t byte_size);
-// 
-// TRITONSERVER_Error* 
-// UnlinkSharedMemoryRegion(std::string shm_key);
-// 
-// TRITONSERVER_Error* 
-// CloseSharedMemory(int shm_fd);
-// 
-// TRITONSERVER_Error* 
-// MapSharedMemory(int shm_fd, size_t offset, size_t byte_size, void** shm_addr);
 
 }}}  // namespace triton::backend::python

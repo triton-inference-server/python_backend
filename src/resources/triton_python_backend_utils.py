@@ -93,6 +93,7 @@ class InferenceRequest:
         The names of the output tensors that should be calculated and
         returned for this request.
     """
+
     def __init__(self, inputs, request_id, correlation_id,
                  requested_output_names):
         self._inputs = inputs
@@ -149,7 +150,11 @@ class InferenceResponse:
         A TritonError object describing any errror encountered while creating
         resposne
     """
+
     def __init__(self, output_tensors, error=None):
+        if type(output_tensors) is not list:
+            raise TritonModelException('"output_tensors" must be a list.')
+
         self._output_tensors = output_tensors
         self._err = error
 
@@ -169,7 +174,8 @@ class InferenceResponse:
         boolean
             A boolean indicating whether response has an error
         """
-        return self._err != None
+
+        return self._err is not None
 
     def error(self):
         """Get TritonError for this inference response
@@ -191,7 +197,13 @@ class Tensor:
     numpy_array : numpy.ndarray
         A numpy array containing input/output data
     """
-    def __init__(self, name, numpy_array=None, raw_data=None):
+
+    def __init__(self,
+                 name,
+                 numpy_array=None,
+                 raw_data=None,
+                 shape=None,
+                 dtype=None):
         if isinstance(numpy_array, (np.ndarray,)) and \
             numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
             raise TritonModelException(
@@ -248,14 +260,16 @@ class Tensor:
         """
         return self._numpy_array
 
+
 class RawData:
     """Representing a raw data object.
     """
 
-    def __init__(self, data_ptr, shape, dtype):
+    def __init__(self, data_ptr, memory_type, memory_type_id, byte_size):
         self._data_ptr = data_ptr
-        self._shape = shape
-        self._dtype = dtype
+        self._memory_type = memory_type
+        self._memory_type_id = memory_type_id
+        self._byte_size = byte_size
 
 
 class TritonError:
@@ -265,6 +279,7 @@ class TritonError:
     msg : str
         A brief description of error
     """
+
     def __init__(self, msg):
         self._msg = msg
 
@@ -289,6 +304,7 @@ class TritonModelException(Exception):
     msg : str
         A brief description of error
     """
+
     def __init__(self, msg):
         self._msg = msg
 
