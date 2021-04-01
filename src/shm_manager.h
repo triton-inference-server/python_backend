@@ -33,7 +33,6 @@
 #include <vector>
 #include "triton/core/tritonserver.h"
 
-const long PAGE_SIZE = sysconf(_SC_PAGE_SIZE);
 namespace triton { namespace backend { namespace python {
 
 class SharedMemory {

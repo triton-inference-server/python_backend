@@ -26,14 +26,13 @@
 
 #pragma once
 
-#include "shm_manager.h"
-#include "triton/backend/backend_common.h"
-#include "triton/core/tritonserver.h"
-
 #include <pthread.h>
 #include <memory>
 #include <string>
 #include <vector>
+#include "shm_manager.h"
+#include "triton/backend/backend_common.h"
+#include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
 

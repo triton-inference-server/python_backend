@@ -24,6 +24,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "pb_utils.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -36,10 +37,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
-
-#include "pb_utils.h"
 #include "shm_manager.h"
-//#include "triton/backend/backend_common.h"
 
 namespace triton { namespace backend { namespace python {
 void

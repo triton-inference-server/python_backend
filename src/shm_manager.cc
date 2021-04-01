@@ -25,14 +25,13 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "shm_manager.h"
-#include "triton/backend/backend_model.h"
-#include "triton/core/tritonserver.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <string>
+#include "triton/backend/backend_model.h"
+#include "triton/core/tritonserver.h"
 
 
 namespace triton { namespace backend { namespace python {

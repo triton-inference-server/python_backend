@@ -36,6 +36,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -43,7 +44,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 #include "pb_utils.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
@@ -94,7 +94,6 @@ class ModelInstanceState : public BackendModelInstance {
   pthread_mutex_t* parent_mutex_;
   pthread_cond_t* parent_cond_;
   std::string model_path_;
-  std::string model_path_version_;
   IPCMessage* ipc_message_;
   std::unique_ptr<SharedMemory> shm_pool_;
   // Child process pid
@@ -525,12 +524,6 @@ ModelInstanceState::ProcessRequests(
 
       uint64_t output_byte_size = raw_data->byte_size;
 
-      // Custom handling for TRITONSERVER_TYPE_BYTES
-      if (triton_dt == TRITONSERVER_TYPE_BYTES) {
-        //
-      } else {
-      }
-
       void* output_buffer;
 
       TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
@@ -890,13 +883,22 @@ ModelInstanceState::WaitForMessageCallback()
     ModelState* model_state = reinterpret_cast<ModelState*>(Model());
     std::string python_lib = model_state->StateForBackend()->python_lib;
     py::module sys = py::module::import("sys");
-    sys.attr("path").attr("append")(model_path_);
-    sys.attr("path").attr("append")(model_path_version_);
+    std::string model_name =
+        model_path_.substr(model_path_.find_last_of("/") + 1);
+    std::string model_path_parent =
+        model_path_.substr(0, model_path_.find_last_of("/"));
+    std::string model_path_parent_parent =
+        model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+    sys.attr("path").attr("append")(model_path_parent);
+    sys.attr("path").attr("append")(model_path_parent_parent);
     sys.attr("path").attr("append")(python_lib);
     py::module python_backend_utils =
         py::module::import("triton_python_backend_utils");
     py::object TritonPythonModel =
-        py::module::import("model").attr("TritonPythonModel");
+        py::module::import(
+            (std::to_string(model_state->Version()) + std::string(".model"))
+                .c_str())
+            .attr("TritonPythonModel");
     PyRequest = python_backend_utils.attr("InferenceRequest");
     PyTensor = python_backend_utils.attr("Tensor");
     deserialize_bytes = python_backend_utils.attr("deserialize_bytes_tensor");
@@ -1134,10 +1136,8 @@ ModelInstanceState::SetupChildProcess()
 
   std::stringstream ss;
   // Use <path>/version/model.py as the model location
-  ss << model_path;
+  ss << model_path << "/" << model_version << "/model.py";
   model_path_ = ss.str();
-  ss << "/" << model_version;
-  model_path_version_ = ss.str();
 
   parent_pid_ = getpid();
 
