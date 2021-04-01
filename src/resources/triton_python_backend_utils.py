@@ -257,6 +257,8 @@ class Tensor:
                 numpy_array = numpy_array.view(numpy_dtype)
         else:
             triton_dtype = numpy_to_triton_type(numpy_array.dtype)
+            if triton_dtype is None:
+                triton_dtype = numpy_to_triton_type(numpy_array.dtype.type)
 
         self._triton_dtype = triton_dtype
         self._name = name
@@ -472,7 +474,7 @@ def numpy_to_triton_type(data_type):
         return 11
     elif data_type == np.float64:
         return 12
-    elif data_type == np.object_:
+    elif data_type == np.object_ or data_type == np.bytes_:
         return 13
 
 

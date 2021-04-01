@@ -81,7 +81,7 @@ class ModelState : public BackendModel {
 void
 signal_handler(int signum)
 {
-  // do nothing
+  // Skip the SIGINT
 }
 
 class ModelInstanceState : public BackendModelInstance {
@@ -94,6 +94,7 @@ class ModelInstanceState : public BackendModelInstance {
   pthread_mutex_t* parent_mutex_;
   pthread_cond_t* parent_cond_;
   std::string model_path_;
+  std::string model_path_version_;
   IPCMessage* ipc_message_;
   std::unique_ptr<SharedMemory> shm_pool_;
   // Child process pid
@@ -188,6 +189,78 @@ TRITONSERVER_Error*
 ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count)
 {
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  int max_batch_size = model_state->MaxBatchSize();
+  std::string name = model_state->Name();
+
+
+  // For each request collect the total batch size for this inference
+  // execution. The batch-size, number of inputs, and size of each
+  // input has already been checked so don't need to do that here.
+
+  size_t total_batch_size = 0;
+  for (size_t i = 0; i < request_count; i++) {
+    // If we get a nullptr request then something is badly wrong. Fail
+    // and release all requests.
+    if (requests[i] == nullptr) {
+      RequestsRespondWithError(
+          requests, request_count,
+          TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "null request given to Python backend for '" + name + "'")
+                  .c_str()));
+      return nullptr;
+    }
+
+    if (max_batch_size > 0) {
+      // Retrieve the batch size from one of the inputs, if the model
+      // supports batching, the first dimension size is batch size
+      TRITONBACKEND_Input* input;
+      TRITONSERVER_Error* err =
+          TRITONBACKEND_RequestInputByIndex(requests[i], 0 /* index */, &input);
+      if (err == nullptr) {
+        const int64_t* shape;
+        err = TRITONBACKEND_InputProperties(
+            input, nullptr, nullptr, &shape, nullptr, nullptr, nullptr);
+        total_batch_size += shape[0];
+      }
+      if (err != nullptr) {
+        RequestsRespondWithError(requests, request_count, err);
+        return nullptr;
+      }
+    } else {
+      total_batch_size += 1;
+    }
+  }
+
+  // If there are no valid payloads then no need to run the inference.
+  if (total_batch_size == 0) {
+    return nullptr;
+  }
+
+  // Make sure the maximum batch size is not exceeded. The
+  // total_batch_size must be 1 for models that don't support batching
+  // (i.e. max_batch_size == 0). If max_batch_size is exceeded then
+  // scheduler has done something badly wrong so fail and release all
+  // requests.
+  if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
+    RequestsRespondWithError(
+        requests, request_count,
+        TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            std::string(
+                "batch size " + std::to_string(total_batch_size) + " for '" +
+                name + "', max allowed is " + std::to_string(max_batch_size))
+                .c_str()));
+    return nullptr;
+  }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("model ") + model_state->Name() + ", instance " + Name() +
+       ", executing " + std::to_string(request_count) + " requests")
+          .c_str());
   uint64_t exec_start_ns = 0;
   SET_TIMESTAMP(exec_start_ns);
 
@@ -341,7 +414,7 @@ ModelInstanceState::ProcessRequests(
 
       TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Failed to process the requests, message: ") +
+          (std::string("Failed to process the request(s), message: ") +
            error_message)
               .c_str());
       LOG_IF_ERROR(
@@ -526,8 +599,8 @@ ModelInstanceState::ProcessRequests(
   // batching so the total batch size is always 1.
   LOG_IF_ERROR(
       TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          TritonModelInstance(), 1, exec_start_ns, compute_start_ns,
-          compute_end_ns, exec_end_ns),
+          TritonModelInstance(), total_batch_size, exec_start_ns,
+          compute_start_ns, compute_end_ns, exec_end_ns),
       "failed reporting batch request statistics");
 
   LOG_MESSAGE(
@@ -817,8 +890,9 @@ ModelInstanceState::WaitForMessageCallback()
     ModelState* model_state = reinterpret_cast<ModelState*>(Model());
     std::string python_lib = model_state->StateForBackend()->python_lib;
     py::module sys = py::module::import("sys");
-    sys.attr("path").attr("insert")(0, model_path_);
-    sys.attr("path").attr("insert")(0, python_lib);
+    sys.attr("path").attr("append")(model_path_);
+    sys.attr("path").attr("append")(model_path_version_);
+    sys.attr("path").attr("append")(python_lib);
     py::module python_backend_utils =
         py::module::import("triton_python_backend_utils");
     py::object TritonPythonModel =
@@ -863,15 +937,28 @@ ModelInstanceState::WaitForMessageCallback()
     return;
   }
 
-  // std::thread background_thread([] {
-  // while (true) {
+  pid_t parent_pid = parent_pid_;
+  bool background_thread_running = true;
+  std::thread background_thread([&parent_pid, &background_thread_running] {
+    while (background_thread_running) {
+      // Every two seconds check if the parent process is alive.
+      sleep(2);
 
-  // // Every two seconds check if the
-  // sleep(2);
-  // }
-  // });
+      if (kill(parent_pid, 0) == 0) {
+        continue;
+      }
+
+      pid_t child_pid = getpid();
+      // Kill the process
+      kill(child_pid, SIGTERM);
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_INFO,
+          ("Non-graceful termination detected. Killing the child stub: " +
+           std::to_string(child_pid))
+              .c_str());
+    }
+  });
   for (;; pthread_mutex_unlock(child_mutex_)) {
-    signal(SIGTERM, signal_handler);
     pthread_mutex_lock(child_mutex_);
     NotifyParent();
 
@@ -982,7 +1069,7 @@ ModelInstanceState::WaitForMessageCallback()
   }
 
   // A small sleep so that the parent lock is activated.
-  sleep(1);
+  sleep(3);
 
   // Call finalize if exists.
   if (py::hasattr(model_instance, "finalize")) {
@@ -994,6 +1081,8 @@ ModelInstanceState::WaitForMessageCallback()
     }
   }
 
+  background_thread_running = false;
+  background_thread.join();
   NotifyParent();
 }
 
@@ -1045,8 +1134,10 @@ ModelInstanceState::SetupChildProcess()
 
   std::stringstream ss;
   // Use <path>/version/model.py as the model location
-  ss << model_path << "/" << model_version;
+  ss << model_path;
   model_path_ = ss.str();
+  ss << "/" << model_version;
+  model_path_version_ = ss.str();
 
   parent_pid_ = getpid();
 
@@ -1103,6 +1194,7 @@ ModelInstanceState::~ModelInstanceState()
             (char**)&request_batch, sizeof(RequestBatch), request_batch_offset),
         "failed to create request batch in shared memory.");
     request_batch->batch_size = 0;
+    ipc_message_->request_batch = request_batch_offset;
     pthread_mutex_lock(parent_mutex_);
     NotifyChild();
 
@@ -1388,80 +1480,6 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
-  ModelState* model_state =
-      reinterpret_cast<ModelState*>(instance_state->Model());
-  int max_batch_size = model_state->MaxBatchSize();
-  std::string name = model_state->Name();
-
-
-  // For each request collect the total batch size for this inference
-  // execution. The batch-size, number of inputs, and size of each
-  // input has already been checked so don't need to do that here.
-
-  size_t total_batch_size = 0;
-  for (size_t i = 0; i < request_count; i++) {
-    // If we get a nullptr request then something is badly wrong. Fail
-    // and release all requests.
-    if (requests[i] == nullptr) {
-      RequestsRespondWithError(
-          requests, request_count,
-          TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL,
-              std::string(
-                  "null request given to Python backend for '" + name + "'")
-                  .c_str()));
-      return nullptr;
-    }
-
-    if (max_batch_size > 0) {
-      // Retrieve the batch size from one of the inputs, if the model
-      // supports batching, the first dimension size is batch size
-      TRITONBACKEND_Input* input;
-      TRITONSERVER_Error* err =
-          TRITONBACKEND_RequestInputByIndex(requests[i], 0 /* index */, &input);
-      if (err == nullptr) {
-        const int64_t* shape;
-        err = TRITONBACKEND_InputProperties(
-            input, nullptr, nullptr, &shape, nullptr, nullptr, nullptr);
-        total_batch_size += shape[0];
-      }
-      if (err != nullptr) {
-        RequestsRespondWithError(requests, request_count, err);
-        return nullptr;
-      }
-    } else {
-      total_batch_size += 1;
-    }
-  }
-
-  // If there are no valid payloads then no need to run the inference.
-  if (total_batch_size == 0) {
-    return nullptr;
-  }
-
-  // Make sure the maximum batch size is not exceeded. The
-  // total_batch_size must be 1 for models that don't support batching
-  // (i.e. max_batch_size == 0). If max_batch_size is exceeded then
-  // scheduler has done something badly wrong so fail and release all
-  // requests.
-  if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
-    RequestsRespondWithError(
-        requests, request_count,
-        TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
-            std::string(
-                "batch size " + std::to_string(total_batch_size) + " for '" +
-                name + "', max allowed is " + std::to_string(max_batch_size))
-                .c_str()));
-    return nullptr;
-  }
-
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("model ") + model_state->Name() + ", instance " +
-       instance_state->Name() + ", executing " + std::to_string(request_count) +
-       " requests")
-          .c_str());
 
   RETURN_IF_ERROR(instance_state->ProcessRequests(requests, request_count));
 
