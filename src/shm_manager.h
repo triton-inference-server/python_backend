@@ -45,13 +45,18 @@ class SharedMemory {
   // Current capcity, local to each process.
   size_t current_capacity_;
 
+  // Amount of bytes to grow the shared memory when the pool is completely used.
+  int64_t shm_growth_bytes_;
+
   // List of old shared memory addresses that should be deallocated.
   // First element of the pair is size and second element is the address.
   std::vector<std::pair<size_t, char*>> old_shm_addresses_;
   TRITONSERVER_Error* UpdateSharedMemory();
 
  public:
-  SharedMemory(const std::string& shm_key);
+  SharedMemory(
+      const std::string& shm_key, int64_t default_byte_size,
+      int64_t shm_growth_bytes);
   TRITONSERVER_Error* MapOffset(
       char** shm_addr, size_t byte_size, off_t offset);
   TRITONSERVER_Error* Map(char** shm_addr, size_t byte_size, off_t& offset);

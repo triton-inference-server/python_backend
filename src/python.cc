@@ -63,6 +63,8 @@ namespace triton { namespace backend { namespace python {
 struct BackendState {
   std::string python_lib;
   std::string python_runtime;
+  int64_t shm_default_byte_size;
+  int64_t shm_growth_byte_size;
 };
 
 class ModelState : public BackendModel {
@@ -922,7 +924,6 @@ ModelInstanceState::WaitForMessageCallback()
       model_config_params["model_version"] =
           std::to_string(model_state->Version());
       model_config_params["model_name"] = model_state->Name();
-
       model_instance.attr("initialize")(model_config_params);
     }
   }
@@ -1092,7 +1093,15 @@ TRITONSERVER_Error*
 ModelInstanceState::SetupChildProcess()
 {
   std::string shm_region_name = std::string("/") + Name();
-  shm_pool_ = std::make_unique<SharedMemory>(shm_region_name);
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  int64_t shm_growth_size =
+      model_state->StateForBackend()->shm_growth_byte_size;
+  int64_t shm_default_size =
+      model_state->StateForBackend()->shm_default_byte_size;
+  shm_pool_ = std::make_unique<SharedMemory>(
+      shm_region_name, shm_default_size, shm_growth_size);
+
 
   // Child Mutex and CV
   pthread_mutex_t* child_mutex;
@@ -1126,7 +1135,6 @@ ModelInstanceState::SetupChildProcess()
   parent_cond_ = parent_cv;
   parent_mutex_ = parent_mutex;
 
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   off_t ipc_offset;
   RETURN_IF_ERROR(
       shm_pool_->Map((char**)&ipc_message_, sizeof(IPCMessage), ipc_offset));
@@ -1351,11 +1359,25 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
   backend_state->python_runtime = "python3";
+  backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
+  backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value python_runtime;
     if (cmdline.Find("python-runtime", &python_runtime)) {
       RETURN_IF_ERROR(python_runtime.AsString(&backend_state->python_runtime));
+    }
+
+    triton::common::TritonJson::Value shm_growth_size;
+    if (cmdline.Find("shm-growth-byte-size", &shm_growth_size)) {
+      RETURN_IF_ERROR(
+          shm_growth_size.AsInt(&backend_state->shm_growth_byte_size));
+    }
+
+    triton::common::TritonJson::Value shm_default_size;
+    if (cmdline.Find("shm-default-byte-size", &shm_default_size)) {
+      RETURN_IF_ERROR(
+          shm_growth_size.AsInt(&backend_state->shm_default_byte_size));
     }
   }
 

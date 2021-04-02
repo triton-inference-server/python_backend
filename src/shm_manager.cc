@@ -36,7 +36,9 @@
 
 namespace triton { namespace backend { namespace python {
 
-SharedMemory::SharedMemory(const std::string& shm_key)
+SharedMemory::SharedMemory(
+    const std::string& shm_key, int64_t default_byte_size,
+    int64_t shm_growth_bytes)
 {
   shm_fd_ =
       shm_open(shm_key.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
@@ -49,7 +51,7 @@ SharedMemory::SharedMemory(const std::string& shm_key)
     throw BackendModelException(err);
   }
 
-  size_t default_byte_size = 1024 * 1024 * 128;  // 128MB
+  shm_growth_bytes_ = shm_growth_bytes;
   int res = ftruncate(shm_fd_, default_byte_size);
   if (res == -1) {
     TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
@@ -123,7 +125,7 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 {
   while (*offset_ + byte_size >= *capacity_) {
     // Increase the shared memory pool size by one page size.
-    *capacity_ = *offset_ + byte_size + PAGE_SIZE;
+    *capacity_ = *offset_ + byte_size + shm_growth_bytes_;
     if (ftruncate(shm_fd_, *capacity_) == -1) {
       TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
@@ -141,7 +143,6 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
   offset = *offset_;
 
   *offset_ += byte_size;
-
   return nullptr;  // success
 }
 
