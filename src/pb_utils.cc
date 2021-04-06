@@ -37,6 +37,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
@@ -60,39 +61,31 @@ CreateIPCCondVariable(pthread_cond_t** cv)
   pthread_condattr_destroy(&cattr);
 }
 
-TRITONSERVER_Error*
+void
 LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str)
 {
   String* string;
-  RETURN_IF_ERROR(
-      shm_pool->MapOffset((char**)&string, sizeof(String), shm_offset));
-  RETURN_IF_ERROR(
-      shm_pool->MapOffset((char**)&str, string->length, string->data));
-
-  return nullptr;  // success
+  shm_pool->MapOffset((char**)&string, sizeof(String), shm_offset);
+  shm_pool->MapOffset((char**)&str, string->length, string->data);
 }
 
-TRITONSERVER_Error*
+void
 SaveStringToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset, const char* str)
 {
   String* string_shm;
-  RETURN_IF_ERROR(
-      shm_pool->Map((char**)&string_shm, sizeof(String), shm_offset));
+  shm_pool->Map((char**)&string_shm, sizeof(String), shm_offset);
   string_shm->length = strlen(str) + 1;
 
   char* string_data;
   off_t str_data_offset;
-  RETURN_IF_ERROR(
-      shm_pool->Map((char**)&string_data, string_shm->length, str_data_offset));
+  shm_pool->Map((char**)&string_data, string_shm->length, str_data_offset);
   string_shm->data = str_data_offset;
   strcpy(string_data, str);
-
-  return nullptr;  // success
 }
 
-TRITONSERVER_Error*
+void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
@@ -100,22 +93,59 @@ SaveRawDataToSharedMemory(
 {
   // raw data
   RawData* raw_data;
-  RETURN_IF_ERROR(
-      shm_pool->Map((char**)&raw_data, sizeof(RawData), raw_data_offset));
+  shm_pool->Map((char**)&raw_data, sizeof(RawData), raw_data_offset);
 
   raw_data->memory_type = memory_type;
   raw_data->memory_type_id = memory_type_id;
   raw_data->byte_size = byte_size;
 
   off_t buffer_offset;
-  RETURN_IF_ERROR(
-      shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset));
+  shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
   raw_data->memory_ptr = buffer_offset;
-
-  return nullptr;  // success
 }
 
-TRITONSERVER_Error*
+void
+SaveMapToSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
+    const std::unordered_map<std::string, std::string>& map)
+{
+  Dict* dict;
+  shm_pool->Map((char**)&dict, sizeof(Dict), shm_offset);
+  dict->length = map.size();
+
+  Pair* pairs;
+  shm_pool->Map((char**)&pairs, sizeof(Pair) * map.size(), dict->values);
+
+  size_t i = 0;
+  for (const auto& pair : map) {
+    SaveStringToSharedMemory(shm_pool, pairs[i].key, pair.first.c_str());
+    SaveStringToSharedMemory(shm_pool, pairs[i].value, pair.second.c_str());
+    i += 1;
+  }
+}
+
+void
+LoadMapFromSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset,
+    std::unordered_map<std::string, std::string>& map)
+{
+  Dict* dict;
+  shm_pool->MapOffset((char**)&dict, sizeof(Dict), shm_offset);
+
+  Pair* pairs;
+  shm_pool->MapOffset(
+      (char**)&pairs, sizeof(Pair) * dict->length, dict->values);
+  for (size_t i = 0; i < dict->length; i++) {
+    char* key;
+    LoadStringFromSharedMemory(shm_pool, pairs[i].key, key);
+
+    char* value;
+    LoadStringFromSharedMemory(shm_pool, pairs[i].value, value);
+    map.emplace(std::make_pair(key, value));
+  }
+}
+
+void
 SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
@@ -124,14 +154,14 @@ SaveTensorToSharedMemory(
 {
   // Raw Data
   off_t raw_data_offset;
-  RETURN_IF_ERROR(SaveRawDataToSharedMemory(
+  SaveRawDataToSharedMemory(
       shm_pool, raw_data_offset, raw_data_ptr, memory_type, memory_type_id,
-      byte_size));
+      byte_size);
   tensor->raw_data = raw_data_offset;
 
   // name
   off_t name_offset;
-  RETURN_IF_ERROR(SaveStringToSharedMemory(shm_pool, name_offset, name));
+  SaveStringToSharedMemory(shm_pool, name_offset, name);
   tensor->name = name_offset;
 
   // input dtype
@@ -141,15 +171,13 @@ SaveTensorToSharedMemory(
   int64_t* tensor_dims;
   tensor->dims_count = dims_count;
   off_t tensor_dims_offset;
-  RETURN_IF_ERROR(shm_pool->Map(
-      (char**)&tensor_dims, sizeof(int64_t) * dims_count, tensor_dims_offset));
+  shm_pool->Map(
+      (char**)&tensor_dims, sizeof(int64_t) * dims_count, tensor_dims_offset);
   tensor->dims = tensor_dims_offset;
 
   for (size_t j = 0; j < dims_count; ++j) {
     tensor_dims[j] = dims[j];
   }
-
-  return nullptr;  // success
 }
 
 }}}  // namespace triton::backend::python

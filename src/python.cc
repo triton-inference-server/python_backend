@@ -25,9 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <pthread.h>
-#include <pybind11/embed.h>
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -55,8 +53,121 @@
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
-namespace py = pybind11;
-using namespace pybind11::literals;
+
+#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, MUTEX, X) \
+  do {                                                                        \
+    TRITONSERVER_Error* raarie_err__ = (X);                                   \
+    if (raarie_err__ != nullptr) {                                            \
+      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);        \
+      return nullptr;                                                         \
+    }                                                                         \
+  } while (false)
+
+#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(                                   \
+    RESPONSES, RESPONSES_COUNT, MUTEX, X)                                      \
+  do {                                                                         \
+    try {                                                                      \
+      (X);                                                                     \
+    }                                                                          \
+    catch (const PythonBackendException& exception) {                          \
+      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(                \
+          TRITONSERVER_ERROR_INTERNAL, exception.err_->error_message.c_str()); \
+      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);         \
+      return nullptr;                                                          \
+    }                                                                          \
+  } while (false)
+
+#define RESPOND_AND_RETURN_IF_ERROR(REQUEST, X)                         \
+  do {                                                                  \
+    TRITONSERVER_Error* rarie_err__ = (X);                              \
+    if (rarie_err__ != nullptr) {                                       \
+      TRITONBACKEND_Response* rarie_response__ = nullptr;               \
+      LOG_IF_ERROR(                                                     \
+          TRITONBACKEND_ResponseNew(&rarie_response__, REQUEST),        \
+          "failed to create response");                                 \
+      if (rarie_response__ != nullptr) {                                \
+        LOG_IF_ERROR(                                                   \
+            TRITONBACKEND_ResponseSend(                                 \
+                rarie_response__, TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                rarie_err__),                                           \
+            "failed to send error response");                           \
+      }                                                                 \
+      return rarie_err__;                                               \
+    }                                                                   \
+  } while (false)
+
+#define RESPOND_AND_RETURN_IF_EXCEPTION(REQUEST, X)                            \
+  do {                                                                         \
+    try {                                                                      \
+      (X);                                                                     \
+    }                                                                          \
+    catch (const PythonBackendException& exception) {                          \
+      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(                 \
+          TRITONSERVER_ERROR_INTERNAL, exception.err_->error_message.c_str()); \
+      TRITONBACKEND_Response* rarie_response__ = nullptr;                      \
+      LOG_IF_ERROR(                                                            \
+          TRITONBACKEND_ResponseNew(&rarie_response__, REQUEST),               \
+          "failed to create response");                                        \
+      if (rarie_response__ != nullptr) {                                       \
+        LOG_IF_ERROR(                                                          \
+            TRITONBACKEND_ResponseSend(                                        \
+                rarie_response__, TRITONSERVER_RESPONSE_COMPLETE_FINAL,        \
+                rarie_err__),                                                  \
+            "failed to send error response");                                  \
+      }                                                                        \
+      return rarie_err__;                                                      \
+    }                                                                          \
+  } while (false)
+
+#define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                     \
+  do {                                                                  \
+    if ((RESPONSES)[IDX] != nullptr) {                                  \
+      TRITONSERVER_Error* err__ = (X);                                  \
+      if (err__ != nullptr) {                                           \
+        LOG_IF_ERROR(                                                   \
+            TRITONBACKEND_ResponseSend(                                 \
+                (RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                err__),                                                 \
+            "failed to send error response");                           \
+        (RESPONSES)[IDX] = nullptr;                                     \
+        TRITONSERVER_ErrorDelete(err__);                                \
+      }                                                                 \
+    }                                                                   \
+  } while (false)
+
+#define GUARDED_RESPOND_IF_EXCEPTION(RESPONSES, IDX, X)                 \
+  do {                                                                  \
+    if ((RESPONSES)[IDX] != nullptr) {                                  \
+      try {                                                             \
+        (X);                                                            \
+      }                                                                 \
+      catch (const PythonBackendException& pb_exception) {              \
+        TRITONSERVER_Error* err__ = TRITONSERVER_ErrorNew(              \
+            TRITONSERVER_ERROR_INTERNAL,                                \
+            pb_exception.err_->error_message.c_str());                  \
+        LOG_IF_ERROR(                                                   \
+            TRITONBACKEND_ResponseSend(                                 \
+                (RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                err__),                                                 \
+            "failed to send error response");                           \
+        (RESPONSES)[IDX] = nullptr;                                     \
+        TRITONSERVER_ErrorDelete(err__);                                \
+      }                                                                 \
+    }                                                                   \
+  } while (false)
+
+#define RETURN_IF_EXCEPTION(X)                                 \
+  do {                                                         \
+    try {                                                      \
+      (X);                                                     \
+    }                                                          \
+    catch (const PythonBackendException& pb_exception) {       \
+      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
+          TRITONSERVER_ERROR_INTERNAL,                         \
+          pb_exception.err_->error_message.c_str());           \
+      return rarie_err__;                                      \
+    }                                                          \
+  } while (false)
 
 namespace triton { namespace backend { namespace python {
 
@@ -65,6 +176,7 @@ struct BackendState {
   std::string python_runtime;
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
+  int64_t stub_timeout_seconds;
 };
 
 class ModelState : public BackendModel {
@@ -81,9 +193,16 @@ class ModelState : public BackendModel {
 };
 
 void
-signal_handler(int signum)
+SignalHandler(int signum)
 {
   // Skip the SIGINT
+}
+
+TRITONSERVER_Error*
+CreateTritonErrorFromException(const PythonBackendException& pb_exception)
+{
+  return TRITONSERVER_ErrorNew(
+      TRITONSERVER_ERROR_INTERNAL, pb_exception.err_->error_message.c_str());
 }
 
 class ModelInstanceState : public BackendModelInstance {
@@ -122,28 +241,11 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
-  // Child process loop
-  void WaitForMessageCallback();
-
   // Create the child process.
   TRITONSERVER_Error* SetupChildProcess();
 
   // Notifies the child process on the new request
   void NotifyChild();
-
-  // Notifies the process on the new request
-  void NotifyParent();
-
-  // Process a single request in the child process.
-  void ChildProcessRequest(
-      Request* request, ResponseBatch* response_batch,
-      py::object& infer_request, py::object& PyRequest, py::object& PyTensor,
-      py::object& deserialize_bytes);
-
-  // Process a single response in the child process.
-  void ChildProcessResponse(
-      Response* response_shm, ResponseBatch* response_batch,
-      py::handle response, py::object& serialize_bytes);
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -178,13 +280,6 @@ ModelInstanceState::NotifyChild()
   pthread_mutex_unlock(child_mutex_);
 }
 
-void
-ModelInstanceState::NotifyParent()
-{
-  pthread_mutex_lock(parent_mutex_);
-  pthread_cond_signal(parent_cond_);
-  pthread_mutex_unlock(parent_mutex_);
-}
 
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequests(
@@ -193,7 +288,6 @@ ModelInstanceState::ProcessRequests(
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
-
 
   // For each request collect the total batch size for this inference
   // execution. The batch-size, number of inputs, and size of each
@@ -268,7 +362,7 @@ ModelInstanceState::ProcessRequests(
   // Create Python inference requests
   RequestBatch* request_batch;
   off_t request_batch_offset;
-  RETURN_IF_ERROR(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
       (char**)&request_batch, sizeof(RequestBatch), request_batch_offset));
 
   ipc_message_->request_batch = request_batch_offset;
@@ -276,7 +370,7 @@ ModelInstanceState::ProcessRequests(
 
   Request* requests_shm;
   off_t requests_shm_offset;
-  RETURN_IF_ERROR(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
       (char**)&requests_shm, sizeof(Request) * request_count,
       requests_shm_offset));
   request_batch->requests = requests_shm_offset;
@@ -316,7 +410,7 @@ ModelInstanceState::ProcessRequests(
     Tensor* input_tensors;
     off_t input_tensors_offset;
 
-    GUARDED_RESPOND_IF_ERROR(
+    GUARDED_RESPOND_IF_EXCEPTION(
         responses, r,
         shm_pool_->Map(
             (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
@@ -333,7 +427,7 @@ ModelInstanceState::ProcessRequests(
     off_t* requested_output_names;
     off_t requested_output_names_offset;
 
-    GUARDED_RESPOND_IF_ERROR(
+    GUARDED_RESPOND_IF_EXCEPTION(
         responses, r,
         shm_pool_->Map(
             (char**)&requested_output_names,
@@ -352,7 +446,7 @@ ModelInstanceState::ProcessRequests(
 
       // output name
       off_t output_name_offset;
-      GUARDED_RESPOND_IF_ERROR(
+      GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
           SaveStringToSharedMemory(
               shm_pool_, output_name_offset, requested_output_name));
@@ -365,12 +459,12 @@ ModelInstanceState::ProcessRequests(
         responses, r, TRITONBACKEND_RequestId(request, &id));
 
     off_t id_offset;
-    GUARDED_RESPOND_IF_ERROR(
+    GUARDED_RESPOND_IF_EXCEPTION(
         responses, r, SaveStringToSharedMemory(shm_pool_, id_offset, id));
     python_infer_request->id = id_offset;
 
     char* id_test;
-    GUARDED_RESPOND_IF_ERROR(
+    GUARDED_RESPOND_IF_EXCEPTION(
         responses, r,
         LoadStringFromSharedMemory(shm_pool_, id_offset, id_test));
 
@@ -395,7 +489,7 @@ ModelInstanceState::ProcessRequests(
 
   // Parsing the request response
   ResponseBatch* response_batch;
-  RESPOND_ALL_AND_RETURN_IF_ERROR(
+  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       &responses, request_count, parent_mutex_,
       shm_pool_->MapOffset(
           (char**)&response_batch, sizeof(ResponseBatch),
@@ -405,7 +499,7 @@ ModelInstanceState::ProcessRequests(
   // inference fails at this stage, it usually indicates a bug in the model code
   if (response_batch->has_error) {
     char* error_message;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         &responses, request_count, parent_mutex_,
         LoadStringFromSharedMemory(
             shm_pool_, response_batch->error, error_message));
@@ -427,12 +521,11 @@ ModelInstanceState::ProcessRequests(
       TRITONSERVER_ErrorDelete(err);
     }
 
-    pthread_mutex_unlock(parent_mutex_);
     return nullptr;
   }
 
   Response* responses_shm;
-  RESPOND_ALL_AND_RETURN_IF_ERROR(
+  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       &responses, request_count, parent_mutex_,
       shm_pool_->MapOffset(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
@@ -449,11 +542,9 @@ ModelInstanceState::ProcessRequests(
     if (response_shm->has_error) {
       char* err_string;
 
-      TRITONSERVER_Error* err_load_string;
-      err_load_string = LoadStringFromSharedMemory(
-          shm_pool_, response_shm->error, err_string);
+      try {
+        LoadStringFromSharedMemory(shm_pool_, response_shm->error, err_string);
 
-      if (err_load_string == nullptr) {
         TRITONSERVER_Error* err =
             TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
         LOG_IF_ERROR(
@@ -461,13 +552,17 @@ ModelInstanceState::ProcessRequests(
                 responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
             "failed sending response");
         TRITONSERVER_ErrorDelete(err);
-      } else {
+      }
+      catch (const PythonBackendException& pb_exception) {
+        TRITONSERVER_Error* err = CreateTritonErrorFromException(pb_exception);
+
         LOG_IF_ERROR(
             TRITONBACKEND_ResponseSend(
-                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL,
-                err_load_string),
+                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
             "failed sending response");
       }
+
+
       responses[r] = nullptr;
 
       // If has_error is true, we do not look at the response even if the
@@ -480,7 +575,7 @@ ModelInstanceState::ProcessRequests(
         TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
 
     Tensor* output_tensors;
-    GUARDED_RESPOND_IF_ERROR(
+    GUARDED_RESPOND_IF_EXCEPTION(
         responses, r,
         shm_pool_->MapOffset(
             (char**)&output_tensors, sizeof(Tensor) * requested_output_count,
@@ -495,25 +590,25 @@ ModelInstanceState::ProcessRequests(
       size_t dims_count = output_tensor->dims_count;
 
       int64_t* dims;
-      GUARDED_RESPOND_IF_ERROR(
+      GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
           shm_pool_->MapOffset(
               (char**)&dims, sizeof(int64_t) * dims_count,
               output_tensor->dims));
 
       char* name;
-      GUARDED_RESPOND_IF_ERROR(
+      GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
           LoadStringFromSharedMemory(shm_pool_, output_tensor->name, name));
 
       RawData* raw_data;
-      GUARDED_RESPOND_IF_ERROR(
+      GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
           shm_pool_->MapOffset(
               (char**)&raw_data, sizeof(RawData), output_tensor->raw_data));
 
       char* data;
-      GUARDED_RESPOND_IF_ERROR(
+      GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
           shm_pool_->MapOffset(
               (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
@@ -607,486 +702,7 @@ ModelInstanceState::ProcessRequests(
 
   // Update the shared memory offset so that we can reuse the shared memory
   shm_pool_->SetOffset(request_batch_offset);
-
-  pthread_mutex_unlock(parent_mutex_);
   return nullptr;
-}
-
-void
-ModelInstanceState::ChildProcessResponse(
-    Response* response_shm, ResponseBatch* response_batch, py::handle response,
-    py::object& serialize_bytes)
-{
-  // Initialize has_error to false
-  response_shm->has_error = false;
-
-  py::bool_ py_has_error = response.attr("has_error")();
-  bool has_error = py_has_error;
-
-  if (has_error) {
-    response_shm->has_error = true;
-    off_t err_string_offset;
-    py::str py_string_err = py::str(response.attr("error")());
-    std::string response_error = py_string_err;
-    LOG_IF_ERROR(
-        SaveStringToSharedMemory(
-            shm_pool_, err_string_offset, response_error.c_str()),
-        "Failed to create string in shared memory");
-    response_shm->error = err_string_offset;
-
-    // Skip the response value if it has error
-    return;
-  }
-
-  py::list output_tensors = response.attr("output_tensors")();
-  size_t output_tensor_length = py::len(output_tensors);
-
-  size_t j = 0;
-  Tensor* output_tensors_shm;
-  off_t output_tensors_offset;
-  STUB_SET_RESPONSE_ERROR_IF_ERROR(
-      shm_pool_, response_batch, true /* return */,
-      shm_pool_->Map(
-          (char**)&output_tensors_shm, sizeof(Tensor) * output_tensor_length,
-          output_tensors_offset));
-  response_shm->outputs = output_tensors_offset;
-  response_shm->outputs_size = output_tensor_length;
-
-  for (auto& output_tensor : output_tensors) {
-    Tensor* output_tensor_shm = &output_tensors_shm[j];
-    py::str name = output_tensor.attr("name")();
-    std::string output_name = name;
-
-    py::array numpy_array = output_tensor.attr("as_numpy")();
-    py::int_ dtype = output_tensor.attr("triton_dtype")();
-    py::buffer_info buffer = numpy_array.request();
-
-    int dtype_triton_int = dtype;
-    TRITONSERVER_DataType dtype_triton =
-        static_cast<TRITONSERVER_DataType>(dtype_triton_int);
-
-    // TODO: If the data_ptr is in shared memory the copy is not required.
-
-    char* data_in_shm;
-    char* data_ptr;
-    const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-    const int memory_type_id = 0;
-
-    size_t dims_count = numpy_array.ndim();
-    int64_t dims[dims_count];
-    ssize_t byte_size;
-
-    // Custom handling for type bytes.
-    if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
-      py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
-      if (serialize_bytes.is_none()) {
-        const char* err_message = "An error happened during serialization.";
-        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, err_message);
-        off_t err_message_offset;
-        LOG_IF_ERROR(
-            SaveStringToSharedMemory(
-                shm_pool_, err_message_offset, err_message),
-            "failed to create string to store error in shared memory.");
-        response_shm->has_error = true;
-        response_shm->error = err_message_offset;
-        return;
-      }
-
-      py::bytes serialized_bytes = serialized_bytes_or_none;
-      data_ptr = PyBytes_AsString(serialized_bytes.ptr());
-      byte_size = PyBytes_Size(serialized_bytes.ptr());
-    } else {
-      data_ptr = static_cast<char*>(buffer.ptr);
-      byte_size = numpy_array.nbytes();
-    }
-
-    const ssize_t* numpy_shape = numpy_array.shape();
-    for (size_t i = 0; i < dims_count; i++) {
-      dims[i] = numpy_shape[i];
-    }
-
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_shm, true /* return */,
-        SaveTensorToSharedMemory(
-            shm_pool_, output_tensor_shm, data_in_shm, memory_type,
-            memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
-            dtype_triton));
-
-    // TODO: We can remove this memcpy if the numpy object
-    // is already in shared memory.
-    std::copy(data_ptr, data_ptr + byte_size, data_in_shm);
-    j += 1;
-  }
-}
-
-void
-ModelInstanceState::ChildProcessRequest(
-    Request* request, ResponseBatch* response_batch, py::object& infer_request,
-    py::object& PyRequest, py::object& PyTensor, py::object& deserialize_bytes)
-{
-  char* id = nullptr;
-  STUB_SET_RESPONSE_ERROR_IF_ERROR(
-      shm_pool_, response_batch, true /* return */,
-      LoadStringFromSharedMemory(shm_pool_, request->id, id));
-
-  uint32_t requested_input_count = request->requested_input_count;
-  Tensor* input_tensors;
-  STUB_SET_RESPONSE_ERROR_IF_ERROR(
-      shm_pool_, response_batch, true /* return */,
-      shm_pool_->MapOffset(
-          (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
-          request->inputs));
-
-  py::list py_input_tensors;
-  for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
-    Tensor* input_tensor = &input_tensors[input_idx];
-
-    char* name = nullptr;
-
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, true /* return */,
-        LoadStringFromSharedMemory(shm_pool_, input_tensor->name, name));
-
-    RawData* raw_data;
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, true /* return */,
-        shm_pool_->MapOffset(
-            (char**)&raw_data, sizeof(RawData), input_tensor->raw_data));
-
-    char* data;
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, true /* return */,
-        shm_pool_->MapOffset(
-            (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
-
-    size_t dims_count = input_tensor->dims_count;
-
-    int64_t* dims;
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, true /* return */,
-        shm_pool_->MapOffset(
-            (char**)&dims, sizeof(int64_t) * dims_count, input_tensor->dims));
-
-    TRITONSERVER_DataType dtype = input_tensor->dtype;
-    std::vector<int64_t> shape{dims, dims + dims_count};
-    py::dtype dtype_numpy;
-    switch (dtype) {
-      case TRITONSERVER_TYPE_BOOL:
-        dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
-        break;
-      case TRITONSERVER_TYPE_UINT8:
-        dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-        break;
-      case TRITONSERVER_TYPE_UINT16:
-        dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-        break;
-      case TRITONSERVER_TYPE_UINT32:
-        dtype_numpy = py::dtype(py::format_descriptor<uint32_t>::format());
-        break;
-      case TRITONSERVER_TYPE_UINT64:
-        dtype_numpy = py::dtype(py::format_descriptor<uint64_t>::format());
-        break;
-      case TRITONSERVER_TYPE_INT8:
-        dtype_numpy = py::dtype(py::format_descriptor<int8_t>::format());
-        break;
-      case TRITONSERVER_TYPE_INT16:
-        dtype_numpy = py::dtype(py::format_descriptor<int16_t>::format());
-        break;
-      case TRITONSERVER_TYPE_INT32:
-        dtype_numpy = py::dtype(py::format_descriptor<int32_t>::format());
-        break;
-      case TRITONSERVER_TYPE_INT64:
-        dtype_numpy = py::dtype(py::format_descriptor<int64_t>::format());
-        break;
-      case TRITONSERVER_TYPE_FP16:
-        // Will be reinterpreted in the python code.
-        dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-        break;
-      case TRITONSERVER_TYPE_FP32:
-        dtype_numpy = py::dtype(py::format_descriptor<float>::format());
-        break;
-      case TRITONSERVER_TYPE_FP64:
-        dtype_numpy = py::dtype(py::format_descriptor<double>::format());
-        break;
-      case TRITONSERVER_TYPE_BYTES:
-        // Will be reinterpreted in the python code.
-        dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-        break;
-      default:
-        break;
-    }
-
-    // Custom handling for bytes
-    if (dtype == TRITONSERVER_TYPE_BYTES) {
-      py::array numpy_array(dtype_numpy, {raw_data->byte_size}, (void*)data);
-      py::list dims = py::cast(shape);
-      py::object deserialized =
-          deserialize_bytes(numpy_array).attr("reshape")(dims);
-
-      py::object py_input_tensor =
-          PyTensor(name, deserialized, static_cast<int>(dtype));
-      py_input_tensors.append(py_input_tensor);
-    } else {
-      py::array numpy_array(dtype_numpy, shape, (void*)data);
-      py::object py_input_tensor =
-          PyTensor(name, numpy_array, static_cast<int>(dtype));
-      py_input_tensors.append(py_input_tensor);
-    }
-  }
-
-  py::list py_requested_output_names;
-
-  uint32_t requested_output_count = request->requested_output_count;
-  off_t* output_names;
-  STUB_SET_RESPONSE_ERROR_IF_ERROR(
-      shm_pool_, response_batch, true /* return */,
-      shm_pool_->MapOffset(
-          (char**)&output_names, sizeof(off_t) * requested_output_count,
-          request->requested_output_names));
-
-  for (size_t output_idx = 0; output_idx < requested_output_count;
-       ++output_idx) {
-    char* output_name = nullptr;
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, true /* return */,
-        LoadStringFromSharedMemory(
-            shm_pool_, output_names[output_idx], output_name));
-    py_requested_output_names.append(output_name);
-  }
-
-  infer_request = PyRequest(
-      py_input_tensors, id, request->correlation_id, py_requested_output_names);
-}
-
-void
-ModelInstanceState::WaitForMessageCallback()
-{
-  py::scoped_interpreter guard{};
-  py::object PyRequest;
-  py::object PyTensor;
-  py::object model_instance;
-  py::object deserialize_bytes;
-  py::object serialize_bytes;
-
-  ResponseBatch* response_batch;
-  off_t response_batch_offset;
-  auto err = shm_pool_->Map(
-      (char**)&response_batch, sizeof(Response), response_batch_offset);
-  ipc_message_->response_batch = response_batch_offset;
-  response_batch->has_error = false;
-
-  // If there is an error in this stage, we can only log it.
-  if (err != nullptr) {
-    LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
-    NotifyParent();
-  }
-
-  try {
-    ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-    std::string python_lib = model_state->StateForBackend()->python_lib;
-    py::module sys = py::module::import("sys");
-    std::string model_name =
-        model_path_.substr(model_path_.find_last_of("/") + 1);
-    std::string model_path_parent =
-        model_path_.substr(0, model_path_.find_last_of("/"));
-    std::string model_path_parent_parent =
-        model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-    sys.attr("path").attr("append")(model_path_parent);
-    sys.attr("path").attr("append")(model_path_parent_parent);
-    sys.attr("path").attr("append")(python_lib);
-    py::module python_backend_utils =
-        py::module::import("triton_python_backend_utils");
-    py::object TritonPythonModel =
-        py::module::import(
-            (std::to_string(model_state->Version()) + std::string(".model"))
-                .c_str())
-            .attr("TritonPythonModel");
-    PyRequest = python_backend_utils.attr("InferenceRequest");
-    PyTensor = python_backend_utils.attr("Tensor");
-    deserialize_bytes = python_backend_utils.attr("deserialize_bytes_tensor");
-    serialize_bytes = python_backend_utils.attr("serialize_byte_tensor");
-
-    triton::common::TritonJson::WriteBuffer buffer;
-    Model()->ModelConfig().Write(&buffer);
-
-    model_instance = TritonPythonModel();
-    py::dict model_config_params;
-
-    // Call initialize if exists.
-    if (py::hasattr(model_instance, "initialize")) {
-      model_config_params["model_config"] = buffer.MutableContents();
-      model_config_params["model_instance_kind"] =
-          TRITONSERVER_InstanceGroupKindString(kind_);
-      model_config_params["model_instance_name"] = name_;
-      model_config_params["model_instance_device_id"] =
-          std::to_string(device_id_);
-      model_config_params["model_repository"] = model_state->RepositoryPath();
-      model_config_params["model_version"] =
-          std::to_string(model_state->Version());
-      model_config_params["model_name"] = model_state->Name();
-      model_instance.attr("initialize")(model_config_params);
-    }
-  }
-  catch (const py::error_already_set& e) {
-    LOG_MESSAGE(TRITONSERVER_LOG_ERROR, e.what());
-
-    off_t err_string_offset;
-    LOG_IF_ERROR(
-        SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()),
-        "Failed to create string in shared memory");
-    response_batch->has_error = true;
-    response_batch->error = err_string_offset;
-    NotifyParent();
-    return;
-  }
-
-  pid_t parent_pid = parent_pid_;
-  bool background_thread_running = true;
-  std::thread background_thread([&parent_pid, &background_thread_running] {
-    while (background_thread_running) {
-      // Every two seconds check if the parent process is alive.
-      sleep(2);
-
-      if (kill(parent_pid, 0) == 0) {
-        continue;
-      }
-
-      pid_t child_pid = getpid();
-      // Kill the process
-      kill(child_pid, SIGTERM);
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          ("Non-graceful termination detected. Killing the child stub: " +
-           std::to_string(child_pid))
-              .c_str());
-    }
-  });
-  for (;; pthread_mutex_unlock(child_mutex_)) {
-    pthread_mutex_lock(child_mutex_);
-    NotifyParent();
-
-    pthread_cond_wait(child_cond_, child_mutex_);
-
-    // Reset the value for has_error
-    response_batch->has_error = false;
-
-    RequestBatch* request_batch;
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, false /* return */,
-        shm_pool_->MapOffset(
-            (char**)&request_batch, sizeof(RequestBatch),
-            ipc_message_->request_batch));
-    if (response_batch->has_error) {
-      continue;
-    }
-    uint32_t batch_size = request_batch->batch_size;
-
-    // An empty batch size indicates termination
-    if (batch_size == 0) {
-      pthread_mutex_unlock(child_mutex_);
-      break;
-    }
-
-    Request* requests;
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, false /* return */,
-        shm_pool_->MapOffset(
-            (char**)&requests, sizeof(Request) * batch_size,
-            request_batch->requests));
-    if (response_batch->has_error) {
-      continue;
-    }
-
-    py::list py_request_list;
-    for (size_t i = 0; i < batch_size; i++) {
-      Request* request = &requests[i];
-      py::object infer_request;
-      ChildProcessRequest(
-          request, response_batch, infer_request, PyRequest, PyTensor,
-          deserialize_bytes);
-      py_request_list.append(infer_request);
-    }
-
-    // If there was an error in one of the requests, skip the processing of this
-    // batch.
-    if (response_batch->has_error) {
-      continue;
-    }
-
-    py::list responses;
-
-    if (!py::hasattr(model_instance, "execute")) {
-      std::string message =
-          "Python model " + Name() + " does not implement `execute` method.";
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, message.c_str());
-
-      off_t err_string_offset;
-      LOG_IF_ERROR(
-          SaveStringToSharedMemory(
-              shm_pool_, err_string_offset, message.c_str()),
-          "Failed to create string in shared memory");
-      response_batch->has_error = true;
-      response_batch->error = err_string_offset;
-
-      continue;
-    }
-
-    // Execute Response
-    try {
-      responses = model_instance.attr("execute")(py_request_list);
-    }
-    catch (const py::error_already_set& e) {
-      off_t err_string_offset;
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, e.what());
-      LOG_IF_ERROR(
-          SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()),
-          "Failed to create string in shared memory");
-      response_batch->has_error = true;
-      response_batch->error = err_string_offset;
-
-      continue;
-    }
-
-    Response* responses_shm;
-    off_t responses_shm_offset;
-    size_t response_size = py::len(responses);
-
-    STUB_SET_RESPONSE_ERROR_IF_ERROR(
-        shm_pool_, response_batch, false /* return */,
-        shm_pool_->Map(
-            (char**)&responses_shm, sizeof(Response) * response_size,
-            responses_shm_offset));
-    if (response_batch->has_error) {
-      continue;
-    }
-    response_batch->responses = responses_shm_offset;
-    response_batch->batch_size = response_size;
-
-    size_t i = 0;
-    for (auto& response : responses) {
-      Response* response_shm = &responses_shm[i];
-      ChildProcessResponse(
-          response_shm, response_batch, response, serialize_bytes);
-      i += 1;
-    }
-  }
-
-  // A small sleep so that the parent lock is activated.
-  sleep(3);
-
-  // Call finalize if exists.
-  if (py::hasattr(model_instance, "finalize")) {
-    try {
-      model_instance.attr("finalize")();
-    }
-    catch (const py::error_already_set& e) {
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, e.what());
-    }
-  }
-
-  background_thread_running = false;
-  background_thread.join();
-  NotifyParent();
 }
 
 TRITONSERVER_Error*
@@ -1100,19 +716,18 @@ ModelInstanceState::SetupChildProcess()
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
   shm_pool_ = std::make_unique<SharedMemory>(
-      shm_region_name, shm_default_size, shm_growth_size);
-
+      shm_region_name, shm_default_size, shm_growth_size, true /* truncate */);
 
   // Child Mutex and CV
   pthread_mutex_t* child_mutex;
   off_t child_mutex_offset;
-  RETURN_IF_ERROR(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
       (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset));
   CreateIPCMutex(&child_mutex);
 
   pthread_cond_t* child_cv;
   off_t child_cv_offset;
-  RETURN_IF_ERROR(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
       (char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset));
   CreateIPCCondVariable(&child_cv);
 
@@ -1122,13 +737,13 @@ ModelInstanceState::SetupChildProcess()
   // Parent Mutex and CV
   pthread_mutex_t* parent_mutex;
   off_t parent_mutex_offset;
-  RETURN_IF_ERROR(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
       (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset));
   CreateIPCMutex(&parent_mutex);
 
   pthread_cond_t* parent_cv;
   off_t parent_cv_offset;
-  RETURN_IF_ERROR(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
       (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset));
   CreateIPCCondVariable(&parent_cv);
 
@@ -1136,7 +751,7 @@ ModelInstanceState::SetupChildProcess()
   parent_mutex_ = parent_mutex;
 
   off_t ipc_offset;
-  RETURN_IF_ERROR(
+  RETURN_IF_EXCEPTION(
       shm_pool_->Map((char**)&ipc_message_, sizeof(IPCMessage), ipc_offset));
 
   uint64_t model_version = model_state->Version();
@@ -1146,9 +761,19 @@ ModelInstanceState::SetupChildProcess()
   // Use <path>/version/model.py as the model location
   ss << model_path << "/" << model_version << "/model.py";
   model_path_ = ss.str();
+  struct stat buffer;
+
+  // Check if model.py exists
+  if (stat(model_path_.c_str(), &buffer) != 0) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("model.py does not exist in the model repository path: " + model_path_)
+            .c_str());
+  }
 
   parent_pid_ = getpid();
 
+  pthread_mutex_lock(parent_mutex_);
   pid_t pid = fork();
 
   if (pid < 0) {
@@ -1158,37 +783,87 @@ ModelInstanceState::SetupChildProcess()
 
   // Child process
   if (pid == 0) {
-    sleep(1);  // A small delay to allow parent process to reach the mutex.
-    signal(SIGINT, signal_handler);
-    WaitForMessageCallback();
+    const char* stub_args[6];
+    stub_args[5] = nullptr;  // Last argument must be nullptr
+    std::stringstream ss;
+    ss << model_state->StateForBackend()->python_lib
+       << "/triton_python_backend_stub";
+    std::string stub_path = ss.str();
+    stub_args[0] = stub_path.c_str();
+    stub_args[1] = model_path_.c_str();
+    stub_args[2] = shm_region_name.c_str();
+    stub_args[3] = std::to_string(shm_default_size).c_str();
+    stub_args[4] = std::to_string(shm_growth_size).c_str();
+    if (execvp(stub_args[0], (char**)stub_args) == -1) {
+      std::stringstream ss;
+      ss << "Failed to run python backend stub. Errno = " << errno << '\n'
+         << "Python backend stub path: " << stub_path << '\n'
+         << "Shared Memory Region Name: " << shm_region_name << '\n'
+         << "Shared Memory Default Byte Size: " << shm_default_size << '\n'
+         << "Shared Memory Growth Byte Size: " << shm_growth_size << '\n';
+      std::string log_message = ss.str();
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, log_message.c_str());
 
-    // We will exit the process on return because we don't want to return a
-    // response two times.
-    exit(0);
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Failed to initialize model instance ") + Name())
+              .c_str());
+    }
+    // sleep(1);  // A small delay to allow parent process to reach the mutex.
+    // signal(SIGINT, SignalHandler);
 
-    return nullptr;
   } else {
+    int64_t stub_timeout_seconds =
+        model_state->StateForBackend()->stub_timeout_seconds;
+    struct timespec ts;
     child_pid_ = pid;
-    pthread_mutex_lock(parent_mutex_);
-    pthread_cond_wait(parent_cond_, parent_mutex_);
-    pthread_mutex_unlock(parent_mutex_);
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += stub_timeout_seconds + 200;
 
+    // Pre initialization step.
+    if (pthread_cond_timedwait(parent_cond_, parent_mutex_, &ts) != 0) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Failed to initialize model instance ") + Name())
+              .c_str());
+    }
+    LOG_MESSAGE(TRITONSERVER_LOG_INFO, "Preinit finished.");
+
+    triton::common::TritonJson::WriteBuffer buffer;
+    Model()->ModelConfig().Write(&buffer);
+
+    std::unordered_map<std::string, std::string> initialize_args = {
+        {"model_config", buffer.MutableContents()},
+        {"model_instance_kind", TRITONSERVER_InstanceGroupKindString(kind_)},
+        {"model_instance_name", name_},
+        {"model_instance_device_id", std::to_string(device_id_)},
+        {"model_repository", model_state->RepositoryPath()},
+        {"model_version", std::to_string(model_state->Version())},
+        {"model_name", model_state->Name()}};
+
+    off_t initialize_args_offset;
+    RETURN_IF_EXCEPTION(SaveMapToSharedMemory(
+        shm_pool_, initialize_args_offset, initialize_args));
+    ipc_message_->request_batch = initialize_args_offset;
+    NotifyChild();
+
+    pthread_cond_wait(parent_cond_, parent_mutex_);
     ResponseBatch* response_batch;
-    RETURN_IF_ERROR(shm_pool_->MapOffset(
+    RETURN_IF_EXCEPTION(shm_pool_->MapOffset(
         (char**)&response_batch, sizeof(RequestBatch),
         ipc_message_->response_batch));
 
     if (response_batch->has_error) {
       char* err_message;
-      RETURN_IF_ERROR(LoadStringFromSharedMemory(
+      RETURN_IF_EXCEPTION(LoadStringFromSharedMemory(
           shm_pool_, response_batch->error, err_message));
       return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_message);
     }
 
     initialized_ = true;
-
-    return nullptr;
   }
+
+  return nullptr;
 }
 
 ModelInstanceState::~ModelInstanceState()
@@ -1197,10 +872,9 @@ ModelInstanceState::~ModelInstanceState()
     // Create Python inference requests
     RequestBatch* request_batch;
     off_t request_batch_offset;
-    LOG_IF_ERROR(
-        shm_pool_->Map(
-            (char**)&request_batch, sizeof(RequestBatch), request_batch_offset),
-        "failed to create request batch in shared memory.");
+    shm_pool_->Map(
+        (char**)&request_batch, sizeof(RequestBatch), request_batch_offset);
+    //"failed to create request batch in shared memory.");
     request_batch->batch_size = 0;
     ipc_message_->request_batch = request_batch_offset;
     pthread_mutex_lock(parent_mutex_);
@@ -1225,12 +899,12 @@ ModelInstanceState::GetInputTensor(
 {
   const char* input_name;
   // Load iidx'th input name
-  RESPOND_AND_RETURN_IF_ERROR(
+  RESPOND_AND_RETURN_IF_EXCEPTION(
       request, TRITONBACKEND_RequestInputName(request, input_idx, &input_name));
 
   // Load iidx'th input
   TRITONBACKEND_Input* in;
-  RESPOND_AND_RETURN_IF_ERROR(
+  RESPOND_AND_RETURN_IF_EXCEPTION(
       request, TRITONBACKEND_RequestInput(request, input_name, &in));
 
   // Load input properties
@@ -1240,7 +914,7 @@ ModelInstanceState::GetInputTensor(
   uint64_t input_byte_size;
   uint32_t input_buffer_count;
 
-  RESPOND_AND_RETURN_IF_ERROR(
+  RESPOND_AND_RETURN_IF_EXCEPTION(
       request, TRITONBACKEND_InputProperties(
                    in, &input_name, &input_dtype, &input_shape,
                    &input_dims_count, &input_byte_size, &input_buffer_count));
@@ -1256,7 +930,7 @@ ModelInstanceState::GetInputTensor(
   const int memory_type_id = 0;
 
   char* input_buffer;
-  RESPOND_AND_RETURN_IF_ERROR(
+  RESPOND_AND_RETURN_IF_EXCEPTION(
       request, SaveTensorToSharedMemory(
                    shm_pool_, input_tensor, input_buffer, memory_type,
                    memory_type_id, input_byte_size, input_name, input_shape,
@@ -1361,6 +1035,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   backend_state->python_runtime = "python3";
   backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
+  backend_state->stub_timeout_seconds = 4;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value python_runtime;
@@ -1378,6 +1053,12 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     if (cmdline.Find("shm-default-byte-size", &shm_default_size)) {
       RETURN_IF_ERROR(
           shm_growth_size.AsInt(&backend_state->shm_default_byte_size));
+    }
+
+    triton::common::TritonJson::Value stub_timeout_seconds;
+    if (cmdline.Find("stub-timeout-seconds", &stub_timeout_seconds)) {
+      RETURN_IF_ERROR(
+          shm_growth_size.AsInt(&backend_state->stub_timeout_seconds));
     }
   }
 

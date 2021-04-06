@@ -29,6 +29,7 @@
 #include <pthread.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
@@ -36,84 +37,31 @@
 
 namespace triton { namespace backend { namespace python {
 
-
-#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, MUTEX, X) \
-  do {                                                                        \
-    TRITONSERVER_Error* raarie_err__ = (X);                                   \
-    if (raarie_err__ != nullptr) {                                            \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);        \
-      pthread_mutex_unlock(MUTEX);                                            \
-      return nullptr;                                                         \
-    }                                                                         \
-  } while (false)
-
-#define RESPOND_AND_RETURN_IF_ERROR(REQUEST, X)                         \
-  do {                                                                  \
-    TRITONSERVER_Error* rarie_err__ = (X);                              \
-    if (rarie_err__ != nullptr) {                                       \
-      TRITONBACKEND_Response* rarie_response__ = nullptr;               \
-      LOG_IF_ERROR(                                                     \
-          TRITONBACKEND_ResponseNew(&rarie_response__, REQUEST),        \
-          "failed to create response");                                 \
-      if (rarie_response__ != nullptr) {                                \
-        LOG_IF_ERROR(                                                   \
-            TRITONBACKEND_ResponseSend(                                 \
-                rarie_response__, TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
-                rarie_err__),                                           \
-            "failed to send error response");                           \
-      }                                                                 \
-      return rarie_err__;                                               \
-    }                                                                   \
-  } while (false)
-
-#define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                     \
-  do {                                                                  \
-    if ((RESPONSES)[IDX] != nullptr) {                                  \
-      TRITONSERVER_Error* err__ = (X);                                  \
-      if (err__ != nullptr) {                                           \
-        LOG_IF_ERROR(                                                   \
-            TRITONBACKEND_ResponseSend(                                 \
-                (RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
-                err__),                                                 \
-            "failed to send error response");                           \
-        (RESPONSES)[IDX] = nullptr;                                     \
-        TRITONSERVER_ErrorDelete(err__);                                \
-      }                                                                 \
-    }                                                                   \
-  } while (false)
-
-#define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X)             \
-  do {                                                                         \
-    TRITONSERVER_Error* err__ = (X);                                           \
-    if (err__ != nullptr) {                                                    \
-      const char* err_message__ = TRITONSERVER_ErrorMessage(err__);            \
-      off_t string_offset__;                                                   \
-      TRITONSERVER_Error* err_string__;                                        \
-      err_string__ =                                                           \
-          SaveStringToSharedMemory(SHM_POOL, string_offset__, err_message__);  \
-      if (err_string__ != nullptr) {                                           \
-        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err__)); \
-        LOG_MESSAGE(                                                           \
-            TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err_string__));  \
-      } else {                                                                 \
-        RESPONSE->has_error = true;                                            \
-        RESPONSE->error = string_offset__;                                     \
-      }                                                                        \
-                                                                               \
-      if (R)                                                                   \
-        return;                                                                \
-    }                                                                          \
-  } while (false)
-
-#define RETURN_AND_UNLOCK_MUTEX_IF_ERROR(MUTEX, X) \
-  do {                                             \
-    TRITONSERVER_Error* rie_err__ = (X);           \
-    if (rie_err__ != nullptr) {                    \
-      pthread_mutex_unlock(MUTEX);                 \
-      return rie_err__;                            \
-    }                                              \
-  } while (false)
-
+#define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X)        \
+  do {                                                                    \
+    try {                                                                 \
+      (X);                                                                \
+    }                                                                     \
+    catch (cont PythonBackendException & pb_exception) {                  \
+      off_t string_offset__;                                              \
+      try {                                                               \
+        SaveStringToSharedMemory(                                         \
+            SHM_POOL, string_offset__, pb_exception->err_.error_message); \
+        RESPONSE->has_error = true;                                       \
+        RESPONSE->error = string_offset__;                                \
+        if (R)                                                            \
+          return;                                                         \
+      }                                                                   \
+      catch (cont PythonBackendException & pb2_exception) {               \
+        printf(TRITONSERVER_ErrorMessage(                                 \
+            pb_exception->err_.error_message.c_str()));                   \
+        printf(                                                           \
+            TRITONSERVER_LOG_ERROR,                                       \
+            TRITONSERVER_ErrorMessage(                                    \
+                pb2_exception->err_.error_message.c_str()));              \
+      }                                                                   \
+    }                                                                     \
+    while (false)
 
 // Create a conditional variable.
 void CreateIPCCondVariable(pthread_cond_t** cv);
@@ -186,26 +134,67 @@ struct IPCMessage {
   off_t response_batch;
 };
 
-TRITONSERVER_Error* SaveStringToSharedMemory(
+// Representing a key value pair
+struct Pair {
+  off_t key;
+  off_t value;
+};
+
+struct Dict {
+  uint32_t length;
+  // Values point to the location where there are `length` pairs.
+  off_t values;
+};
+
+//
+// PythonBackendError
+//
+struct PythonBackendError {
+  std::string error_message;
+};
+
+//
+// PythonBackendException
+//
+// Exception thrown if error occurs in PythonBackend.
+//
+struct PythonBackendException {
+  PythonBackendException(std::unique_ptr<PythonBackendError> err)
+      : err_(std::move(err))
+  {
+  }
+  std::unique_ptr<PythonBackendError> err_;
+};
+
+void SaveMapToSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
+    const std::unordered_map<std::string, std::string>& map);
+
+void LoadMapFromSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset,
+    std::unordered_map<std::string, std::string>& map);
+
+void SaveStringToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
     const char* str);
-TRITONSERVER_Error* LoadStringFromSharedMemory(
+void LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str);
 
-TRITONSERVER_Error* LoadRawDataFromSharedLibrary(
+void LoadRawDataFromSharedLibrary(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& tensor_shm_offset,
     const Tensor& tensor);
-TRITONSERVER_Error* SaveRawDataToSharedMemory(
+void SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int memory_type_id, uint64_t byte_size);
 
-TRITONSERVER_Error* SaveTensorToSharedMemory(
+void SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int memory_type_id, uint64_t byte_size, const char* name,
     const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype);
-TRITONSERVER_Error* LoadTensorFromSharedMemory(
+void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
+
 }}}  // namespace triton::backend::python

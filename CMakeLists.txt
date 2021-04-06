@@ -96,6 +96,17 @@ add_library(
   src/python.cc
 )
 
+add_executable(
+  triton-python-backend-stub
+  src/pb_stub.cc
+  src/pb_utils.cc
+  src/pb_utils.h
+  src/shm_manager.cc
+  src/shm_manager.h
+)
+
+set_property(TARGET triton-python-backend-stub PROPERTY OUTPUT_NAME triton_python_backend_stub)
+
 add_library(
   TritonPythonBackend::triton-python-backend ALIAS triton-python-backend
 )
@@ -113,15 +124,28 @@ target_compile_options(
     -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
 )
 
+target_compile_features(triton-python-backend-stub PRIVATE cxx_std_11)
+target_compile_options(
+  triton-python-backend-stub PRIVATE
+  $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+  -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
+)
+
 target_link_libraries(
   triton-python-backend
-  PUBLIC
-   Python3::Python
-   Threads::Threads
   PRIVATE
     triton-core-serverstub  # from repo-core
     triton-backend-utils    # from repo-backend
-    pybind11::embed
+)
+
+target_link_libraries(
+  triton-python-backend-stub
+  PRIVATE
+   Python3::Python
+   Threads::Threads
+   pybind11::embed
+   triton-backend-utils    # from repo-backend
+   -lrt                    # shared memory 
 )
 
 set_target_properties(
@@ -141,10 +165,12 @@ set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/TritonPythonBackend)
 install(
   TARGETS
     triton-python-backend
+    triton-python-backend-stub
   EXPORT
     triton-python-backend-targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
   ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
+  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(

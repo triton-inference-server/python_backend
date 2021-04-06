@@ -31,7 +31,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -51,15 +50,14 @@ class SharedMemory {
   // List of old shared memory addresses that should be deallocated.
   // First element of the pair is size and second element is the address.
   std::vector<std::pair<size_t, char*>> old_shm_addresses_;
-  TRITONSERVER_Error* UpdateSharedMemory();
+  void UpdateSharedMemory();
 
  public:
   SharedMemory(
       const std::string& shm_key, int64_t default_byte_size,
-      int64_t shm_growth_bytes);
-  TRITONSERVER_Error* MapOffset(
-      char** shm_addr, size_t byte_size, off_t offset);
-  TRITONSERVER_Error* Map(char** shm_addr, size_t byte_size, off_t& offset);
+      int64_t shm_growth_bytes, bool truncate = false);
+  void MapOffset(char** shm_addr, size_t byte_size, off_t offset);
+  void Map(char** shm_addr, size_t byte_size, off_t& offset);
   void SetOffset(off_t offset);
   ~SharedMemory() noexcept(false);
 };

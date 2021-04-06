@@ -30,48 +30,51 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <string>
-#include "triton/backend/backend_model.h"
-#include "triton/core/tritonserver.h"
-
+#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 
 SharedMemory::SharedMemory(
     const std::string& shm_key, int64_t default_byte_size,
-    int64_t shm_growth_bytes)
+    int64_t shm_growth_bytes, bool truncate)
 {
-  shm_fd_ =
-      shm_open(shm_key.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+  if (truncate) {
+    shm_fd_ = shm_open(
+        shm_key.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+  } else {
+    shm_fd_ = shm_open(shm_key.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+  }
   if (shm_fd_ == -1) {
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
+    std::unique_ptr<PythonBackendError> err =
+        std::make_unique<PythonBackendError>();
+    err->error_message =
         ("unable to get shared memory descriptor for shared-memory key '" +
-         shm_key + "'")
-            .c_str());
-    throw BackendModelException(err);
+         shm_key + "'");
+    throw PythonBackendException(std::move(err));
   }
 
   shm_growth_bytes_ = shm_growth_bytes;
   int res = ftruncate(shm_fd_, default_byte_size);
   if (res == -1) {
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
+    std::unique_ptr<PythonBackendError> err =
+        std::make_unique<PythonBackendError>();
+    err->error_message =
         ("unable to initialize shared-memory key '" + shm_key +
-         "' to requested size: " + std::to_string(default_byte_size) + " bytes")
-            .c_str());
-    throw BackendModelException(err);
+         "' to requested size: " + std::to_string(default_byte_size) +
+         " bytes");
+    throw PythonBackendException(std::move(err));
   }
 
   void* map_addr = mmap(
       NULL, default_byte_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
 
   if (map_addr == MAP_FAILED) {
-    auto err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
+    std::unique_ptr<PythonBackendError> err =
+        std::make_unique<PythonBackendError>();
+    err->error_message =
         ("unable to process address space or shared-memory descriptor: " +
-         std::to_string(shm_fd_))
-            .c_str());
-    throw BackendModelException(err);
+         std::to_string(shm_fd_));
+    throw PythonBackendException(std::move(err));
   }
   shm_addr_ = (char*)map_addr;
 
@@ -95,58 +98,59 @@ SharedMemory::~SharedMemory() noexcept(false)
   for (auto& pair : old_shm_addresses_) {
     int status = munmap(pair.second, pair.first);
     if (status == -1) {
-      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "unable to munmap shared memory region");
-      throw BackendModelException(err);
+      std::unique_ptr<PythonBackendError> err =
+          std::make_unique<PythonBackendError>();
+      err->error_message = "unable to munmap shared memory region";
+      throw PythonBackendException(std::move(err));
     }
   }
 
   // Close fd
   if (close(shm_fd_) == -1) {
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("unable to close shared-memory descriptor: " + std::to_string(shm_fd_))
-            .c_str());
-    throw BackendModelException(err);
+    std::unique_ptr<PythonBackendError> err =
+        std::make_unique<PythonBackendError>();
+    err->error_message =
+        ("unable to close shared-memory descriptor: " +
+         std::to_string(shm_fd_));
+    throw PythonBackendException(std::move(err));
   }
 
   // Unlink shared memory
   int error = shm_unlink(shm_key_.c_str());
   if (error == -1) {
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("unable to unlink shared memory for key '" + shm_key_ + "'").c_str());
-    throw BackendModelException(err);
+    std::unique_ptr<PythonBackendError> err =
+        std::make_unique<PythonBackendError>();
+    err->error_message =
+        ("unable to unlink shared memory for key '" + shm_key_ + "'");
+    throw PythonBackendException(std::move(err));
   }
 }
 
-TRITONSERVER_Error*
+void
 SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 {
   while (*offset_ + byte_size >= *capacity_) {
     // Increase the shared memory pool size by one page size.
     *capacity_ = *offset_ + byte_size + shm_growth_bytes_;
     if (ftruncate(shm_fd_, *capacity_) == -1) {
-      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
+      std::unique_ptr<PythonBackendError> err =
+          std::make_unique<PythonBackendError>();
+      err->error_message =
           ("Failed to increase the shared memory pool size for key '" +
-           shm_key_ + "' to " + std::to_string(*capacity_) + " bytes")
-              .c_str());
-      return err;
+           shm_key_ + "' to " + std::to_string(*capacity_) + " bytes");
+      throw PythonBackendException(std::move(err));
     }
   }
 
-  // Update shared memory pointer and capacity if necessary.
-  RETURN_IF_ERROR(UpdateSharedMemory());
+  UpdateSharedMemory();
 
   *shm_addr = shm_addr_ + *offset_;
   offset = *offset_;
 
   *offset_ += byte_size;
-  return nullptr;  // success
 }
 
-TRITONSERVER_Error*
+void
 SharedMemory::UpdateSharedMemory()
 {
   if (current_capacity_ != *capacity_) {
@@ -154,30 +158,26 @@ SharedMemory::UpdateSharedMemory()
         mmap(NULL, *capacity_, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
 
     if (map_addr == MAP_FAILED) {
-      auto err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
+      std::unique_ptr<PythonBackendError> err =
+          std::make_unique<PythonBackendError>();
+      err->error_message =
           ("unable to process address space or shared-memory descriptor: " +
-           std::to_string(shm_fd_))
-              .c_str());
-      return err;
+           std::to_string(shm_fd_));
+      throw PythonBackendException(std::move(err));
     }
 
     old_shm_addresses_.push_back({current_capacity_, shm_addr_});
     current_capacity_ = *capacity_;
     shm_addr_ = (char*)map_addr;
   }
-
-  return nullptr;  // success
 }
 
-TRITONSERVER_Error*
+void
 SharedMemory::MapOffset(char** shm_addr, size_t byte_size, off_t offset)
 {
   // Update shared memory pointer and capacity if necessary.
-  RETURN_IF_ERROR(UpdateSharedMemory());
+  UpdateSharedMemory();
   *shm_addr = shm_addr_ + offset;
-
-  return nullptr;  // success
 }
 
 void
