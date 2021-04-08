@@ -24,7 +24,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
 cmake_minimum_required(VERSION 3.17)
 
 project(tritonpythonbackend LANGUAGES C CXX)
@@ -74,89 +73,39 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(repo-common repo-core repo-backend)
 
 FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY "https://github.com/google/googletest"
-  GIT_TAG "release-1.10.0"
+  pybind11
+  GIT_REPOSITORY "https://github.com/pybind/pybind11"
+  GIT_TAG "v2.6"
   GIT_SHALLOW ON
 )
-FetchContent_Declare(
-  grpc
-  GIT_REPOSITORY https://github.com/grpc/grpc.git
-  GIT_TAG "v1.31.1"
-  GIT_SHALLOW ON
-)
-FetchContent_MakeAvailable(googletest grpc)
+FetchContent_MakeAvailable(pybind11)
 
-set(_PROTOBUF_LIBPROTOBUF libprotobuf)
-set(_REFLECTION grpc++_reflection)
-set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
-set(_GRPC_GRPCPP grpc++)
-set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
-
-get_target_property(Protobuf_INCLUDE_DIRS ${_PROTOBUF_LIBPROTOBUF} INTERFACE_INCLUDE_DIRECTORIES)
-get_target_property(gRPC_INCLUDE_DIRS ${_GRPC_GRPCPP} INTERFACE_INCLUDE_DIRECTORIES)
-
-include_directories(${Protobuf_INCLUDE_DIRS})
-include_directories(${gRPC_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-get_filename_component(python_host_proto_abspath "src/python_host.proto" ABSOLUTE)
-get_filename_component(python_host_proto_dir "${python_host_proto_abspath}" PATH)
-
-set(GRPC_SRCS
-    "${CMAKE_CURRENT_BINARY_DIR}/python_host.grpc.pb.cc"
-    "${CMAKE_CURRENT_BINARY_DIR}/python_host.pb.cc")
-
-set(GRPC_HDRS
-    "${CMAKE_CURRENT_BINARY_DIR}/python_host.grpc.pb.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/python_host.pb.h")
-
-set(GRPC_PY
-    "${CMAKE_CURRENT_BINARY_DIR}/python_host_pb2_grpc.py"
-    "${CMAKE_CURRENT_BINARY_DIR}/python_host_pb2.py")
-
-add_custom_command(
-  OUTPUT ${GRPC_SRCS} ${GRPC_HDRS}
-  COMMAND ${_PROTOBUF_PROTOC}
-  ARGS
-    --grpc_out "${CMAKE_CURRENT_BINARY_DIR}"
-    --cpp_out "${CMAKE_CURRENT_BINARY_DIR}"
-    -I "${python_host_proto_dir}"
-    --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
-    "${python_host_proto_abspath}"
-  DEPENDS "${python_host_proto_abspath}" ${_PROTOBUF_LIBPROTOBUF}
-)
-
-find_package(Python REQUIRED COMPONENTS Interpreter)
-add_custom_command(
-  OUTPUT ${GRPC_PY}
-  COMMAND ${Python_EXECUTABLE}
-  ARGS
-    -m grpc_tools.protoc
-    -I "${python_host_proto_dir}"
-    --grpc_python_out "${CMAKE_CURRENT_BINARY_DIR}"
-    --python_out "${CMAKE_CURRENT_BINARY_DIR}"
-    "${python_host_proto_abspath}"
-  DEPENDS "${python_host_proto_abspath}" ${_PROTOBUF_LIBPROTOBUF}
-)
-
-add_custom_target(python-grpc-py-library ALL
-                  DEPENDS ${GRPC_PY})
-
-add_library(
-  python-grpc-library EXCLUDE_FROM_ALL OBJECT
-  ${GRPC_SRCS} ${GRPC_HDRS}
-)
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_package(Threads REQUIRED)
 
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
 add_library(
   triton-python-backend SHARED
+  src/pb_utils.cc
+  src/pb_utils.h
+  src/shm_manager.cc
+  src/shm_manager.h
   src/python.cc
-
-  $<TARGET_OBJECTS:python-grpc-library>
 )
 
+add_executable(
+  triton-python-backend-stub
+  src/pb_stub.cc
+  src/pb_utils.cc
+  src/pb_utils.h
+  src/shm_manager.cc
+  src/shm_manager.h
+)
+
+set_property(TARGET triton-python-backend-stub PROPERTY OUTPUT_NAME triton_python_backend_stub)
 
 add_library(
   TritonPythonBackend::triton-python-backend ALIAS triton-python-backend
@@ -175,12 +124,28 @@ target_compile_options(
     -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
 )
 
+target_compile_features(triton-python-backend-stub PRIVATE cxx_std_11)
+target_compile_options(
+  triton-python-backend-stub PRIVATE
+  $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+  -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
+)
+
 target_link_libraries(
   triton-python-backend
   PRIVATE
     triton-core-serverstub  # from repo-core
     triton-backend-utils    # from repo-backend
-    ${_GRPC_GRPCPP}
+)
+
+target_link_libraries(
+  triton-python-backend-stub
+  PRIVATE
+   Python3::Python
+   Threads::Threads
+   pybind11::embed
+   triton-backend-utils    # from repo-backend
+   -lrt                    # shared memory 
 )
 
 set_target_properties(
@@ -200,10 +165,12 @@ set(INSTALL_CONFIGDIR ${CMAKE_INSTALL_LIBDIR}/cmake/TritonPythonBackend)
 install(
   TARGETS
     triton-python-backend
+    triton-python-backend-stub
   EXPORT
     triton-python-backend-targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
   ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
+  RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(
@@ -215,14 +182,6 @@ install(
     TritonPythonBackend::
   DESTINATION
     ${INSTALL_CONFIGDIR}
-)
-
-install(
-  FILES
-    ${GRPC_PY}
-    src/resources/startup.py
-  DESTINATION
-    ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(
