@@ -52,8 +52,8 @@ $ git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy
 ```
 $ cd python_backend
 $ mkdir -p models/add_sub/1/
-$ cp examples/add_sub.py models/add_sub/1/model.py
-$ cp examples/config.pbtxt models/add_sub/config.pbtxt
+$ cp examples/add_sub/model.py models/add_sub/1/model.py
+$ cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
 ```
 
 4. Start the Triton server.
