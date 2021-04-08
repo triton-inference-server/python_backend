@@ -27,9 +27,13 @@
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <unordered_map>
 #include "pb_utils.h"
 #include "shm_manager.h"
@@ -40,15 +44,19 @@ using namespace pybind11::literals;
 
 namespace triton { namespace backend { namespace python {
 
-#define RETURN_IF_EXCEPTION(X)                                           \
-  do {                                                                   \
-    try {                                                                \
-      (X);                                                               \
-    }                                                                    \
-    catch (const PythonBackendException& pb_exception) {                 \
-      LOG_INFO << pb_exception.err_->error_message.c_str() << std::endl; \
-      return 1;                                                          \
-    }                                                                    \
+#define LOG_IF_EXCEPTION(X)                                 \
+  do {                                                      \
+    try {                                                   \
+      (X);                                                  \
+    }                                                       \
+    catch (const PythonBackendException& pb_exception) {    \
+      LOG_INFO << pb_exception.err_->error_message.c_str(); \
+    }                                                       \
+  } while (false)
+
+#define LOG_EXCEPTION(E)               \
+  do {                                 \
+    LOG_INFO << E.err_->error_message; \
   } while (false)
 
 // Macros that use current filename and line number.
@@ -200,9 +208,8 @@ class Stub {
       off_t err_string_offset;
       py::str py_string_err = py::str(response.attr("error")());
       std::string response_error = py_string_err;
-      SaveStringToSharedMemory(
-          shm_pool_, err_string_offset, response_error.c_str());
-      //"Failed to create string in shared memory");
+      LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+          shm_pool_, err_string_offset, response_error.c_str()));
       response_shm->error = err_string_offset;
 
       // Skip the response value if it has error
@@ -234,8 +241,6 @@ class Stub {
       TRITONSERVER_DataType dtype_triton =
           static_cast<TRITONSERVER_DataType>(dtype_triton_int);
 
-      // TODO: If the data_ptr is in shared memory the copy is not required.
-
       char* data_in_shm;
       char* data_ptr;
       const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
@@ -250,10 +255,9 @@ class Stub {
         py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
         if (serialize_bytes.is_none()) {
           const char* err_message = "An error happened during serialization.";
-          LOG_MESSAGE(TRITONSERVER_LOG_ERROR, err_message);
+          LOG_INFO << err_message;
           off_t err_message_offset;
           SaveStringToSharedMemory(shm_pool_, err_message_offset, err_message);
-          //"failed to create string to store error in shared memory.");
           response_shm->has_error = true;
           response_shm->error = err_message_offset;
           return;
@@ -283,71 +287,6 @@ class Stub {
       j += 1;
     }
   }
-
-  void Initialize(std::string& model_version, std::string python_stub_path)
-  {
-    try {
-      try {
-        py::module sys = py::module::import("sys");
-
-        std::string model_name =
-            model_path_.substr(model_path_.find_last_of("/") + 1);
-        std::string model_path_parent =
-            model_path_.substr(0, model_path_.find_last_of("/"));
-        std::string model_path_parent_parent =
-            model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-        std::string python_backend_folder =
-            python_stub_path.substr(0, python_stub_path.find_last_of("/"));
-        sys.attr("path").attr("append")(model_path_parent);
-        sys.attr("path").attr("append")(model_path_parent_parent);
-        sys.attr("path").attr("append")(python_backend_folder);
-
-        py::module python_backend_utils =
-            py::module::import("triton_python_backend_utils");
-
-        py::object TritonPythonModel =
-            py::module::import((model_version + std::string(".model")).c_str())
-                .attr("TritonPythonModel");
-        PyRequest_ = python_backend_utils.attr("InferenceRequest");
-        PyTensor_ = python_backend_utils.attr("Tensor");
-        deserialize_bytes_ =
-            python_backend_utils.attr("deserialize_bytes_tensor");
-        serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
-        model_instance_ = TritonPythonModel();
-
-        std::unordered_map<std::string, std::string> map;
-        LoadMapFromSharedMemory(shm_pool_, ipc_message_->request_batch, map);
-        py::dict model_config_params;
-
-        for (const auto& pair : map) {
-          model_config_params[pair.first.c_str()] = pair.second;
-        }
-        // Call initialize if exists.
-        if (py::hasattr(model_instance_, "initialize")) {
-          model_instance_.attr("initialize")(model_config_params);
-        }
-      }
-
-      catch (const py::error_already_set& e) {
-        LOG_INFO << e.what();
-
-        off_t err_string_offset;
-        SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()),
-            response_batch_->has_error = true;
-        response_batch_->error = err_string_offset;
-        NotifyParent();
-        exit(1);
-      }
-    }
-    catch (const PythonBackendException& pb_exception) {
-      LOG_INFO << "Failed to initialize Python stub: "
-               << pb_exception.err_->error_message.c_str();
-      NotifyParent();
-      exit(1);
-    }
-  }
-
-  void WaitForNotification() { pthread_cond_wait(child_cond_, child_mutex_); }
 
   void ProcessRequest(
       Request* request, ResponseBatch* response_batch,
@@ -471,6 +410,217 @@ class Stub {
         py_input_tensors, id, request->correlation_id,
         py_requested_output_names);
   }
+
+  void SetResponseFromException(const PythonBackendException& pb_exception)
+  {
+    off_t err_string_offset;
+    LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+        shm_pool_, err_string_offset,
+        pb_exception.err_->error_message.c_str()));
+    response_batch_->has_error = true;
+    response_batch_->error = err_string_offset;
+  }
+
+  int Execute()
+  {
+    // Reset the value for has_error
+    response_batch_->has_error = false;
+
+    RequestBatch* request_batch;
+    try {
+      shm_pool_->MapOffset(
+          (char**)&request_batch, sizeof(RequestBatch),
+          ipc_message_->request_batch);
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_EXCEPTION(pb_exception);
+      SetResponseFromException(pb_exception);
+      return 0;
+    }
+    uint32_t batch_size = request_batch->batch_size;
+
+    // An empty batch size indicates termination
+    if (batch_size == 0) {
+      return 1;
+    }
+
+    Request* requests;
+    try {
+      shm_pool_->MapOffset(
+          (char**)&requests, sizeof(Request) * batch_size,
+          request_batch->requests);
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_EXCEPTION(pb_exception);
+      SetResponseFromException(pb_exception);
+      return 0;
+    }
+
+    py::list py_request_list;
+    for (size_t i = 0; i < batch_size; i++) {
+      Request* request = &requests[i];
+      py::object infer_request;
+      try {
+        ProcessRequest(
+            request, response_batch_, infer_request, PyRequest_, PyTensor_,
+            deserialize_bytes_);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_EXCEPTION(pb_exception);
+        SetResponseFromException(pb_exception);
+        return 0;
+      }
+      py_request_list.append(infer_request);
+    }
+
+    py::list responses;
+
+    if (!py::hasattr(model_instance_, "execute")) {
+      std::string message = "Python model " + model_path_ +
+                            " does not implement `execute` method.";
+      LOG_INFO << message;
+
+      off_t err_string_offset;
+      LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+          shm_pool_, err_string_offset, message.c_str()));
+      response_batch_->has_error = true;
+      response_batch_->error = err_string_offset;
+
+      return 0;
+    }
+
+    // Execute Response
+    try {
+      responses = model_instance_.attr("execute")(py_request_list);
+    }
+    catch (const py::error_already_set& e) {
+      off_t err_string_offset;
+      LOG_INFO << e.what();
+      LOG_IF_EXCEPTION(
+          SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()));
+      response_batch_->has_error = true;
+      response_batch_->error = err_string_offset;
+      return 0;
+    }
+
+    Response* responses_shm;
+    off_t responses_shm_offset;
+    size_t response_size = py::len(responses);
+
+    try {
+      shm_pool_->Map(
+          (char**)&responses_shm, sizeof(Response) * response_size,
+          responses_shm_offset);
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_EXCEPTION(pb_exception);
+      SetResponseFromException(pb_exception);
+      return 0;
+    }
+    response_batch_->responses = responses_shm_offset;
+    response_batch_->batch_size = response_size;
+
+    size_t i = 0;
+    for (auto& response : responses) {
+      Response* response_shm = &responses_shm[i];
+      try {
+        ProcessResponse(
+            response_shm, response_batch_, response, serialize_bytes_);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_EXCEPTION(pb_exception);
+        pb_exception.err_->error_message.c_str();
+
+        off_t err_string_offset;
+        LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+            shm_pool_, err_string_offset,
+            pb_exception.err_->error_message.c_str()));
+        response_shm->has_error = true;
+        response_shm->error = err_string_offset;
+      }
+      i += 1;
+    }
+
+    return 0;
+  }
+
+  void Initialize(std::string& model_version, std::string python_stub_path)
+  {
+    try {
+      try {
+        py::module sys = py::module::import("sys");
+
+        std::string model_name =
+            model_path_.substr(model_path_.find_last_of("/") + 1);
+        std::string model_path_parent =
+            model_path_.substr(0, model_path_.find_last_of("/"));
+        std::string model_path_parent_parent =
+            model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+        std::string python_backend_folder =
+            python_stub_path.substr(0, python_stub_path.find_last_of("/"));
+        sys.attr("path").attr("append")(model_path_parent);
+        sys.attr("path").attr("append")(model_path_parent_parent);
+        sys.attr("path").attr("append")(python_backend_folder);
+
+        py::module python_backend_utils =
+            py::module::import("triton_python_backend_utils");
+
+        py::object TritonPythonModel =
+            py::module::import((model_version + std::string(".model")).c_str())
+                .attr("TritonPythonModel");
+        PyRequest_ = python_backend_utils.attr("InferenceRequest");
+        PyTensor_ = python_backend_utils.attr("Tensor");
+        deserialize_bytes_ =
+            python_backend_utils.attr("deserialize_bytes_tensor");
+        serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
+        model_instance_ = TritonPythonModel();
+
+        std::unordered_map<std::string, std::string> map;
+        LoadMapFromSharedMemory(shm_pool_, ipc_message_->request_batch, map);
+        py::dict model_config_params;
+
+        for (const auto& pair : map) {
+          model_config_params[pair.first.c_str()] = pair.second;
+        }
+        // Call initialize if exists.
+        if (py::hasattr(model_instance_, "initialize")) {
+          model_instance_.attr("initialize")(model_config_params);
+        }
+      }
+
+      catch (const py::error_already_set& e) {
+        LOG_INFO << e.what();
+
+        off_t err_string_offset;
+        SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()),
+            response_batch_->has_error = true;
+        response_batch_->error = err_string_offset;
+        NotifyParent();
+        exit(1);
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_INFO << "Failed to initialize Python stub: "
+               << pb_exception.err_->error_message.c_str();
+      NotifyParent();
+      exit(1);
+    }
+  }
+
+  void Finalize()
+  {
+    // Call finalize if exists.
+    if (py::hasattr(model_instance_, "finalize")) {
+      try {
+        model_instance_.attr("finalize")();
+      }
+      catch (const py::error_already_set& e) {
+        LOG_INFO << e.what();
+      }
+    }
+  }
+
+  void WaitForNotification() { pthread_cond_wait(child_cond_, child_mutex_); }
 };
 extern "C" {
 
@@ -478,6 +628,7 @@ int
 main(int argc, char** argv)
 {
   if (argc < 5) {
+    LOG_INFO << "Expected 5 arguments, found " << argc << " arguments.";
     exit(1);
   }
 
@@ -525,6 +676,38 @@ main(int argc, char** argv)
 
   stub->Initialize(model_version, argv[0] /* python stub path*/);
 
+  pid_t parent_pid = std::stoi(argv[5]);
+  bool background_thread_running = true;
+  std::thread background_thread([&parent_pid, &background_thread_running] {
+    while (background_thread_running) {
+      // Every two seconds check if the parent process is alive.
+      sleep(2);
+
+      if (kill(parent_pid, 0) == 0) {
+        continue;
+      }
+
+      pid_t child_pid = getpid();
+      // Kill the process
+      kill(child_pid, SIGTERM);
+      LOG_INFO << "Non-graceful termination detected. Killing the child stub: "
+               << std::to_string(child_pid).c_str();
+    }
+  });
+
+  // Wait for messages from the parent process
+  while (true) {
+    stub->NotifyParent();
+    stub->WaitForNotification();
+    int stop = stub->Execute();
+
+    if (stop)
+      break;
+  }
+  stub->Finalize();
+  background_thread_running = false;
+  background_thread.join();
+  stub->NotifyParent();
   return 0;
 }
 }

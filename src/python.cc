@@ -478,7 +478,6 @@ ModelInstanceState::ProcessRequests(
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
 
-  pthread_mutex_lock(parent_mutex_);
   NotifyChild();
 
   // Wait for child notification
@@ -783,8 +782,8 @@ ModelInstanceState::SetupChildProcess()
 
   // Child process
   if (pid == 0) {
-    const char* stub_args[6];
-    stub_args[5] = nullptr;  // Last argument must be nullptr
+    const char* stub_args[7];
+    stub_args[6] = nullptr;  // Last argument must be nullptr
     std::stringstream ss;
     ss << model_state->StateForBackend()->python_lib
        << "/triton_python_backend_stub";
@@ -794,6 +793,7 @@ ModelInstanceState::SetupChildProcess()
     stub_args[2] = shm_region_name.c_str();
     stub_args[3] = std::to_string(shm_default_size).c_str();
     stub_args[4] = std::to_string(shm_growth_size).c_str();
+    stub_args[5] = std::to_string(parent_pid_).c_str();
     if (execvp(stub_args[0], (char**)stub_args) == -1) {
       std::stringstream ss;
       ss << "Failed to run python backend stub. Errno = " << errno << '\n'
@@ -809,7 +809,6 @@ ModelInstanceState::SetupChildProcess()
           (std::string("Failed to initialize model instance ") + Name())
               .c_str());
     }
-    // sleep(1);  // A small delay to allow parent process to reach the mutex.
     // signal(SIGINT, SignalHandler);
 
   } else {
@@ -877,18 +876,17 @@ ModelInstanceState::~ModelInstanceState()
     //"failed to create request batch in shared memory.");
     request_batch->batch_size = 0;
     ipc_message_->request_batch = request_batch_offset;
-    pthread_mutex_lock(parent_mutex_);
     NotifyChild();
 
     // Wait for child notification
     pthread_cond_wait(parent_cond_, parent_mutex_);
-    pthread_mutex_unlock(parent_mutex_);
   }
 
   // Terminate the child process.
   int status;
   kill(child_pid_, SIGTERM);
   waitpid(child_pid_, &status, 0);
+  pthread_mutex_unlock(parent_mutex_);
 }
 
 TRITONSERVER_Error*
