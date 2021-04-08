@@ -1,4 +1,4 @@
-// Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,64 +24,42 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-syntax = "proto3";
+#pragma once
 
-package triton.backend.python;
+#include <unistd.h>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
-message InitializationCommand
-{
-  message ValuePair
-  {
-    string key = 1;
-    string value = 2;
-  }
+namespace triton { namespace backend { namespace python {
 
-  repeated ValuePair args = 1;
-}
+class SharedMemory {
+  int shm_fd_;
+  std::string shm_key_;
+  size_t* capacity_;
+  off_t* offset_;
+  char* shm_addr_;
 
-message Tensor
-{
-  string name = 1;
-  int32 dtype = 2;
-  repeated int64 dims = 3;
-  bytes raw_data = 4;
-}
+  // Current capcity, local to each process.
+  size_t current_capacity_;
 
-message InferenceRequest
-{
-  string id = 1;
-  uint64 correlation_id = 2;
-  repeated Tensor inputs = 3;
-  repeated string requested_output_names = 4;
-}
+  // Amount of bytes to grow the shared memory when the pool is completely used.
+  int64_t shm_growth_bytes_;
 
-message Error
-{
-  string message = 1;
-}
+  // List of old shared memory addresses that should be deallocated.
+  // First element of the pair is size and second element is the address.
+  std::vector<std::pair<size_t, char*>> old_shm_addresses_;
+  void UpdateSharedMemory();
 
-message InferenceResponse
-{
-  Error error = 1;
-  bool failed = 2;
-  repeated Tensor outputs = 3;
-}
+ public:
+  SharedMemory(
+      const std::string& shm_key, int64_t default_byte_size,
+      int64_t shm_growth_bytes, bool truncate = false);
+  void MapOffset(char** shm_addr, size_t byte_size, off_t offset);
+  void Map(char** shm_addr, size_t byte_size, off_t& offset);
+  void SetOffset(off_t offset);
+  ~SharedMemory() noexcept(false);
+};
 
-message ExecuteResponse
-{
-  repeated InferenceResponse responses = 1;
-}
-
-message ExecuteRequest
-{
-  repeated InferenceRequest requests = 1;
-}
-
-message Empty {}
-
-service PythonInterpreter
-{
-  rpc Init(InitializationCommand) returns (Empty) {}
-  rpc Fini(Empty) returns (Empty) {}
-  rpc Execute(ExecuteRequest) returns (ExecuteResponse) {}
-}
+}}}  // namespace triton::backend::python
