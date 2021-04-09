@@ -62,6 +62,12 @@ namespace triton { namespace backend { namespace python {
 // Macros that use current filename and line number.
 #define LOG_INFO LOG_INFO_FL(__FILE__, __LINE__)
 
+void
+SignalHandler(int signum)
+{
+  // Skip the SIGINT
+}
+
 class Logger {
  public:
   // Log a message.
@@ -631,6 +637,7 @@ main(int argc, char** argv)
     LOG_INFO << "Expected 5 arguments, found " << argc << " arguments.";
     exit(1);
   }
+  signal(SIGINT, SignalHandler);
 
   // Path to model.py
   std::string model_path = argv[1];
