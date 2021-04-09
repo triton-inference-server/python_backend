@@ -698,7 +698,7 @@ ModelInstanceState::SetupChildProcess()
 {
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
   std::string shm_region_name =
-      std::string("/") + Name() + kind + std::to_string(device_id_);
+      std::string("/") + Name() + "_" + kind + "_" + std::to_string(device_id_);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_growth_size =
@@ -910,7 +910,7 @@ ModelInstanceState::GetInputTensor(
   if (input_byte_size > max_input_size) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_UNSUPPORTED,
-        "Python backend does not support input size larger than 4GBs, consider "
+        "Python backend does not support input size larger than 2GBs, consider "
         "parititioning your input into multiple inputs.");
   }
 
@@ -1039,27 +1039,50 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     std::string shm_growth_byte_size;
     if (cmdline.Find("shm-growth-byte-size", &shm_growth_size)) {
       RETURN_IF_ERROR(shm_growth_size.AsString(&shm_growth_byte_size));
+      try {
+        backend_state->shm_growth_byte_size = std::stol(shm_growth_byte_size);
+      }
+      catch (const std::invalid_argument& ia) {
+        return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
+      }
     }
-    backend_state->shm_growth_byte_size =
-        std::atoi(shm_growth_byte_size.c_str());
 
     triton::common::TritonJson::Value shm_default_size;
     std::string shm_default_byte_size;
     if (cmdline.Find("shm-default-byte-size", &shm_default_size)) {
       RETURN_IF_ERROR(shm_default_size.AsString(&shm_default_byte_size));
+      try {
+        backend_state->shm_default_byte_size = std::stol(shm_default_byte_size);
+      }
+      catch (const std::invalid_argument& ia) {
+        return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
+      }
     }
-    backend_state->shm_default_byte_size =
-        std::atoi(shm_default_byte_size.c_str());
 
     triton::common::TritonJson::Value stub_timeout_seconds;
     std::string stub_timeout_string_seconds;
     if (cmdline.Find("stub-timeout-seconds", &stub_timeout_seconds)) {
       RETURN_IF_ERROR(
           stub_timeout_seconds.AsString(&stub_timeout_string_seconds));
+      try {
+        backend_state->stub_timeout_seconds =
+            std::stol(stub_timeout_string_seconds);
+      }
+      catch (const std::invalid_argument& ia) {
+        return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
+      }
     }
-    backend_state->stub_timeout_seconds =
-        std::atoi(stub_timeout_string_seconds.c_str());
   }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("shm-default-bytes=") +
+       std::to_string(backend_state->shm_default_byte_size) +
+       ",shm-growth-bytes=" +
+       std::to_string(backend_state->shm_growth_byte_size) +
+       ",stub-timeout-seconds=" +
+       std::to_string(backend_state->stub_timeout_seconds))
+          .c_str());
 
   // Use BackendArtifacts to determine the location of Python files
   const char* location;
