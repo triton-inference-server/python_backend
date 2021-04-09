@@ -379,6 +379,8 @@ ModelInstanceState::ProcessRequests(
   std::vector<TRITONBACKEND_Response*> responses;
   responses.reserve(request_count);
 
+  size_t number_of_requests_wo_err = 0;
+
   for (size_t i = 0; i < request_count; i++) {
     TRITONBACKEND_Response* response;
     auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
@@ -463,25 +465,26 @@ ModelInstanceState::ProcessRequests(
         responses, r, SaveStringToSharedMemory(shm_pool_, id_offset, id));
     python_infer_request->id = id_offset;
 
-    char* id_test;
-    GUARDED_RESPOND_IF_EXCEPTION(
-        responses, r,
-        LoadStringFromSharedMemory(shm_pool_, id_offset, id_test));
-
     uint64_t correlation_id;
     GUARDED_RESPOND_IF_ERROR(
         responses, r,
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
     python_infer_request->correlation_id = correlation_id;
+    if (responses[r] != nullptr) {
+      ++number_of_requests_wo_err;
+    }
   }
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
+  if (number_of_requests_wo_err == 0) {
+    return nullptr;
+  } else {
+    NotifyChild();
 
-  NotifyChild();
-
-  // Wait for child notification
-  pthread_cond_wait(parent_cond_, parent_mutex_);
+    // Wait for child notification
+    pthread_cond_wait(parent_cond_, parent_mutex_);
+  }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -917,12 +920,20 @@ ModelInstanceState::GetInputTensor(
                    in, &input_name, &input_dtype, &input_shape,
                    &input_dims_count, &input_byte_size, &input_buffer_count));
 
+  // If input_byte_size is larger than 2GBs, reject request the request.
+  uint64_t max_input_size = INT32_MAX;
+  if (input_byte_size > max_input_size) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNSUPPORTED,
+        "Python backend does not support input size larger than 4GBs, consider "
+        "parititioning your input into multiple inputs.");
+  }
+
   // We need to create a new collector for every request because python backend
   // sends each request individually to the python model
   BackendInputCollector collector(
       &request, 1, &responses, Model()->TritonMemoryManager(),
       false /* pinned_enable */, CudaStream());
-
 
   const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
   const int memory_type_id = 0;
@@ -1042,22 +1053,29 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     }
 
     triton::common::TritonJson::Value shm_growth_size;
+    std::string shm_growth_byte_size;
     if (cmdline.Find("shm-growth-byte-size", &shm_growth_size)) {
-      RETURN_IF_ERROR(
-          shm_growth_size.AsInt(&backend_state->shm_growth_byte_size));
+      RETURN_IF_ERROR(shm_growth_size.AsString(&shm_growth_byte_size));
     }
+    backend_state->shm_growth_byte_size =
+        std::atoi(shm_growth_byte_size.c_str());
 
     triton::common::TritonJson::Value shm_default_size;
+    std::string shm_default_byte_size;
     if (cmdline.Find("shm-default-byte-size", &shm_default_size)) {
-      RETURN_IF_ERROR(
-          shm_growth_size.AsInt(&backend_state->shm_default_byte_size));
+      RETURN_IF_ERROR(shm_default_size.AsString(&shm_default_byte_size));
     }
+    backend_state->shm_default_byte_size =
+        std::atoi(shm_default_byte_size.c_str());
 
     triton::common::TritonJson::Value stub_timeout_seconds;
+    std::string stub_timeout_string_seconds;
     if (cmdline.Find("stub-timeout-seconds", &stub_timeout_seconds)) {
       RETURN_IF_ERROR(
-          shm_growth_size.AsInt(&backend_state->stub_timeout_seconds));
+          stub_timeout_seconds.AsString(&stub_timeout_string_seconds));
     }
+    backend_state->stub_timeout_seconds =
+        std::atoi(stub_timeout_string_seconds.c_str());
   }
 
   // Use BackendArtifacts to determine the location of Python files
