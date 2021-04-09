@@ -54,17 +54,16 @@
 #include "triton/core/tritonserver.h"
 
 
-#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, MUTEX, X) \
-  do {                                                                        \
-    TRITONSERVER_Error* raarie_err__ = (X);                                   \
-    if (raarie_err__ != nullptr) {                                            \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);        \
-      return nullptr;                                                         \
-    }                                                                         \
+#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X) \
+  do {                                                                 \
+    TRITONSERVER_Error* raarie_err__ = (X);                            \
+    if (raarie_err__ != nullptr) {                                     \
+      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__); \
+      return nullptr;                                                  \
+    }                                                                  \
   } while (false)
 
-#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(                                   \
-    RESPONSES, RESPONSES_COUNT, MUTEX, X)                                      \
+#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(RESPONSES, RESPONSES_COUNT, X)     \
   do {                                                                         \
     try {                                                                      \
       (X);                                                                     \
@@ -191,12 +190,6 @@ class ModelState : public BackendModel {
   ModelState(TRITONBACKEND_Model* triton_model);
   BackendState* backend_state_;
 };
-
-void
-SignalHandler(int signum)
-{
-  // Skip the SIGINT
-}
 
 TRITONSERVER_Error*
 CreateTritonErrorFromException(const PythonBackendException& pb_exception)
@@ -379,8 +372,6 @@ ModelInstanceState::ProcessRequests(
   std::vector<TRITONBACKEND_Response*> responses;
   responses.reserve(request_count);
 
-  size_t number_of_requests_wo_err = 0;
-
   for (size_t i = 0; i < request_count; i++) {
     TRITONBACKEND_Response* response;
     auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
@@ -397,23 +388,23 @@ ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request* request = requests[r];
     Request* python_infer_request = &requests_shm[r];
     uint32_t requested_input_count = 0;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
+    RESPOND_ALL_AND_RETURN_IF_ERROR(
+        &responses, request_count,
         TRITONBACKEND_RequestInputCount(request, &requested_input_count));
 
     python_infer_request->requested_input_count = requested_input_count;
 
     uint32_t requested_output_count = 0;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
+    RESPOND_ALL_AND_RETURN_IF_ERROR(
+        &responses, request_count,
         TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
     python_infer_request->requested_output_count = requested_output_count;
 
     Tensor* input_tensors;
     off_t input_tensors_offset;
 
-    GUARDED_RESPOND_IF_EXCEPTION(
-        responses, r,
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
         shm_pool_->Map(
             (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
             input_tensors_offset));
@@ -422,15 +413,16 @@ ModelInstanceState::ProcessRequests(
     for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
       Tensor* input_tensor = &input_tensors[iidx];
 
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r, GetInputTensor(iidx, input_tensor, request, responses));
+      RESPOND_ALL_AND_RETURN_IF_ERROR(
+          &responses, request_count,
+          GetInputTensor(iidx, input_tensor, request, responses));
     }
 
     off_t* requested_output_names;
     off_t requested_output_names_offset;
 
-    GUARDED_RESPOND_IF_EXCEPTION(
-        responses, r,
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
         shm_pool_->Map(
             (char**)&requested_output_names,
             sizeof(off_t) * requested_output_count,
@@ -441,15 +433,15 @@ ModelInstanceState::ProcessRequests(
     // Append the list of requested outputs to the inference_request
     for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
       const char* requested_output_name;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
+      RESPOND_ALL_AND_RETURN_IF_ERROR(
+          &responses, request_count,
           TRITONBACKEND_RequestOutputName(
               request, iidx, &requested_output_name));
 
       // output name
       off_t output_name_offset;
-      GUARDED_RESPOND_IF_EXCEPTION(
-          responses, r,
+      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+          &responses, request_count,
           SaveStringToSharedMemory(
               shm_pool_, output_name_offset, requested_output_name));
       requested_output_names[iidx] = output_name_offset;
@@ -457,34 +449,28 @@ ModelInstanceState::ProcessRequests(
 
     // request id
     const char* id;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r, TRITONBACKEND_RequestId(request, &id));
+    RESPOND_ALL_AND_RETURN_IF_ERROR(
+        &responses, request_count, TRITONBACKEND_RequestId(request, &id));
 
     off_t id_offset;
-    GUARDED_RESPOND_IF_EXCEPTION(
-        responses, r, SaveStringToSharedMemory(shm_pool_, id_offset, id));
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
+        SaveStringToSharedMemory(shm_pool_, id_offset, id));
     python_infer_request->id = id_offset;
 
     uint64_t correlation_id;
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
+    RESPOND_ALL_AND_RETURN_IF_ERROR(
+        &responses, request_count,
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
     python_infer_request->correlation_id = correlation_id;
-    if (responses[r] != nullptr) {
-      ++number_of_requests_wo_err;
-    }
   }
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
-  if (number_of_requests_wo_err == 0) {
-    return nullptr;
-  } else {
-    NotifyChild();
+  NotifyChild();
 
-    // Wait for child notification
-    pthread_cond_wait(parent_cond_, parent_mutex_);
-  }
+  // Wait for child notification
+  pthread_cond_wait(parent_cond_, parent_mutex_);
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -492,7 +478,7 @@ ModelInstanceState::ProcessRequests(
   // Parsing the request response
   ResponseBatch* response_batch;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count, parent_mutex_,
+      &responses, request_count,
       shm_pool_->MapOffset(
           (char**)&response_batch, sizeof(ResponseBatch),
           ipc_message_->response_batch));
@@ -502,7 +488,7 @@ ModelInstanceState::ProcessRequests(
   if (response_batch->has_error) {
     char* error_message;
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count, parent_mutex_,
+        &responses, request_count,
         LoadStringFromSharedMemory(
             shm_pool_, response_batch->error, error_message));
     for (uint32_t r = 0; r < request_count; ++r) {
@@ -528,7 +514,7 @@ ModelInstanceState::ProcessRequests(
 
   Response* responses_shm;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count, parent_mutex_,
+      &responses, request_count,
       shm_pool_->MapOffset(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
           response_batch->responses));
@@ -710,7 +696,9 @@ ModelInstanceState::ProcessRequests(
 TRITONSERVER_Error*
 ModelInstanceState::SetupChildProcess()
 {
-  std::string shm_region_name = std::string("/") + Name();
+  std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
+  std::string shm_region_name =
+      std::string("/") + Name() + kind + std::to_string(device_id_);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_growth_size =
@@ -812,7 +800,6 @@ ModelInstanceState::SetupChildProcess()
           (std::string("Failed to initialize model instance ") + Name())
               .c_str());
     }
-    // signal(SIGINT, SignalHandler);
 
   } else {
     int64_t stub_timeout_seconds =
@@ -900,13 +887,12 @@ ModelInstanceState::GetInputTensor(
 {
   const char* input_name;
   // Load iidx'th input name
-  RESPOND_AND_RETURN_IF_EXCEPTION(
-      request, TRITONBACKEND_RequestInputName(request, input_idx, &input_name));
+  RETURN_IF_ERROR(
+      TRITONBACKEND_RequestInputName(request, input_idx, &input_name));
 
   // Load iidx'th input
   TRITONBACKEND_Input* in;
-  RESPOND_AND_RETURN_IF_EXCEPTION(
-      request, TRITONBACKEND_RequestInput(request, input_name, &in));
+  RETURN_IF_ERROR(TRITONBACKEND_RequestInput(request, input_name, &in));
 
   // Load input properties
   TRITONSERVER_DataType input_dtype;
@@ -915,10 +901,9 @@ ModelInstanceState::GetInputTensor(
   uint64_t input_byte_size;
   uint32_t input_buffer_count;
 
-  RESPOND_AND_RETURN_IF_EXCEPTION(
-      request, TRITONBACKEND_InputProperties(
-                   in, &input_name, &input_dtype, &input_shape,
-                   &input_dims_count, &input_byte_size, &input_buffer_count));
+  RETURN_IF_ERROR(TRITONBACKEND_InputProperties(
+      in, &input_name, &input_dtype, &input_shape, &input_dims_count,
+      &input_byte_size, &input_buffer_count));
 
   // If input_byte_size is larger than 2GBs, reject request the request.
   uint64_t max_input_size = INT32_MAX;
@@ -939,11 +924,9 @@ ModelInstanceState::GetInputTensor(
   const int memory_type_id = 0;
 
   char* input_buffer;
-  RESPOND_AND_RETURN_IF_EXCEPTION(
-      request, SaveTensorToSharedMemory(
-                   shm_pool_, input_tensor, input_buffer, memory_type,
-                   memory_type_id, input_byte_size, input_name, input_shape,
-                   input_dims_count, input_dtype));
+  RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+      shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
+      input_byte_size, input_name, input_shape, input_dims_count, input_dtype));
 
   // Load raw data into input_tensor raw data.
   // FIXME: Avoid the copy to CPU Memory when
