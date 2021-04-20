@@ -172,7 +172,6 @@ namespace triton { namespace backend { namespace python {
 
 struct BackendState {
   std::string python_lib;
-  std::string python_runtime;
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
@@ -763,7 +762,6 @@ ModelInstanceState::SetupChildProcess()
 
   parent_pid_ = getpid();
 
-  pthread_mutex_lock(parent_mutex_);
   pid_t pid = fork();
 
   if (pid < 0) {
@@ -802,12 +800,14 @@ ModelInstanceState::SetupChildProcess()
     }
 
   } else {
+    pthread_mutex_lock(parent_mutex_);
     int64_t stub_timeout_seconds =
         model_state->StateForBackend()->stub_timeout_seconds;
+
     struct timespec ts;
     child_pid_ = pid;
     clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += stub_timeout_seconds + 200;
+    ts.tv_sec += stub_timeout_seconds;
 
     // Pre initialization step.
     if (pthread_cond_timedwait(parent_cond_, parent_mutex_, &ts) != 0) {
@@ -816,7 +816,6 @@ ModelInstanceState::SetupChildProcess()
           (std::string("Failed to initialize model instance ") + Name())
               .c_str());
     }
-    LOG_MESSAGE(TRITONSERVER_LOG_INFO, "Preinit finished.");
 
     triton::common::TritonJson::WriteBuffer buffer;
     Model()->ModelConfig().Write(&buffer);
@@ -1024,23 +1023,24 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
-  backend_state->python_runtime = "python3";
   backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
-  backend_state->stub_timeout_seconds = 4;
+  backend_state->stub_timeout_seconds = 10;
 
   if (backend_config.Find("cmdline", &cmdline)) {
-    triton::common::TritonJson::Value python_runtime;
-    if (cmdline.Find("python-runtime", &python_runtime)) {
-      RETURN_IF_ERROR(python_runtime.AsString(&backend_state->python_runtime));
-    }
-
     triton::common::TritonJson::Value shm_growth_size;
     std::string shm_growth_byte_size;
     if (cmdline.Find("shm-growth-byte-size", &shm_growth_size)) {
       RETURN_IF_ERROR(shm_growth_size.AsString(&shm_growth_byte_size));
       try {
         backend_state->shm_growth_byte_size = std::stol(shm_growth_byte_size);
+        if (backend_state->shm_growth_byte_size <= 0) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("shm-growth-byte-size") +
+               " can't be smaller than or equal to zero.")
+                  .c_str());
+        }
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
@@ -1053,6 +1053,14 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       RETURN_IF_ERROR(shm_default_size.AsString(&shm_default_byte_size));
       try {
         backend_state->shm_default_byte_size = std::stol(shm_default_byte_size);
+        // Shared memory default byte size can't be less than 4 MBs.
+        if (backend_state->shm_default_byte_size < 4 * 1024 * 1024) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("shm-default-byte-size") +
+               " can't be smaller than 4 MiBs")
+                  .c_str());
+        }
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
@@ -1067,6 +1075,13 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       try {
         backend_state->stub_timeout_seconds =
             std::stol(stub_timeout_string_seconds);
+        if (backend_state->stub_timeout_seconds <= 0) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("stub-timeout-seconds") +
+               " can't be smaller than or equal to zero.")
+                  .c_str());
+        }
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
@@ -1076,9 +1091,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      (std::string("shm-default-bytes=") +
+      (std::string("shm-default-byte-size=") +
        std::to_string(backend_state->shm_default_byte_size) +
-       ",shm-growth-bytes=" +
+       ",shm-growth-byte-size=" +
        std::to_string(backend_state->shm_growth_byte_size) +
        ",stub-timeout-seconds=" +
        std::to_string(backend_state->stub_timeout_seconds))

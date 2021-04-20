@@ -685,7 +685,8 @@ main(int argc, char** argv)
 
   pid_t parent_pid = std::stoi(argv[5]);
   bool background_thread_running = true;
-  std::thread background_thread([&parent_pid, &background_thread_running] {
+  std::thread background_thread([&parent_pid, &background_thread_running,
+                                 &stub] {
     while (background_thread_running) {
       // Every two seconds check if the parent process is alive.
       sleep(2);
@@ -695,6 +696,10 @@ main(int argc, char** argv)
       }
 
       pid_t child_pid = getpid();
+
+      // Destroy Stub
+      stub.reset();
+
       // Kill the process
       kill(child_pid, SIGTERM);
       LOG_INFO << "Non-graceful termination detected. Killing the child stub: "
