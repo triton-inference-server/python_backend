@@ -370,7 +370,7 @@ ModelInstanceState::ProcessRequests(
       requests_shm_offset));
   request_batch->requests = requests_shm_offset;
 
-  // We take the responsiblity of the responses.
+  // We take the responsibilty of the responses.
   std::vector<TRITONBACKEND_Response*> responses;
   responses.reserve(request_count);
 
@@ -962,7 +962,7 @@ ModelInstanceState::GetInputTensor(
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_UNSUPPORTED,
         "Python backend does not support input size larger than 2GBs, consider "
-        "parititioning your input into multiple inputs.");
+        "partitioning your input into multiple inputs.");
   }
 
   // We need to create a new collector for every request because python backend
