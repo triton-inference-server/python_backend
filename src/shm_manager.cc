@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/vfs.h>
 #include <unistd.h>
 #include <string>
 #include "pb_utils.h"
@@ -126,13 +127,54 @@ SharedMemory::~SharedMemory() noexcept(false)
   }
 }
 
+size_t
+SharedMemory::GetAvailableSharedMemory()
+{
+  size_t total_available_shm;
+  struct statfs shm_sb;
+
+  int error_code = statfs("/dev/shm", &shm_sb);
+  if (error_code == 0 /* success */) {
+    total_available_shm = shm_sb.f_bsize * shm_sb.f_bfree;
+  } else {
+    std::unique_ptr<PythonBackendError> err =
+        std::make_unique<PythonBackendError>();
+    err->error_message = "Failed to call statfs for /dev/shm. Error code: " +
+                         std::to_string(error_code);
+    throw PythonBackendException(std::move(err));
+  }
+
+  return total_available_shm;
+}
+
 void
 SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 {
+  size_t shm_bytes_added = 0;
   while (*offset_ + byte_size >= *capacity_) {
-    // Increase the shared memory pool size by one page size.
-    *capacity_ = *offset_ + byte_size + shm_growth_bytes_;
+    // Increase the shared memory pool size by the amount of bytes available.
+    *capacity_ += shm_growth_bytes_;
+    shm_bytes_added += shm_growth_bytes_;
+  }
+
+  if (shm_bytes_added > 0) {
+    size_t available_shm_bytes = GetAvailableSharedMemory();
+
+    if (shm_bytes_added >= available_shm_bytes) {
+      // Revert the capacity to the previous value
+      *capacity_ -= shm_bytes_added;
+      std::unique_ptr<PythonBackendError> err =
+          std::make_unique<PythonBackendError>();
+      err->error_message =
+          ("Failed to increase the shared memory pool size for key '" +
+           shm_key_ + "' to " + std::to_string(*capacity_) +
+           " bytes. There are no bytes available in /dev/shm.");
+      throw PythonBackendException(std::move(err));
+    }
+
     if (ftruncate(shm_fd_, *capacity_) == -1) {
+      // Revert the capacity to the previous value
+      *capacity_ -= shm_bytes_added;
       std::unique_ptr<PythonBackendError> err =
           std::make_unique<PythonBackendError>();
       err->error_message =

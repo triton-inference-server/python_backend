@@ -52,6 +52,9 @@ class SharedMemory {
   std::vector<std::pair<size_t, char*>> old_shm_addresses_;
   void UpdateSharedMemory();
 
+  // Get the amount of shared memory available.
+  size_t GetAvailableSharedMemory();
+
  public:
   SharedMemory(
       const std::string& shm_key, int64_t default_byte_size,
