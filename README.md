@@ -85,12 +85,10 @@ $ python3 python_backend/examples/add_sub_client.py
 
 * cmake >= 3.17
 * numpy
-* grpcio-tools
-* grpcio-channelz
 * rapidjson-dev
 
 ```
-pip3 install grpcio-tools grpcio-channelz numpy
+pip3 install numpy
 ```
 
 On Ubuntu or Debian you can use the command below to install `rapidjson`:
@@ -189,8 +187,12 @@ class TritonPythonModel:
 
         responses = []
 
-        # Every Python backend must iterate every request and create a
-        # pb_utils.InferenceResponse for each of them.
+        # Every Python backend must iterate through list of requests and create
+        # an instance of pb_utils.InferenceResponse class for each of them. You
+        # should avoid storing any of the input Tensors in the class attributes
+        # as they will be overridden in subsequent inference requests. You can
+        # make a copy of the underlying NumPy array and store it if it is
+        # required.
         for request in requests:
             # Perform inference on the request and append it to responses list...
 
@@ -285,29 +287,12 @@ models
     └── config.pbtxt
 ```
 
-## Changing Python Runtime Path
+## Python Environment
 
-Python backend by default uses `python3` available inside `PATH`. In order to change
-the Python runtime used by Python backend, you can use the `--backend-config` flag:
-
-```
-/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,python-runtime=<full path to custom Python location>
-```
-
-You will also need to install all the dependencies mentioned in the "Install
-from Source" section in the new environment too.
-
-## Changing GRPC Timeout
-
-Python backend uses gRPC to connect Triton to the Python model. You can change the
-timeout using the backend config:
-
-```
-/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,grpc-timeout-milliseconds=3000
-```
-
-The default timeout value is 2000 milliseconds.
-
+Python backend by default uses `python3` available inside `PATH`. If you are
+using [conda](https://docs.conda.io/en/latest/) or
+[venv](https://docs.python.org/3/library/venv.html), they will automatically
+update `PATH` and Python backend will use the correct environment.
 ## Error Handling
 
 If there is an error that affects the `initialize`, `execute`, or `finalize`
@@ -325,6 +310,34 @@ class TritonPythonModel:
       if error_during_finalize:
         raise pb_utils.TritonModelException("An error occurred during finalize.")
 ```
+
+## Managing Shared Memory
+
+Starting from 21.04 release, Python backend uses shared memory to connect
+user's code to Triton. Note that this change is completely transparent and
+does not require any change to the existing user's model code.
+
+Python backend, by default, allocates 64 MBs for each model instance. Then,
+it will grow the shared memory region by 64 MBs whenever an increase is
+required. You can configure the default shared memory used by each model
+instance using the `shm-default-byte-size` flag. The amount of shared memory
+growth can be configured using the `shm-growth-byte-size`.
+
+You can also configure the timeout used for connecting Triton main process
+to the Python backend stubs using the `stub-timeout-seconds`. The default
+value is 10 seconds.
+
+The config values described above can be passed to Triton using `--backend-config`
+flag:
+
+```
+/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,<config-key>=<config-value>
+```
+
+Also, if you are running Triton inside a Docker container you need to
+properly set the `--shm-size` flag depending on the size of your inputs and
+outputs. The default value for docker run command is `64MB` which is very
+small.
 
 # Examples
 
