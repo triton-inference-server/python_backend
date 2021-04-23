@@ -51,6 +51,7 @@
 #include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
+#include "triton/backend/backend_output_responder.h"
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
@@ -547,7 +548,8 @@ ModelInstanceState::ProcessRequests(
           response_batch->responses));
 
   for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Response* response = responses[r];
+    std::vector<TRITONBACKEND_Response*> response(
+        responses.begin() + r, responses.begin() + r + 1);
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
 
@@ -607,14 +609,14 @@ ModelInstanceState::ProcessRequests(
             (char**)&output_tensors, sizeof(Tensor) * requested_output_count,
             response_shm->outputs));
 
+    BackendOutputResponder responder(
+        &request, 1 /* request count */, &response, 0 /* max_batch_size */,
+        model_state->TritonMemoryManager(), model_state->EnablePinnedInput(),
+        CudaStream());
     for (size_t j = 0; j < requested_output_count; ++j) {
       Tensor* output_tensor = &output_tensors[j];
-
-      TRITONBACKEND_Output* triton_output;
       TRITONSERVER_DataType triton_dt = output_tensor->dtype;
-
       size_t dims_count = output_tensor->dims_count;
-
       int64_t* dims;
       GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
@@ -639,50 +641,17 @@ ModelInstanceState::ProcessRequests(
           shm_pool_->MapOffset(
               (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
 
-      // Prepare output buffers.
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_ResponseOutput(
-              response, &triton_output, name, triton_dt, dims, dims_count));
-
-      uint64_t output_byte_size = raw_data->byte_size;
-
-      void* output_buffer;
-
-      TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
-      int64_t output_memory_type_id = 0;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_OutputBuffer(
-              triton_output, &output_buffer, output_byte_size,
-              &output_memory_type, &output_memory_type_id));
-
-      if ((responses[r] == nullptr) ||
-          (output_memory_type == TRITONSERVER_MEMORY_GPU)) {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_UNSUPPORTED,
-                "can't create response in GPU memory."));
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_ERROR, __FILE__, __LINE__,
-            (std::string("request ") + std::to_string(r) +
-             ": failed to create output buffer in CPU memory.")
-                .c_str());
-        continue;
-      }
-
-      // Copy Python output to Triton output buffers
-      std::copy(data, data + output_byte_size, (char*)output_buffer);
+      std::vector<int64_t> batch_shape(dims, dims + dims_count);
+      responder.ProcessTensor(
+          name, triton_dt, batch_shape, data,
+          TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
     }
-
-    if (responses[r] == nullptr) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR, (std::string("Request ") + std::to_string(r) +
-                                   ": failed to create output response")
-                                      .c_str());
-      continue;
+    bool cuda_copy = responder.Finalize();
+#ifdef TRITON_ENABLE_GPU
+    if (cuda_copy) {
+      cudaStreamSynchronize(stream_);
     }
+#endif  // TRITON_ENABLE_GPU
 
     // If error happens at this stage, we can only log it
     LOG_IF_ERROR(
