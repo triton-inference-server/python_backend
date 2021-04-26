@@ -27,8 +27,10 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/vfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -172,10 +174,10 @@ namespace triton { namespace backend { namespace python {
 
 struct BackendState {
   std::string python_lib;
-  std::string python_runtime;
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
+  std::atomic<long> total_shared_memory_size;
 };
 
 class ModelState : public BackendModel {
@@ -486,27 +488,52 @@ ModelInstanceState::ProcessRequests(
   // If inference fails, release all the requests and send an error response If
   // inference fails at this stage, it usually indicates a bug in the model code
   if (response_batch->has_error) {
-    char* error_message;
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
-        LoadStringFromSharedMemory(
-            shm_pool_, response_batch->error, error_message));
-    for (uint32_t r = 0; r < request_count; ++r) {
-      if (responses[r] == nullptr)
-        continue;
+    if (response_batch->is_error_set) {
+      char* error_message;
+      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+          &responses, request_count,
+          LoadStringFromSharedMemory(
+              shm_pool_, response_batch->error, error_message));
+      for (uint32_t r = 0; r < request_count; ++r) {
+        if (responses[r] == nullptr)
+          continue;
 
-      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Failed to process the request(s), message: ") +
-           error_message)
-              .c_str());
-      LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(
-              responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-          "failed sending response");
+        TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            (std::string("Failed to process the request(s), message: ") +
+             error_message)
+                .c_str());
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
+        LOG_IF_ERROR(
+            TRITONBACKEND_ResponseSend(
+                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+            "failed sending response");
 
-      responses[r] = nullptr;
-      TRITONSERVER_ErrorDelete(err);
+        responses[r] = nullptr;
+        TRITONSERVER_ErrorDelete(err);
+      }
+    } else {
+      const char* error_message = "Failed to process the error response batch.";
+      for (uint32_t r = 0; r < request_count; ++r) {
+        if (responses[r] == nullptr)
+          continue;
+
+        TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            (std::string("Failed to process the request(s), message: ") +
+             error_message)
+                .c_str());
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
+        LOG_IF_ERROR(
+            TRITONBACKEND_ResponseSend(
+                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+            "failed sending response");
+
+        responses[r] = nullptr;
+        TRITONSERVER_ErrorDelete(err);
+      }
     }
 
     return nullptr;
@@ -528,18 +555,30 @@ ModelInstanceState::ProcessRequests(
     Response* response_shm = &responses_shm[r];
 
     if (response_shm->has_error) {
-      char* err_string;
-
       try {
-        LoadStringFromSharedMemory(shm_pool_, response_shm->error, err_string);
+        if (response_shm->is_error_set) {
+          char* err_string;
+          LoadStringFromSharedMemory(
+              shm_pool_, response_shm->error, err_string);
+          TRITONSERVER_Error* err =
+              TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
 
-        TRITONSERVER_Error* err =
-            TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(
-                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-            "failed sending response");
-        TRITONSERVER_ErrorDelete(err);
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseSend(
+                  responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+              "failed sending response");
+          TRITONSERVER_ErrorDelete(err);
+        } else {
+          const char* err_string = "Failed to process response.";
+          TRITONSERVER_Error* err =
+              TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
+
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseSend(
+                  responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+              "failed sending response");
+          TRITONSERVER_ErrorDelete(err);
+        }
       }
       catch (const PythonBackendException& pb_exception) {
         TRITONSERVER_Error* err = CreateTritonErrorFromException(pb_exception);
@@ -549,7 +588,6 @@ ModelInstanceState::ProcessRequests(
                 responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
             "failed sending response");
       }
-
 
       responses[r] = nullptr;
 
@@ -705,6 +743,19 @@ ModelInstanceState::SetupChildProcess()
       model_state->StateForBackend()->shm_growth_byte_size;
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
+
+  model_state->StateForBackend()->total_shared_memory_size -= shm_default_size;
+
+  // If total amount of shared memory available is negative, return an error
+  if (model_state->StateForBackend()->total_shared_memory_size < 0) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("Failed to initialize the model instance " + Name() +
+         " because it run out of shared memory. Increase the shared memory "
+         "size to fix this error.")
+            .c_str());
+  }
+
   shm_pool_ = std::make_unique<SharedMemory>(
       shm_region_name, shm_default_size, shm_growth_size, true /* truncate */);
 
@@ -763,7 +814,6 @@ ModelInstanceState::SetupChildProcess()
 
   parent_pid_ = getpid();
 
-  pthread_mutex_lock(parent_mutex_);
   pid_t pid = fork();
 
   if (pid < 0) {
@@ -802,12 +852,14 @@ ModelInstanceState::SetupChildProcess()
     }
 
   } else {
+    pthread_mutex_lock(parent_mutex_);
     int64_t stub_timeout_seconds =
         model_state->StateForBackend()->stub_timeout_seconds;
+
     struct timespec ts;
     child_pid_ = pid;
     clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += stub_timeout_seconds + 200;
+    ts.tv_sec += stub_timeout_seconds;
 
     // Pre initialization step.
     if (pthread_cond_timedwait(parent_cond_, parent_mutex_, &ts) != 0) {
@@ -816,7 +868,6 @@ ModelInstanceState::SetupChildProcess()
           (std::string("Failed to initialize model instance ") + Name())
               .c_str());
     }
-    LOG_MESSAGE(TRITONSERVER_LOG_INFO, "Preinit finished.");
 
     triton::common::TritonJson::WriteBuffer buffer;
     Model()->ModelConfig().Write(&buffer);
@@ -1022,25 +1073,41 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     RETURN_IF_ERROR(backend_config.Parse(buffer, byte_size));
   }
 
+  struct statfs shm_sb;
+
+  size_t total_shm_byte_size;
+  int error_code = statfs("/dev/shm", &shm_sb);
+  if (error_code == 0 /* success */) {
+    total_shm_byte_size = shm_sb.f_bsize * shm_sb.f_blocks;
+  } else {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("Failed to call statfs for /dev/shm. Error code: " +
+         std::to_string(error_code))
+            .c_str());
+  }
+
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
-  backend_state->python_runtime = "python3";
   backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
-  backend_state->stub_timeout_seconds = 4;
+  backend_state->stub_timeout_seconds = 10;
+  backend_state->total_shared_memory_size = total_shm_byte_size;
 
   if (backend_config.Find("cmdline", &cmdline)) {
-    triton::common::TritonJson::Value python_runtime;
-    if (cmdline.Find("python-runtime", &python_runtime)) {
-      RETURN_IF_ERROR(python_runtime.AsString(&backend_state->python_runtime));
-    }
-
     triton::common::TritonJson::Value shm_growth_size;
     std::string shm_growth_byte_size;
     if (cmdline.Find("shm-growth-byte-size", &shm_growth_size)) {
       RETURN_IF_ERROR(shm_growth_size.AsString(&shm_growth_byte_size));
       try {
         backend_state->shm_growth_byte_size = std::stol(shm_growth_byte_size);
+        if (backend_state->shm_growth_byte_size <= 0) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("shm-growth-byte-size") +
+               " can't be smaller than or equal to zero.")
+                  .c_str());
+        }
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
@@ -1053,6 +1120,14 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       RETURN_IF_ERROR(shm_default_size.AsString(&shm_default_byte_size));
       try {
         backend_state->shm_default_byte_size = std::stol(shm_default_byte_size);
+        // Shared memory default byte size can't be less than 4 MBs.
+        if (backend_state->shm_default_byte_size < 4 * 1024 * 1024) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("shm-default-byte-size") +
+               " can't be smaller than 4 MiBs")
+                  .c_str());
+        }
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
@@ -1067,6 +1142,13 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       try {
         backend_state->stub_timeout_seconds =
             std::stol(stub_timeout_string_seconds);
+        if (backend_state->stub_timeout_seconds <= 0) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INVALID_ARG,
+              (std::string("stub-timeout-seconds") +
+               " can't be smaller than or equal to zero.")
+                  .c_str());
+        }
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
@@ -1076,9 +1158,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      (std::string("shm-default-bytes=") +
+      (std::string("shm-default-byte-size=") +
        std::to_string(backend_state->shm_default_byte_size) +
-       ",shm-growth-bytes=" +
+       ",shm-growth-byte-size=" +
        std::to_string(backend_state->shm_growth_byte_size) +
        ",stub-timeout-seconds=" +
        std::to_string(backend_state->stub_timeout_seconds))

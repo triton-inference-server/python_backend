@@ -199,6 +199,34 @@ class Stub {
 
   std::unique_ptr<SharedMemory>& GetSharedMemory() { return shm_pool_; }
 
+  void SetErrorForResponse(Response* response, const char* err_message)
+  {
+    off_t err_string_offset = 0;
+    response->is_error_set = false;
+    response->has_error = true;
+    LOG_IF_EXCEPTION(
+        SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
+
+    if (err_string_offset != 0) {
+      response->error = err_string_offset;
+      response->is_error_set = true;
+    }
+  }
+
+  void SetErrorForResponseBatch(const char* err_message)
+  {
+    off_t err_string_offset = 0;
+    response_batch_->is_error_set = false;
+    response_batch_->has_error = true;
+    LOG_IF_EXCEPTION(
+        SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
+
+    if (err_string_offset != 0) {
+      response_batch_->error = err_string_offset;
+      response_batch_->is_error_set = true;
+    }
+  }
+
   void ProcessResponse(
       Response* response_shm, ResponseBatch* response_batch,
       py::handle response, py::object& serialize_bytes)
@@ -210,15 +238,11 @@ class Stub {
     bool has_error = py_has_error;
 
     if (has_error) {
-      response_shm->has_error = true;
-      off_t err_string_offset;
       py::str py_string_err = py::str(response.attr("error")());
       std::string response_error = py_string_err;
-      LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-          shm_pool_, err_string_offset, response_error.c_str()));
-      response_shm->error = err_string_offset;
+      SetErrorForResponse(response_shm, response_error.c_str());
 
-      // Skip the response value if it has error
+      // Skip the response value when the response has error.
       return;
     }
 
@@ -262,10 +286,7 @@ class Stub {
         if (serialize_bytes.is_none()) {
           const char* err_message = "An error happened during serialization.";
           LOG_INFO << err_message;
-          off_t err_message_offset;
-          SaveStringToSharedMemory(shm_pool_, err_message_offset, err_message);
-          response_shm->has_error = true;
-          response_shm->error = err_message_offset;
+          SetErrorForResponse(response_shm, err_message);
           return;
         }
 
@@ -419,12 +440,7 @@ class Stub {
 
   void SetResponseFromException(const PythonBackendException& pb_exception)
   {
-    off_t err_string_offset;
-    LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-        shm_pool_, err_string_offset,
-        pb_exception.err_->error_message.c_str()));
-    response_batch_->has_error = true;
-    response_batch_->error = err_string_offset;
+    SetErrorForResponseBatch(pb_exception.err_->error_message.c_str());
   }
 
   int Execute()
@@ -485,12 +501,7 @@ class Stub {
       std::string message = "Python model " + model_path_ +
                             " does not implement `execute` method.";
       LOG_INFO << message;
-
-      off_t err_string_offset;
-      LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-          shm_pool_, err_string_offset, message.c_str()));
-      response_batch_->has_error = true;
-      response_batch_->error = err_string_offset;
+      SetErrorForResponseBatch(message.c_str());
 
       return 0;
     }
@@ -500,12 +511,9 @@ class Stub {
       responses = model_instance_.attr("execute")(py_request_list);
     }
     catch (const py::error_already_set& e) {
-      off_t err_string_offset;
       LOG_INFO << e.what();
-      LOG_IF_EXCEPTION(
-          SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()));
-      response_batch_->has_error = true;
-      response_batch_->error = err_string_offset;
+      SetErrorForResponseBatch(e.what());
+
       return 0;
     }
 
@@ -536,13 +544,8 @@ class Stub {
       catch (const PythonBackendException& pb_exception) {
         LOG_EXCEPTION(pb_exception);
         pb_exception.err_->error_message.c_str();
-
-        off_t err_string_offset;
-        LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-            shm_pool_, err_string_offset,
-            pb_exception.err_->error_message.c_str()));
-        response_shm->has_error = true;
-        response_shm->error = err_string_offset;
+        SetErrorForResponse(
+            response_shm, pb_exception.err_->error_message.c_str());
       }
       i += 1;
     }
@@ -596,11 +599,8 @@ class Stub {
 
       catch (const py::error_already_set& e) {
         LOG_INFO << e.what();
+        SetErrorForResponseBatch(e.what());
 
-        off_t err_string_offset;
-        SaveStringToSharedMemory(shm_pool_, err_string_offset, e.what()),
-            response_batch_->has_error = true;
-        response_batch_->error = err_string_offset;
         NotifyParent();
         exit(1);
       }
@@ -685,7 +685,8 @@ main(int argc, char** argv)
 
   pid_t parent_pid = std::stoi(argv[5]);
   bool background_thread_running = true;
-  std::thread background_thread([&parent_pid, &background_thread_running] {
+  std::thread background_thread([&parent_pid, &background_thread_running,
+                                 &stub] {
     while (background_thread_running) {
       // Every two seconds check if the parent process is alive.
       sleep(2);
@@ -695,6 +696,10 @@ main(int argc, char** argv)
       }
 
       pid_t child_pid = getpid();
+
+      // Destroy Stub
+      stub.reset();
+
       // Kill the process
       kill(child_pid, SIGTERM);
       LOG_INFO << "Non-graceful termination detected. Killing the child stub: "

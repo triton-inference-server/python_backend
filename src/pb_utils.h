@@ -112,6 +112,7 @@ struct Response {
   uint32_t outputs_size;
   off_t error;
   bool has_error;
+  bool is_error_set;  // Indicates whether this error has a message or not.
 };
 
 struct ResponseBatch {
@@ -119,6 +120,7 @@ struct ResponseBatch {
   uint32_t batch_size;
   off_t error;
   bool has_error;
+  bool is_error_set;  // Indicates whether this error has a message or not.
 };
 
 struct RequestBatch {
