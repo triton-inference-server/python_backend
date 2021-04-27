@@ -547,9 +547,9 @@ ModelInstanceState::ProcessRequests(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
           response_batch->responses));
 
+
   for (uint32_t r = 0; r < request_count; ++r) {
-    std::vector<TRITONBACKEND_Response*> response(
-        responses.begin() + r, responses.begin() + r + 1);
+    TRITONBACKEND_Response* response = responses[r];
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
 
@@ -609,11 +609,6 @@ ModelInstanceState::ProcessRequests(
             (char**)&output_tensors, sizeof(Tensor) * requested_output_count,
             response_shm->outputs));
 
-    BackendOutputResponder responder(
-        &request, 1 /* request count */, &response, 0 /* max_batch_size */,
-        model_state->TritonMemoryManager(), model_state->EnablePinnedInput(),
-        CudaStream());
-
     bool cuda_copy = false;
     std::set<std::string> requested_output_names;
     for (size_t j = 0; j < requested_output_count; ++j) {
@@ -659,36 +654,29 @@ ModelInstanceState::ProcessRequests(
               (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
 
       std::vector<int64_t> batch_shape(dims, dims + dims_count);
-      if (triton_dt != TRITONSERVER_TYPE_BYTES) {
-        responder.ProcessTensor(
-            name, triton_dt, batch_shape, data,
-            TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
-      } else {
-        TRITONSERVER_MemoryType actual_memory_type = TRITONSERVER_MEMORY_CPU;
-        int64_t actual_memory_type_id = 0;
-        void* buffer;
+      TRITONSERVER_MemoryType actual_memory_type = TRITONSERVER_MEMORY_CPU;
+      int64_t actual_memory_type_id = 0;
+      void* buffer;
 
-        TRITONBACKEND_Output* response_output;
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_ResponseOutput(
-                response[0], &response_output, name, triton_dt,
-                batch_shape.data(), batch_shape.size()));
+      TRITONBACKEND_Output* response_output;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_ResponseOutput(
+              response, &response_output, name, triton_dt, batch_shape.data(),
+              batch_shape.size()));
 
-        bool cuda_used;
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_OutputBuffer(
-                response_output, &buffer, raw_data->byte_size,
-                &actual_memory_type, &actual_memory_type_id));
-        CopyBuffer(
-            "Failed to copy string", TRITONSERVER_MEMORY_CPU /* memory_type */,
-            0 /* memory_type_id */, actual_memory_type, actual_memory_type_id,
-            raw_data->byte_size, data, buffer, CudaStream(), &cuda_used);
-        cuda_copy |= cuda_used;
-      }
+      bool cuda_used;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_OutputBuffer(
+              response_output, &buffer, raw_data->byte_size,
+              &actual_memory_type, &actual_memory_type_id));
+      CopyBuffer(
+          "Failed to copy string", TRITONSERVER_MEMORY_CPU /* memory_type */,
+          0 /* memory_type_id */, actual_memory_type, actual_memory_type_id,
+          raw_data->byte_size, data, buffer, CudaStream(), &cuda_used);
+      cuda_copy |= cuda_used;
     }
-    cuda_copy |= responder.Finalize();
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
       cudaStreamSynchronize(stream_);
