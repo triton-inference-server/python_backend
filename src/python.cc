@@ -51,6 +51,7 @@
 #include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
+#include "triton/backend/backend_output_responder.h"
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
@@ -369,7 +370,7 @@ ModelInstanceState::ProcessRequests(
       requests_shm_offset));
   request_batch->requests = requests_shm_offset;
 
-  // We take the responsiblity of the responses.
+  // We take the responsibilty of the responses.
   std::vector<TRITONBACKEND_Response*> responses;
   responses.reserve(request_count);
 
@@ -545,6 +546,7 @@ ModelInstanceState::ProcessRequests(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
           response_batch->responses));
 
+
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
     TRITONBACKEND_Request* request = requests[r];
@@ -606,14 +608,20 @@ ModelInstanceState::ProcessRequests(
             (char**)&output_tensors, sizeof(Tensor) * requested_output_count,
             response_shm->outputs));
 
+    bool cuda_copy = false;
+    std::set<std::string> requested_output_names;
+    for (size_t j = 0; j < requested_output_count; ++j) {
+      const char* output_name;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_RequestOutputName(request, j, &output_name));
+      requested_output_names.insert(output_name);
+    }
+
     for (size_t j = 0; j < requested_output_count; ++j) {
       Tensor* output_tensor = &output_tensors[j];
-
-      TRITONBACKEND_Output* triton_output;
       TRITONSERVER_DataType triton_dt = output_tensor->dtype;
-
       size_t dims_count = output_tensor->dims_count;
-
       int64_t* dims;
       GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
@@ -625,6 +633,12 @@ ModelInstanceState::ProcessRequests(
       GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
           LoadStringFromSharedMemory(shm_pool_, output_tensor->name, name));
+
+      // Skip the output tensor if it is not in the list of requested outputs
+      if (requested_output_names.find(std::string(name)) ==
+          requested_output_names.end()) {
+        continue;
+      }
 
       RawData* raw_data;
       GUARDED_RESPOND_IF_EXCEPTION(
@@ -638,50 +652,35 @@ ModelInstanceState::ProcessRequests(
           shm_pool_->MapOffset(
               (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
 
-      // Prepare output buffers.
+      std::vector<int64_t> batch_shape(dims, dims + dims_count);
+      TRITONSERVER_MemoryType actual_memory_type = TRITONSERVER_MEMORY_CPU;
+      int64_t actual_memory_type_id = 0;
+      void* buffer;
+
+      TRITONBACKEND_Output* response_output;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_ResponseOutput(
-              response, &triton_output, name, triton_dt, dims, dims_count));
+              response, &response_output, name, triton_dt, batch_shape.data(),
+              batch_shape.size()));
 
-      uint64_t output_byte_size = raw_data->byte_size;
-
-      void* output_buffer;
-
-      TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
-      int64_t output_memory_type_id = 0;
+      bool cuda_used;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_OutputBuffer(
-              triton_output, &output_buffer, output_byte_size,
-              &output_memory_type, &output_memory_type_id));
-
-      if ((responses[r] == nullptr) ||
-          (output_memory_type == TRITONSERVER_MEMORY_GPU)) {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_UNSUPPORTED,
-                "can't create response in GPU memory."));
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_ERROR, __FILE__, __LINE__,
-            (std::string("request ") + std::to_string(r) +
-             ": failed to create output buffer in CPU memory.")
-                .c_str());
-        continue;
-      }
-
-      // Copy Python output to Triton output buffers
-      std::copy(data, data + output_byte_size, (char*)output_buffer);
+              response_output, &buffer, raw_data->byte_size,
+              &actual_memory_type, &actual_memory_type_id));
+      CopyBuffer(
+          "Failed to copy string", TRITONSERVER_MEMORY_CPU /* memory_type */,
+          0 /* memory_type_id */, actual_memory_type, actual_memory_type_id,
+          raw_data->byte_size, data, buffer, CudaStream(), &cuda_used);
+      cuda_copy |= cuda_used;
     }
-
-    if (responses[r] == nullptr) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR, (std::string("Request ") + std::to_string(r) +
-                                   ": failed to create output response")
-                                      .c_str());
-      continue;
+#ifdef TRITON_ENABLE_GPU
+    if (cuda_copy) {
+      cudaStreamSynchronize(stream_);
     }
+#endif  // TRITON_ENABLE_GPU
 
     // If error happens at this stage, we can only log it
     LOG_IF_ERROR(
@@ -949,7 +948,7 @@ ModelInstanceState::GetInputTensor(
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_UNSUPPORTED,
         "Python backend does not support input size larger than 2GBs, consider "
-        "parititioning your input into multiple inputs.");
+        "partitioning your input into multiple inputs.");
   }
 
   // We need to create a new collector for every request because python backend

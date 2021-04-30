@@ -62,12 +62,6 @@ namespace triton { namespace backend { namespace python {
 // Macros that use current filename and line number.
 #define LOG_INFO LOG_INFO_FL(__FILE__, __LINE__)
 
-void
-SignalHandler(int signum)
-{
-  // Skip the SIGINT
-}
-
 class Logger {
  public:
   // Log a message.
@@ -109,6 +103,12 @@ class LogMessage {
 };
 
 #define LOG_INFO_FL(FN, LN) LogMessage((char*)(FN), LN).stream()
+
+void
+SignalHandler(int signum)
+{
+  // Skip the SIGINT
+}
 
 class Stub {
   pthread_mutex_t* child_mutex_;
