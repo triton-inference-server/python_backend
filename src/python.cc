@@ -177,7 +177,6 @@ struct BackendState {
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
-  std::atomic<long> total_shared_memory_size;
 };
 
 class ModelState : public BackendModel {
@@ -744,18 +743,6 @@ ModelInstanceState::SetupChildProcess()
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
 
-  model_state->StateForBackend()->total_shared_memory_size -= shm_default_size;
-
-  // If total amount of shared memory available is negative, return an error
-  if (model_state->StateForBackend()->total_shared_memory_size < 0) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("Failed to initialize the model instance " + Name() +
-         " because it run out of shared memory. Increase the shared memory "
-         "size to fix this error.")
-            .c_str());
-  }
-
   shm_pool_ = std::make_unique<SharedMemory>(
       shm_region_name, shm_default_size, shm_growth_size, true /* truncate */);
 
@@ -1073,26 +1060,11 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     RETURN_IF_ERROR(backend_config.Parse(buffer, byte_size));
   }
 
-  struct statfs shm_sb;
-
-  size_t total_shm_byte_size;
-  int error_code = statfs("/dev/shm", &shm_sb);
-  if (error_code == 0 /* success */) {
-    total_shm_byte_size = shm_sb.f_bsize * shm_sb.f_blocks;
-  } else {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("Failed to call statfs for /dev/shm. Error code: " +
-         std::to_string(error_code))
-            .c_str());
-  }
-
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
   backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
   backend_state->stub_timeout_seconds = 10;
-  backend_state->total_shared_memory_size = total_shm_byte_size;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value shm_growth_size;

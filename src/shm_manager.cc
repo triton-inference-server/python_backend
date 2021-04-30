@@ -55,8 +55,8 @@ SharedMemory::SharedMemory(
   }
 
   shm_growth_bytes_ = shm_growth_bytes;
-  int res = ftruncate(shm_fd_, default_byte_size);
-  if (res == -1) {
+  int res = posix_fallocate(shm_fd_, 0, default_byte_size);
+  if (res != 0) {
     std::unique_ptr<PythonBackendError> err =
         std::make_unique<PythonBackendError>();
     err->error_message =
@@ -127,26 +127,6 @@ SharedMemory::~SharedMemory() noexcept(false)
   }
 }
 
-size_t
-SharedMemory::GetAvailableSharedMemory()
-{
-  size_t total_available_shm;
-  struct statfs shm_sb;
-
-  int error_code = statfs("/dev/shm", &shm_sb);
-  if (error_code == 0 /* success */) {
-    total_available_shm = shm_sb.f_bsize * shm_sb.f_bfree;
-  } else {
-    std::unique_ptr<PythonBackendError> err =
-        std::make_unique<PythonBackendError>();
-    err->error_message = "Failed to call statfs for /dev/shm. Error code: " +
-                         std::to_string(error_code);
-    throw PythonBackendException(std::move(err));
-  }
-
-  return total_available_shm;
-}
-
 void
 SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 {
@@ -158,28 +138,14 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
   }
 
   if (shm_bytes_added > 0) {
-    size_t available_shm_bytes = GetAvailableSharedMemory();
-
-    if (shm_bytes_added >= available_shm_bytes) {
+    if (posix_fallocate(shm_fd_, 0, *capacity_) != 0) {
       // Revert the capacity to the previous value
       *capacity_ -= shm_bytes_added;
       std::unique_ptr<PythonBackendError> err =
           std::make_unique<PythonBackendError>();
       err->error_message =
           ("Failed to increase the shared memory pool size for key '" +
-           shm_key_ + "' to " + std::to_string(*capacity_) +
-           " bytes. There are no bytes available in /dev/shm.");
-      throw PythonBackendException(std::move(err));
-    }
-
-    if (ftruncate(shm_fd_, *capacity_) == -1) {
-      // Revert the capacity to the previous value
-      *capacity_ -= shm_bytes_added;
-      std::unique_ptr<PythonBackendError> err =
-          std::make_unique<PythonBackendError>();
-      err->error_message =
-          ("Failed to increase the shared memory pool size for key '" +
-           shm_key_ + "' to " + std::to_string(*capacity_) + " bytes");
+           shm_key_ + "' to " + std::to_string(*capacity_) + " bytes.");
       throw PythonBackendException(std::move(err));
     }
   }
