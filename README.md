@@ -325,7 +325,7 @@ growth can be configured using the `shm-growth-byte-size`.
 
 You can also configure the timeout used for connecting Triton main process
 to the Python backend stubs using the `stub-timeout-seconds`. The default
-value is 10 seconds.
+value is 30 seconds.
 
 The config values described above can be passed to Triton using `--backend-config`
 flag:
