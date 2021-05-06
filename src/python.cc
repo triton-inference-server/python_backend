@@ -799,6 +799,7 @@ ModelInstanceState::SetupChildProcess()
   }
 
   parent_pid_ = getpid();
+  pthread_mutex_lock(parent_mutex_);
 
   pid_t pid = fork();
 
@@ -838,7 +839,6 @@ ModelInstanceState::SetupChildProcess()
     }
 
   } else {
-    pthread_mutex_lock(parent_mutex_);
     int64_t stub_timeout_seconds =
         model_state->StateForBackend()->stub_timeout_seconds;
 
@@ -851,7 +851,9 @@ ModelInstanceState::SetupChildProcess()
     if (pthread_cond_timedwait(parent_cond_, parent_mutex_, &ts) != 0) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Failed to initialize model instance ") + Name())
+          (std::string("Timed out occured while waiting for the stub process. "
+                       "Failed to initialize model instance ") +
+           Name())
               .c_str());
     }
 
@@ -1063,7 +1065,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   triton::common::TritonJson::Value cmdline;
   backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
-  backend_state->stub_timeout_seconds = 10;
+  backend_state->stub_timeout_seconds = 30;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value shm_growth_size;
@@ -1257,8 +1259,6 @@ TRITONBACKEND_ModelInstanceExecute(
   ModelInstanceState* instance_state;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
-
-
   RETURN_IF_ERROR(instance_state->ProcessRequests(requests, request_count));
 
   for (uint32_t r = 0; r < request_count; ++r) {
