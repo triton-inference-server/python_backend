@@ -1036,7 +1036,6 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
        std::to_string(TRITONBACKEND_API_VERSION_MINOR))
           .c_str());
 
-  TRITONBACKEND_ApiVersion(&api_version_major, &api_version_minor);
   if ((api_version_major != TRITONBACKEND_API_VERSION_MAJOR) ||
       (api_version_minor < TRITONBACKEND_API_VERSION_MINOR)) {
     return TRITONSERVER_ErrorNew(
