@@ -76,7 +76,7 @@ $ git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy
 
 7. Run the example client.
 ```
-$ python3 python_backend/examples/add_sub_client.py
+$ python3 python_backend/examples/add_sub/client.py
 ```
 
 ## Building from Source
@@ -342,7 +342,7 @@ small.
 # Examples
 
 For using the Triton Python client in these examples you need to install
-the [Triton Python Client Library](https://github.com/triton-inference-server/server/blob/master/docs/client_libraries.md#getting-the-client-libraries).
+the [Triton Python Client Library](https://github.com/triton-inference-server/client#getting-the-client-libraries-and-examples).
 The Python client for each of the examples is in the `client.py` file.
 
 ## AddSub in Numpy
