@@ -287,12 +287,17 @@ models
     └── config.pbtxt
 ```
 
-## Python Environment
+## Using Your Own Python Interpreter
 
-Python backend by default uses `python3` available inside `PATH`. If you are
-using [conda](https://docs.conda.io/en/latest/) or
-[venv](https://docs.python.org/3/library/venv.html), they will automatically
-update `PATH` and Python backend will use the correct environment.
+Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
+containers uses Python 3.8. Changing your environment using
+[conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/) does not
+make Python backend to use the new environment. To change the Python interpreter
+used by Python backend, you need to rebuild the backend from source while the
+Python environment is activated. The instructions for building the backend from
+source are included in the
+[building from source](https://github.com/triton-inference-server/python_backend#building-from-source) section.
+
 ## Error Handling
 
 If there is an error that affects the `initialize`, `execute`, or `finalize`
