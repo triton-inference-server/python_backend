@@ -802,11 +802,26 @@ ModelInstanceState::SetupChildProcess()
             .c_str());
   }
 
+  // Path to the extracted Python env
   std::string python_execution_env = "none";
+
+  // Path to environment activation script
+  std::string path_to_activate;
+
   if (model_state->PythonExecutionEnv() != "") {
     python_execution_env = model_state->StateForBackend()->env_manager->Extract(
         model_state->PythonExecutionEnv());
+    path_to_activate = python_execution_env + "/bin/activate";
+    if (!FileExists(path_to_activate)) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Path ") + path_to_activate +
+           " does not exist. The Python environment should contain an "
+           "'activate' script.")
+              .c_str());
+    }
   }
+
   parent_pid_ = getpid();
   pthread_mutex_lock(parent_mutex_);
 
@@ -824,6 +839,19 @@ ModelInstanceState::SetupChildProcess()
     stub_args[1] = "-c";
     stub_args[3] = nullptr;  // Last argument must be nullptr
 
+    // Default Python backend stub
+    std::string python_backend_stub =
+        model_state->StateForBackend()->python_lib +
+        "/triton_python_backend_stub";
+
+    // Path to alternative Python backend stub
+    std::string model_python_backend_stub =
+        std::string(model_path) + "/triton_python_backend_stub";
+
+    if (FileExists(model_python_backend_stub)) {
+      python_backend_stub = model_python_backend_stub;
+    }
+
     std::stringstream ss;
     ss << model_state->StateForBackend()->python_lib
        << "/triton_python_backend_stub";
@@ -834,10 +862,7 @@ ModelInstanceState::SetupChildProcess()
     std::string bash_argument;
     bash_argument = ss.str();
     if (model_state->PythonExecutionEnv() != "") {
-      ss.seekp(0);
-      // TODO: Check if /bin/activate exits in the path
-      bash_argument = "source " + python_execution_env + "/bin/activate && " +
-                      bash_argument;
+      bash_argument = "source " + path_to_activate + " && " + bash_argument;
       std::cout << bash_argument << std::endl;
     }
 

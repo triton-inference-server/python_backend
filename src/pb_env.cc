@@ -119,10 +119,12 @@ EnvironmentManager::Extract(std::string env_path)
     std::string dst_env_path(
         std::string(base_path_) + "/" + std::to_string(env_map_.size()));
 
+    std::string canonical_env_path_str(canonical_env_path);
+
     int status =
         mkdir(dst_env_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     if (status == 0) {
-      ExtractTarFile(canonical_env_path, dst_env_path);
+      ExtractTarFile(canonical_env_path_str, dst_env_path);
     } else {
       throw PythonBackendException(
           std::string("Failed to create environment directory for '") +

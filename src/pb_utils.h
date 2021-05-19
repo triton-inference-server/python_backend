@@ -198,6 +198,8 @@ void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
 
-void ExtractTarFile(std::string archive_path, std::string dst_path);
+void ExtractTarFile(std::string &archive_path, std::string &dst_path);
+
+bool FileExists(std::string &path);
 
 }}}  // namespace triton::backend::python

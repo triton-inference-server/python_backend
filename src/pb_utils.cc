@@ -226,7 +226,7 @@ CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
 }
 
 void
-ExtractTarFile(std::string archive_path, std::string dst_path)
+ExtractTarFile(std::string &archive_path, std::string &dst_path)
 {
   char current_directory[PATH_MAX];
   getcwd(current_directory, PATH_MAX);
@@ -285,6 +285,14 @@ ExtractTarFile(std::string archive_path, std::string dst_path)
 
   archive_write_close(output_archive);
   archive_write_free(output_archive);
+
+  // Revert the directory change.
+  chdir(current_directory);
+}
+
+bool FileExists(std::string &path) {
+  struct stat buffer;
+  return stat(path.c_str(), &buffer) == 0;
 }
 
 }}}  // namespace triton::backend::python
