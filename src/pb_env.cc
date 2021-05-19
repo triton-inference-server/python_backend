@@ -28,6 +28,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <fts.h>
 #include <boost/filesystem.hpp>
 #include <boost/iostreams/copy.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
@@ -40,9 +41,56 @@
 
 namespace triton { namespace backend { namespace python {
 
+
+void
+RecursiveDirectoryDelete(const char* dir)
+{
+  FTS* ftsp = NULL;
+  FTSENT* curr;
+
+  char* files[] = {(char*)dir, NULL};
+
+  ftsp = fts_open(files, FTS_NOCHDIR | FTS_PHYSICAL | FTS_XDEV, NULL);
+  if (!ftsp) {
+  }
+
+  while ((curr = fts_read(ftsp))) {
+    switch (curr->fts_info) {
+      case FTS_NS:
+      case FTS_DNR:
+      case FTS_ERR:
+        throw PythonBackendException(
+            std::string("fts_read error: ") + curr->fts_accpath +
+            " error: " + strerror(curr->fts_errno));
+        break;
+
+      case FTS_DC:
+      case FTS_DOT:
+      case FTS_NSOK:
+        break;
+
+      case FTS_D:
+        // Do nothing. Directories are deleted in FTS_DP
+        break;
+
+      case FTS_DP:
+      case FTS_F:
+      case FTS_SL:
+      case FTS_SLNONE:
+      case FTS_DEFAULT:
+        if (remove(curr->fts_accpath) < 0) {
+          throw PythonBackendException(
+              std::string("Failed to remove ") + curr->fts_path +
+              " error: " + strerror(curr->fts_errno));
+        }
+        break;
+    }
+  }
+}
+
 EnvironmentManager::EnvironmentManager()
 {
-  char tmp_dir_template[PATH_MAX];
+  char tmp_dir_template[PATH_MAX + 1];
   strcpy(tmp_dir_template, "/tmp/python_env_XXXXXX");
 
   char* env_path = mkdtemp(tmp_dir_template);
@@ -56,18 +104,25 @@ EnvironmentManager::EnvironmentManager()
 std::string
 EnvironmentManager::Extract(std::string env_path)
 {
+  // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
-  boost::filesystem::path canonical_env_path =
-      boost::filesystem::canonical(env_path);
+  char canonical_env_path[PATH_MAX + 1];
+
+  char* err = realpath(env_path.c_str(), canonical_env_path);
+  if (err == nullptr) {
+    throw PythonBackendException(
+        std::string("Failed to get the canonical path for ") + env_path + ".");
+  }
 
   // Extract only if the env has not been extracted yet.
-  if (env_map_.find(canonical_env_path.string()) == env_map_.end()) {
-    boost::filesystem::path dst_env_path(
+  if (env_map_.find(canonical_env_path) == env_map_.end()) {
+    std::string dst_env_path(
         std::string(base_path_) + "/" + std::to_string(env_map_.size()));
 
-    bool directory_created = boost::filesystem::create_directory(dst_env_path);
-    if (directory_created) {
-      ExtractTarFile(canonical_env_path.string(), dst_env_path.string());
+    int status =
+        mkdir(dst_env_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+    if (status == 0) {
+      ExtractTarFile(canonical_env_path, dst_env_path);
     } else {
       throw PythonBackendException(
           std::string("Failed to create environment directory for '") +
@@ -75,16 +130,16 @@ EnvironmentManager::Extract(std::string env_path)
     }
 
     // Add the path to the list of environments
-    env_map_.insert({canonical_env_path.string(), dst_env_path.string()});
-    return dst_env_path.string();
+    env_map_.insert({canonical_env_path, dst_env_path});
+    return dst_env_path;
   } else {
-    return env_map_.find(canonical_env_path.string())->second;
+    return env_map_.find(canonical_env_path)->second;
   }
 }
 
 EnvironmentManager::~EnvironmentManager()
 {
-  boost::filesystem::remove_all(base_path_);
+  RecursiveDirectoryDelete(base_path_);
 }
 
 }}}  // namespace triton::backend::python

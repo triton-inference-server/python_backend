@@ -25,23 +25,25 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <string>
+#include <climits>
 #include <map>
 #include <mutex>
-#include <boost/iostreams/filter/gzip.hpp>
-#include <boost/filesystem.hpp>
+#include <string>
 
 namespace triton { namespace backend { namespace python {
 
+//
+// A class that manages Python environments
+//
 class EnvironmentManager {
-    std::map<std::string, std::string> env_map_;
-    char base_path_[PATH_MAX];
-    std::mutex mutex_;
+  std::map<std::string, std::string> env_map_;
+  char base_path_[PATH_MAX + 1];
+  std::mutex mutex_;
 
-public:
-    EnvironmentManager();
-    std::string Extract(std::string env_path);
-    ~EnvironmentManager();
+ public:
+  EnvironmentManager();
+  std::string Extract(std::string env_path);
+  ~EnvironmentManager();
 };
 
-}}}
+}}}  // namespace triton::backend::python

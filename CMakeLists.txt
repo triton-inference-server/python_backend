@@ -82,13 +82,6 @@ FetchContent_MakeAvailable(pybind11)
 
 find_package(ZLIB REQUIRED)
 
-#
-# Boost
-#
-find_package(Boost REQUIRED COMPONENTS filesystem iostreams)
-message(STATUS "Using Boost ${Boost_VERSION}")
-include_directories(${Boost_INCLUDE_DIRS})
-
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
@@ -149,7 +142,6 @@ target_link_libraries(
     triton-backend-utils    # from repo-backend
     ZLIB::ZLIB
     -larchive               # shared memory 
-    ${Boost_LIBRARIES}
 )
 
 target_link_libraries(

@@ -46,8 +46,7 @@ SharedMemory::SharedMemory(
     shm_fd_ = shm_open(shm_key.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
   }
   if (shm_fd_ == -1) {
-
-      std::string error_message = 
+    std::string error_message =
         ("unable to get shared memory descriptor for shared-memory key '" +
          shm_key + "'");
     throw PythonBackendException(error_message);
@@ -56,7 +55,7 @@ SharedMemory::SharedMemory(
   shm_growth_bytes_ = shm_growth_bytes;
   int res = posix_fallocate(shm_fd_, 0, default_byte_size);
   if (res != 0) {
-    std::string error_message = 
+    std::string error_message =
         ("unable to initialize shared-memory key '" + shm_key +
          "' to requested size: " + std::to_string(default_byte_size) +
          " bytes");
@@ -101,7 +100,8 @@ SharedMemory::~SharedMemory() noexcept(false)
 
   // Close fd
   if (close(shm_fd_) == -1) {
-    std::string error_message = ("unable to close shared-memory descriptor: " +
+    std::string error_message =
+        ("unable to close shared-memory descriptor: " +
          std::to_string(shm_fd_));
     throw PythonBackendException(error_message);
   }
@@ -109,7 +109,7 @@ SharedMemory::~SharedMemory() noexcept(false)
   // Unlink shared memory
   int error = shm_unlink(shm_key_.c_str());
   if (error == -1) {
-    std::string error_message = 
+    std::string error_message =
         ("unable to unlink shared memory for key '" + shm_key_ + "'");
     throw PythonBackendException(error_message);
   }
@@ -129,7 +129,7 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
     if (posix_fallocate(shm_fd_, 0, *capacity_) != 0) {
       // Revert the capacity to the previous value
       *capacity_ -= shm_bytes_added;
-      std::string error_message = 
+      std::string error_message =
           ("Failed to increase the shared memory pool size for key '" +
            shm_key_ + "' to " + std::to_string(*capacity_) + " bytes.");
       throw PythonBackendException(error_message);
@@ -152,7 +152,7 @@ SharedMemory::UpdateSharedMemory()
         mmap(NULL, *capacity_, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
 
     if (map_addr == MAP_FAILED) {
-      std::string error_message = 
+      std::string error_message =
           ("unable to process address space or shared-memory descriptor: " +
            std::to_string(shm_fd_));
       throw PythonBackendException(error_message);

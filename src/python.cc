@@ -802,6 +802,11 @@ ModelInstanceState::SetupChildProcess()
             .c_str());
   }
 
+  std::string python_execution_env = "none";
+  if (model_state->PythonExecutionEnv() != "") {
+    python_execution_env = model_state->StateForBackend()->env_manager->Extract(
+        model_state->PythonExecutionEnv());
+  }
   parent_pid_ = getpid();
   pthread_mutex_lock(parent_mutex_);
 
@@ -828,14 +833,11 @@ ModelInstanceState::SetupChildProcess()
 
     std::string bash_argument;
     bash_argument = ss.str();
-    std::string python_execution_env = "none";
     if (model_state->PythonExecutionEnv() != "") {
       ss.seekp(0);
-      python_execution_env =
-          model_state->StateForBackend()->env_manager->Extract(
-              model_state->PythonExecutionEnv());
       // TODO: Check if /bin/activate exits in the path
-      bash_argument = "source " + python_execution_env + "/bin/activate && " + bash_argument;
+      bash_argument = "source " + python_execution_env + "/bin/activate && " +
+                      bash_argument;
       std::cout << bash_argument << std::endl;
     }
 
