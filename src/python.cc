@@ -44,6 +44,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "pb_env.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
@@ -66,17 +67,17 @@
     }                                                                  \
   } while (false)
 
-#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(RESPONSES, RESPONSES_COUNT, X)     \
-  do {                                                                         \
-    try {                                                                      \
-      (X);                                                                     \
-    }                                                                          \
-    catch (const PythonBackendException& exception) {                          \
-      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(                \
-          TRITONSERVER_ERROR_INTERNAL, exception.err_->error_message.c_str()); \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);         \
-      return nullptr;                                                          \
-    }                                                                          \
+#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(RESPONSES, RESPONSES_COUNT, X) \
+  do {                                                                     \
+    try {                                                                  \
+      (X);                                                                 \
+    }                                                                      \
+    catch (const PythonBackendException& exception) {                      \
+      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(            \
+          TRITONSERVER_ERROR_INTERNAL, exception.what());                  \
+      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);     \
+      return nullptr;                                                      \
+    }                                                                      \
   } while (false)
 
 #define RESPOND_AND_RETURN_IF_ERROR(REQUEST, X)                         \
@@ -98,27 +99,27 @@
     }                                                                   \
   } while (false)
 
-#define RESPOND_AND_RETURN_IF_EXCEPTION(REQUEST, X)                            \
-  do {                                                                         \
-    try {                                                                      \
-      (X);                                                                     \
-    }                                                                          \
-    catch (const PythonBackendException& exception) {                          \
-      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(                 \
-          TRITONSERVER_ERROR_INTERNAL, exception.err_->error_message.c_str()); \
-      TRITONBACKEND_Response* rarie_response__ = nullptr;                      \
-      LOG_IF_ERROR(                                                            \
-          TRITONBACKEND_ResponseNew(&rarie_response__, REQUEST),               \
-          "failed to create response");                                        \
-      if (rarie_response__ != nullptr) {                                       \
-        LOG_IF_ERROR(                                                          \
-            TRITONBACKEND_ResponseSend(                                        \
-                rarie_response__, TRITONSERVER_RESPONSE_COMPLETE_FINAL,        \
-                rarie_err__),                                                  \
-            "failed to send error response");                                  \
-      }                                                                        \
-      return rarie_err__;                                                      \
-    }                                                                          \
+#define RESPOND_AND_RETURN_IF_EXCEPTION(REQUEST, X)                     \
+  do {                                                                  \
+    try {                                                               \
+      (X);                                                              \
+    }                                                                   \
+    catch (const PythonBackendException& exception) {                   \
+      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(          \
+          TRITONSERVER_ERROR_INTERNAL, exception.what());               \
+      TRITONBACKEND_Response* rarie_response__ = nullptr;               \
+      LOG_IF_ERROR(                                                     \
+          TRITONBACKEND_ResponseNew(&rarie_response__, REQUEST),        \
+          "failed to create response");                                 \
+      if (rarie_response__ != nullptr) {                                \
+        LOG_IF_ERROR(                                                   \
+            TRITONBACKEND_ResponseSend(                                 \
+                rarie_response__, TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                rarie_err__),                                           \
+            "failed to send error response");                           \
+      }                                                                 \
+      return rarie_err__;                                               \
+    }                                                                   \
   } while (false)
 
 #define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                     \
@@ -145,8 +146,7 @@
       }                                                                 \
       catch (const PythonBackendException& pb_exception) {              \
         TRITONSERVER_Error* err__ = TRITONSERVER_ErrorNew(              \
-            TRITONSERVER_ERROR_INTERNAL,                                \
-            pb_exception.err_->error_message.c_str());                  \
+            TRITONSERVER_ERROR_INTERNAL, pb_exception.what());          \
         LOG_IF_ERROR(                                                   \
             TRITONBACKEND_ResponseSend(                                 \
                 (RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
@@ -165,8 +165,7 @@
     }                                                          \
     catch (const PythonBackendException& pb_exception) {       \
       TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
-          TRITONSERVER_ERROR_INTERNAL,                         \
-          pb_exception.err_->error_message.c_str());           \
+          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());   \
       return rarie_err__;                                      \
     }                                                          \
   } while (false)
@@ -178,6 +177,7 @@ struct BackendState {
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
+  std::unique_ptr<EnvironmentManager> env_manager;
 };
 
 class ModelState : public BackendModel {
@@ -188,16 +188,20 @@ class ModelState : public BackendModel {
   // Get backend state
   BackendState* StateForBackend() { return backend_state_; }
 
+  // Get the Python execution environment
+  std::string PythonExecutionEnv() { return python_execution_env_; }
+
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
   BackendState* backend_state_;
+  std::string python_execution_env_;
 };
 
 TRITONSERVER_Error*
 CreateTritonErrorFromException(const PythonBackendException& pb_exception)
 {
   return TRITONSERVER_ErrorNew(
-      TRITONSERVER_ERROR_INTERNAL, pb_exception.err_->error_message.c_str());
+      TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
 }
 
 class ModelInstanceState : public BackendModelInstance {
@@ -810,19 +814,33 @@ ModelInstanceState::SetupChildProcess()
 
   // Child process
   if (pid == 0) {
-    const char* stub_args[7];
-    stub_args[6] = nullptr;  // Last argument must be nullptr
+    const char* stub_args[4];
+    stub_args[0] = "bash";
+    stub_args[1] = "-c";
+    stub_args[3] = nullptr;  // Last argument must be nullptr
+
     std::stringstream ss;
     ss << model_state->StateForBackend()->python_lib
        << "/triton_python_backend_stub";
     std::string stub_path = ss.str();
-    stub_args[0] = stub_path.c_str();
-    stub_args[1] = model_path_.c_str();
-    stub_args[2] = shm_region_name.c_str();
-    stub_args[3] = std::to_string(shm_default_size).c_str();
-    stub_args[4] = std::to_string(shm_growth_size).c_str();
-    stub_args[5] = std::to_string(parent_pid_).c_str();
-    if (execvp(stub_args[0], (char**)stub_args) == -1) {
+    ss << " " << model_path_ << " " << shm_region_name << " "
+       << shm_default_size << " " << shm_growth_size << " " << parent_pid_;
+
+    std::string bash_argument;
+    bash_argument = ss.str();
+    std::string python_execution_env = "none";
+    if (model_state->PythonExecutionEnv() != "") {
+      ss.seekp(0);
+      python_execution_env =
+          model_state->StateForBackend()->env_manager->Extract(
+              model_state->PythonExecutionEnv());
+      // TODO: Check if /bin/activate exits in the path
+      bash_argument = "source " + python_execution_env + "/bin/activate && " + bash_argument;
+      std::cout << bash_argument << std::endl;
+    }
+
+    stub_args[2] = bash_argument.c_str();
+    if (execvp("bash", (char**)stub_args) == -1) {
       std::stringstream ss;
       ss << "Failed to run python backend stub. Errno = " << errno << '\n'
          << "Python backend stub path: " << stub_path << '\n'
@@ -851,7 +869,7 @@ ModelInstanceState::SetupChildProcess()
     if (pthread_cond_timedwait(parent_cond_, parent_mutex_, &ts) != 0) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Timed out occured while waiting for the stub process. "
+          (std::string("Timed out occurred while waiting for the stub process. "
                        "Failed to initialize model instance ") +
            Name())
               .c_str());
@@ -1003,10 +1021,23 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   TRITONBACKEND_ArtifactType artifact_type;
   THROW_IF_BACKEND_MODEL_ERROR(
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
+  python_execution_env_ = "";
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
   backend_state_ = reinterpret_cast<BackendState*>(bstate);
+  triton::common::TritonJson::Value params;
+  if (model_config_.Find("parameters", &params)) {
+    // Skip the EXECUTION_ENV_PATH variable if it doesn't exist.
+    TRITONSERVER_Error* error =
+        GetParameterValue(params, "EXECUTION_ENV_PATH", &python_execution_env_);
+    if (error == nullptr) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_INFO,
+          (std::string("Using Python execution env ") + python_execution_env_)
+              .c_str());
+    }
+  }
 
   if (artifact_type != TRITONBACKEND_ARTIFACT_FILESYSTEM) {
     throw triton::backend::BackendModelException(TRITONSERVER_ErrorNew(
@@ -1145,6 +1176,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
   backend_state->python_lib = location;
+  backend_state->env_manager = std::make_unique<EnvironmentManager>();
 
   RETURN_IF_ERROR(TRITONBACKEND_BackendSetState(
       backend, reinterpret_cast<void*>(backend_state.get())));

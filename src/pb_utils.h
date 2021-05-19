@@ -27,6 +27,7 @@
 #pragma once
 
 #include <pthread.h>
+#include <exception>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -37,30 +38,28 @@
 
 namespace triton { namespace backend { namespace python {
 
-#define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X)        \
-  do {                                                                    \
-    try {                                                                 \
-      (X);                                                                \
-    }                                                                     \
-    catch (cont PythonBackendException & pb_exception) {                  \
-      off_t string_offset__;                                              \
-      try {                                                               \
-        SaveStringToSharedMemory(                                         \
-            SHM_POOL, string_offset__, pb_exception->err_.error_message); \
-        RESPONSE->has_error = true;                                       \
-        RESPONSE->error = string_offset__;                                \
-        if (R)                                                            \
-          return;                                                         \
-      }                                                                   \
-      catch (cont PythonBackendException & pb2_exception) {               \
-        printf(TRITONSERVER_ErrorMessage(                                 \
-            pb_exception->err_.error_message.c_str()));                   \
-        printf(                                                           \
-            TRITONSERVER_LOG_ERROR,                                       \
-            TRITONSERVER_ErrorMessage(                                    \
-                pb2_exception->err_.error_message.c_str()));              \
-      }                                                                   \
-    }                                                                     \
+#define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
+  do {                                                             \
+    try {                                                          \
+      (X);                                                         \
+    }                                                              \
+    catch (cont PythonBackendException & pb_exception) {           \
+      off_t string_offset__;                                       \
+      try {                                                        \
+        SaveStringToSharedMemory(                                  \
+            SHM_POOL, string_offset__, pb_exception.what());       \
+        RESPONSE->has_error = true;                                \
+        RESPONSE->error = string_offset__;                         \
+        if (R)                                                     \
+          return;                                                  \
+      }                                                            \
+      catch (cont PythonBackendException & pb2_exception) {        \
+        printf(TRITONSERVER_ErrorMessage(pb_exception.what()));    \
+        printf(                                                    \
+            TRITONSERVER_LOG_ERROR,                                \
+            TRITONSERVER_ErrorMessage(pb2_exception.what()));      \
+      }                                                            \
+    }                                                              \
     while (false)
 
 // Create a conditional variable.
@@ -160,12 +159,12 @@ struct PythonBackendError {
 //
 // Exception thrown if error occurs in PythonBackend.
 //
-struct PythonBackendException {
-  PythonBackendException(std::unique_ptr<PythonBackendError> err)
-      : err_(std::move(err))
-  {
-  }
-  std::unique_ptr<PythonBackendError> err_;
+struct PythonBackendException : std::exception {
+  PythonBackendException(std::string message) : message_(message) {}
+
+  const char* what() const throw() { return message_.c_str(); }
+
+  std::string message_;
 };
 
 void SaveMapToSharedMemory(
@@ -198,5 +197,7 @@ void SaveTensorToSharedMemory(
 void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
+
+void ExtractTarFile(std::string archive_path, std::string dst_path);
 
 }}}  // namespace triton::backend::python

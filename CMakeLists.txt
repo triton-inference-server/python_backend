@@ -80,6 +80,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
+find_package(ZLIB REQUIRED)
+
+#
+# Boost
+#
+find_package(Boost REQUIRED COMPONENTS filesystem iostreams)
+message(STATUS "Using Boost ${Boost_VERSION}")
+include_directories(${Boost_INCLUDE_DIRS})
+
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
@@ -89,11 +98,13 @@ configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
 add_library(
   triton-python-backend SHARED
+  src/python.cc
   src/pb_utils.cc
   src/pb_utils.h
+  src/pb_env.cc
+  src/pb_env.h
   src/shm_manager.cc
   src/shm_manager.h
-  src/python.cc
 )
 
 add_executable(
@@ -136,6 +147,9 @@ target_link_libraries(
   PRIVATE
     triton-core-serverstub  # from repo-core
     triton-backend-utils    # from repo-backend
+    ZLIB::ZLIB
+    -larchive               # shared memory 
+    ${Boost_LIBRARIES}
 )
 
 target_link_libraries(
@@ -145,6 +159,7 @@ target_link_libraries(
    Threads::Threads
    pybind11::embed
    triton-backend-utils    # from repo-backend
+   -larchive               # libarchive
    -lrt                    # shared memory 
 )
 

@@ -44,19 +44,19 @@ using namespace pybind11::literals;
 
 namespace triton { namespace backend { namespace python {
 
-#define LOG_IF_EXCEPTION(X)                                 \
-  do {                                                      \
-    try {                                                   \
-      (X);                                                  \
-    }                                                       \
-    catch (const PythonBackendException& pb_exception) {    \
-      LOG_INFO << pb_exception.err_->error_message.c_str(); \
-    }                                                       \
+#define LOG_IF_EXCEPTION(X)                              \
+  do {                                                   \
+    try {                                                \
+      (X);                                               \
+    }                                                    \
+    catch (const PythonBackendException& pb_exception) { \
+      LOG_INFO << pb_exception.what();                   \
+    }                                                    \
   } while (false)
 
-#define LOG_EXCEPTION(E)               \
-  do {                                 \
-    LOG_INFO << E.err_->error_message; \
+#define LOG_EXCEPTION(E)  \
+  do {                    \
+    LOG_INFO << E.what(); \
   } while (false)
 
 // Macros that use current filename and line number.
@@ -440,7 +440,7 @@ class Stub {
 
   void SetResponseFromException(const PythonBackendException& pb_exception)
   {
-    SetErrorForResponseBatch(pb_exception.err_->error_message.c_str());
+    SetErrorForResponseBatch(pb_exception.what());
   }
 
   int Execute()
@@ -543,9 +543,7 @@ class Stub {
       }
       catch (const PythonBackendException& pb_exception) {
         LOG_EXCEPTION(pb_exception);
-        pb_exception.err_->error_message.c_str();
-        SetErrorForResponse(
-            response_shm, pb_exception.err_->error_message.c_str());
+        SetErrorForResponse(response_shm, pb_exception.what());
       }
       i += 1;
     }
@@ -606,8 +604,7 @@ class Stub {
       }
     }
     catch (const PythonBackendException& pb_exception) {
-      LOG_INFO << "Failed to initialize Python stub: "
-               << pb_exception.err_->error_message.c_str();
+      LOG_INFO << "Failed to initialize Python stub: " << pb_exception.what();
       NotifyParent();
       exit(1);
     }
@@ -664,6 +661,7 @@ main(int argc, char** argv)
   }
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
+  pid_t parent_pid = std::stoi(argv[5]);
 
   std::unique_ptr<Stub> stub;
   try {
@@ -671,8 +669,7 @@ main(int argc, char** argv)
         shm_growth_size, shm_default_size, shm_region_name, model_path);
   }
   catch (const PythonBackendException& pb_exception) {
-    LOG_INFO << "Failed to preinitialize Python stub: "
-             << pb_exception.err_->error_message.c_str();
+    LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
     exit(1);
   }
 
@@ -683,7 +680,6 @@ main(int argc, char** argv)
 
   stub->Initialize(model_version, argv[0] /* python stub path*/);
 
-  pid_t parent_pid = std::stoi(argv[5]);
   bool background_thread_running = true;
   std::thread background_thread([&parent_pid, &background_thread_running,
                                  &stub] {
