@@ -94,11 +94,11 @@ EnvironmentManager::EnvironmentManager()
   strcpy(tmp_dir_template, "/tmp/python_env_XXXXXX");
 
   char* env_path = mkdtemp(tmp_dir_template);
-  if (tmp_dir_template == nullptr) {
+  if (env_path == nullptr) {
     throw PythonBackendException(
         "Failed to create temporary directory for Python environments.");
   }
-  strcpy(base_path_, env_path);
+  strcpy(base_path_, tmp_dir_template);
 }
 
 std::string

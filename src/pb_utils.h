@@ -31,6 +31,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <climits>
 #include <vector>
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"

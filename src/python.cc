@@ -36,7 +36,6 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <filesystem>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -807,11 +806,20 @@ ModelInstanceState::SetupChildProcess()
 
   // Path to environment activation script
   std::string path_to_activate;
+  std::string path_to_libpython;
 
   if (model_state->PythonExecutionEnv() != "") {
-    python_execution_env = model_state->StateForBackend()->env_manager->Extract(
-        model_state->PythonExecutionEnv());
+    try {
+      python_execution_env =
+          model_state->StateForBackend()->env_manager->Extract(
+              model_state->PythonExecutionEnv());
+    }
+    catch (PythonBackendException& pb_exception) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+    }
     path_to_activate = python_execution_env + "/bin/activate";
+    path_to_libpython = python_execution_env + "/lib";
     if (!FileExists(path_to_activate)) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
@@ -853,24 +861,29 @@ ModelInstanceState::SetupChildProcess()
     }
 
     std::stringstream ss;
-    ss << model_state->StateForBackend()->python_lib
-       << "/triton_python_backend_stub";
-    std::string stub_path = ss.str();
-    ss << " " << model_path_ << " " << shm_region_name << " "
-       << shm_default_size << " " << shm_growth_size << " " << parent_pid_;
+    ss << python_backend_stub << " " << model_path_ << " " << shm_region_name
+       << " " << shm_default_size << " " << shm_growth_size << " "
+       << parent_pid_ << " " << model_state->StateForBackend()->python_lib;
 
     std::string bash_argument;
     bash_argument = ss.str();
     if (model_state->PythonExecutionEnv() != "") {
-      bash_argument = "source " + path_to_activate + " && " + bash_argument;
-      std::cout << bash_argument << std::endl;
+      // Need to properly set the LD_LIBRARY_PATH so that Python environments
+      // using different python versions load properly.
+      bash_argument = "export LD_LIBRARY_PATH=" + path_to_libpython +
+                      ":$LD_LIBRARY_PATH; source " + path_to_activate + " && " +
+                      bash_argument;
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_VERBOSE,
+          (std::string("Started Python backend stub: ") + bash_argument)
+              .c_str());
     }
 
     stub_args[2] = bash_argument.c_str();
     if (execvp("bash", (char**)stub_args) == -1) {
       std::stringstream ss;
       ss << "Failed to run python backend stub. Errno = " << errno << '\n'
-         << "Python backend stub path: " << stub_path << '\n'
+         << "Python backend stub path: " << python_backend_stub << '\n'
          << "Shared Memory Region Name: " << shm_region_name << '\n'
          << "Shared Memory Default Byte Size: " << shm_default_size << '\n'
          << "Shared Memory Growth Byte Size: " << shm_growth_size << '\n';

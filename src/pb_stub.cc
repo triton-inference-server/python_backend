@@ -551,7 +551,7 @@ class Stub {
     return 0;
   }
 
-  void Initialize(std::string& model_version, std::string python_stub_path)
+  void Initialize(std::string& model_version, std::string triton_install_path)
   {
     try {
       try {
@@ -563,8 +563,7 @@ class Stub {
             model_path_.substr(0, model_path_.find_last_of("/"));
         std::string model_path_parent_parent =
             model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-        std::string python_backend_folder =
-            python_stub_path.substr(0, python_stub_path.find_last_of("/"));
+        std::string python_backend_folder = triton_install_path;
         sys.attr("path").attr("append")(model_path_parent);
         sys.attr("path").attr("append")(model_path_parent_parent);
         sys.attr("path").attr("append")(python_backend_folder);
@@ -630,8 +629,8 @@ extern "C" {
 int
 main(int argc, char** argv)
 {
-  if (argc < 5) {
-    LOG_INFO << "Expected 5 arguments, found " << argc << " arguments.";
+  if (argc < 7) {
+    LOG_INFO << "Expected 7 arguments, found " << argc << " arguments.";
     exit(1);
   }
   signal(SIGINT, SignalHandler);
@@ -662,6 +661,7 @@ main(int argc, char** argv)
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
   pid_t parent_pid = std::stoi(argv[5]);
+  std::string triton_install_path = argv[6];
 
   std::unique_ptr<Stub> stub;
   try {
@@ -678,7 +678,7 @@ main(int argc, char** argv)
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
 
-  stub->Initialize(model_version, argv[0] /* python stub path*/);
+  stub->Initialize(model_version, argv[6] /* triton install path */);
 
   bool background_thread_running = true;
   std::thread background_thread([&parent_pid, &background_thread_running,
