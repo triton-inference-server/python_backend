@@ -149,13 +149,6 @@ struct Dict {
 };
 
 //
-// PythonBackendError
-//
-struct PythonBackendError {
-  std::string error_message;
-};
-
-//
 // PythonBackendException
 //
 // Exception thrown if error occurs in PythonBackend.

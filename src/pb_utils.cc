@@ -229,8 +229,15 @@ void
 ExtractTarFile(std::string& archive_path, std::string& dst_path)
 {
   char current_directory[PATH_MAX];
-  getcwd(current_directory, PATH_MAX);
-  chdir(dst_path.c_str());
+  if (getcwd(current_directory, PATH_MAX) == nullptr) {
+    throw PythonBackendException(
+        "Failed to get the current working directory.");
+  }
+  if (chdir(dst_path.c_str()) == 0) {
+    throw PythonBackendException(
+        (std::string("Failed to change the directory to ") + dst_path).c_str());
+  }
+
   struct archive_entry* entry;
   int flags = ARCHIVE_EXTRACT_TIME;
 
@@ -287,7 +294,11 @@ ExtractTarFile(std::string& archive_path, std::string& dst_path)
   archive_write_free(output_archive);
 
   // Revert the directory change.
-  chdir(current_directory);
+  if (chdir(current_directory) == 0) {
+    throw PythonBackendException(
+        (std::string("Failed to change the directory to ") + current_directory)
+            .c_str());
+  }
 }
 
 bool
