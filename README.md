@@ -292,11 +292,15 @@ models
 Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
 containers uses Python 3.8. Changing your environment using
 [conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/) does not
-make Python backend to use the new environment. To change the Python interpreter
-used by Python backend, you need to rebuild the backend from source while the
-Python environment is activated. The instructions for building the backend from
-source are included in the
+make Python backend to use the Python Interpreter in the activated environment. To 
+change the Python interpreter used by Python backend, you need to rebuild the
+backend from source while the Python environment is activated. The instructions for
+building the backend from source are included in the
 [building from source](https://github.com/triton-inference-server/python_backend#building-from-source) section.
+
+Note that if the Python version matches the Python version available inside the container,
+the packages installed in [conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/)
+will be picked up by Python backend.
 
 ## Error Handling
 
