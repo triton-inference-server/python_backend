@@ -130,55 +130,62 @@ class Stub {
       int64_t shm_growth_size, int64_t shm_default_size,
       std::string& shm_region_name, std::string& model_path)
   {
-    model_path_ = model_path;
-    child_mutex_ = nullptr;
-    child_cond_ = nullptr;
-    parent_mutex_ = nullptr;
-    parent_cond_ = nullptr;
+    try {
+      model_path_ = model_path;
+      child_mutex_ = nullptr;
+      child_cond_ = nullptr;
+      parent_mutex_ = nullptr;
+      parent_cond_ = nullptr;
 
-    shm_pool_ = std::make_unique<SharedMemory>(
-        shm_region_name, shm_default_size, shm_growth_size);
+      shm_pool_ = std::make_unique<SharedMemory>(
+          shm_region_name, shm_default_size, shm_growth_size);
 
-    // Child Mutex and CV
-    pthread_mutex_t* child_mutex;
-    off_t child_mutex_offset;
-    shm_pool_->Map(
-        (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset);
+      // Child Mutex and CV
+      pthread_mutex_t* child_mutex;
+      off_t child_mutex_offset;
+      shm_pool_->Map(
+          (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset);
 
-    pthread_cond_t* child_cv;
-    off_t child_cv_offset;
-    shm_pool_->Map((char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset);
+      pthread_cond_t* child_cv;
+      off_t child_cv_offset;
+      shm_pool_->Map(
+          (char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset);
 
-    child_mutex_ = child_mutex;
-    child_cond_ = child_cv;
+      child_mutex_ = child_mutex;
+      child_cond_ = child_cv;
 
-    // Parent Mutex and CV
-    pthread_mutex_t* parent_mutex;
-    off_t parent_mutex_offset;
-    shm_pool_->Map(
-        (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset);
+      // Parent Mutex and CV
+      pthread_mutex_t* parent_mutex;
+      off_t parent_mutex_offset;
+      shm_pool_->Map(
+          (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset);
 
-    pthread_cond_t* parent_cv;
-    off_t parent_cv_offset;
-    shm_pool_->Map(
-        (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset);
+      pthread_cond_t* parent_cv;
+      off_t parent_cv_offset;
+      shm_pool_->Map(
+          (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset);
 
-    parent_mutex_ = parent_mutex;
-    parent_cond_ = parent_cv;
+      parent_mutex_ = parent_mutex;
+      parent_cond_ = parent_cv;
 
-    IPCMessage* ipc_message;
-    off_t ipc_offset;
-    shm_pool_->Map((char**)&ipc_message, sizeof(IPCMessage), ipc_offset);
+      IPCMessage* ipc_message;
+      off_t ipc_offset;
+      shm_pool_->Map((char**)&ipc_message, sizeof(IPCMessage), ipc_offset);
 
-    off_t response_batch_offset;
-    shm_pool_->Map(
-        (char**)&response_batch_, sizeof(Response), response_batch_offset);
-    ipc_message->response_batch = response_batch_offset;
-    response_batch_->has_error = false;
-    ipc_message_ = ipc_message;
+      off_t response_batch_offset;
+      shm_pool_->Map(
+          (char**)&response_batch_, sizeof(Response), response_batch_offset);
+      ipc_message->response_batch = response_batch_offset;
+      response_batch_->has_error = false;
+      ipc_message_ = ipc_message;
 
-    pthread_mutex_lock(child_mutex_);
-    NotifyParent();
+      pthread_mutex_lock(child_mutex_);
+      NotifyParent();
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_INFO << pb_exception.what() << std::endl;
+      exit(1);
+    }
   }
 
   ~Stub() { pthread_mutex_unlock(child_mutex_); }

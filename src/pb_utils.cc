@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -231,11 +232,14 @@ ExtractTarFile(std::string& archive_path, std::string& dst_path)
   char current_directory[PATH_MAX];
   if (getcwd(current_directory, PATH_MAX) == nullptr) {
     throw PythonBackendException(
-        "Failed to get the current working directory.");
+        (std::string("Failed to get the current working directory. Error: ") +
+         std::strerror(errno)));
   }
-  if (chdir(dst_path.c_str()) == 0) {
+  if (chdir(dst_path.c_str()) == -1) {
     throw PythonBackendException(
-        (std::string("Failed to change the directory to ") + dst_path).c_str());
+        (std::string("Failed to change the directory to ") + dst_path +
+         " Error: " + std::strerror(errno))
+            .c_str());
   }
 
   struct archive_entry* entry;
@@ -294,7 +298,7 @@ ExtractTarFile(std::string& archive_path, std::string& dst_path)
   archive_write_free(output_archive);
 
   // Revert the directory change.
-  if (chdir(current_directory) == 0) {
+  if (chdir(current_directory) == -1) {
     throw PythonBackendException(
         (std::string("Failed to change the directory to ") + current_directory)
             .c_str());

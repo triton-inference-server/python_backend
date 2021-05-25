@@ -248,7 +248,7 @@ class ModelInstanceState : public BackendModelInstance {
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
-    : BackendModelInstance(model_state, triton_model_instance),
+    : BackendModelInstance(model_state, triton_model_instance), child_pid_(0),
       initialized_(false)
 {
 }
@@ -745,8 +745,15 @@ ModelInstanceState::SetupChildProcess()
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
 
-  shm_pool_ = std::make_unique<SharedMemory>(
-      shm_region_name, shm_default_size, shm_growth_size, true /* truncate */);
+  try {
+    shm_pool_ = std::make_unique<SharedMemory>(
+        shm_region_name, shm_default_size, shm_growth_size,
+        true /* truncate */);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+  }
 
   // Child Mutex and CV
   pthread_mutex_t* child_mutex;
@@ -802,7 +809,7 @@ ModelInstanceState::SetupChildProcess()
   }
 
   // Path to the extracted Python env
-  std::string python_execution_env = "none";
+  std::string python_execution_env = "";
 
   // Path to environment activation script
   std::string path_to_activate;
@@ -811,7 +818,7 @@ ModelInstanceState::SetupChildProcess()
   if (model_state->PythonExecutionEnv() != "") {
     try {
       python_execution_env =
-          model_state->StateForBackend()->env_manager->Extract(
+          model_state->StateForBackend()->env_manager->ExtractIfNotExists(
               model_state->PythonExecutionEnv());
     }
     catch (PythonBackendException& pb_exception) {
@@ -820,7 +827,7 @@ ModelInstanceState::SetupChildProcess()
     }
     path_to_activate = python_execution_env + "/bin/activate";
     path_to_libpython = python_execution_env + "/lib";
-    if (!FileExists(path_to_activate)) {
+    if (python_execution_env.length() > 0 && !FileExists(path_to_activate)) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           (std::string("Path ") + path_to_activate +
@@ -967,13 +974,15 @@ ModelInstanceState::~ModelInstanceState()
 
     // Wait for child notification
     pthread_cond_wait(parent_cond_, parent_mutex_);
+    pthread_mutex_unlock(parent_mutex_);
   }
 
-  // Terminate the child process.
-  int status;
-  kill(child_pid_, SIGTERM);
-  waitpid(child_pid_, &status, 0);
-  pthread_mutex_unlock(parent_mutex_);
+  // Terminate the child process if it has been created.
+  if (child_pid_ != 0) {
+    int status;
+    kill(child_pid_, SIGTERM);
+    waitpid(child_pid_, &status, 0);
+  }
 }
 
 TRITONSERVER_Error*

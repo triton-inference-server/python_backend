@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "shm_manager.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -56,9 +57,12 @@ SharedMemory::SharedMemory(
   int res = posix_fallocate(shm_fd_, 0, default_byte_size);
   if (res != 0) {
     std::string error_message =
-        ("unable to initialize shared-memory key '" + shm_key +
-         "' to requested size: " + std::to_string(default_byte_size) +
-         " bytes");
+        ("Unable to initialize shared memory key '" + shm_key +
+         "' to requested size (" + std::to_string(default_byte_size) +
+         " bytes). If you are running Triton inside docker, use '--shm-size' "
+         "flag to control the shared memory region size. Each Python backend "
+         "model instance requires at least 64MBs of shared memory. Flag "
+         "'--shm-size=5G' should be sufficient for common usecases.");
     throw PythonBackendException(std::move(error_message));
   }
 
@@ -131,7 +135,9 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
       *capacity_ -= shm_bytes_added;
       std::string error_message =
           ("Failed to increase the shared memory pool size for key '" +
-           shm_key_ + "' to " + std::to_string(*capacity_) + " bytes.");
+           shm_key_ + "' to " + std::to_string(*capacity_) +
+           " bytes. If you are running Triton inside docker, use '--shm-size' "
+           "flag to control the shared memory region size.");
       throw PythonBackendException(error_message);
     }
   }

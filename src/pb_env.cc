@@ -41,7 +41,6 @@
 
 namespace triton { namespace backend { namespace python {
 
-
 void
 RecursiveDirectoryDelete(const char* dir)
 {
@@ -102,7 +101,7 @@ EnvironmentManager::EnvironmentManager()
 }
 
 std::string
-EnvironmentManager::Extract(std::string env_path)
+EnvironmentManager::ExtractIfNotExists(std::string env_path)
 {
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);

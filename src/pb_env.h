@@ -42,7 +42,10 @@ class EnvironmentManager {
 
  public:
   EnvironmentManager();
-  std::string Extract(std::string env_path);
+
+  // Extracts the tar.gz file in the 'env_path' if it has not been
+  // already extracted.
+  std::string ExtractIfNotExists(std::string env_path);
   ~EnvironmentManager();
 };
 
