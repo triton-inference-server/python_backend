@@ -818,7 +818,7 @@ ModelInstanceState::SetupChildProcess()
   if (model_state->PythonExecutionEnv() != "") {
     try {
       python_execution_env =
-          model_state->StateForBackend()->env_manager->ExtractIfNotExists(
+          model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
               model_state->PythonExecutionEnv());
     }
     catch (PythonBackendException& pb_exception) {

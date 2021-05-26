@@ -101,7 +101,7 @@ EnvironmentManager::EnvironmentManager()
 }
 
 std::string
-EnvironmentManager::ExtractIfNotExists(std::string env_path)
+EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
 {
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
