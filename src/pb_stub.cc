@@ -44,19 +44,19 @@ using namespace pybind11::literals;
 
 namespace triton { namespace backend { namespace python {
 
-#define LOG_IF_EXCEPTION(X)                                 \
-  do {                                                      \
-    try {                                                   \
-      (X);                                                  \
-    }                                                       \
-    catch (const PythonBackendException& pb_exception) {    \
-      LOG_INFO << pb_exception.err_->error_message.c_str(); \
-    }                                                       \
+#define LOG_IF_EXCEPTION(X)                              \
+  do {                                                   \
+    try {                                                \
+      (X);                                               \
+    }                                                    \
+    catch (const PythonBackendException& pb_exception) { \
+      LOG_INFO << pb_exception.what();                   \
+    }                                                    \
   } while (false)
 
-#define LOG_EXCEPTION(E)               \
-  do {                                 \
-    LOG_INFO << E.err_->error_message; \
+#define LOG_EXCEPTION(E)  \
+  do {                    \
+    LOG_INFO << E.what(); \
   } while (false)
 
 // Macros that use current filename and line number.
@@ -130,55 +130,62 @@ class Stub {
       int64_t shm_growth_size, int64_t shm_default_size,
       std::string& shm_region_name, std::string& model_path)
   {
-    model_path_ = model_path;
-    child_mutex_ = nullptr;
-    child_cond_ = nullptr;
-    parent_mutex_ = nullptr;
-    parent_cond_ = nullptr;
+    try {
+      model_path_ = model_path;
+      child_mutex_ = nullptr;
+      child_cond_ = nullptr;
+      parent_mutex_ = nullptr;
+      parent_cond_ = nullptr;
 
-    shm_pool_ = std::make_unique<SharedMemory>(
-        shm_region_name, shm_default_size, shm_growth_size);
+      shm_pool_ = std::make_unique<SharedMemory>(
+          shm_region_name, shm_default_size, shm_growth_size);
 
-    // Child Mutex and CV
-    pthread_mutex_t* child_mutex;
-    off_t child_mutex_offset;
-    shm_pool_->Map(
-        (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset);
+      // Child Mutex and CV
+      pthread_mutex_t* child_mutex;
+      off_t child_mutex_offset;
+      shm_pool_->Map(
+          (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset);
 
-    pthread_cond_t* child_cv;
-    off_t child_cv_offset;
-    shm_pool_->Map((char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset);
+      pthread_cond_t* child_cv;
+      off_t child_cv_offset;
+      shm_pool_->Map(
+          (char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset);
 
-    child_mutex_ = child_mutex;
-    child_cond_ = child_cv;
+      child_mutex_ = child_mutex;
+      child_cond_ = child_cv;
 
-    // Parent Mutex and CV
-    pthread_mutex_t* parent_mutex;
-    off_t parent_mutex_offset;
-    shm_pool_->Map(
-        (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset);
+      // Parent Mutex and CV
+      pthread_mutex_t* parent_mutex;
+      off_t parent_mutex_offset;
+      shm_pool_->Map(
+          (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset);
 
-    pthread_cond_t* parent_cv;
-    off_t parent_cv_offset;
-    shm_pool_->Map(
-        (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset);
+      pthread_cond_t* parent_cv;
+      off_t parent_cv_offset;
+      shm_pool_->Map(
+          (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset);
 
-    parent_mutex_ = parent_mutex;
-    parent_cond_ = parent_cv;
+      parent_mutex_ = parent_mutex;
+      parent_cond_ = parent_cv;
 
-    IPCMessage* ipc_message;
-    off_t ipc_offset;
-    shm_pool_->Map((char**)&ipc_message, sizeof(IPCMessage), ipc_offset);
+      IPCMessage* ipc_message;
+      off_t ipc_offset;
+      shm_pool_->Map((char**)&ipc_message, sizeof(IPCMessage), ipc_offset);
 
-    off_t response_batch_offset;
-    shm_pool_->Map(
-        (char**)&response_batch_, sizeof(Response), response_batch_offset);
-    ipc_message->response_batch = response_batch_offset;
-    response_batch_->has_error = false;
-    ipc_message_ = ipc_message;
+      off_t response_batch_offset;
+      shm_pool_->Map(
+          (char**)&response_batch_, sizeof(Response), response_batch_offset);
+      ipc_message->response_batch = response_batch_offset;
+      response_batch_->has_error = false;
+      ipc_message_ = ipc_message;
 
-    pthread_mutex_lock(child_mutex_);
-    NotifyParent();
+      pthread_mutex_lock(child_mutex_);
+      NotifyParent();
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_INFO << pb_exception.what() << std::endl;
+      exit(1);
+    }
   }
 
   ~Stub() { pthread_mutex_unlock(child_mutex_); }
@@ -440,7 +447,7 @@ class Stub {
 
   void SetResponseFromException(const PythonBackendException& pb_exception)
   {
-    SetErrorForResponseBatch(pb_exception.err_->error_message.c_str());
+    SetErrorForResponseBatch(pb_exception.what());
   }
 
   int Execute()
@@ -543,9 +550,7 @@ class Stub {
       }
       catch (const PythonBackendException& pb_exception) {
         LOG_EXCEPTION(pb_exception);
-        pb_exception.err_->error_message.c_str();
-        SetErrorForResponse(
-            response_shm, pb_exception.err_->error_message.c_str());
+        SetErrorForResponse(response_shm, pb_exception.what());
       }
       i += 1;
     }
@@ -553,7 +558,7 @@ class Stub {
     return 0;
   }
 
-  void Initialize(std::string& model_version, std::string python_stub_path)
+  void Initialize(std::string& model_version, std::string triton_install_path)
   {
     try {
       try {
@@ -565,8 +570,7 @@ class Stub {
             model_path_.substr(0, model_path_.find_last_of("/"));
         std::string model_path_parent_parent =
             model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-        std::string python_backend_folder =
-            python_stub_path.substr(0, python_stub_path.find_last_of("/"));
+        std::string python_backend_folder = triton_install_path;
         sys.attr("path").attr("append")(model_path_parent);
         sys.attr("path").attr("append")(model_path_parent_parent);
         sys.attr("path").attr("append")(python_backend_folder);
@@ -606,8 +610,7 @@ class Stub {
       }
     }
     catch (const PythonBackendException& pb_exception) {
-      LOG_INFO << "Failed to initialize Python stub: "
-               << pb_exception.err_->error_message.c_str();
+      LOG_INFO << "Failed to initialize Python stub: " << pb_exception.what();
       NotifyParent();
       exit(1);
     }
@@ -633,8 +636,8 @@ extern "C" {
 int
 main(int argc, char** argv)
 {
-  if (argc < 5) {
-    LOG_INFO << "Expected 5 arguments, found " << argc << " arguments.";
+  if (argc < 7) {
+    LOG_INFO << "Expected 7 arguments, found " << argc << " arguments.";
     exit(1);
   }
   signal(SIGINT, SignalHandler);
@@ -664,6 +667,8 @@ main(int argc, char** argv)
   }
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
+  pid_t parent_pid = std::stoi(argv[5]);
+  std::string triton_install_path = argv[6];
 
   std::unique_ptr<Stub> stub;
   try {
@@ -671,8 +676,7 @@ main(int argc, char** argv)
         shm_growth_size, shm_default_size, shm_region_name, model_path);
   }
   catch (const PythonBackendException& pb_exception) {
-    LOG_INFO << "Failed to preinitialize Python stub: "
-             << pb_exception.err_->error_message.c_str();
+    LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
     exit(1);
   }
 
@@ -681,9 +685,8 @@ main(int argc, char** argv)
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
 
-  stub->Initialize(model_version, argv[0] /* python stub path*/);
+  stub->Initialize(model_version, argv[6] /* triton install path */);
 
-  pid_t parent_pid = std::stoi(argv[5]);
   bool background_thread_running = true;
   std::thread background_thread([&parent_pid, &background_thread_running,
                                  &stub] {

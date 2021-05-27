@@ -80,20 +80,21 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
-
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
 add_library(
   triton-python-backend SHARED
+  src/python.cc
   src/pb_utils.cc
   src/pb_utils.h
+  src/pb_env.cc
+  src/pb_env.h
   src/shm_manager.cc
   src/shm_manager.h
-  src/python.cc
 )
 
 add_executable(
@@ -104,7 +105,6 @@ add_executable(
   src/shm_manager.cc
   src/shm_manager.h
 )
-
 set_property(TARGET triton-python-backend-stub PROPERTY OUTPUT_NAME triton_python_backend_stub)
 
 add_library(
@@ -136,15 +136,17 @@ target_link_libraries(
   PRIVATE
     triton-core-serverstub  # from repo-core
     triton-backend-utils    # from repo-backend
+    ZLIB::ZLIB
+    -larchive               # shared memory 
 )
 
 target_link_libraries(
   triton-python-backend-stub
   PRIVATE
-   Python3::Python
    Threads::Threads
    pybind11::embed
    triton-backend-utils    # from repo-backend
+   -larchive               # libarchive
    -lrt                    # shared memory 
 )
 
