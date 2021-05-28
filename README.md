@@ -37,13 +37,13 @@ any C++ code.
 ## User Documentation
 
 * [Quick Start](#quick-start)
-* [Building From Source](#building-from-source)
 * [Usage](#usage)
+* [Examples](#examples)
+* [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
 * [Model Config File](#model-config-file)
 * [Error Hanldling](#error-handling)
 * [Managing Shared Memory](#managing-shared-memory)
-* [Examples](#examples)
-* [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
+* [Building From Source](#building-from-source)
 
 ## Quick Start
 
@@ -414,15 +414,7 @@ still applies here and the version of the Python interpreter inside the conda
 environment must match the Python version of stub used by Python backend. The
 default version of the stub is Python 3.8.
 
-3. Note that if the Python version of your environment matches the Python
-version available inside the container, the packages installed in
-[conda](https://conda.io) will be picked up by Python backend and applied to all
-the Python models. In this case you can skip both [Building Custom Python
-Backend Stub](#1-building-custom-python-backend-stub) and [Packaging the Conda
-Environment](#2-packaging-the-conda-environment) steps. You only need to make
-sure that the environment is activated before you start the Triton Server.
-
-4. You can use a single execution environment for multiple models. You need to
+3. You can share a single execution environment across multiple models. You need to
 provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
 `config.pbtxt` of all the models that want to use the execution environment.
 
