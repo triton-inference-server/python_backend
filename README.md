@@ -302,9 +302,12 @@ models
 ## Using Custom Python Execution Environments
 
 Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
-containers uses Python 3.8. Changing your environment using
-[conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/) does not
-make Python backend to use the Python Interpreter in the activated environment. 
+containers uses Python 3.8. If your Python model is compatible with Python 3.8
+and requires only modules already included in the Triton container, then you can
+skip this section. If you need to use a different version of Python or if you
+have additional dependencies, you need to recompile the stub executable and
+create an execution environment as described below and include that with your
+model.
 
 ### 1. Building Custom Python Backend Stub
 
@@ -400,7 +403,8 @@ parameters: {
 
 ### Important Notes
 
-1. The version of the Python interpreter in the tar file must match the version of triton_python_backend_stub.
+1. The version of the Python interpreter in the execution environment must match
+the version of triton_python_backend_stub.
 
 2. If you don't want to use a different Python interpreter, you can skip
 [Building Custom Python Backend Stub Step](#1-building-custom-python-backend-stub).
@@ -412,12 +416,15 @@ default version of the stub is Python 3.8.
 
 3. Note that if the Python version of your environment matches the Python
 version available inside the container, the packages installed in
-[conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/) will be
-picked up by Python backend and applied to all the Python models. In this case
-you can skip both [Building Custom Python Backend
-Stub](#1-building-custom-python-backend-stub) and [Packaging the Conda
+[conda](https://conda.io) will be picked up by Python backend and applied to all
+the Python models. In this case you can skip both [Building Custom Python
+Backend Stub](#1-building-custom-python-backend-stub) and [Packaging the Conda
 Environment](#2-packaging-the-conda-environment) steps. You only need to make
 sure that the environment is activated before you start the Triton Server.
+
+4. You can use a single execution environment for multiple models. You need to
+provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
+`config.pbtxt` of all the models that want to use the execution environment.
 
 ## Error Handling
 
