@@ -34,13 +34,24 @@ The Triton backend for Python. The goal of Python backend is to let you serve
 models written in Python by Triton Inference Server without having to write
 any C++ code.
 
+## User Documentation
+
+* [Quick Start](#quick-start)
+* [Usage](#usage)
+* [Examples](#examples)
+* [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
+* [Model Config File](#model-config-file)
+* [Error Hanldling](#error-handling)
+* [Managing Shared Memory](#managing-shared-memory)
+* [Building From Source](#building-from-source)
+
 ## Quick Start
 
 1. Run the Triton Inference Server container.
 ```
 $ docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
-Replace \<xx.yy\> with the Triton version (e.g. 20.11).
+Replace \<xx.yy\> with the Triton version (e.g. 21.05).
 
 2. Inside the container, clone the Python backend repository.
 
@@ -86,14 +97,15 @@ $ python3 python_backend/examples/add_sub/client.py
 * cmake >= 3.17
 * numpy
 * rapidjson-dev
+* libarchive-dev
 
 ```
 pip3 install numpy
 ```
 
-On Ubuntu or Debian you can use the command below to install `rapidjson`:
+On Ubuntu or Debian you can use the command below to install `rapidjson` and `libarchive`:
 ```
-sudo apt-get install rapidjson-dev
+sudo apt-get install rapidjson-dev libarchive-dev
 ```
 
 2. Build Python backend
@@ -101,7 +113,7 @@ sudo apt-get install rapidjson-dev
 ```
 $ mkdir build
 $ cd build
-$ cmake -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+$ cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 $ make install
 ```
 
@@ -287,20 +299,124 @@ models
     └── config.pbtxt
 ```
 
-## Using Your Own Python Interpreter
+## Using Custom Python Execution Environments
 
 Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
-containers uses Python 3.8. Changing your environment using
-[conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/) does not
-make Python backend to use the Python Interpreter in the activated environment. To 
-change the Python interpreter used by Python backend, you need to rebuild the
-backend from source while the Python environment is activated. The instructions for
-building the backend from source are included in the
-[building from source](https://github.com/triton-inference-server/python_backend#building-from-source) section.
+containers uses Python 3.8. If your Python model is compatible with Python 3.8
+and requires only modules already included in the Triton container, then you can
+skip this section. If you need to use a different version of Python or if you
+have additional dependencies, you need to recompile the stub executable and
+create an execution environment as described below and include that with your
+model.
 
-Note that if the Python version matches the Python version available inside the container,
-the packages installed in [conda](https://conda.io) or [virtualenv](https://virtualenv.pypa.io/)
-will be picked up by Python backend.
+### 1. Building Custom Python Backend Stub
+
+Python backend uses a *stub* process to connect your `model.py` file to the
+Triton C++ core. This stub process has an embedded Python interpreter with
+a fixed Python version. If you intend to use a Python interpreter with
+different version from the default Python backend stub, you need to compile your own
+Python backend stub by following the steps below:
+
+1. Install the software packages below:
+* [conda](https://docs.conda.io/en/latest/)
+* [cmake](https://cmake.org)
+* rapidjson and libarchive (instructions for installing these packages in Ubuntu or Debian are included in [Building from Source Section](#building-from-source))
+
+
+2. Create and activate a [conda](https://docs.conda.io/en/latest/) environment with your desired Python version. In this example, we will be using Python 3.6:
+```bash
+conda create -n python-3-6 python=3.6
+conda activate python-3-6
+
+# NumPy is required for Python models
+conda install numpy
+```
+3. Clone the Python backend repository and compile the Python backend stub (replace \<xx.yy\> with the release number):
+```bash
+$ git clone https://github.com/triton-inference-server/python_backend -b <xx.yy>
+$ cd python_backend
+$ mkdir build && cd build
+$ cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+$ make triton-python-backend-stub
+```
+
+Now, you have access to a Python backend stub with Python 3.6. You can verify
+that using `ldd`:
+
+```
+$ ldd triton_python_backend_stub
+...
+libpython3.6m.so.1.0 => /home/ubuntu/envs/miniconda3/envs/python-3-6/lib/libpython3.6m.so.1.0 (0x00007fbb69cf3000)
+...
+```
+
+There are many other shared libraries printed in addition to the library posted
+above. However, it is important to see `libpython3.6m.so.1.0` in the list of
+linked shared libraries. If you use a different Python version, you should see
+that version instead. You need to copy the `triton_python_backend_stub` to the
+model directory of the models that want to use the custom Python backend
+stub. For example, if you have `model_a` in your [model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md), the folder
+structure should look like below:
+
+```
+models
+|-- model_a
+    |-- 1
+    |   |-- model.py
+    |-- config.pbtxt
+    `-- triton_python_backend_stub
+```
+
+Note the location of `triton_python_backend_stub` in the directory structure above.
+
+### 2. Packaging the Conda Environment
+
+It is also required to create a tar file that contains your conda environment.
+Currently, Python backend only supports
+[conda-pack](https://conda.github.io/conda-pack/) for this purpose.
+[conda-pack](https://conda.github.io/conda-pack/) ensures that your conda
+environment is portable. You can create a tar file for your conda environment
+using `conda-pack` command:
+
+```
+$ conda-pack
+Collecting packages...
+Packing environment at '/home/iman/miniconda3/envs/python-3-6' to 'python-3-6.tar.gz'
+[########################################] | 100% Completed |  4.5s
+```
+
+After creating the tar file from the conda environment, you need to tell Python
+backend to use that environment for your model. You can do this by adding the
+lines below to the `config.pbtxt` file:
+
+```
+name: "model_a"
+backend: "python"
+
+...
+
+parameters: {
+  key: "EXECUTION_ENV_PATH",
+  value: {string_value: "/home/iman/miniconda3/envs/python-3-6/python3.6.tar.gz"}
+}
+```
+
+### Important Notes
+
+1. The version of the Python interpreter in the execution environment must match
+the version of triton_python_backend_stub.
+
+2. If you don't want to use a different Python interpreter, you can skip
+[Building Custom Python Backend Stub Step](#1-building-custom-python-backend-stub).
+In this case you only need to pack your environment using `conda-pack` and
+provide the path to tar file in the model config. However, the previous note
+still applies here and the version of the Python interpreter inside the conda
+environment must match the Python version of stub used by Python backend. The
+default version of the stub is Python 3.8.
+
+3. You can share a single execution environment across multiple models. You need to
+provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
+`config.pbtxt` of all the models that want to use the execution environment.
 
 ## Error Handling
 
