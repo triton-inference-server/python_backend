@@ -134,6 +134,8 @@ struct IPCMessage {
 
   // response points to a ResponseBatch struct.
   off_t response_batch;
+
+  bool health;
 };
 
 // Representing a key value pair

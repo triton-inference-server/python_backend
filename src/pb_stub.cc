@@ -132,6 +132,7 @@ class Stub {
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   ResponseBatch* response_batch_;
+  bool* health_;
 
  public:
   Stub(
@@ -211,6 +212,8 @@ class Stub {
     pthread_cond_signal(parent_cond_);
     pthread_mutex_unlock(parent_mutex_);
   }
+
+  bool& Health() { return ipc_message_->health; }
 
   std::unique_ptr<SharedMemory>& GetSharedMemory() { return shm_pool_; }
 
@@ -712,13 +715,15 @@ main(int argc, char** argv)
 
   stub->Initialize(model_version, argv[6] /* triton install path */);
   bool non_graceful_exit = false;
+  bool &health = stub->Health();
 
   bool background_thread_running = true;
   std::thread background_thread(
-      [&parent_pid, &background_thread_running, &stub, &non_graceful_exit] {
+      [&parent_pid, &background_thread_running, &stub, &non_graceful_exit, &health] {
         while (background_thread_running) {
-          // Every two seconds check if the parent process is alive.
+          // Every 10ms check if the parent process is alive.
           sleep(0.01);
+          health = true;
 
           if (sigterm_received) {
             background_thread_running = false;
