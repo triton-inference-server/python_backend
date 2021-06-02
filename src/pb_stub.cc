@@ -110,6 +110,14 @@ SignalHandler(int signum)
   // Skip the SIGINT
 }
 
+bool sigterm_received = false;
+
+void
+SigtermHandler(int signum)
+{
+  sigterm_received = true;
+}
+
 class Stub {
   pthread_mutex_t* child_mutex_;
   pthread_cond_t* child_cond_;
@@ -629,7 +637,19 @@ class Stub {
     }
   }
 
-  void WaitForNotification() { pthread_cond_wait(child_cond_, child_mutex_); }
+  // Wait for notification from the server. Returns true if the Python backend
+  // is exiting , and false if the Python backend is still running.
+  bool WaitForNotification()
+  {
+    struct timespec ts;
+
+    do {
+      clock_gettime(CLOCK_REALTIME, &ts);
+      ts.tv_sec += 1;
+    } while (pthread_cond_timedwait(child_cond_, child_mutex_, &ts) != 0 &&
+             !sigterm_received);
+    return sigterm_received;
+  }
 };
 extern "C" {
 
@@ -641,6 +661,7 @@ main(int argc, char** argv)
     exit(1);
   }
   signal(SIGINT, SignalHandler);
+  signal(SIGTERM, SigtermHandler);
 
   // Path to model.py
   std::string model_path = argv[1];
@@ -680,49 +701,59 @@ main(int argc, char** argv)
     exit(1);
   }
 
-  stub->WaitForNotification();
+  // Exit if it has received a SIGTERM signal.
+  if (stub->WaitForNotification()) {
+    LOG_INFO << "Received SIGTERM: exiting.";
+    exit(1);
+  }
 
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
 
   stub->Initialize(model_version, argv[6] /* triton install path */);
+  bool non_graceful_exit = false;
 
   bool background_thread_running = true;
-  std::thread background_thread([&parent_pid, &background_thread_running,
-                                 &stub] {
-    while (background_thread_running) {
-      // Every two seconds check if the parent process is alive.
-      sleep(2);
+  std::thread background_thread(
+      [&parent_pid, &background_thread_running, &stub, &non_graceful_exit] {
+        while (background_thread_running) {
+          // Every two seconds check if the parent process is alive.
+          sleep(0.01);
 
-      if (kill(parent_pid, 0) == 0) {
-        continue;
-      }
+          if (sigterm_received) {
+            background_thread_running = false;
+          }
 
-      pid_t child_pid = getpid();
-
-      // Destroy Stub
-      stub.reset();
-
-      // Kill the process
-      kill(child_pid, SIGTERM);
-      LOG_INFO << "Non-graceful termination detected. Killing the child stub: "
-               << std::to_string(child_pid).c_str();
-    }
-  });
+          if (kill(parent_pid, 0) != 0) {
+            // Destroy Stub
+            stub.reset();
+            LOG_INFO << "Non-graceful termination detected. ";
+            background_thread_running = false;
+            non_graceful_exit = true;
+            sigterm_received = true;
+          }
+        }
+      });
 
   // Wait for messages from the parent process
   while (true) {
     stub->NotifyParent();
-    stub->WaitForNotification();
-    int stop = stub->Execute();
+    if (stub->WaitForNotification()) {
+      break;
+    }
 
+    int stop = stub->Execute();
     if (stop)
       break;
   }
-  stub->Finalize();
+
+  if (!non_graceful_exit) {
+    stub->Finalize();
+    stub->NotifyParent();
+  }
+
   background_thread_running = false;
   background_thread.join();
-  stub->NotifyParent();
   return 0;
 }
 }
