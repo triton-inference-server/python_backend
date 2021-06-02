@@ -78,6 +78,7 @@ RecursiveDirectoryDelete(const char* dir)
       case FTS_SLNONE:
       case FTS_DEFAULT:
         if (remove(curr->fts_accpath) < 0) {
+          fts_close(ftsp);
           throw PythonBackendException(
               std::string("Failed to remove ") + curr->fts_path +
               " error: " + strerror(curr->fts_errno));
@@ -85,6 +86,8 @@ RecursiveDirectoryDelete(const char* dir)
         break;
     }
   }
+
+  fts_close(ftsp);
 }
 
 EnvironmentManager::EnvironmentManager()

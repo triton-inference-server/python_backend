@@ -1085,6 +1085,9 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
           TRITONSERVER_LOG_INFO,
           (std::string("Using Python execution env ") + python_execution_env_)
               .c_str());
+    } else {
+      // Delete the error
+      TRITONSERVER_ErrorDelete(error);
     }
   }
 
