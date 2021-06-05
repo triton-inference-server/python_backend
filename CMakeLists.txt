@@ -83,6 +83,13 @@ FetchContent_MakeAvailable(pybind11)
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
+#
+# Boost
+#
+find_package(Boost REQUIRED)
+message(STATUS "Using Boost ${Boost_VERSION}")
+include_directories(${Boost_INCLUDE_DIRS})
+
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 

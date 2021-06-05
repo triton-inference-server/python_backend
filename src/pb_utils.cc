@@ -55,26 +55,6 @@ namespace triton { namespace backend { namespace python {
   } while (false)
 
 void
-CreateIPCMutex(pthread_mutex_t** mutex)
-{
-  pthread_mutexattr_t mattr;
-  pthread_mutexattr_init(&mattr);
-  pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-  pthread_mutex_init(*mutex, &mattr);
-  pthread_mutexattr_destroy(&mattr);
-}
-
-void
-CreateIPCCondVariable(pthread_cond_t** cv)
-{
-  pthread_condattr_t cattr;
-  pthread_condattr_init(&cattr);
-  pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
-  pthread_cond_init(*cv, &cattr);
-  pthread_condattr_destroy(&cattr);
-}
-
-void
 LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str)
 {

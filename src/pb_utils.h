@@ -39,6 +39,8 @@
 
 namespace triton { namespace backend { namespace python {
 
+namespace bi = boost::interprocess;
+
 #define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
   do {                                                             \
     try {                                                          \
@@ -62,12 +64,6 @@ namespace triton { namespace backend { namespace python {
       }                                                            \
     }                                                              \
     while (false)
-
-// Create a conditional variable.
-void CreateIPCCondVariable(pthread_cond_t** cv);
-
-// Create a mutex that is shared between different processes.
-void CreateIPCMutex(pthread_mutex_t** mutex);
 
 //
 // Represents a raw data
@@ -134,8 +130,10 @@ struct IPCMessage {
 
   // response points to a ResponseBatch struct.
   off_t response_batch;
-
   bool health;
+
+  // Health mutex
+  off_t health_mutex;
 };
 
 // Representing a key value pair
