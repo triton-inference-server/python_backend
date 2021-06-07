@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -344,13 +344,15 @@ ModelInstanceState::WaitForStubNotification()
     }
   }
 
-  timeout = boost::get_system_time() + boost::posix_time::milliseconds(timeout_seceonds);
+  timeout = boost::get_system_time() +
+            boost::posix_time::milliseconds(timeout_seceonds);
   while (!parent_cond_->timed_wait(*parent_lock_, timeout)) {
     if (!IsStubProcessAlive()) {
       return false;
     }
 
-    timeout = boost::get_system_time() + boost::posix_time::milliseconds(timeout_seceonds);
+    timeout = boost::get_system_time() +
+              boost::posix_time::milliseconds(timeout_seceonds);
   }
   return true;
 }
@@ -970,11 +972,11 @@ ModelInstanceState::StartStubProcess()
     RETURN_IF_EXCEPTION(SaveMapToSharedMemory(
         shm_pool_, initialize_args_offset, initialize_args));
     ipc_message_->request_batch = initialize_args_offset;
-    NotifyStub();
 
-    // If the stub process has exited during initialize, return failure to
-    // initialize
-    if (!WaitForStubNotification()) {
+    // If parent fails to notify the stub or the stub fails to notify the
+    // parent in a timely manner, kill the stub process and restart the
+    // stub process.
+    if (!NotifyStub() || !WaitForStubNotification()) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           (std::string("Failed to initialize stub, stub process exited "
