@@ -1525,7 +1525,6 @@ TRITONBACKEND_ModelInstanceExecute(
   ModelInstanceState* instance_state;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
-  LOG_MESSAGE(TRITONSERVER_LOG_INFO, std::to_string(request_count).c_str());
   RETURN_IF_ERROR(instance_state->ProcessRequests(requests, request_count));
 
   for (uint32_t r = 0; r < request_count; ++r) {
