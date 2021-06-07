@@ -27,12 +27,12 @@
 #pragma once
 
 #include <unistd.h>
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
-#include <boost/interprocess/shared_memory_object.hpp>
-#include <boost/interprocess/mapped_region.hpp>
 
 
 namespace triton { namespace backend { namespace python {
@@ -56,7 +56,8 @@ class SharedMemory {
   boost::interprocess::shared_memory_object shm_obj_;
   std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
 
-  std::vector<std::unique_ptr<boost::interprocess::mapped_region>> old_shm_maps_;
+  std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
+      old_shm_maps_;
 
  public:
   SharedMemory(

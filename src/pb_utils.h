@@ -27,11 +27,11 @@
 #pragma once
 
 #include <pthread.h>
+#include <climits>
 #include <exception>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <climits>
 #include <vector>
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
@@ -131,9 +131,6 @@ struct IPCMessage {
   // response points to a ResponseBatch struct.
   off_t response_batch;
   bool health;
-
-  // Health mutex
-  off_t health_mutex;
 };
 
 // Representing a key value pair
@@ -192,8 +189,8 @@ void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
 
-void ExtractTarFile(std::string &archive_path, std::string &dst_path);
+void ExtractTarFile(std::string& archive_path, std::string& dst_path);
 
-bool FileExists(std::string &path);
+bool FileExists(std::string& path);
 
 }}}  // namespace triton::backend::python
