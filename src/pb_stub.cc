@@ -743,7 +743,7 @@ main(int argc, char** argv)
   py::scoped_interpreter guard{};
 
   stub->Initialize(model_version, argv[6] /* triton install path */);
-  std::atomic<bool> non_graceful_exit(false);
+  std::atomic<bool> non_graceful_exit = {false};
 
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread(
