@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,15 +27,17 @@
 #pragma once
 
 #include <unistd.h>
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+
 namespace triton { namespace backend { namespace python {
 
 class SharedMemory {
-  int shm_fd_;
   std::string shm_key_;
   size_t* capacity_;
   off_t* offset_;
@@ -47,13 +49,14 @@ class SharedMemory {
   // Amount of bytes to grow the shared memory when the pool is completely used.
   int64_t shm_growth_bytes_;
 
-  // List of old shared memory addresses that should be deallocated.
-  // First element of the pair is size and second element is the address.
-  std::vector<std::pair<size_t, char*>> old_shm_addresses_;
-  void UpdateSharedMemory();
-
   // Get the amount of shared memory available.
   size_t GetAvailableSharedMemory();
+  boost::interprocess::shared_memory_object shm_obj_;
+  std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
+  std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
+      old_shm_maps_;
+
+  void UpdateSharedMemory();
 
  public:
   SharedMemory(

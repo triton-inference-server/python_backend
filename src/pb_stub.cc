@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -30,6 +30,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <atomic>
+#include <boost/interprocess/sync/interprocess_condition.hpp>
+#include <boost/interprocess/sync/interprocess_mutex.hpp>
+#include <boost/interprocess/sync/scoped_lock.hpp>
+#include <boost/thread/thread_time.hpp>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -38,9 +43,9 @@
 #include "pb_utils.h"
 #include "shm_manager.h"
 
-
 namespace py = pybind11;
 using namespace pybind11::literals;
+namespace bi = boost::interprocess;
 
 namespace triton { namespace backend { namespace python {
 
@@ -119,10 +124,12 @@ SigtermHandler(int signum)
 }
 
 class Stub {
-  pthread_mutex_t* child_mutex_;
-  pthread_cond_t* child_cond_;
-  pthread_mutex_t* parent_mutex_;
-  pthread_cond_t* parent_cond_;
+  bi::interprocess_mutex* stub_mutex_;
+  bi::interprocess_condition* stub_cond_;
+  bi::interprocess_mutex* parent_mutex_;
+  bi::interprocess_condition* parent_cond_;
+  bi::interprocess_mutex* health_mutex_;
+  bi::scoped_lock<bi::interprocess_mutex> stub_lock_;
   std::string model_path_;
   IPCMessage* ipc_message_;
   std::unique_ptr<SharedMemory> shm_pool_;
@@ -140,39 +147,50 @@ class Stub {
   {
     try {
       model_path_ = model_path;
-      child_mutex_ = nullptr;
-      child_cond_ = nullptr;
+      stub_mutex_ = nullptr;
+      stub_cond_ = nullptr;
       parent_mutex_ = nullptr;
       parent_cond_ = nullptr;
+      health_mutex_ = nullptr;
 
       shm_pool_ = std::make_unique<SharedMemory>(
           shm_region_name, shm_default_size, shm_growth_size);
 
-      // Child Mutex and CV
-      pthread_mutex_t* child_mutex;
-      off_t child_mutex_offset;
+      // Stub mutex and CV
+      bi::interprocess_mutex* stub_mutex;
+      off_t stub_mutex_offset;
       shm_pool_->Map(
-          (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset);
+          (char**)&stub_mutex, sizeof(bi::interprocess_mutex),
+          stub_mutex_offset);
 
-      pthread_cond_t* child_cv;
-      off_t child_cv_offset;
+      bi::interprocess_condition* stub_cv;
+      off_t stub_cv_offset;
       shm_pool_->Map(
-          (char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset);
+          (char**)&stub_cv, sizeof(bi::interprocess_condition), stub_cv_offset);
 
-      child_mutex_ = child_mutex;
-      child_cond_ = child_cv;
+      stub_cond_ = stub_cv;
+      stub_mutex_ = stub_mutex;
 
       // Parent Mutex and CV
-      pthread_mutex_t* parent_mutex;
+      bi::interprocess_mutex* parent_mutex;
       off_t parent_mutex_offset;
       shm_pool_->Map(
-          (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset);
+          (char**)&parent_mutex, sizeof(bi::interprocess_mutex),
+          parent_mutex_offset);
 
-      pthread_cond_t* parent_cv;
+      bi::interprocess_condition* parent_cv;
       off_t parent_cv_offset;
       shm_pool_->Map(
-          (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset);
+          (char**)&parent_cv, sizeof(bi::interprocess_condition),
+          parent_cv_offset);
 
+      bi::interprocess_mutex* health_mutex;
+      off_t health_mutex_offset;
+      shm_pool_->Map(
+          (char**)&health_mutex, sizeof(bi::interprocess_mutex),
+          health_mutex_offset);
+
+      health_mutex_ = health_mutex;
       parent_mutex_ = parent_mutex;
       parent_cond_ = parent_cv;
 
@@ -187,7 +205,7 @@ class Stub {
       response_batch_->has_error = false;
       ipc_message_ = ipc_message;
 
-      pthread_mutex_lock(child_mutex_);
+      stub_lock_ = bi::scoped_lock<bi::interprocess_mutex>(*stub_mutex_);
       NotifyParent();
     }
     catch (const PythonBackendException& pb_exception) {
@@ -195,8 +213,6 @@ class Stub {
       exit(1);
     }
   }
-
-  ~Stub() { pthread_mutex_unlock(child_mutex_); }
 
   void NotifyParent()
   {
@@ -207,10 +223,11 @@ class Stub {
       exit(1);
     }
 
-    pthread_mutex_lock(parent_mutex_);
-    pthread_cond_signal(parent_cond_);
-    pthread_mutex_unlock(parent_mutex_);
+    bi::scoped_lock<bi::interprocess_mutex> lk(*parent_mutex_);
+    parent_cond_->notify_one();
   }
+
+  bool& Health() { return ipc_message_->health; }
 
   std::unique_ptr<SharedMemory>& GetSharedMemory() { return shm_pool_; }
 
@@ -414,21 +431,30 @@ class Stub {
           break;
       }
 
-      // Custom handling for bytes
-      if (dtype == TRITONSERVER_TYPE_BYTES) {
-        py::array numpy_array(dtype_numpy, {raw_data->byte_size}, (void*)data);
-        py::list dims = py::cast(shape);
-        py::object deserialized =
-            deserialize_bytes(numpy_array).attr("reshape")(dims);
+      try {
+        // Custom handling for bytes
+        if (dtype == TRITONSERVER_TYPE_BYTES) {
+          py::array numpy_array(
+              dtype_numpy, {raw_data->byte_size}, (void*)data);
+          py::list dims = py::cast(shape);
 
-        py::object py_input_tensor =
-            PyTensor(name, deserialized, static_cast<int>(dtype));
-        py_input_tensors.append(py_input_tensor);
-      } else {
-        py::array numpy_array(dtype_numpy, shape, (void*)data);
-        py::object py_input_tensor =
-            PyTensor(name, numpy_array, static_cast<int>(dtype));
-        py_input_tensors.append(py_input_tensor);
+          py::object deserialized =
+              deserialize_bytes(numpy_array).attr("reshape")(dims);
+
+          py::object py_input_tensor =
+              PyTensor(name, deserialized, static_cast<int>(dtype));
+          py_input_tensors.append(py_input_tensor);
+        } else {
+          py::array numpy_array(dtype_numpy, shape, (void*)data);
+          py::object py_input_tensor =
+              PyTensor(name, numpy_array, static_cast<int>(dtype));
+          py_input_tensors.append(py_input_tensor);
+        }
+      }
+      catch (const py::error_already_set& e) {
+        LOG_INFO << e.what();
+        throw PythonBackendException(e.what());
+        return;
       }
     }
 
@@ -624,6 +650,12 @@ class Stub {
     }
   }
 
+  void UpdateHealth()
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
+    ipc_message_->health = true;
+  }
+
   void Finalize()
   {
     // Call finalize if exists.
@@ -637,20 +669,20 @@ class Stub {
     }
   }
 
-  // Wait for notification from the server. Returns true if the Python backend
-  // is exiting , and false if the Python backend is still running.
+  // Wait for notification from the server. Returns true if the parent process
+  // has received a SIGTERM, and false otherwise.
   bool WaitForNotification()
   {
-    struct timespec ts;
-
+    boost::posix_time::ptime timeout;
     do {
-      clock_gettime(CLOCK_REALTIME, &ts);
-      ts.tv_sec += 1;
-    } while (pthread_cond_timedwait(child_cond_, child_mutex_, &ts) != 0 &&
+      timeout =
+          boost::get_system_time() + boost::posix_time::milliseconds(1000);
+    } while (!stub_cond_->timed_wait(stub_lock_, timeout) != 0 &&
              !sigterm_received);
     return sigterm_received;
   }
 };
+
 extern "C" {
 
 int
@@ -711,15 +743,19 @@ main(int argc, char** argv)
   py::scoped_interpreter guard{};
 
   stub->Initialize(model_version, argv[6] /* triton install path */);
-  bool non_graceful_exit = false;
+  std::atomic<bool> non_graceful_exit = {false};
 
-  bool background_thread_running = true;
+  std::atomic<bool> background_thread_running = {true};
   std::thread background_thread(
       [&parent_pid, &background_thread_running, &stub, &non_graceful_exit] {
         while (background_thread_running) {
-          // Every two seconds check if the parent process is alive.
-          sleep(0.01);
+          // Every 300ms set the health variable to true. This variable is in
+          // shared memory and will be set to false by the parent process.
+          // The parent process expects that the stub process sets this variable
+          // to true within 1 second.
+          sleep(0.3);
 
+          stub->UpdateHealth();
           if (sigterm_received) {
             background_thread_running = false;
           }

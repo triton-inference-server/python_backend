@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -36,46 +36,38 @@
 
 namespace triton { namespace backend { namespace python {
 
+namespace bi = boost::interprocess;
+
 SharedMemory::SharedMemory(
     const std::string& shm_key, int64_t default_byte_size,
     int64_t shm_growth_bytes, bool truncate)
 {
   if (truncate) {
-    shm_fd_ = shm_open(
-        shm_key.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    shm_obj_ = bi::shared_memory_object(
+        bi::open_or_create, shm_key.c_str(), bi::read_write);
   } else {
-    shm_fd_ = shm_open(shm_key.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-  }
-  if (shm_fd_ == -1) {
-    std::string error_message =
-        ("unable to get shared memory descriptor for shared-memory key '" +
-         shm_key + "'");
-    throw PythonBackendException(error_message);
+    shm_obj_ = bi::shared_memory_object(
+        bi::open_only, shm_key.c_str(), bi::read_write);
   }
 
   shm_growth_bytes_ = shm_growth_bytes;
-  int res = posix_fallocate(shm_fd_, 0, default_byte_size);
-  if (res != 0) {
+  try {
+    shm_obj_.truncate(default_byte_size);
+  }
+  catch (bi::interprocess_exception& ex) {
     std::string error_message =
         ("Unable to initialize shared memory key '" + shm_key +
          "' to requested size (" + std::to_string(default_byte_size) +
          " bytes). If you are running Triton inside docker, use '--shm-size' "
          "flag to control the shared memory region size. Each Python backend "
          "model instance requires at least 64MBs of shared memory. Flag "
-         "'--shm-size=5G' should be sufficient for common usecases.");
+         "'--shm-size=5G' should be sufficient for common usecases. Error: " +
+         ex.what());
     throw PythonBackendException(std::move(error_message));
   }
 
-  void* map_addr = mmap(
-      NULL, default_byte_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
-
-  if (map_addr == MAP_FAILED) {
-    std::string error_message =
-        ("unable to process address space or shared-memory descriptor: " +
-         std::to_string(shm_fd_));
-    throw PythonBackendException(error_message);
-  }
-  shm_addr_ = (char*)map_addr;
+  shm_map_ = std::make_unique<bi::mapped_region>(shm_obj_, bi::read_write);
+  shm_addr_ = (char*)shm_map_->get_address();
 
   capacity_ = (size_t*)shm_addr_;
   *capacity_ = default_byte_size;
@@ -93,30 +85,7 @@ SharedMemory::SharedMemory(
 
 SharedMemory::~SharedMemory() noexcept(false)
 {
-  // TODO: Deallocate the first address
-  for (auto& pair : old_shm_addresses_) {
-    int status = munmap(pair.second, pair.first);
-    if (status == -1) {
-      std::string error_message = "unable to munmap shared memory region";
-      throw PythonBackendException(error_message);
-    }
-  }
-
-  // Close fd
-  if (close(shm_fd_) == -1) {
-    std::string error_message =
-        ("unable to close shared-memory descriptor: " +
-         std::to_string(shm_fd_));
-    throw PythonBackendException(error_message);
-  }
-
-  // Unlink shared memory
-  int error = shm_unlink(shm_key_.c_str());
-  if (error == -1) {
-    std::string error_message =
-        ("unable to unlink shared memory for key '" + shm_key_ + "'");
-    throw PythonBackendException(error_message);
-  }
+  bi::shared_memory_object::remove(shm_key_.c_str());
 }
 
 void
@@ -130,14 +99,17 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
   }
 
   if (shm_bytes_added > 0) {
-    if (posix_fallocate(shm_fd_, 0, *capacity_) != 0) {
-      // Revert the capacity to the previous value
+    try {
+      shm_obj_.truncate(*capacity_);
+    }
+    catch (bi::interprocess_exception& ex) {
       *capacity_ -= shm_bytes_added;
       std::string error_message =
           ("Failed to increase the shared memory pool size for key '" +
            shm_key_ + "' to " + std::to_string(*capacity_) +
            " bytes. If you are running Triton inside docker, use '--shm-size' "
-           "flag to control the shared memory region size.");
+           "flag to control the shared memory region size. Error: " +
+           ex.what());
       throw PythonBackendException(error_message);
     }
   }
@@ -154,19 +126,22 @@ void
 SharedMemory::UpdateSharedMemory()
 {
   if (current_capacity_ != *capacity_) {
-    void* map_addr =
-        mmap(NULL, *capacity_, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_, 0);
-
-    if (map_addr == MAP_FAILED) {
-      std::string error_message =
-          ("unable to process address space or shared-memory descriptor: " +
-           std::to_string(shm_fd_));
+    std::unique_ptr<bi::mapped_region> new_map;
+    try {
+      new_map = std::make_unique<bi::mapped_region>(shm_obj_, bi::read_write);
+    }
+    catch (bi::interprocess_exception& ex) {
+      std::string error_message = std::string(
+                                      "unable to process address space or "
+                                      "shared-memory descriptor, err:") +
+                                  ex.what();
       throw PythonBackendException(error_message);
     }
 
-    old_shm_addresses_.push_back({current_capacity_, shm_addr_});
+    old_shm_maps_.emplace_back(std::move(shm_map_));
     current_capacity_ = *capacity_;
-    shm_addr_ = (char*)map_addr;
+    shm_map_ = std::move(new_map);
+    shm_addr_ = (char*)shm_map_->get_address();
   }
 }
 
