@@ -45,10 +45,9 @@
 
 namespace py = pybind11;
 using namespace pybind11::literals;
+namespace bi = boost::interprocess;
 
 namespace triton { namespace backend { namespace python {
-
-namespace bi = boost::interprocess;
 
 #define LOG_IF_EXCEPTION(X)                              \
   do {                                                   \

@@ -49,15 +49,14 @@ class SharedMemory {
   // Amount of bytes to grow the shared memory when the pool is completely used.
   int64_t shm_growth_bytes_;
 
-  void UpdateSharedMemory();
-
   // Get the amount of shared memory available.
   size_t GetAvailableSharedMemory();
   boost::interprocess::shared_memory_object shm_obj_;
   std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
-
   std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
       old_shm_maps_;
+
+  void UpdateSharedMemory();
 
  public:
   SharedMemory(
