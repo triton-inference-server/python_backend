@@ -1,4 +1,4 @@
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -52,6 +52,10 @@ set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/co
 #
 include(FetchContent)
 
+# We need to use ExternalProject because we want to use Boost 1.76 which is not
+# available in Ubuntu 20.04
+include(ExternalProject)
+
 FetchContent_Declare(
   repo-common
   GIT_REPOSITORY https://github.com/triton-inference-server/common.git
@@ -80,10 +84,25 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
+#
+# Boost
+#
+ExternalProject_Add(
+  boostorg
+  URL https://boostorg.jfrog.io/artifactory/main/release/1.76.0/source/boost_1_76_0.tar.gz
+  URL_HASH SHA256=7bd7ddceec1a1dfdcbdb3e609b60d01739c38390a5f956385a12f3122049f0ca
+  PREFIX "boost-src"
+  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    <SOURCE_DIR>/boost/ ${CMAKE_BINARY_DIR}/boost
+  INSTALL_COMMAND ""
+  BUILD_COMMAND ""
+)
+set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
+
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${CMAKE_BINARY_DIR})
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
 add_library(
@@ -105,16 +124,14 @@ add_executable(
   src/shm_manager.cc
   src/shm_manager.h
 )
+
+add_dependencies(triton-python-backend boostorg)
+add_dependencies(triton-python-backend-stub boostorg)
+
 set_property(TARGET triton-python-backend-stub PROPERTY OUTPUT_NAME triton_python_backend_stub)
 
 add_library(
   TritonPythonBackend::triton-python-backend ALIAS triton-python-backend
-)
-
-target_include_directories(
-  triton-python-backend
-  PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_compile_features(triton-python-backend PRIVATE cxx_std_11)

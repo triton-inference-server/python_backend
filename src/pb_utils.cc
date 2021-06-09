@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -53,26 +53,6 @@ namespace triton { namespace backend { namespace python {
       throw PythonBackendException(MSG); \
     }                                    \
   } while (false)
-
-void
-CreateIPCMutex(pthread_mutex_t** mutex)
-{
-  pthread_mutexattr_t mattr;
-  pthread_mutexattr_init(&mattr);
-  pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-  pthread_mutex_init(*mutex, &mattr);
-  pthread_mutexattr_destroy(&mattr);
-}
-
-void
-CreateIPCCondVariable(pthread_cond_t** cv)
-{
-  pthread_condattr_t cattr;
-  pthread_condattr_init(&cattr);
-  pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
-  pthread_cond_init(*cv, &cattr);
-  pthread_condattr_destroy(&cattr);
-}
 
 void
 LoadStringFromSharedMemory(

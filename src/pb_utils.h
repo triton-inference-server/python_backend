@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,17 +27,19 @@
 #pragma once
 
 #include <pthread.h>
+#include <climits>
 #include <exception>
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <climits>
 #include <vector>
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
+
+namespace bi = boost::interprocess;
 
 #define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
   do {                                                             \
@@ -62,12 +64,6 @@ namespace triton { namespace backend { namespace python {
       }                                                            \
     }                                                              \
     while (false)
-
-// Create a conditional variable.
-void CreateIPCCondVariable(pthread_cond_t** cv);
-
-// Create a mutex that is shared between different processes.
-void CreateIPCMutex(pthread_mutex_t** mutex);
 
 //
 // Represents a raw data
@@ -134,6 +130,7 @@ struct IPCMessage {
 
   // response points to a ResponseBatch struct.
   off_t response_batch;
+  bool health;
 };
 
 // Representing a key value pair
@@ -192,8 +189,8 @@ void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
 
-void ExtractTarFile(std::string &archive_path, std::string &dst_path);
+void ExtractTarFile(std::string& archive_path, std::string& dst_path);
 
-bool FileExists(std::string &path);
+bool FileExists(std::string& path);
 
 }}}  // namespace triton::backend::python

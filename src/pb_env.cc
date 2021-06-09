@@ -29,10 +29,6 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <fts.h>
-#include <boost/filesystem.hpp>
-#include <boost/iostreams/copy.hpp>
-#include <boost/iostreams/filter/gzip.hpp>
-#include <boost/iostreams/filtering_streambuf.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>

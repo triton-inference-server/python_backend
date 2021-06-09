@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,6 +31,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <atomic>
+#include <boost/interprocess/sync/interprocess_condition.hpp>
+#include <boost/interprocess/sync/interprocess_mutex.hpp>
+#include <boost/interprocess/sync/scoped_lock.hpp>
+#include <boost/thread/thread_time.hpp>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -51,7 +55,6 @@
 #include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
-#include "triton/backend/backend_output_responder.h"
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
@@ -171,6 +174,8 @@
 
 namespace triton { namespace backend { namespace python {
 
+namespace bi = boost::interprocess;
+
 struct BackendState {
   std::string python_lib;
   int64_t shm_default_byte_size;
@@ -208,20 +213,26 @@ class ModelInstanceState : public BackendModelInstance {
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
 
   TRITONBACKEND_Model* triton_model_;
-  pthread_mutex_t* child_mutex_;
-  pthread_cond_t* child_cond_;
-  pthread_mutex_t* parent_mutex_;
-  pthread_cond_t* parent_cond_;
+  bi::interprocess_mutex* stub_mutex_;
+  bi::interprocess_condition* stub_cond_;
+  bi::interprocess_mutex* parent_mutex_;
+  bi::interprocess_condition* parent_cond_;
+  bi::interprocess_mutex* health_mutex_;
+  std::unique_ptr<bi::scoped_lock<bi::interprocess_mutex>> parent_lock_;
   std::string model_path_;
   IPCMessage* ipc_message_;
   std::unique_ptr<SharedMemory> shm_pool_;
-  // Child process pid
-  pid_t child_pid_;
+
+  // Stub process pid
+  pid_t stub_pid_;
 
   // Parent process pid
   pid_t parent_pid_;
-
   bool initialized_;
+
+  // Path to python execution environment
+  std::string path_to_libpython_;
+  std::string path_to_activate_;
 
  public:
   static TRITONSERVER_Error* Create(
@@ -239,16 +250,34 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
-  // Create the child process.
-  TRITONSERVER_Error* SetupChildProcess();
+  // Create the stub process.
+  TRITONSERVER_Error* SetupStubProcess();
 
-  // Notifies the child process on the new request
-  void NotifyChild();
+  // Notifies the stub process on the new request.  Returns false if the parent
+  // process fails to acquire the lock.
+  bool NotifyStub();
+
+  // Checks whether the stub process is live
+  bool IsStubProcessAlive();
+
+  // Wait for stub notification
+  bool WaitForStubNotification();
+
+  // Responds to all the requests with an error message.
+  void RespondErrorToAllRequests(
+      const char* message, std::vector<TRITONBACKEND_Response*>& responses,
+      TRITONBACKEND_Request** requests, const uint32_t request_count);
+
+  // Kill stub process
+  void KillStubProcess();
+
+  // Start stub process
+  TRITONSERVER_Error* StartStubProcess();
 };
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
-    : BackendModelInstance(model_state, triton_model_instance), child_pid_(0),
+    : BackendModelInstance(model_state, triton_model_instance), stub_pid_(0),
       initialized_(false)
 {
 }
@@ -270,14 +299,88 @@ ModelInstanceState::Create(
   return nullptr;  // success
 }
 
-void
-ModelInstanceState::NotifyChild()
+bool
+ModelInstanceState::NotifyStub()
 {
-  pthread_mutex_lock(child_mutex_);
-  pthread_cond_signal(child_cond_);
-  pthread_mutex_unlock(child_mutex_);
+  boost::posix_time::ptime timeout =
+      boost::get_system_time() + boost::posix_time::milliseconds(1000);
+  bi::scoped_lock<bi::interprocess_mutex> lock(*stub_mutex_, timeout);
+
+  if (lock) {
+    stub_cond_->notify_one();
+    return true;
+  } else {
+    return false;
+  }
 }
 
+void
+ModelInstanceState::KillStubProcess()
+{
+  kill(stub_pid_, SIGKILL);
+  int status;
+  waitpid(stub_pid_, &status, 0);
+  stub_pid_ = 0;
+}
+
+bool
+ModelInstanceState::WaitForStubNotification()
+{
+  uint64_t timeout_seceonds = 1000;
+  boost::posix_time::ptime timeout =
+      boost::get_system_time() +
+      boost::posix_time::milliseconds(timeout_seceonds);
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+    // Check if lock has been acquired.
+    if (lock) {
+      ipc_message_->health = false;
+    } else {
+      // If It failed to obtain the lock, it means that the stub has been
+      // stuck or exited while holding the health mutex lock.
+      return false;
+    }
+  }
+
+  timeout = boost::get_system_time() +
+            boost::posix_time::milliseconds(timeout_seceonds);
+  while (!parent_cond_->timed_wait(*parent_lock_, timeout)) {
+    if (!IsStubProcessAlive()) {
+      return false;
+    }
+
+    timeout = boost::get_system_time() +
+              boost::posix_time::milliseconds(timeout_seceonds);
+  }
+  return true;
+}
+
+void
+ModelInstanceState::RespondErrorToAllRequests(
+    const char* message, std::vector<TRITONBACKEND_Response*>& responses,
+    TRITONBACKEND_Request** requests, const uint32_t request_count)
+{
+  for (uint32_t r = 0; r < request_count; ++r) {
+    if (responses[r] == nullptr)
+      continue;
+
+    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("Failed to process the request(s), message: ") + message)
+            .c_str());
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
+    LOG_IF_ERROR(
+        TRITONBACKEND_ResponseSend(
+            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+        "failed sending response");
+
+    responses[r] = nullptr;
+    TRITONSERVER_ErrorDelete(err);
+  }
+}
 
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequests(
@@ -384,7 +487,7 @@ ModelInstanceState::ProcessRequests(
       responses.emplace_back(response);
     } else {
       responses.emplace_back(nullptr);
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response.");
       TRITONSERVER_ErrorDelete(err);
     }
   }
@@ -472,10 +575,46 @@ ModelInstanceState::ProcessRequests(
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
-  NotifyChild();
 
-  // Wait for child notification
-  pthread_cond_wait(parent_cond_, parent_mutex_);
+  // This means that the stub process has exited and Python
+  // backend failed to restart the stub process.
+  if (stub_pid_ == 0) {
+    const char* error_message = "The stub process has exited unexpectedly.";
+    RespondErrorToAllRequests(
+        error_message, responses, requests, request_count);
+
+    // Update the shared memory offset so that we can reuse the shared memory
+    shm_pool_->SetOffset(request_batch_offset);
+    return nullptr;
+  }
+
+  // If parent fails to notify the stub or the stub fails to notify the
+  // parent in a timely manner, kill the stub process and restart the
+  // stub process.
+  if (!NotifyStub() || !WaitForStubNotification()) {
+    KillStubProcess();
+    const char* error_message = "The stub process has exited unexpectedly.";
+    LOG_MESSAGE(TRITONSERVER_LOG_ERROR, error_message);
+    TRITONSERVER_Error* err = StartStubProcess();
+    if (err == nullptr) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_INFO, "Stub process successfully restarted.");
+    } else {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string(
+               "Stub process failed to restart. Your future requests to "
+               "model ") +
+           name_ + " will fail. Error: " + TRITONSERVER_ErrorMessage(err))
+              .c_str());
+    }
+    RespondErrorToAllRequests(
+        error_message, responses, requests, request_count);
+
+    // Update the shared memory offset so that we can reuse the shared memory
+    shm_pool_->SetOffset(request_batch_offset);
+    return nullptr;
+  }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -488,7 +627,7 @@ ModelInstanceState::ProcessRequests(
           (char**)&response_batch, sizeof(ResponseBatch),
           ipc_message_->response_batch));
 
-  // If inference fails, release all the requests and send an error response If
+  // If inference fails, release all the requests and send an error response. If
   // inference fails at this stage, it usually indicates a bug in the model code
   if (response_batch->has_error) {
     if (response_batch->is_error_set) {
@@ -497,46 +636,13 @@ ModelInstanceState::ProcessRequests(
           &responses, request_count,
           LoadStringFromSharedMemory(
               shm_pool_, response_batch->error, error_message));
-      for (uint32_t r = 0; r < request_count; ++r) {
-        if (responses[r] == nullptr)
-          continue;
-
-        TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
-            (std::string("Failed to process the request(s), message: ") +
-             error_message)
-                .c_str());
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(
-                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-            "failed sending response");
-
-        responses[r] = nullptr;
-        TRITONSERVER_ErrorDelete(err);
-      }
+      RespondErrorToAllRequests(
+          error_message, responses, requests, request_count);
     } else {
-      const char* error_message = "Failed to process the error response batch.";
-      for (uint32_t r = 0; r < request_count; ++r) {
-        if (responses[r] == nullptr)
-          continue;
-
-        TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
-            (std::string("Failed to process the request(s), message: ") +
-             error_message)
-                .c_str());
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(
-                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-            "failed sending response");
-
-        responses[r] = nullptr;
-        TRITONSERVER_ErrorDelete(err);
-      }
+      const char* error_message =
+          "Failed to fetch the error in response batch.";
+      RespondErrorToAllRequests(
+          error_message, responses, requests, request_count);
     }
 
     return nullptr;
@@ -726,15 +832,35 @@ ModelInstanceState::ProcessRequests(
        Name() + " released " + std::to_string(request_count) + " requests")
           .c_str());
 
-
   // Update the shared memory offset so that we can reuse the shared memory
   shm_pool_->SetOffset(request_batch_offset);
   return nullptr;
 }
 
-TRITONSERVER_Error*
-ModelInstanceState::SetupChildProcess()
+bool
+ModelInstanceState::IsStubProcessAlive()
 {
+  boost::posix_time::ptime timeout =
+      boost::get_system_time() + boost::posix_time::seconds(1);
+  bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+  // Check if lock has been acquired.
+  if (lock) {
+    return ipc_message_->health;
+  } else {
+    // If It failed to obtain the lock, it means that the stub has been
+    // stuck or exited while holding the health mutex lock.
+    return false;
+  }
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::StartStubProcess()
+{
+  stub_mutex_ = new (stub_mutex_) bi::interprocess_mutex;
+  health_mutex_ = new (health_mutex_) bi::interprocess_mutex;
+  stub_cond_ = new (stub_cond_) bi::interprocess_condition;
+
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
   std::string shm_region_name =
       std::string("/") + Name() + "_" + kind + "_" + std::to_string(device_id_);
@@ -744,110 +870,17 @@ ModelInstanceState::SetupChildProcess()
       model_state->StateForBackend()->shm_growth_byte_size;
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
-
-  try {
-    shm_pool_ = std::make_unique<SharedMemory>(
-        shm_region_name, shm_default_size, shm_growth_size,
-        true /* truncate */);
-  }
-  catch (const PythonBackendException& pb_exception) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-  }
-
-  // Child Mutex and CV
-  pthread_mutex_t* child_mutex;
-  off_t child_mutex_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&child_mutex, sizeof(pthread_mutex_t), child_mutex_offset));
-  CreateIPCMutex(&child_mutex);
-
-  pthread_cond_t* child_cv;
-  off_t child_cv_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&child_cv, sizeof(pthread_cond_t), child_cv_offset));
-  CreateIPCCondVariable(&child_cv);
-
-  child_cond_ = child_cv;
-  child_mutex_ = child_mutex;
-
-  // Parent Mutex and CV
-  pthread_mutex_t* parent_mutex;
-  off_t parent_mutex_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&parent_mutex, sizeof(pthread_mutex_t), parent_mutex_offset));
-  CreateIPCMutex(&parent_mutex);
-
-  pthread_cond_t* parent_cv;
-  off_t parent_cv_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&parent_cv, sizeof(pthread_cond_t), parent_cv_offset));
-  CreateIPCCondVariable(&parent_cv);
-
-  parent_cond_ = parent_cv;
-  parent_mutex_ = parent_mutex;
-
-  off_t ipc_offset;
-  RETURN_IF_EXCEPTION(
-      shm_pool_->Map((char**)&ipc_message_, sizeof(IPCMessage), ipc_offset));
-
-  uint64_t model_version = model_state->Version();
   const char* model_path = model_state->RepositoryPath().c_str();
 
-  std::stringstream ss;
-  // Use <path>/version/model.py as the model location
-  ss << model_path << "/" << model_version << "/model.py";
-  model_path_ = ss.str();
-  struct stat buffer;
-
-  // Check if model.py exists
-  if (stat(model_path_.c_str(), &buffer) != 0) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("model.py does not exist in the model repository path: " + model_path_)
-            .c_str());
-  }
-
-  // Path to the extracted Python env
-  std::string python_execution_env = "";
-
-  // Path to environment activation script
-  std::string path_to_activate;
-  std::string path_to_libpython;
-
-  if (model_state->PythonExecutionEnv() != "") {
-    try {
-      python_execution_env =
-          model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
-              model_state->PythonExecutionEnv());
-    }
-    catch (PythonBackendException& pb_exception) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-    }
-    path_to_activate = python_execution_env + "/bin/activate";
-    path_to_libpython = python_execution_env + "/lib";
-    if (python_execution_env.length() > 0 && !FileExists(path_to_activate)) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Path ") + path_to_activate +
-           " does not exist. The Python environment should contain an "
-           "'activate' script.")
-              .c_str());
-    }
-  }
-
-  parent_pid_ = getpid();
-  pthread_mutex_lock(parent_mutex_);
+  initialized_ = false;
 
   pid_t pid = fork();
-
   if (pid < 0) {
     return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, "Failed to fork the child process.");
+        TRITONSERVER_ERROR_INTERNAL, "Failed to fork the stub process.");
   }
 
-  // Child process
+  // Stub process
   if (pid == 0) {
     const char* stub_args[4];
     stub_args[0] = "bash";
@@ -868,23 +901,24 @@ ModelInstanceState::SetupChildProcess()
     }
 
     std::stringstream ss;
-    ss << python_backend_stub << " " << model_path_ << " " << shm_region_name
-       << " " << shm_default_size << " " << shm_growth_size << " "
-       << parent_pid_ << " " << model_state->StateForBackend()->python_lib;
+    ss << "exec " << python_backend_stub << " " << model_path_ << " "
+       << shm_region_name << " " << shm_default_size << " " << shm_growth_size
+       << " " << parent_pid_ << " "
+       << model_state->StateForBackend()->python_lib;
 
     std::string bash_argument;
     bash_argument = ss.str();
     if (model_state->PythonExecutionEnv() != "") {
       // Need to properly set the LD_LIBRARY_PATH so that Python environments
       // using different python versions load properly.
-      bash_argument = "export LD_LIBRARY_PATH=" + path_to_libpython +
-                      ":$LD_LIBRARY_PATH; source " + path_to_activate + " && " +
-                      bash_argument;
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_VERBOSE,
-          (std::string("Started Python backend stub: ") + bash_argument)
-              .c_str());
+      bash_argument = "export LD_LIBRARY_PATH=" + path_to_libpython_ +
+                      ":$LD_LIBRARY_PATH; source " + path_to_activate_ +
+                      " && " + bash_argument;
     }
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_VERBOSE,
+        (std::string("Starting Python backend stub: ") + bash_argument)
+            .c_str());
 
     stub_args[2] = bash_argument.c_str();
     if (execvp("bash", (char**)stub_args) == -1) {
@@ -907,13 +941,13 @@ ModelInstanceState::SetupChildProcess()
     int64_t stub_timeout_seconds =
         model_state->StateForBackend()->stub_timeout_seconds;
 
-    struct timespec ts;
-    child_pid_ = pid;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += stub_timeout_seconds;
+    stub_pid_ = pid;
+    boost::posix_time::ptime timeout =
+        boost::get_system_time() +
+        boost::posix_time::seconds(stub_timeout_seconds);
 
     // Pre initialization step.
-    if (pthread_cond_timedwait(parent_cond_, parent_mutex_, &ts) != 0) {
+    if (!parent_cond_->timed_wait(*parent_lock_, timeout)) {
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           (std::string("Timed out occurred while waiting for the stub process. "
@@ -938,9 +972,19 @@ ModelInstanceState::SetupChildProcess()
     RETURN_IF_EXCEPTION(SaveMapToSharedMemory(
         shm_pool_, initialize_args_offset, initialize_args));
     ipc_message_->request_batch = initialize_args_offset;
-    NotifyChild();
 
-    pthread_cond_wait(parent_cond_, parent_mutex_);
+    // If parent fails to notify the stub or the stub fails to notify the
+    // parent in a timely manner, kill the stub process and restart the
+    // stub process.
+    if (!NotifyStub() || !WaitForStubNotification()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Failed to initialize stub, stub process exited "
+                       "unexpectedly: ") +
+           name_)
+              .c_str());
+    }
+
     ResponseBatch* response_batch;
     RETURN_IF_EXCEPTION(shm_pool_->MapOffset(
         (char**)&response_batch, sizeof(RequestBatch),
@@ -956,33 +1000,172 @@ ModelInstanceState::SetupChildProcess()
     initialized_ = true;
   }
 
+  return nullptr;  // success
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::SetupStubProcess()
+{
+  std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
+  std::string shm_region_name =
+      std::string("/") + Name() + "_" + kind + "_" + std::to_string(device_id_);
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  int64_t shm_growth_size =
+      model_state->StateForBackend()->shm_growth_byte_size;
+  int64_t shm_default_size =
+      model_state->StateForBackend()->shm_default_byte_size;
+
+  try {
+    shm_pool_ = std::make_unique<SharedMemory>(
+        shm_region_name, shm_default_size, shm_growth_size,
+        true /* truncate */);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+  }
+
+  // Stub mutex and CV
+  bi::interprocess_mutex* stub_mutex;
+  off_t stub_mutex_offset;
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
+      (char**)&stub_mutex, sizeof(bi::interprocess_mutex), stub_mutex_offset));
+  stub_mutex = new (stub_mutex) bi::interprocess_mutex;
+
+  bi::interprocess_condition* stub_cv;
+  off_t stub_cv_offset;
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
+      (char**)&stub_cv, sizeof(bi::interprocess_condition), stub_cv_offset));
+  stub_cv = new (stub_cv) bi::interprocess_condition;
+
+  stub_cond_ = stub_cv;
+  stub_mutex_ = stub_mutex;
+
+  // Parent Mutex and CV
+  bi::interprocess_mutex* parent_mutex;
+  off_t parent_mutex_offset;
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
+      (char**)&parent_mutex, sizeof(bi::interprocess_mutex),
+      parent_mutex_offset));
+  parent_mutex = new (parent_mutex) bi::interprocess_mutex;
+
+  bi::interprocess_condition* parent_cv;
+  off_t parent_cv_offset;
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
+      (char**)&parent_cv, sizeof(bi::interprocess_condition),
+      parent_cv_offset));
+  parent_cv = new (parent_cv) bi::interprocess_condition;
+
+  bi::interprocess_mutex* health_mutex;
+  off_t health_mutex_offset;
+  RETURN_IF_EXCEPTION(shm_pool_->Map(
+      (char**)&health_mutex, sizeof(bi::interprocess_mutex),
+      health_mutex_offset));
+  health_mutex = new (health_mutex) bi::interprocess_mutex;
+
+  parent_cond_ = parent_cv;
+  parent_mutex_ = parent_mutex;
+  health_mutex_ = health_mutex;
+  parent_lock_ =
+      std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(*parent_mutex);
+
+  off_t ipc_offset;
+  RETURN_IF_EXCEPTION(
+      shm_pool_->Map((char**)&ipc_message_, sizeof(IPCMessage), ipc_offset));
+
+  uint64_t model_version = model_state->Version();
+  const char* model_path = model_state->RepositoryPath().c_str();
+
+  std::stringstream ss;
+  // Use <path>/version/model.py as the model location
+  ss << model_path << "/" << model_version << "/model.py";
+  model_path_ = ss.str();
+  struct stat buffer;
+
+  // Check if model.py exists
+  if (stat(model_path_.c_str(), &buffer) != 0) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("model.py does not exist in the model repository path: " + model_path_)
+            .c_str());
+  }
+
+  // Path to the extracted Python env
+  std::string python_execution_env = "";
+  if (model_state->PythonExecutionEnv() != "") {
+    try {
+      python_execution_env =
+          model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
+              model_state->PythonExecutionEnv());
+    }
+    catch (PythonBackendException& pb_exception) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+    }
+
+    path_to_activate_ = python_execution_env + "/bin/activate";
+    path_to_libpython_ = python_execution_env + "/lib";
+    if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Path ") + path_to_activate_ +
+           " does not exist. The Python environment should contain an "
+           "'activate' script.")
+              .c_str());
+    }
+  }
+
+  parent_pid_ = getpid();
+  RETURN_IF_ERROR(StartStubProcess());
+
   return nullptr;
 }
 
 ModelInstanceState::~ModelInstanceState()
 {
   if (initialized_) {
-    // Create Python inference requests
-    RequestBatch* request_batch;
-    off_t request_batch_offset;
-    shm_pool_->Map(
-        (char**)&request_batch, sizeof(RequestBatch), request_batch_offset);
-    //"failed to create request batch in shared memory.");
-    request_batch->batch_size = 0;
-    ipc_message_->request_batch = request_batch_offset;
-    NotifyChild();
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
+      ipc_message_->health = false;
+    }
 
-    // Wait for child notification
-    pthread_cond_wait(parent_cond_, parent_mutex_);
-    pthread_mutex_unlock(parent_mutex_);
+    // Sleep 1 second so that the child process has a chance to change the
+    // health variable
+    sleep(1);
+
+    bool healthy = false;
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
+      healthy = ipc_message_->health;
+    }
+
+    if (healthy) {
+      // Signal to the termination to the Python backend stub using a request of
+      // size 0.
+      RequestBatch* request_batch;
+      off_t request_batch_offset;
+      shm_pool_->Map(
+          (char**)&request_batch, sizeof(RequestBatch), request_batch_offset);
+      request_batch->batch_size = 0;
+      ipc_message_->request_batch = request_batch_offset;
+
+      if (NotifyStub()) {
+        // Wait for stub notification
+        parent_cond_->wait(*parent_lock_);
+      }
+    }
   }
 
-  // Terminate the child process if it has been created.
-  if (child_pid_ != 0) {
+  // Terminate the stub process if it has been created.
+  if (stub_pid_ != 0) {
     int status;
-    kill(child_pid_, SIGTERM);
-    waitpid(child_pid_, &status, 0);
+    kill(stub_pid_, SIGTERM);
+    waitpid(stub_pid_, &status, 0);
   }
+
+  // Destory the lock before deletion of shared memory is triggered.
+  parent_lock_.reset(nullptr);
 }
 
 TRITONSERVER_Error*
@@ -1323,13 +1506,13 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceSetState(
       instance, reinterpret_cast<void*>(instance_state)));
 
+  RETURN_IF_ERROR(instance_state->SetupStubProcess());
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       (std::string("TRITONBACKEND_ModelInstanceInitialize: instance "
                    "initialization successful ") +
        name + " (device " + std::to_string(device_id) + ")")
           .c_str());
-  RETURN_IF_ERROR(instance_state->SetupChildProcess());
 
   return nullptr;
 }
