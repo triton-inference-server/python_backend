@@ -41,7 +41,7 @@ any C++ code.
 * [Examples](#examples)
 * [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
 * [Model Config File](#model-config-file)
-* [Error Hanldling](#error-handling)
+* [Error Handling](#error-handling)
 * [Managing Shared Memory](#managing-shared-memory)
 * [Building From Source](#building-from-source)
 
