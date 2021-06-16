@@ -261,6 +261,10 @@ class Tensor:
             if triton_dtype is None:
                 triton_dtype = numpy_to_triton_type(numpy_array.dtype.type)
 
+        if not numpy_array.flags['C_CONTIGUOUS']:
+            numpy_array = np.ascontiguousarray(
+                numpy_array, dtype=numpy_array.dtype)
+
         self._triton_dtype = triton_dtype
         self._name = name
         self._numpy_array = numpy_array
