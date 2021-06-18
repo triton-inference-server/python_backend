@@ -46,13 +46,52 @@ PbTensor::PbTensor(std::string name, py::object numpy_array, int dtype)
   }
 }
 
-// PbTensor::PbTensor(
-//     std::string& name, std::vector<int64_t> dims, memory_type,
-//     memory_type_id, triton_dtype, data_ptr) : name_(name),
-//     numpy_array_(numpy_array), dtype_(dtype)
-// {
-// }
+PbTensor::PbTensor(
+    std::string name, std::vector<int64_t> dims, int dtype,
+    TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
+    void* memory_ptr)
+{
+  name_ = name;
+  memory_ptr_ = memory_ptr;
+  memory_type_ = memory_type;
+  memory_type_id_ = memory_type_id;
+  dtype_ = dtype;
+  dims_ = dims;
+  numpy_array_ = py::none();
+}
 
+void
+delete_unused_dltensor(PyObject* dlp)
+{
+  if (PyCapsule_IsValid(dlp, "dltensor")) {
+    DLManagedTensor* dl_managed_tensor =
+        static_cast<DLManagedTensor*>(PyCapsule_GetPointer(dlp, "dltensor"));
+    free(dl_managed_tensor);
+  }
+}
+
+py::capsule
+PbTensor::ToDLPack()
+{
+  DLManagedTensor* dlpack_tensor = new DLManagedTensor;
+  dlpack_tensor->dl_tensor.ndim = dims_.size();
+  dlpack_tensor->dl_tensor.byte_offset = 0;
+  dlpack_tensor->dl_tensor.data = const_cast<void*>(memory_ptr_);
+  dlpack_tensor->dl_tensor.shape = dims_.data();
+  dlpack_tensor->dl_tensor.strides = nullptr;
+  dlpack_tensor->deleter = [](DLManagedTensor* m) {};
+  dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
+  dlpack_tensor->dl_tensor.dtype.bits = 32;
+  dlpack_tensor->dl_tensor.dtype.code = DLDataTypeCode::kDLInt;
+  dlpack_tensor->dl_tensor.dtype.lanes = 1;
+  if (memory_type_ == TRITONSERVER_MEMORY_GPU) {
+    dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
+  } else if (memory_type_ == TRITONSERVER_MEMORY_CPU) {
+    dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCPU;
+  }
+  return py::capsule(
+      static_cast<void*>(dlpack_tensor), "dltensor", &delete_unused_dltensor);
+}
 
 const std::string&
 PbTensor::Name()

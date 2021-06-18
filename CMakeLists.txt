@@ -85,6 +85,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pybind11)
 
 #
+# DLPack
+#
+FetchContent_Declare(
+  dlpack
+  GIT_REPOSITORY "https://github.com/dmlc/dlpack"
+  GIT_TAG "v0.5"
+  GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(dlpack)
+
+#
 # Boost
 #
 ExternalProject_Add(
@@ -166,6 +177,7 @@ target_link_libraries(
   PRIVATE
    Threads::Threads
    pybind11::embed
+   dlpack
    triton-backend-utils    # from repo-backend
    -larchive               # libarchive
    -lrt                    # shared memory 

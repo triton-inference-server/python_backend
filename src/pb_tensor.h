@@ -25,12 +25,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <string>
-#include "triton/backend/backend_common.h"
-#include "triton/core/tritonserver.h"
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <string>
+#include "triton/backend/backend_common.h"
+#include "triton/core/tritonserver.h"
+#include <dlpack/dlpack.h>
 
 namespace py = pybind11;
 
@@ -39,10 +40,17 @@ class PbTensor {
   std::string name_;
   py::array numpy_array_;
   int dtype_;
+  void* memory_ptr_;
+  int64_t memory_type_id_;
+  std::vector<int64_t> dims_;
+  TRITONSERVER_MemoryType memory_type_;
 
  public:
   PbTensor(std::string name, py::object numpy_array);
   PbTensor(std::string name, py::object numpy_array, int dtype);
+  PbTensor(std::string name, std::vector<int64_t> dims, int dtype,
+      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
+      void* memory_ptr);
   py::capsule ToDLPack();
   const std::string& Name();
   py::array& AsNumpy();

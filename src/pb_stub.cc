@@ -463,26 +463,26 @@ class Stub {
           return;
         }
       } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
-        // cudaipcmemhandle_t* cuda_mem_handle;
-        // cudasetdevice(raw_data->memory_type_id);
-        // shm_pool_->mapoffset(
-        //     (char**)&cuda_mem_handle, sizeof(cudaipcmemhandle_t),
-        //     raw_data->memory_ptr);
-        // cudaerror_t err = cudaipcopenmemhandle(
-        //     (void**)&data, *cuda_mem_handle, cudaipcmemlazyenablepeeraccess);
-        // if (err != cudasuccess) {
-        //   throw pythonbackendexception(std::string(
-        //                                    "failed to open cuda ipc handle: "
-        //                                    +
-        //                                    std::string(cudageterrorstring(err)))
-        //                                    .c_str());
-        // }
+        cudaIpcMemHandle_t* cuda_mem_handle;
+        cudaSetDevice(raw_data->memory_type_id);
+        shm_pool_->MapOffset(
+            (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
+            raw_data->memory_ptr);
+        cudaError_t err = cudaIpcOpenMemHandle(
+            (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+        if (err != cudaSuccess) {
+          throw PythonBackendException(std::string(
+                                           "failed to open cuda ipc handle: " +
+                                           std::string(cudaGetErrorString(err)))
+                                           .c_str());
+        }
 
-        // py::list dims = py::cast(shape);
-        // pytensor.attr("from_raw")(
-        //     name, dims, static_cast<int>(raw_data->memory_type),
-        //     raw_data->memory_type_id, static_cast<int>(dtype),
-        //     static_cast<void*>(data));
+        PbTensor py_input_tensor = PbTensor(
+            name, shape, static_cast<int>(dtype),
+            raw_data->memory_type, raw_data->memory_type_id,
+            static_cast<void*>(data));
+
+        py_input_tensors.append(py_input_tensor);
       }
     }
 
@@ -651,8 +651,6 @@ class Stub {
             py::module::import((model_version + std::string(".model")).c_str())
                 .attr("TritonPythonModel");
         PyRequest_ = python_backend_utils.attr("InferenceRequest");
-        // PyTensor_ = python_backend_utils.attr("Tensor");
-        // PyTensor_.setattr('to_dlpack', )
         deserialize_bytes_ =
             python_backend_utils.attr("deserialize_bytes_tensor");
         serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
@@ -722,10 +720,11 @@ class Stub {
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
   py::class_<PbTensor>(module, "Tensor")
-      .def(py::init<std::string &, py::array &>())
+      .def(py::init<std::string&, py::array&>())
       .def("name", &PbTensor::Name)
       .def("as_numpy", &PbTensor::AsNumpy)
-      .def("triton_dtype", &PbTensor::TritonDtype);
+      .def("triton_dtype", &PbTensor::TritonDtype)
+      .def("to_dlpack", &PbTensor::ToDLPack);
 }
 
 extern "C" {
