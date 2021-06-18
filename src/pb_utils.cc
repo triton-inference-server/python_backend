@@ -44,6 +44,10 @@
 #include <unordered_map>
 #include "shm_manager.h"
 
+#ifdef TRITON_ENABLE_GPU
+#include <cuda_runtime_api.h>
+#endif
+
 namespace triton { namespace backend { namespace python {
 
 #define THROW_IF_ERROR(MSG, X)           \
@@ -91,10 +95,22 @@ SaveRawDataToSharedMemory(
   raw_data->memory_type = memory_type;
   raw_data->memory_type_id = memory_type_id;
   raw_data->byte_size = byte_size;
+  if (memory_type == TRITONSERVER_MEMORY_CPU) {
+    off_t buffer_offset;
+    shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
+    raw_data->memory_ptr = buffer_offset;
+  }
 
-  off_t buffer_offset;
-  shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
-  raw_data->memory_ptr = buffer_offset;
+#ifdef TRITON_ENABLE_GPU
+  if (memory_type == TRITONSERVER_MEMORY_GPU) {
+    off_t buffer_offset;
+    shm_pool->Map((char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
+    raw_data->memory_ptr = buffer_offset;
+  }
+#else
+  throw PythonBackendException(
+      "Trying to create GPU tensors with TRITON_ENABLE_GPU disabled.");
+#endif
 }
 
 void
@@ -142,7 +158,7 @@ void
 SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, const char* name,
+    int64_t memory_type_id, uint64_t byte_size, const char* name,
     const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype)
 {
   // Raw Data

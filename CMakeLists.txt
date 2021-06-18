@@ -118,9 +118,13 @@ add_library(
 
 add_executable(
   triton-python-backend-stub
+  src/pb_stub_utils.cc
+  src/pb_stub_utils.h
   src/pb_stub.cc
   src/pb_utils.cc
   src/pb_utils.h
+  src/pb_tensor.cc
+  src/pb_tensor.h
   src/shm_manager.cc
   src/shm_manager.h
 )

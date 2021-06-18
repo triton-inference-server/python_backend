@@ -655,7 +655,6 @@ ModelInstanceState::ProcessRequests(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
           response_batch->responses));
 
-
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
     TRITONBACKEND_Request* request = requests[r];
@@ -1210,26 +1209,49 @@ ModelInstanceState::GetInputTensor(
         "partitioning your input into multiple inputs.");
   }
 
-  // We need to create a new collector for every request because python backend
-  // sends each request individually to the python model
   BackendInputCollector collector(
       &request, 1, &responses, Model()->TritonMemoryManager(),
       false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
       HostPolicyName().c_str());
 
-  const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-  const int memory_type_id = 0;
+  TRITONSERVER_MemoryType memory_type;
+  int64_t memory_type_id;
+  if (kind_ == TRITONSERVER_INSTANCEGROUPKIND_CPU) {
+    memory_type = TRITONSERVER_MEMORY_CPU;
+    memory_type_id = 0;
+    char* input_buffer;
+    RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+        shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
+        input_byte_size, input_name, input_shape, input_dims_count,
+        input_dtype));
+    collector.ProcessTensor(
+        input_name, input_buffer, input_byte_size, memory_type, memory_type_id);
+  } else {
+#ifdef TRITON_ENABLE_GPU
+    memory_type = TRITONSERVER_MEMORY_GPU;
+    memory_type_id = device_id_;
 
-  char* input_buffer;
-  RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-      shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
-      input_byte_size, input_name, input_shape, input_dims_count, input_dtype));
+    char* cuda_handle;
+    RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+        shm_pool_, input_tensor, cuda_handle, memory_type, memory_type_id,
+        input_byte_size, input_name, input_shape, input_dims_count,
+        input_dtype));
 
-  // Load raw data into input_tensor raw data.
-  // FIXME: Avoid the copy to CPU Memory when
-  // the data is in GPU.
-  collector.ProcessTensor(
-      input_name, input_buffer, input_byte_size, memory_type, memory_type_id);
+    const void* buffer = nullptr;
+    std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
+    alloc_perference = {{TRITONSERVER_MEMORY_GPU, device_id_}};
+    collector.ProcessTensor(
+    input_name, nullptr, 0, alloc_perference, reinterpret_cast<const char **>(&buffer), &input_byte_size,
+    &memory_type, &memory_type_id);
+
+    cudaSetDevice(device_id_);
+    cudaIpcGetMemHandle(reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle), const_cast<void*>(buffer));
+#else
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        "Python backend needs to be rebuilt with TRITON_ENABLE_GPU=ON.");
+#endif
+  }
 
   return nullptr;
 }

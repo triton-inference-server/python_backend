@@ -71,7 +71,7 @@ namespace bi = boost::interprocess;
 struct RawData {
   off_t memory_ptr;
   TRITONSERVER_MemoryType memory_type;
-  int memory_type_id;
+  int64_t memory_type_id;
   uint64_t byte_size;
 };
 
@@ -183,7 +183,7 @@ void SaveRawDataToSharedMemory(
 void SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, const char* name,
+    int64_t memory_type_id, uint64_t byte_size, const char* name,
     const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype);
 void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,

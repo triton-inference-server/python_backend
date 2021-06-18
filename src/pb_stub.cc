@@ -40,8 +40,13 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
+
+#ifdef TRITON_ENABLE_GPU
+#include <cuda_runtime_api.h>
+#endif
 
 namespace py = pybind11;
 using namespace pybind11::literals;
@@ -134,7 +139,6 @@ class Stub {
   IPCMessage* ipc_message_;
   std::unique_ptr<SharedMemory> shm_pool_;
   py::object PyRequest_;
-  py::object PyTensor_;
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
@@ -306,7 +310,7 @@ class Stub {
       char* data_in_shm;
       char* data_ptr;
       const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-      const int memory_type_id = 0;
+      const int64_t memory_type_id = 0;
 
       size_t dims_count = numpy_array.ndim();
       int64_t dims[dims_count];
@@ -349,7 +353,7 @@ class Stub {
 
   void ProcessRequest(
       Request* request, ResponseBatch* response_batch,
-      py::object& infer_request, py::object& PyRequest, py::object& PyTensor,
+      py::object& infer_request, py::object& PyRequest,
       py::object& deserialize_bytes)
   {
     char* id = nullptr;
@@ -367,16 +371,11 @@ class Stub {
 
       char* name = nullptr;
       LoadStringFromSharedMemory(shm_pool_, input_tensor->name, name);
+      size_t dims_count = input_tensor->dims_count;
 
       RawData* raw_data;
       shm_pool_->MapOffset(
           (char**)&raw_data, sizeof(RawData), input_tensor->raw_data);
-
-      char* data;
-      shm_pool_->MapOffset(
-          (char**)&data, raw_data->byte_size, raw_data->memory_ptr);
-
-      size_t dims_count = input_tensor->dims_count;
 
       int64_t* dims;
       shm_pool_->MapOffset(
@@ -384,77 +383,106 @@ class Stub {
 
       TRITONSERVER_DataType dtype = input_tensor->dtype;
       std::vector<int64_t> shape{dims, dims + dims_count};
-      py::dtype dtype_numpy;
-      switch (dtype) {
-        case TRITONSERVER_TYPE_BOOL:
-          dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT8:
-          dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT16:
-          dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT32:
-          dtype_numpy = py::dtype(py::format_descriptor<uint32_t>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT64:
-          dtype_numpy = py::dtype(py::format_descriptor<uint64_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT8:
-          dtype_numpy = py::dtype(py::format_descriptor<int8_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT16:
-          dtype_numpy = py::dtype(py::format_descriptor<int16_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT32:
-          dtype_numpy = py::dtype(py::format_descriptor<int32_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT64:
-          dtype_numpy = py::dtype(py::format_descriptor<int64_t>::format());
-          break;
-        case TRITONSERVER_TYPE_FP16:
-          // Will be reinterpreted in the python code.
-          dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-          break;
-        case TRITONSERVER_TYPE_FP32:
-          dtype_numpy = py::dtype(py::format_descriptor<float>::format());
-          break;
-        case TRITONSERVER_TYPE_FP64:
-          dtype_numpy = py::dtype(py::format_descriptor<double>::format());
-          break;
-        case TRITONSERVER_TYPE_BYTES:
-          // Will be reinterpreted in the python code.
-          dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-          break;
-        default:
-          break;
-      }
 
-      try {
-        // Custom handling for bytes
-        if (dtype == TRITONSERVER_TYPE_BYTES) {
-          py::array numpy_array(
-              dtype_numpy, {raw_data->byte_size}, (void*)data);
-          py::list dims = py::cast(shape);
+      char* data;
+      if (raw_data->memory_type == TRITONSERVER_MEMORY_CPU) {
+        shm_pool_->MapOffset(
+            (char**)&data, raw_data->byte_size, raw_data->memory_ptr);
 
-          py::object deserialized =
-              deserialize_bytes(numpy_array).attr("reshape")(dims);
-
-          py::object py_input_tensor =
-              PyTensor(name, deserialized, static_cast<int>(dtype));
-          py_input_tensors.append(py_input_tensor);
-        } else {
-          py::array numpy_array(dtype_numpy, shape, (void*)data);
-          py::object py_input_tensor =
-              PyTensor(name, numpy_array, static_cast<int>(dtype));
-          py_input_tensors.append(py_input_tensor);
+        py::dtype dtype_numpy;
+        switch (dtype) {
+          case TRITONSERVER_TYPE_BOOL:
+            dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
+            break;
+          case TRITONSERVER_TYPE_UINT8:
+            dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
+            break;
+          case TRITONSERVER_TYPE_UINT16:
+            dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
+            break;
+          case TRITONSERVER_TYPE_UINT32:
+            dtype_numpy = py::dtype(py::format_descriptor<uint32_t>::format());
+            break;
+          case TRITONSERVER_TYPE_UINT64:
+            dtype_numpy = py::dtype(py::format_descriptor<uint64_t>::format());
+            break;
+          case TRITONSERVER_TYPE_INT8:
+            dtype_numpy = py::dtype(py::format_descriptor<int8_t>::format());
+            break;
+          case TRITONSERVER_TYPE_INT16:
+            dtype_numpy = py::dtype(py::format_descriptor<int16_t>::format());
+            break;
+          case TRITONSERVER_TYPE_INT32:
+            dtype_numpy = py::dtype(py::format_descriptor<int32_t>::format());
+            break;
+          case TRITONSERVER_TYPE_INT64:
+            dtype_numpy = py::dtype(py::format_descriptor<int64_t>::format());
+            break;
+          case TRITONSERVER_TYPE_FP16:
+            // Will be reinterpreted in the python code.
+            dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
+            break;
+          case TRITONSERVER_TYPE_FP32:
+            dtype_numpy = py::dtype(py::format_descriptor<float>::format());
+            break;
+          case TRITONSERVER_TYPE_FP64:
+            dtype_numpy = py::dtype(py::format_descriptor<double>::format());
+            break;
+          case TRITONSERVER_TYPE_BYTES:
+            // Will be reinterpreted in the python code.
+            dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
+            break;
+          default:
+            break;
         }
-      }
-      catch (const py::error_already_set& e) {
-        LOG_INFO << e.what();
-        throw PythonBackendException(e.what());
-        return;
+        std::string name_str(name);
+
+        try {
+          // Custom handling for bytes
+          if (dtype == TRITONSERVER_TYPE_BYTES) {
+            py::array numpy_array(
+                dtype_numpy, {raw_data->byte_size}, (void*)data);
+            py::list dims = py::cast(shape);
+
+            py::object deserialized =
+                deserialize_bytes(numpy_array).attr("reshape")(dims);
+
+            PbTensor py_input_tensor(
+                name_str, deserialized, static_cast<int>(dtype));
+            py_input_tensors.append(py_input_tensor);
+          } else {
+            py::array numpy_array(dtype_numpy, shape, (void*)data);
+            PbTensor py_input_tensor(
+                name_str, numpy_array, static_cast<int>(dtype));
+            py_input_tensors.append(py_input_tensor);
+          }
+        }
+        catch (const py::error_already_set& e) {
+          LOG_INFO << e.what();
+          throw PythonBackendException(e.what());
+          return;
+        }
+      } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
+        // cudaipcmemhandle_t* cuda_mem_handle;
+        // cudasetdevice(raw_data->memory_type_id);
+        // shm_pool_->mapoffset(
+        //     (char**)&cuda_mem_handle, sizeof(cudaipcmemhandle_t),
+        //     raw_data->memory_ptr);
+        // cudaerror_t err = cudaipcopenmemhandle(
+        //     (void**)&data, *cuda_mem_handle, cudaipcmemlazyenablepeeraccess);
+        // if (err != cudasuccess) {
+        //   throw pythonbackendexception(std::string(
+        //                                    "failed to open cuda ipc handle: "
+        //                                    +
+        //                                    std::string(cudageterrorstring(err)))
+        //                                    .c_str());
+        // }
+
+        // py::list dims = py::cast(shape);
+        // pytensor.attr("from_raw")(
+        //     name, dims, static_cast<int>(raw_data->memory_type),
+        //     raw_data->memory_type_id, static_cast<int>(dtype),
+        //     static_cast<void*>(data));
       }
     }
 
@@ -483,6 +511,8 @@ class Stub {
   {
     SetErrorForResponseBatch(pb_exception.what());
   }
+
+  int from_dlpack(int i, int j) { return i + j; }
 
   int Execute()
   {
@@ -525,7 +555,7 @@ class Stub {
       py::object infer_request;
       try {
         ProcessRequest(
-            request, response_batch_, infer_request, PyRequest_, PyTensor_,
+            request, response_batch_, infer_request, PyRequest_,
             deserialize_bytes_);
       }
       catch (const PythonBackendException& pb_exception) {
@@ -611,12 +641,18 @@ class Stub {
 
         py::module python_backend_utils =
             py::module::import("triton_python_backend_utils");
+        py::module c_python_backend_utils =
+            py::module::import("c_python_backend_utils");
+        py::setattr(
+            python_backend_utils, "Tensor",
+            c_python_backend_utils.attr("Tensor"));
 
         py::object TritonPythonModel =
             py::module::import((model_version + std::string(".model")).c_str())
                 .attr("TritonPythonModel");
         PyRequest_ = python_backend_utils.attr("InferenceRequest");
-        PyTensor_ = python_backend_utils.attr("Tensor");
+        // PyTensor_ = python_backend_utils.attr("Tensor");
+        // PyTensor_.setattr('to_dlpack', )
         deserialize_bytes_ =
             python_backend_utils.attr("deserialize_bytes_tensor");
         serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
@@ -682,6 +718,15 @@ class Stub {
     return sigterm_received;
   }
 };
+
+PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
+{
+  py::class_<PbTensor>(module, "Tensor")
+      .def(py::init<std::string &, py::array &>())
+      .def("name", &PbTensor::Name)
+      .def("as_numpy", &PbTensor::AsNumpy)
+      .def("triton_dtype", &PbTensor::TritonDtype);
+}
 
 extern "C" {
 
@@ -749,8 +794,8 @@ main(int argc, char** argv)
         while (background_thread_running) {
           // Every 300ms set the health variable to true. This variable is in
           // shared memory and will be set to false by the parent process.
-          // The parent process expects that the stub process sets this variable
-          // to true within 1 second.
+          // The parent process expects that the stub process sets this
+          // variable to true within 1 second.
           sleep(0.3);
 
           stub->UpdateHealth();
