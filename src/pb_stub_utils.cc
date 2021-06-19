@@ -94,4 +94,62 @@ triton_to_numpy_type(int data_type)
     return np.attr("object_");
   return py::none();
 }
+
+DLDataType
+convert_triton_to_dlpack_type(int data_type)
+{
+  DLDataType dl_dtype;
+  DLDataTypeCode dl_code;
+
+  // Number of bits required for the data type.
+  size_t dt_size = 0;
+  // TODO: Fix for TYPE_BYTES
+
+  dl_dtype.lanes = 1;
+  if (data_type == 1) {
+    dl_code = DLDataTypeCode::kDLInt;
+    dt_size = 1;
+  } else if (data_type == 2) {
+    dl_code = DLDataTypeCode::kDLUInt;
+    dt_size = 8;
+  } else if (data_type == 3) {
+    dl_code = DLDataTypeCode::kDLUInt;
+    dt_size = 16;
+  } else if (data_type == 4) {
+    dl_code = DLDataTypeCode::kDLUInt;
+    dt_size = 32;
+  } else if (data_type == 5) {
+    dl_code = DLDataTypeCode::kDLUInt;
+    dt_size = 64;
+  } else if (data_type == 6) {
+    dl_code = DLDataTypeCode::kDLInt;
+    dt_size = 8;
+  } else if (data_type == 7) {
+    dl_code = DLDataTypeCode::kDLInt;
+    dt_size = 16;
+  } else if (data_type == 8) {
+    dl_code = DLDataTypeCode::kDLInt;
+    dt_size = 32;
+  } else if (data_type == 9) {
+    dl_code = DLDataTypeCode::kDLInt;
+    dt_size = 64;
+  } else if (data_type == 10) {
+    dl_code = DLDataTypeCode::kDLFloat;
+    dt_size = 16;
+  } else if (data_type == 11) {
+    dl_code = DLDataTypeCode::kDLFloat;
+    dt_size = 32;
+  } else if (data_type == 12) {
+    dl_code = DLDataTypeCode::kDLFloat;
+    dt_size = 64;
+  }
+  // else if (data_type == 13)
+  //   1 == 1;
+  // return np.attr("object_"); TODO
+  dl_dtype.code = dl_code;
+  dl_dtype.bits = dt_size;
+
+  return dl_dtype;
+}
+
 }}}  // namespace triton::backend::python

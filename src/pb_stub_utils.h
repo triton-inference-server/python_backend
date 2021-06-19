@@ -27,9 +27,11 @@
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <dlpack/dlpack.h>
 
 namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 int numpy_to_triton_type(py::object data_type);
 py::object triton_to_numpy_type(int data_type);
+DLDataType convert_triton_to_dlpack_type(int data_type);
 }}}  // namespace triton::backend::python

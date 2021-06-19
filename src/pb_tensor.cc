@@ -81,9 +81,8 @@ PbTensor::ToDLPack()
   dlpack_tensor->dl_tensor.strides = nullptr;
   dlpack_tensor->deleter = [](DLManagedTensor* m) {};
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
-  dlpack_tensor->dl_tensor.dtype.bits = 32;
-  dlpack_tensor->dl_tensor.dtype.code = DLDataTypeCode::kDLInt;
-  dlpack_tensor->dl_tensor.dtype.lanes = 1;
+  dlpack_tensor->dl_tensor.dtype = convert_triton_to_dlpack_type(dtype_);
+
   if (memory_type_ == TRITONSERVER_MEMORY_GPU) {
     dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
   } else if (memory_type_ == TRITONSERVER_MEMORY_CPU) {
