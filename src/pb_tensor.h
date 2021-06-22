@@ -25,17 +25,23 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <dlpack/dlpack.h>
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <string>
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
-#include <dlpack/dlpack.h>
 
 namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
+
+typedef enum PYTHONBACKEND_tensortype_enum {
+  PYTHONBACKEND_RAW,
+  PYTHONBACKEND_NUMPY
+} PYTHONBACKEND_TensorType;
+
 class PbTensor {
   std::string name_;
   py::array numpy_array_;
@@ -44,16 +50,27 @@ class PbTensor {
   int64_t memory_type_id_;
   std::vector<int64_t> dims_;
   TRITONSERVER_MemoryType memory_type_;
+  PYTHONBACKEND_TensorType tensor_type_;
+  uint64_t byte_size_;
 
  public:
   PbTensor(std::string name, py::object numpy_array);
   PbTensor(std::string name, py::object numpy_array, int dtype);
-  PbTensor(std::string name, std::vector<int64_t> dims, int dtype,
+  PbTensor(
+      std::string name, std::vector<int64_t> dims, int dtype,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      void* memory_ptr);
+      void* memory_ptr, uint64_t byte_size);
   py::capsule ToDLPack();
+  static std::unique_ptr<PbTensor> FromDLPack(
+      std::string name, py::capsule dlpack);
   const std::string& Name();
   py::array& AsNumpy();
   int TritonDtype();
+  bool IsCPU();
+  uint64_t ByteSize();
+  TRITONSERVER_MemoryType MemoryType();
+  std::vector<int64_t>& Dims();
+  void* GetDataPtr();
+  int64_t MemoryTypeId();
 };
 }}}  // namespace triton::backend::python

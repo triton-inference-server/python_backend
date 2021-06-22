@@ -754,35 +754,88 @@ ModelInstanceState::ProcessRequests(
           shm_pool_->MapOffset(
               (char**)&raw_data, sizeof(RawData), output_tensor->raw_data));
 
-      char* data;
-      GUARDED_RESPOND_IF_EXCEPTION(
-          responses, r,
-          shm_pool_->MapOffset(
-              (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
+      TRITONSERVER_MemoryType actual_memory_type = raw_data->memory_type;
+      int64_t actual_memory_type_id = raw_data->memory_type_id;
 
-      std::vector<int64_t> batch_shape(dims, dims + dims_count);
-      TRITONSERVER_MemoryType actual_memory_type = TRITONSERVER_MEMORY_CPU;
-      int64_t actual_memory_type_id = 0;
-      void* buffer;
+      if (actual_memory_type == TRITONSERVER_MEMORY_CPU) {
+        char* data;
+        GUARDED_RESPOND_IF_EXCEPTION(
+            responses, r,
+            shm_pool_->MapOffset(
+                (char**)&data, raw_data->byte_size, raw_data->memory_ptr));
 
-      TRITONBACKEND_Output* response_output;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_ResponseOutput(
-              response, &response_output, name, triton_dt, batch_shape.data(),
-              batch_shape.size()));
+        std::vector<int64_t> batch_shape(dims, dims + dims_count);
+        void* buffer;
 
-      bool cuda_used;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_OutputBuffer(
-              response_output, &buffer, raw_data->byte_size,
-              &actual_memory_type, &actual_memory_type_id));
-      CopyBuffer(
-          "Failed to copy string", TRITONSERVER_MEMORY_CPU /* memory_type */,
-          0 /* memory_type_id */, actual_memory_type, actual_memory_type_id,
-          raw_data->byte_size, data, buffer, CudaStream(), &cuda_used);
-      cuda_copy |= cuda_used;
+        TRITONBACKEND_Output* response_output;
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONBACKEND_ResponseOutput(
+                response, &response_output, name, triton_dt, batch_shape.data(),
+                batch_shape.size()));
+
+        bool cuda_used;
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONBACKEND_OutputBuffer(
+                response_output, &buffer, raw_data->byte_size,
+                &actual_memory_type, &actual_memory_type_id));
+
+        CopyBuffer(
+            "Failed to copy string", TRITONSERVER_MEMORY_CPU /* memory_type */,
+            0 /* memory_type_id */, actual_memory_type, actual_memory_type_id,
+            raw_data->byte_size, data, buffer, CudaStream(), &cuda_used);
+        cuda_copy |= cuda_used;
+      } else if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+        cudaIpcMemHandle_t* cuda_mem_handle;
+        GUARDED_RESPOND_IF_EXCEPTION(
+            responses, r,
+            shm_pool_->MapOffset(
+                (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
+                raw_data->memory_ptr));
+        cudaSetDevice(actual_memory_type_id);
+        char* data;
+
+        cudaError_t err = cudaIpcOpenMemHandle(
+            (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+        if (err != cudaSuccess) {
+          throw PythonBackendException(std::string(
+                                           "failed to open cuda ipc handle: " +
+                                           std::string(cudaGetErrorString(err)))
+                                           .c_str());
+        }
+
+        std::vector<int64_t> batch_shape(dims, dims + dims_count);
+        void* buffer;
+
+        TRITONBACKEND_Output* response_output;
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONBACKEND_ResponseOutput(
+                response, &response_output, name, triton_dt, batch_shape.data(),
+                batch_shape.size()));
+
+        bool cuda_used;
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONBACKEND_OutputBuffer(
+                response_output, &buffer, raw_data->byte_size,
+                &actual_memory_type, &actual_memory_type_id));
+        CopyBuffer(
+            "Failed to copy string", actual_memory_type,
+            actual_memory_type_id /* memory_type_id */, actual_memory_type,
+            actual_memory_type_id, raw_data->byte_size, data, buffer,
+            CudaStream(), &cuda_used);
+
+        cuda_copy |= cuda_used;
+        err = cudaIpcCloseMemHandle(reinterpret_cast<void*>(data));
+        if (err != cudaSuccess) {
+          throw PythonBackendException(std::string(
+                                           "failed to close cuda ipc handle: " +
+                                           std::string(cudaGetErrorString(err)))
+                                           .c_str());
+        }
+      }
     }
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
@@ -1241,15 +1294,24 @@ ModelInstanceState::GetInputTensor(
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
     alloc_perference = {{TRITONSERVER_MEMORY_GPU, device_id_}};
     collector.ProcessTensor(
-    input_name, nullptr, 0, alloc_perference, reinterpret_cast<const char **>(&buffer), &input_byte_size,
-    &memory_type, &memory_type_id);
-
+        input_name, nullptr, 0, alloc_perference,
+        reinterpret_cast<const char**>(&buffer), &input_byte_size, &memory_type,
+        &memory_type_id);
+    
+    // TODO: Properly handle the deletion of cudaIpcMemHandle
     cudaSetDevice(device_id_);
-    cudaIpcGetMemHandle(reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle), const_cast<void*>(buffer));
+    cudaError_t err = cudaIpcGetMemHandle(
+        reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
+        const_cast<void*>(buffer));
+    if (err != cudaSuccess) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Failed to open device pointer.");
+    }
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
-        "Python backend needs to be rebuilt with TRITON_ENABLE_GPU=ON.");
+        "Python backend needs to be rebuilt with TRITON_ENABLE_GPU=ON to "
+        "support GPU tensors.");
 #endif
   }
 

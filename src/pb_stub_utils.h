@@ -24,14 +24,17 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <dlpack/dlpack.h>
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <dlpack/dlpack.h>
+#include "triton/core/tritonserver.h"
 
 namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 int numpy_to_triton_type(py::object data_type);
 py::object triton_to_numpy_type(int data_type);
 DLDataType convert_triton_to_dlpack_type(int data_type);
+TRITONSERVER_DataType convert_dlpack_to_triton_type(
+    const DLDataType& data_type);
 }}}  // namespace triton::backend::python

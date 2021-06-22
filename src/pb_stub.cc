@@ -293,60 +293,79 @@ class Stub {
         output_tensors_offset);
     response_shm->outputs = output_tensors_offset;
     response_shm->outputs_size = output_tensor_length;
+    TRITONSERVER_MemoryType memory_type;
+    int64_t memory_type_id;
 
     for (auto& output_tensor : output_tensors) {
+      PbTensor output_tensor_pb = output_tensor.cast<PbTensor>();
       Tensor* output_tensor_shm = &output_tensors_shm[j];
-      py::str name = output_tensor.attr("name")();
-      std::string output_name = name;
-
-      py::array numpy_array = output_tensor.attr("as_numpy")();
-      py::int_ dtype = output_tensor.attr("triton_dtype")();
-      py::buffer_info buffer = numpy_array.request();
-
-      int dtype_triton_int = dtype;
+      std::string output_name = output_tensor_pb.Name();
       TRITONSERVER_DataType dtype_triton =
-          static_cast<TRITONSERVER_DataType>(dtype_triton_int);
+          static_cast<TRITONSERVER_DataType>(output_tensor_pb.TritonDtype());
+      memory_type = TRITONSERVER_MEMORY_CPU;
+      memory_type_id = 0;
 
-      char* data_in_shm;
-      char* data_ptr;
-      const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
-      const int64_t memory_type_id = 0;
+      if (output_tensor_pb.IsCPU()) {
+        py::array numpy_array = output_tensor_pb.AsNumpy();
+        py::buffer_info buffer = numpy_array.request();
+        size_t dims_count = numpy_array.ndim();
+        memory_type = TRITONSERVER_MEMORY_CPU;
+        memory_type_id = 0;
 
-      size_t dims_count = numpy_array.ndim();
-      int64_t dims[dims_count];
-      ssize_t byte_size;
+        char* data_in_shm;
+        char* data_ptr;
 
-      // Custom handling for type bytes.
-      if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
-        py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
-        if (serialize_bytes.is_none()) {
-          const char* err_message = "An error happened during serialization.";
-          LOG_INFO << err_message;
-          SetErrorForResponse(response_shm, err_message);
-          return;
-        }
+        int64_t dims[dims_count];
+        ssize_t byte_size;
 
-        py::bytes serialized_bytes = serialized_bytes_or_none;
-        data_ptr = PyBytes_AsString(serialized_bytes.ptr());
-        byte_size = PyBytes_Size(serialized_bytes.ptr());
-      } else {
+        // Custom handling for type bytes.
+        // if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
+        //   py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
+        //   if (serialize_bytes.is_none()) {
+        //     const char* err_message = "An error happened during
+        //     serialization."; LOG_INFO << err_message;
+        //     SetErrorForResponse(response_shm, err_message);
+        //     return;
+        //   }
+
+        //   py::bytes serialized_bytes = serialized_bytes_or_none;
+        //   data_ptr = PyBytes_AsString(serialized_bytes.ptr());
+        //   byte_size = PyBytes_Size(serialized_bytes.ptr());
+        // } else {
         data_ptr = static_cast<char*>(buffer.ptr);
         byte_size = numpy_array.nbytes();
+        // }
+
+        const ssize_t* numpy_shape = numpy_array.shape();
+        for (size_t i = 0; i < dims_count; i++) {
+          dims[i] = numpy_shape[i];
+        }
+
+        SaveTensorToSharedMemory(
+            shm_pool_, output_tensor_shm, data_in_shm, memory_type,
+            memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
+            dtype_triton);
+
+        // TODO: We can remove this memcpy if the numpy object
+        // is already in shared memory.
+        std::copy(data_ptr, data_ptr + byte_size, data_in_shm);
+      } else {
+        char* cuda_handle;
+        SaveTensorToSharedMemory(
+            shm_pool_, output_tensor_shm, cuda_handle,
+            output_tensor_pb.MemoryType(), output_tensor_pb.MemoryTypeId(),
+            output_tensor_pb.ByteSize(), output_name.c_str(),
+            output_tensor_pb.Dims().data(), output_tensor_pb.Dims().size(),
+            dtype_triton);
+        cudaSetDevice(output_tensor_pb.MemoryTypeId());
+        cudaError_t err = cudaIpcGetMemHandle(
+            reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
+            output_tensor_pb.GetDataPtr());
+        if (err != cudaSuccess) {
+          // return TRITONSERVER_ErrorNew(
+          //     TRITONSERVER_ERROR_INTERNAL, "Failed to open device pointer.");
+        }
       }
-
-      const ssize_t* numpy_shape = numpy_array.shape();
-      for (size_t i = 0; i < dims_count; i++) {
-        dims[i] = numpy_shape[i];
-      }
-
-      SaveTensorToSharedMemory(
-          shm_pool_, output_tensor_shm, data_in_shm, memory_type,
-          memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
-          dtype_triton);
-
-      // TODO: We can remove this memcpy if the numpy object
-      // is already in shared memory.
-      std::copy(data_ptr, data_ptr + byte_size, data_in_shm);
       j += 1;
     }
   }
@@ -468,6 +487,7 @@ class Stub {
         shm_pool_->MapOffset(
             (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
             raw_data->memory_ptr);
+
         cudaError_t err = cudaIpcOpenMemHandle(
             (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
         if (err != cudaSuccess) {
@@ -478,16 +498,15 @@ class Stub {
         }
 
         PbTensor py_input_tensor = PbTensor(
-            name, shape, static_cast<int>(dtype),
-            raw_data->memory_type, raw_data->memory_type_id,
-            static_cast<void*>(data));
+            name, shape, static_cast<int>(dtype), raw_data->memory_type,
+            raw_data->memory_type_id, static_cast<void*>(data),
+            raw_data->byte_size);
 
         py_input_tensors.append(py_input_tensor);
       }
     }
 
     py::list py_requested_output_names;
-
     uint32_t requested_output_count = request->requested_output_count;
     off_t* output_names;
     shm_pool_->MapOffset(
@@ -724,7 +743,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("name", &PbTensor::Name)
       .def("as_numpy", &PbTensor::AsNumpy)
       .def("triton_dtype", &PbTensor::TritonDtype)
-      .def("to_dlpack", &PbTensor::ToDLPack);
+      .def("to_dlpack", &PbTensor::ToDLPack)
+      .def("from_dlpack", &PbTensor::FromDLPack);
 }
 
 extern "C" {

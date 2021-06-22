@@ -152,4 +152,53 @@ convert_triton_to_dlpack_type(int data_type)
   return dl_dtype;
 }
 
+TRITONSERVER_DataType
+convert_dlpack_to_triton_type(const DLDataType &data_type)
+{
+  if (data_type.lanes != 1) {
+    // lanes != 1 is not supported in Python backend.
+    return TRITONSERVER_TYPE_INVALID;
+  }
+
+  if (data_type.code == DLDataTypeCode::kDLFloat) {
+    if (data_type.bits == 16) {
+      return TRITONSERVER_TYPE_FP16;
+    } else if (data_type.bits == 32) {
+      return TRITONSERVER_TYPE_FP32;
+    } else if (data_type.bits == 64) {
+      return TRITONSERVER_TYPE_FP64;
+    }
+  }
+
+  if (data_type.code == DLDataTypeCode::kDLInt) {
+    if (data_type.bits == 8) {
+      return TRITONSERVER_TYPE_INT8;
+    } else if (data_type.bits == 16) {
+      return TRITONSERVER_TYPE_INT16;
+    } else if (data_type.bits == 32) {
+      return TRITONSERVER_TYPE_INT32;
+    } else if (data_type.bits == 64) {
+      return TRITONSERVER_TYPE_INT64;
+    } else if (data_type.bits == 1) {
+      return TRITONSERVER_TYPE_BOOL;
+    }
+  }
+
+  if (data_type.code == DLDataTypeCode::kDLUInt) {
+    if (data_type.bits == 8) {
+      return TRITONSERVER_TYPE_UINT8;
+    } else if (data_type.bits == 16) {
+      return TRITONSERVER_TYPE_UINT16;
+    } else if (data_type.bits == 32) {
+      return TRITONSERVER_TYPE_UINT32;
+    } else if (data_type.bits == 64) {
+      return TRITONSERVER_TYPE_UINT64;
+    }
+  }
+  // TODO: Handle TYPE_STRING
+
+  return TRITONSERVER_TYPE_INVALID;
+}
+
+
 }}}  // namespace triton::backend::python
