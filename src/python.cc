@@ -223,6 +223,10 @@ class ModelInstanceState : public BackendModelInstance {
   IPCMessage* ipc_message_;
   std::unique_ptr<SharedMemory> shm_pool_;
 
+#ifdef TRITON_ENABLE_GPU
+  std::unordered_map<std::string, void*> cuda_ipc_mem_handles_;
+#endif
+
   // Stub process pid
   pid_t stub_pid_;
 
@@ -754,8 +758,11 @@ ModelInstanceState::ProcessRequests(
           shm_pool_->MapOffset(
               (char**)&raw_data, sizeof(RawData), output_tensor->raw_data));
 
-      TRITONSERVER_MemoryType actual_memory_type = raw_data->memory_type;
-      int64_t actual_memory_type_id = raw_data->memory_type_id;
+      TRITONSERVER_MemoryType src_memory_type = raw_data->memory_type;
+      int64_t src_memory_type_id = raw_data->memory_type_id;
+
+      TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
+      int64_t actual_memory_type_id = src_memory_type_id;
 
       if (actual_memory_type == TRITONSERVER_MEMORY_CPU) {
         char* data;
@@ -781,28 +788,50 @@ ModelInstanceState::ProcessRequests(
                 response_output, &buffer, raw_data->byte_size,
                 &actual_memory_type, &actual_memory_type_id));
 
-        CopyBuffer(
-            "Failed to copy string", TRITONSERVER_MEMORY_CPU /* memory_type */,
-            0 /* memory_type_id */, actual_memory_type, actual_memory_type_id,
-            raw_data->byte_size, data, buffer, CudaStream(), &cuda_used);
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            CopyBuffer(
+                "Failed to copy memory type CPU", src_memory_type,
+                src_memory_type_id, actual_memory_type, actual_memory_type_id,
+                raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
         cuda_copy |= cuda_used;
       } else if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-        cudaIpcMemHandle_t* cuda_mem_handle;
-        GUARDED_RESPOND_IF_EXCEPTION(
-            responses, r,
-            shm_pool_->MapOffset(
-                (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
-                raw_data->memory_ptr));
-        cudaSetDevice(actual_memory_type_id);
         char* data;
+        if (!output_tensor->is_reused) {
+          cudaIpcMemHandle_t* cuda_mem_handle;
+          GUARDED_RESPOND_IF_EXCEPTION(
+              responses, r,
+              shm_pool_->MapOffset(
+                  (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
+                  raw_data->memory_ptr));
+          std::cout << " memory type id is in the main stub "
+                    << src_memory_type_id << std::endl;
+          cudaSetDevice(src_memory_type_id);
 
-        cudaError_t err = cudaIpcOpenMemHandle(
-            (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
-        if (err != cudaSuccess) {
-          throw PythonBackendException(std::string(
-                                           "failed to open cuda ipc handle: " +
-                                           std::string(cudaGetErrorString(err)))
-                                           .c_str());
+          cudaError_t err = cudaIpcOpenMemHandle(
+              (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+          if (err != cudaSuccess) {
+            throw PythonBackendException(
+                std::string(
+                    "failed to open cuda ipc handle: " +
+                    std::string(cudaGetErrorString(err)))
+                    .c_str());
+          }
+        } else {
+          char* reused_tensor_name;
+          GUARDED_RESPOND_IF_EXCEPTION(
+              responses, r,
+              LoadStringFromSharedMemory(
+                  shm_pool_, output_tensor->reused_tensor_name,
+                  reused_tensor_name));
+          std::unordered_map<std::string, void*>::const_iterator
+              cuda_ipc_mem_handle =
+                  cuda_ipc_mem_handles_.find(reused_tensor_name);
+          if (cuda_ipc_mem_handle == cuda_ipc_mem_handles_.end()) {
+            // TODO: This should not happen. Proper error handling
+          } else {
+            data = reinterpret_cast<char*>(cuda_ipc_mem_handle->second);
+          }
         }
 
         std::vector<int64_t> batch_shape(dims, dims + dims_count);
@@ -821,20 +850,13 @@ ModelInstanceState::ProcessRequests(
             TRITONBACKEND_OutputBuffer(
                 response_output, &buffer, raw_data->byte_size,
                 &actual_memory_type, &actual_memory_type_id));
-        CopyBuffer(
-            "Failed to copy string", actual_memory_type,
-            actual_memory_type_id /* memory_type_id */, actual_memory_type,
-            actual_memory_type_id, raw_data->byte_size, data, buffer,
-            CudaStream(), &cuda_used);
 
-        cuda_copy |= cuda_used;
-        err = cudaIpcCloseMemHandle(reinterpret_cast<void*>(data));
-        if (err != cudaSuccess) {
-          throw PythonBackendException(std::string(
-                                           "failed to close cuda ipc handle: " +
-                                           std::string(cudaGetErrorString(err)))
-                                           .c_str());
-        }
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            CopyBuffer(
+                "Failed to copy memory type GPU", src_memory_type,
+                src_memory_type_id, actual_memory_type, actual_memory_type_id,
+                raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
       }
     }
 #ifdef TRITON_ENABLE_GPU
@@ -886,6 +908,22 @@ ModelInstanceState::ProcessRequests(
 
   // Update the shared memory offset so that we can reuse the shared memory
   shm_pool_->SetOffset(request_batch_offset);
+
+  // Close the CUDA memory handles
+  // #ifdef TRITON_ENABLE_GPU
+  //   for (cudaIpcMemHandle_t* ipc_mem_handle : cuda_ipc_mem_handles_) {
+  //     cudaError_t err = cudaIpcCloseMemHandle(ipc_mem_handle);
+  //     if (err != cudaSuccess) {
+  //       LOG_MESSAGE(
+  //           TRITONSERVER_LOG_ERROR, std::string(
+  //                                       "failed to close CUDA IPC handle: " +
+  //                                       std::string(cudaGetErrorString(err)))
+  //                                       .c_str());
+  //     }
+  //   }
+  //   cuda_ipc_mem_handles_.clear();
+  // #endif
+
   return nullptr;
 }
 
@@ -1193,8 +1231,8 @@ ModelInstanceState::~ModelInstanceState()
     }
 
     if (healthy) {
-      // Signal to the termination to the Python backend stub using a request of
-      // size 0.
+      // Signal to the termination to the Python backend stub using a request
+      // of size 0.
       RequestBatch* request_batch;
       off_t request_batch_offset;
       shm_pool_->Map(
@@ -1258,7 +1296,8 @@ ModelInstanceState::GetInputTensor(
   if (input_byte_size > max_input_size) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_UNSUPPORTED,
-        "Python backend does not support input size larger than 2GBs, consider "
+        "Python backend does not support input size larger than 2GBs, "
+        "consider "
         "partitioning your input into multiple inputs.");
   }
 
@@ -1297,15 +1336,21 @@ ModelInstanceState::GetInputTensor(
         input_name, nullptr, 0, alloc_perference,
         reinterpret_cast<const char**>(&buffer), &input_byte_size, &memory_type,
         &memory_type_id);
-    
+
     // TODO: Properly handle the deletion of cudaIpcMemHandle
     cudaSetDevice(device_id_);
+
     cudaError_t err = cudaIpcGetMemHandle(
         reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
         const_cast<void*>(buffer));
+
+    cuda_ipc_mem_handles_.insert({input_name, const_cast<void*>(buffer)});
     if (err != cudaSuccess) {
+      std::cout << err << " eorr fdsafdsa " << std::endl;
       return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "Failed to open device pointer.");
+          TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
+                                        std::string(cudaGetErrorName(err)))
+                                           .c_str());
     }
 #else
     return TRITONSERVER_ErrorNew(

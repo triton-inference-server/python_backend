@@ -37,4 +37,5 @@ py::object triton_to_numpy_type(int data_type);
 DLDataType convert_triton_to_dlpack_type(int data_type);
 TRITONSERVER_DataType convert_dlpack_to_triton_type(
     const DLDataType& data_type);
+py::dtype convert_triton_to_pybind_dtype(int data_type);
 }}}  // namespace triton::backend::python

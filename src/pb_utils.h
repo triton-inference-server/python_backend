@@ -84,6 +84,10 @@ struct Tensor {
   TRITONSERVER_DataType dtype;
   off_t dims;  // Shared memory offset for the dimensions.
   size_t dims_count;
+  off_t reused_tensor_name;  // This field is only used by output tensors and
+                             // indicates the name of the tensor in the input
+                             // tensor that this tensor is using.
+  bool is_reused;
 };
 
 struct String {

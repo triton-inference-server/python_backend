@@ -95,6 +95,61 @@ triton_to_numpy_type(int data_type)
   return py::none();
 }
 
+py::dtype
+convert_triton_to_pybind_dtype(int data_type)
+{
+  TRITONSERVER_DataType dtype = static_cast<TRITONSERVER_DataType>(data_type);
+  py::dtype dtype_numpy;
+
+  switch (dtype) {
+    case TRITONSERVER_TYPE_BOOL:
+      dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
+      break;
+    case TRITONSERVER_TYPE_UINT8:
+      dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
+      break;
+    case TRITONSERVER_TYPE_UINT16:
+      dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
+      break;
+    case TRITONSERVER_TYPE_UINT32:
+      dtype_numpy = py::dtype(py::format_descriptor<uint32_t>::format());
+      break;
+    case TRITONSERVER_TYPE_UINT64:
+      dtype_numpy = py::dtype(py::format_descriptor<uint64_t>::format());
+      break;
+    case TRITONSERVER_TYPE_INT8:
+      dtype_numpy = py::dtype(py::format_descriptor<int8_t>::format());
+      break;
+    case TRITONSERVER_TYPE_INT16:
+      dtype_numpy = py::dtype(py::format_descriptor<int16_t>::format());
+      break;
+    case TRITONSERVER_TYPE_INT32:
+      dtype_numpy = py::dtype(py::format_descriptor<int32_t>::format());
+      break;
+    case TRITONSERVER_TYPE_INT64:
+      dtype_numpy = py::dtype(py::format_descriptor<int64_t>::format());
+      break;
+    case TRITONSERVER_TYPE_FP16:
+      // Will be reinterpreted in the python code.
+      dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
+      break;
+    case TRITONSERVER_TYPE_FP32:
+      dtype_numpy = py::dtype(py::format_descriptor<float>::format());
+      break;
+    case TRITONSERVER_TYPE_FP64:
+      dtype_numpy = py::dtype(py::format_descriptor<double>::format());
+      break;
+    case TRITONSERVER_TYPE_BYTES:
+      // Will be reinterpreted in the python code.
+      dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
+      break;
+    default:
+      break;
+  }
+
+  return dtype_numpy;
+}
+
 DLDataType
 convert_triton_to_dlpack_type(int data_type)
 {
@@ -153,7 +208,7 @@ convert_triton_to_dlpack_type(int data_type)
 }
 
 TRITONSERVER_DataType
-convert_dlpack_to_triton_type(const DLDataType &data_type)
+convert_dlpack_to_triton_type(const DLDataType& data_type)
 {
   if (data_type.lanes != 1) {
     // lanes != 1 is not supported in Python backend.
@@ -199,6 +254,4 @@ convert_dlpack_to_triton_type(const DLDataType &data_type)
 
   return TRITONSERVER_TYPE_INVALID;
 }
-
-
 }}}  // namespace triton::backend::python

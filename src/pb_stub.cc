@@ -143,6 +143,7 @@ class Stub {
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   ResponseBatch* response_batch_;
+  std::unordered_map<void*, std::string> cuda_ipc_mem_handles_;
 
  public:
   Stub(
@@ -299,11 +300,13 @@ class Stub {
     for (auto& output_tensor : output_tensors) {
       PbTensor output_tensor_pb = output_tensor.cast<PbTensor>();
       Tensor* output_tensor_shm = &output_tensors_shm[j];
+      output_tensor_shm->is_reused = false;
       std::string output_name = output_tensor_pb.Name();
       TRITONSERVER_DataType dtype_triton =
           static_cast<TRITONSERVER_DataType>(output_tensor_pb.TritonDtype());
       memory_type = TRITONSERVER_MEMORY_CPU;
       memory_type_id = 0;
+      LOG_INFO << "Hi2 .. " << std::endl;
 
       if (output_tensor_pb.IsCPU()) {
         py::array numpy_array = output_tensor_pb.AsNumpy();
@@ -345,6 +348,7 @@ class Stub {
             shm_pool_, output_tensor_shm, data_in_shm, memory_type,
             memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
             dtype_triton);
+        LOG_INFO << "Hi .. " << std::endl;
 
         // TODO: We can remove this memcpy if the numpy object
         // is already in shared memory.
@@ -357,13 +361,29 @@ class Stub {
             output_tensor_pb.ByteSize(), output_name.c_str(),
             output_tensor_pb.Dims().data(), output_tensor_pb.Dims().size(),
             dtype_triton);
-        cudaSetDevice(output_tensor_pb.MemoryTypeId());
-        cudaError_t err = cudaIpcGetMemHandle(
-            reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-            output_tensor_pb.GetDataPtr());
-        if (err != cudaSuccess) {
-          // return TRITONSERVER_ErrorNew(
-          //     TRITONSERVER_ERROR_INTERNAL, "Failed to open device pointer.");
+
+        std::unordered_map<void*, std::string>::const_iterator
+            cuda_ipc_mem_handle =
+                cuda_ipc_mem_handles_.find(output_tensor_pb.GetDataPtr());
+        if (cuda_ipc_mem_handle == cuda_ipc_mem_handles_.end()) {
+          cudaSetDevice(output_tensor_pb.MemoryTypeId());
+          cudaError_t err = cudaIpcGetMemHandle(
+              reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
+              output_tensor_pb.GetDataPtr());
+          if (err != cudaSuccess) {
+            throw PythonBackendException(
+                std::string(
+                    "failed to get cuda ipc handle: " +
+                    std::string(cudaGetErrorString(err)))
+                    .c_str());
+          }
+        } else {
+          output_tensor_shm->is_reused = true;
+          off_t reused_tensor_name_offset;
+          SaveStringToSharedMemory(
+              shm_pool_, reused_tensor_name_offset,
+              cuda_ipc_mem_handle->second.c_str());
+          output_tensor_shm->reused_tensor_name = reused_tensor_name_offset;
         }
       }
       j += 1;
@@ -496,6 +516,8 @@ class Stub {
                                            std::string(cudaGetErrorString(err)))
                                            .c_str());
         }
+
+        cuda_ipc_mem_handles_.insert({static_cast<void*>(data), name});
 
         PbTensor py_input_tensor = PbTensor(
             name, shape, static_cast<int>(dtype), raw_data->memory_type,
