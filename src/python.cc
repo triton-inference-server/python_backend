@@ -659,6 +659,8 @@ ModelInstanceState::ProcessRequests(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
           response_batch->responses));
 
+  std::vector<cudaIpcMemHandle_t*> opened_ipc_mem_handles;
+
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
     TRITONBACKEND_Request* request = requests[r];
@@ -804,8 +806,6 @@ ModelInstanceState::ProcessRequests(
               shm_pool_->MapOffset(
                   (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
                   raw_data->memory_ptr));
-          std::cout << " memory type id is in the main stub "
-                    << src_memory_type_id << std::endl;
           cudaSetDevice(src_memory_type_id);
 
           cudaError_t err = cudaIpcOpenMemHandle(
@@ -817,6 +817,9 @@ ModelInstanceState::ProcessRequests(
                     std::string(cudaGetErrorString(err)))
                     .c_str());
           }
+
+          opened_ipc_mem_handles.push_back(
+              reinterpret_cast<cudaIpcMemHandle_t*>(data));
         } else {
           char* reused_tensor_name;
           GUARDED_RESPOND_IF_EXCEPTION(
@@ -906,11 +909,38 @@ ModelInstanceState::ProcessRequests(
        Name() + " released " + std::to_string(request_count) + " requests")
           .c_str());
 
+  if (response_batch->cleanup) {
+    // If parent fails to notify the stub or the stub fails to notify the
+    // parent in a timely manner, kill the stub process and restart the
+    // stub process.
+    if (!NotifyStub() || !WaitForStubNotification()) {
+      KillStubProcess();
+      const char* error_message = "The stub process has exited unexpectedly.";
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, error_message);
+      TRITONSERVER_Error* err = StartStubProcess();
+      if (err == nullptr) {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO, "Stub process successfully restarted.");
+      }
+    }
+  }
+
   // Update the shared memory offset so that we can reuse the shared memory
   shm_pool_->SetOffset(request_batch_offset);
+#ifdef TRITON_ENABLE_GPU
+  for (cudaIpcMemHandle_t* cuda_ipc_handle : opened_ipc_mem_handles) {
+    cudaError_t err = cudaIpcCloseMemHandle(cuda_ipc_handle);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR, std::string(
+                                      "failed to close CUDA IPC handle:" +
+                                      std::string(cudaGetErrorString(err)))
+                                      .c_str());
+    }
+  }
+#endif
 
   // Close the CUDA memory handles
-  // #ifdef TRITON_ENABLE_GPU
   //   for (cudaIpcMemHandle_t* ipc_mem_handle : cuda_ipc_mem_handles_) {
   //     cudaError_t err = cudaIpcCloseMemHandle(ipc_mem_handle);
   //     if (err != cudaSuccess) {
@@ -922,7 +952,6 @@ ModelInstanceState::ProcessRequests(
   //     }
   //   }
   //   cuda_ipc_mem_handles_.clear();
-  // #endif
 
   return nullptr;
 }
@@ -1346,7 +1375,6 @@ ModelInstanceState::GetInputTensor(
 
     cuda_ipc_mem_handles_.insert({input_name, const_cast<void*>(buffer)});
     if (err != cudaSuccess) {
-      std::cout << err << " eorr fdsafdsa " << std::endl;
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
                                         std::string(cudaGetErrorName(err)))

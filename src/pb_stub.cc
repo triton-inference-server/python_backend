@@ -144,6 +144,8 @@ class Stub {
   py::object serialize_bytes_;
   ResponseBatch* response_batch_;
   std::unordered_map<void*, std::string> cuda_ipc_mem_handles_;
+  std::vector<PbTensor*> tensors_to_remove_;
+  bool require_cleanup_;
 
  public:
   Stub(
@@ -157,6 +159,9 @@ class Stub {
       parent_mutex_ = nullptr;
       parent_cond_ = nullptr;
       health_mutex_ = nullptr;
+
+      // This boolean indicates whether a cleanup is required or not.
+      require_cleanup_ = false;
 
       shm_pool_ = std::make_unique<SharedMemory>(
           shm_region_name, shm_default_size, shm_growth_size);
@@ -297,19 +302,23 @@ class Stub {
     TRITONSERVER_MemoryType memory_type;
     int64_t memory_type_id;
 
+    require_cleanup_ = false;
     for (auto& output_tensor : output_tensors) {
-      PbTensor output_tensor_pb = output_tensor.cast<PbTensor>();
+      PbTensor* output_tensor_pb = output_tensor.cast<PbTensor*>();
+      if (output_tensor_pb->TensorType() == PYTHONBACKEND_DLPACK) {
+        require_cleanup_ = true;
+        tensors_to_remove_.push_back(output_tensor_pb);
+      }
       Tensor* output_tensor_shm = &output_tensors_shm[j];
       output_tensor_shm->is_reused = false;
-      std::string output_name = output_tensor_pb.Name();
+      std::string output_name = output_tensor_pb->Name();
       TRITONSERVER_DataType dtype_triton =
-          static_cast<TRITONSERVER_DataType>(output_tensor_pb.TritonDtype());
+          static_cast<TRITONSERVER_DataType>(output_tensor_pb->TritonDtype());
       memory_type = TRITONSERVER_MEMORY_CPU;
       memory_type_id = 0;
-      LOG_INFO << "Hi2 .. " << std::endl;
 
-      if (output_tensor_pb.IsCPU()) {
-        py::array numpy_array = output_tensor_pb.AsNumpy();
+      if (output_tensor_pb->IsCPU()) {
+        py::array numpy_array = output_tensor_pb->AsNumpy();
         py::buffer_info buffer = numpy_array.request();
         size_t dims_count = numpy_array.ndim();
         memory_type = TRITONSERVER_MEMORY_CPU;
@@ -322,22 +331,22 @@ class Stub {
         ssize_t byte_size;
 
         // Custom handling for type bytes.
-        // if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
-        //   py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
-        //   if (serialize_bytes.is_none()) {
-        //     const char* err_message = "An error happened during
-        //     serialization."; LOG_INFO << err_message;
-        //     SetErrorForResponse(response_shm, err_message);
-        //     return;
-        //   }
+        if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
+          py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
+          if (serialize_bytes.is_none()) {
+            const char* err_message = "An error happened during serialization.";
+            LOG_INFO << err_message;
+            SetErrorForResponse(response_shm, err_message);
+            break;
+          }
 
-        //   py::bytes serialized_bytes = serialized_bytes_or_none;
-        //   data_ptr = PyBytes_AsString(serialized_bytes.ptr());
-        //   byte_size = PyBytes_Size(serialized_bytes.ptr());
-        // } else {
-        data_ptr = static_cast<char*>(buffer.ptr);
-        byte_size = numpy_array.nbytes();
-        // }
+          py::bytes serialized_bytes = serialized_bytes_or_none;
+          data_ptr = PyBytes_AsString(serialized_bytes.ptr());
+          byte_size = PyBytes_Size(serialized_bytes.ptr());
+        } else {
+          data_ptr = static_cast<char*>(buffer.ptr);
+          byte_size = numpy_array.nbytes();
+        }
 
         const ssize_t* numpy_shape = numpy_array.shape();
         for (size_t i = 0; i < dims_count; i++) {
@@ -348,7 +357,6 @@ class Stub {
             shm_pool_, output_tensor_shm, data_in_shm, memory_type,
             memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
             dtype_triton);
-        LOG_INFO << "Hi .. " << std::endl;
 
         // TODO: We can remove this memcpy if the numpy object
         // is already in shared memory.
@@ -357,19 +365,19 @@ class Stub {
         char* cuda_handle;
         SaveTensorToSharedMemory(
             shm_pool_, output_tensor_shm, cuda_handle,
-            output_tensor_pb.MemoryType(), output_tensor_pb.MemoryTypeId(),
-            output_tensor_pb.ByteSize(), output_name.c_str(),
-            output_tensor_pb.Dims().data(), output_tensor_pb.Dims().size(),
+            output_tensor_pb->MemoryType(), output_tensor_pb->MemoryTypeId(),
+            output_tensor_pb->ByteSize(), output_name.c_str(),
+            output_tensor_pb->Dims().data(), output_tensor_pb->Dims().size(),
             dtype_triton);
 
         std::unordered_map<void*, std::string>::const_iterator
             cuda_ipc_mem_handle =
-                cuda_ipc_mem_handles_.find(output_tensor_pb.GetDataPtr());
+                cuda_ipc_mem_handles_.find(output_tensor_pb->GetDataPtr());
         if (cuda_ipc_mem_handle == cuda_ipc_mem_handles_.end()) {
-          cudaSetDevice(output_tensor_pb.MemoryTypeId());
+          cudaSetDevice(output_tensor_pb->MemoryTypeId());
           cudaError_t err = cudaIpcGetMemHandle(
               reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-              output_tensor_pb.GetDataPtr());
+              output_tensor_pb->GetDataPtr());
           if (err != cudaSuccess) {
             throw PythonBackendException(
                 std::string(
@@ -388,6 +396,7 @@ class Stub {
       }
       j += 1;
     }
+
   }
 
   void ProcessRequest(
@@ -553,12 +562,13 @@ class Stub {
     SetErrorForResponseBatch(pb_exception.what());
   }
 
-  int from_dlpack(int i, int j) { return i + j; }
-
   int Execute()
   {
     // Reset the value for has_error
     response_batch_->has_error = false;
+
+    // Reset the cleanup value
+    response_batch_->cleanup = false;
 
     RequestBatch* request_batch;
     try {
@@ -658,6 +668,24 @@ class Stub {
         SetErrorForResponse(response_shm, pb_exception.what());
       }
       i += 1;
+    }
+
+    // When require_cleanup_ is true it needs one additional step for cleaning
+    // up the tensors on the client side.
+    if (require_cleanup_) {
+      response_batch_->cleanup = true;
+      NotifyParent();
+
+      // Exit if it has received a SIGTERM signal.
+      if (WaitForNotification()) {
+        LOG_INFO << "Received SIGTERM: exiting.";
+        return 1;
+      }
+
+      for (PbTensor* & pb_tensor : tensors_to_remove_) {
+        pb_tensor->DeleteDLPack();
+      }
+      tensors_to_remove_.clear();
     }
 
     return 0;
@@ -767,6 +795,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("triton_dtype", &PbTensor::TritonDtype)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("from_dlpack", &PbTensor::FromDLPack);
+
+  py::register_exception<PythonBackendException>(
+      module, "PythonBackendException");
 }
 
 extern "C" {

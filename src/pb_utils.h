@@ -120,6 +120,9 @@ struct ResponseBatch {
   uint32_t batch_size;
   off_t error;
   bool has_error;
+  // Indicates whether an additional call to stub is required for the clean up
+  // of the resources.
+  bool cleanup;
   bool is_error_set;  // Indicates whether this error has a message or not.
 };
 

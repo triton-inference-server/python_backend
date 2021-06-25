@@ -39,7 +39,8 @@ namespace triton { namespace backend { namespace python {
 
 typedef enum PYTHONBACKEND_tensortype_enum {
   PYTHONBACKEND_RAW,
-  PYTHONBACKEND_NUMPY
+  PYTHONBACKEND_NUMPY,
+  PYTHONBACKEND_DLPACK
 } PYTHONBACKEND_TensorType;
 
 // PbTensor class is the representation of Triton tensors
@@ -54,6 +55,7 @@ class PbTensor {
   TRITONSERVER_MemoryType memory_type_;
   PYTHONBACKEND_TensorType tensor_type_;
   uint64_t byte_size_;
+  DLManagedTensor* dl_managed_tensor_;
 
  public:
   /// Create a PbTensor using a numpy array
@@ -82,8 +84,9 @@ class PbTensor {
   PbTensor(
       std::string name, std::vector<int64_t> dims, int dtype,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      void* memory_ptr, uint64_t byte_size);
-  
+      void* memory_ptr, uint64_t byte_size,
+      DLManagedTensor* dl_managed_tensor = nullptr);
+
   py::capsule ToDLPack();
   static std::unique_ptr<PbTensor> FromDLPack(
       std::string name, py::capsule dlpack);
@@ -91,9 +94,12 @@ class PbTensor {
   py::array& AsNumpy();
   int TritonDtype();
 
+  void DeleteDLPack();
+  PYTHONBACKEND_TensorType TensorType();
+
   /// Tells whether the Tensor is stored in CPU or not.
-  /// \return A boolean value indicating whether the tensor is stored in CPU or
-  /// not.
+  /// \return A boolean value indicating whether the tensor is stored in CPU
+  /// or not.
   bool IsCPU();
 
   /// Get the total byte size of the tensor.
