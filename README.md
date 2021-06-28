@@ -238,7 +238,7 @@ a list of `InferenceRequest` objects. In this function, your `execute` function
 must return a list of `InferenceResponse` objects that has the same length as
 `requests`.
 
-In case there is an error when processing one of the requests, 
+In case there is an error in processing one of the requests, 
 you can use the `TritonError` object to set the error message
 for that specific request. Below is an example of setting 
 errors for an `InferenceResponse` object:
