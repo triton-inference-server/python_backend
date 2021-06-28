@@ -40,6 +40,16 @@ PbTensor::PbTensor(std::string name, py::object numpy_array)
   memory_type_ = TRITONSERVER_MEMORY_CPU;
   memory_type_id_ = 0;
   dl_managed_tensor_ = nullptr;
+  memory_ptr_ = numpy_array_.request().ptr;
+
+  // Initialize tensor dimension
+  size_t dims_count = numpy_array_.ndim();
+
+  const ssize_t* numpy_shape = numpy_array_.shape();
+  for (size_t i = 0; i < dims_count; i++) {
+    dims_.push_back(numpy_shape[i]);
+  }
+  byte_size_ = numpy_array_.nbytes();
 }
 
 PbTensor::PbTensor(std::string name, py::object numpy_array, int dtype)
@@ -51,6 +61,17 @@ PbTensor::PbTensor(std::string name, py::object numpy_array, int dtype)
   numpy_array_ = numpy_array;
   tensor_type_ = PYTHONBACKEND_NUMPY;
   memory_type_ = TRITONSERVER_MEMORY_CPU;
+  memory_ptr_ = numpy_array_.request().ptr;
+  dtype_ = dtype;
+
+  // Initialize tensor dimension
+  size_t dims_count = numpy_array_.ndim();
+
+  const ssize_t* numpy_shape = numpy_array_.shape();
+  for (size_t i = 0; i < dims_count; i++) {
+    dims_.push_back(numpy_shape[i]);
+  }
+  byte_size_ = numpy_array_.nbytes();
   memory_type_id_ = 0;
   dl_managed_tensor_ = nullptr;
 }
@@ -137,7 +158,7 @@ PbTensor::ToDLPack()
   dlpack_tensor->dl_tensor.ndim = dims_.size();
   dlpack_tensor->dl_tensor.byte_offset = 0;
   dlpack_tensor->dl_tensor.data = const_cast<void*>(memory_ptr_);
-  dlpack_tensor->dl_tensor.shape = dims_.data();
+  dlpack_tensor->dl_tensor.shape = &dims_[0];
   dlpack_tensor->dl_tensor.strides = nullptr;
   dlpack_tensor->deleter = [](DLManagedTensor* m) {};
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
@@ -198,16 +219,16 @@ PbTensor::FromDLPack(std::string name, py::capsule dlpack_tensor)
       convert_dlpack_to_triton_type(dl_managed_tensor->dl_tensor.dtype);
 
   // Calculate tensor size.
-  uint64_t size = 1;
+  uint64_t byte_size = 1;
   for (auto& dim : dims) {
-    size *= dim;
+    byte_size *= dim;
   }
-  size *= (dl_managed_tensor->dl_tensor.dtype.bits + 7) / 8;
+  byte_size *= (dl_managed_tensor->dl_tensor.dtype.bits + 7) / 8;
 
   PyCapsule_SetName(dlpack_tensor.ptr(), "used_dlpack");
   return std::make_unique<PbTensor>(
       name, dims, static_cast<int>(dtype), memory_type, memory_type_id,
-      memory_ptr, size, dl_managed_tensor);
+      memory_ptr, byte_size, dl_managed_tensor);
 }
 
 
@@ -225,17 +246,17 @@ PbTensor::AsNumpy()
       (tensor_type_ == PYTHONBACKEND_DLPACK &&
        memory_type_ == TRITONSERVER_MEMORY_CPU)) {
     if (numpy_array_.equal(py::none())) {
-      numpy_array_ = py::array(
-          py::dtype(py::format_descriptor<float>::format()), byte_size_,
+      py::object numpy_array = py::array(
+          py::dtype(convert_triton_to_pybind_dtype(dtype_)), dims_,
           (void*)memory_ptr_);
-      // numpy_array_ =
-      //     numpy_array_.attr("view")(triton_to_numpy_type(dtype_));
+      numpy_array_ =
+          numpy_array.attr("view")(triton_to_numpy_type(dtype_));
     }
   } else if (tensor_type_ == PYTHONBACKEND_NUMPY) {
     return numpy_array_;
   } else {
-    std::cout << "error saw " << std::endl;
-    throw PythonBackendException("GPU Tensors cannot be converted to NumPy");
+    throw PythonBackendException(
+        "Tensors that are stored in GPU cannot be converted to NumPy");
   }
 
   return numpy_array_;

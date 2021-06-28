@@ -87,14 +87,36 @@ class PbTensor {
       void* memory_ptr, uint64_t byte_size,
       DLManagedTensor* dl_managed_tensor = nullptr);
 
-  py::capsule ToDLPack();
+  /// Construct a Python backend tensor using a DLPack
+  /// capsule.
+  /// \param dlpack source dlpack tensor
+  /// \param name name of the tensor
   static std::unique_ptr<PbTensor> FromDLPack(
       std::string name, py::capsule dlpack);
+
+  /// Get a PyCapsule object containing the DLPack representation of the tensor.
+  /// \return Capsule object containing pointer to a DLPack object.
+  py::capsule ToDLPack();
+
+  /// Get the name of the tensor
+  /// \return name of the tensor.
   const std::string& Name();
+
+  /// Get NumPy representation of the tensor.
+  /// \throw If the tensor is stored in GPU, an exception is thrown
+  /// \return NumPy representation of the Tensor
   py::array& AsNumpy();
+
+  /// Get the triton dtype
+  /// \return Triton dtype
   int TritonDtype();
 
+  /// This function will be automatically called by the stub when the tensor is
+  /// no longer required.
   void DeleteDLPack();
+
+  /// Get the type of the tensor
+  /// \return Type of the tensor.
   PYTHONBACKEND_TensorType TensorType();
 
   /// Tells whether the Tensor is stored in CPU or not.
