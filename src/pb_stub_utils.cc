@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "pb_stub_utils.h"
+#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -96,7 +97,7 @@ triton_to_numpy_type(int data_type)
 }
 
 py::dtype
-convert_triton_to_pybind_dtype(int data_type)
+triton_to_pybind_dtype(int data_type)
 {
   TRITONSERVER_DataType dtype = static_cast<TRITONSERVER_DataType>(data_type);
   py::dtype dtype_numpy;
@@ -151,64 +152,81 @@ convert_triton_to_pybind_dtype(int data_type)
 }
 
 DLDataType
-convert_triton_to_dlpack_type(int data_type)
+triton_to_dlpack_type(int data_type)
 {
   DLDataType dl_dtype;
   DLDataTypeCode dl_code;
 
+  TRITONSERVER_DataType triton_dtype =
+      static_cast<TRITONSERVER_DataType>(data_type);
+
   // Number of bits required for the data type.
   size_t dt_size = 0;
-  // TODO: Fix for TYPE_BYTES
 
   dl_dtype.lanes = 1;
-  if (data_type == 1) {
-    dl_code = DLDataTypeCode::kDLInt;
-    dt_size = 1;
-  } else if (data_type == 2) {
-    dl_code = DLDataTypeCode::kDLUInt;
-    dt_size = 8;
-  } else if (data_type == 3) {
-    dl_code = DLDataTypeCode::kDLUInt;
-    dt_size = 16;
-  } else if (data_type == 4) {
-    dl_code = DLDataTypeCode::kDLUInt;
-    dt_size = 32;
-  } else if (data_type == 5) {
-    dl_code = DLDataTypeCode::kDLUInt;
-    dt_size = 64;
-  } else if (data_type == 6) {
-    dl_code = DLDataTypeCode::kDLInt;
-    dt_size = 8;
-  } else if (data_type == 7) {
-    dl_code = DLDataTypeCode::kDLInt;
-    dt_size = 16;
-  } else if (data_type == 8) {
-    dl_code = DLDataTypeCode::kDLInt;
-    dt_size = 32;
-  } else if (data_type == 9) {
-    dl_code = DLDataTypeCode::kDLInt;
-    dt_size = 64;
-  } else if (data_type == 10) {
-    dl_code = DLDataTypeCode::kDLFloat;
-    dt_size = 16;
-  } else if (data_type == 11) {
-    dl_code = DLDataTypeCode::kDLFloat;
-    dt_size = 32;
-  } else if (data_type == 12) {
-    dl_code = DLDataTypeCode::kDLFloat;
-    dt_size = 64;
+  switch (triton_dtype) {
+    case TRITONSERVER_TYPE_BOOL:
+      dl_code = DLDataTypeCode::kDLInt;
+      dt_size = 1;
+      break;
+    case TRITONSERVER_TYPE_UINT8:
+      dl_code = DLDataTypeCode::kDLUInt;
+      dt_size = 8;
+      break;
+    case TRITONSERVER_TYPE_UINT16:
+      dl_code = DLDataTypeCode::kDLUInt;
+      dt_size = 16;
+      break;
+    case TRITONSERVER_TYPE_UINT32:
+      dl_code = DLDataTypeCode::kDLUInt;
+      dt_size = 32;
+      break;
+    case TRITONSERVER_TYPE_UINT64:
+      dl_code = DLDataTypeCode::kDLUInt;
+      dt_size = 64;
+      break;
+    case TRITONSERVER_TYPE_INT8:
+      dl_code = DLDataTypeCode::kDLInt;
+      dt_size = 8;
+      break;
+    case TRITONSERVER_TYPE_INT16:
+      dl_code = DLDataTypeCode::kDLInt;
+      dt_size = 16;
+      break;
+    case TRITONSERVER_TYPE_INT32:
+      dl_code = DLDataTypeCode::kDLInt;
+      dt_size = 32;
+      break;
+    case TRITONSERVER_TYPE_INT64:
+      dl_code = DLDataTypeCode::kDLInt;
+      dt_size = 64;
+      break;
+    case TRITONSERVER_TYPE_FP16:
+      dl_code = DLDataTypeCode::kDLFloat;
+      dt_size = 16;
+      break;
+    case TRITONSERVER_TYPE_FP32:
+      dl_code = DLDataTypeCode::kDLFloat;
+      dt_size = 32;
+      break;
+    case TRITONSERVER_TYPE_FP64:
+      dl_code = DLDataTypeCode::kDLFloat;
+      dt_size = 64;
+      break;
+    default:
+      throw PythonBackendException(
+          std::string("DType code \"") + std::to_string(data_type) +
+          "\" is not supported.");
+      break;
   }
-  // else if (data_type == 13)
-  //   1 == 1;
-  // return np.attr("object_"); TODO
-  dl_dtype.code = dl_code;
-  dl_dtype.bits = dt_size;
 
   return dl_dtype;
+  dl_dtype.code = dl_code;
+  dl_dtype.bits = dt_size;
 }
 
 TRITONSERVER_DataType
-convert_dlpack_to_triton_type(const DLDataType& data_type)
+dlpack_to_triton_type(const DLDataType& data_type)
 {
   if (data_type.lanes != 1) {
     // lanes != 1 is not supported in Python backend.
@@ -250,7 +268,6 @@ convert_dlpack_to_triton_type(const DLDataType& data_type)
       return TRITONSERVER_TYPE_UINT64;
     }
   }
-  // TODO: Handle TYPE_STRING
 
   return TRITONSERVER_TYPE_INVALID;
 }

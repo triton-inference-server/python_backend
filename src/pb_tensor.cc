@@ -162,7 +162,12 @@ PbTensor::ToDLPack()
   dlpack_tensor->dl_tensor.strides = nullptr;
   dlpack_tensor->deleter = [](DLManagedTensor* m) {};
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
-  dlpack_tensor->dl_tensor.dtype = convert_triton_to_dlpack_type(dtype_);
+  dlpack_tensor->dl_tensor.dtype = triton_to_dlpack_type(dtype_);
+
+  if (dtype_ == TRITONSERVER_TYPE_BYTES) {
+    throw PythonBackendException(
+        "DLPack does not have support for string tensors.");
+  }
 
   switch (memory_type_) {
     case TRITONSERVER_MEMORY_GPU:
@@ -203,20 +208,30 @@ PbTensor::FromDLPack(std::string name, py::capsule dlpack_tensor)
 
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
-  if (dl_managed_tensor->dl_tensor.device.device_type ==
-      DLDeviceType::kDLCUDA) {
-    memory_type = TRITONSERVER_MEMORY_GPU;
-    memory_type_id = dl_managed_tensor->dl_tensor.device.device_id;
-  } else if (
-      dl_managed_tensor->dl_tensor.device.device_type == DLDeviceType::kDLCPU) {
-    memory_type = TRITONSERVER_MEMORY_CPU;
-    memory_type_id = 0;
-  } else {
-    // TODO unsupported.
+
+  switch (dl_managed_tensor->dl_tensor.device.device_type) {
+    case DLDeviceType::kDLCUDA:
+      memory_type = TRITONSERVER_MEMORY_GPU;
+      memory_type_id = dl_managed_tensor->dl_tensor.device.device_id;
+      break;
+    case DLDeviceType::kDLCPU:
+      memory_type = TRITONSERVER_MEMORY_CPU;
+      memory_type_id = 0;
+      break;
+    case DLDeviceType::kDLCUDAHost:
+      memory_type = TRITONSERVER_MEMORY_CPU_PINNED;
+      memory_type_id = 0;
+      break;
+    default:
+      throw PythonBackendException(
+          "DLDevice type " +
+          std::to_string(dl_managed_tensor->dl_tensor.device.device_type) +
+          " is not support by Python backend.");
+      break;
   }
 
   TRITONSERVER_DataType dtype =
-      convert_dlpack_to_triton_type(dl_managed_tensor->dl_tensor.dtype);
+      dlpack_to_triton_type(dl_managed_tensor->dl_tensor.dtype);
 
   // Calculate tensor size.
   uint64_t byte_size = 1;
@@ -229,7 +244,7 @@ PbTensor::FromDLPack(std::string name, py::capsule dlpack_tensor)
   return std::make_unique<PbTensor>(
       name, dims, static_cast<int>(dtype), memory_type, memory_type_id,
       memory_ptr, byte_size, dl_managed_tensor);
-}
+}  
 
 
 const std::string&
@@ -247,10 +262,9 @@ PbTensor::AsNumpy()
        memory_type_ == TRITONSERVER_MEMORY_CPU)) {
     if (numpy_array_.equal(py::none())) {
       py::object numpy_array = py::array(
-          py::dtype(convert_triton_to_pybind_dtype(dtype_)), dims_,
+          py::dtype(triton_to_pybind_dtype(dtype_)), dims_,
           (void*)memory_ptr_);
-      numpy_array_ =
-          numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
     }
   } else if (tensor_type_ == PYTHONBACKEND_NUMPY) {
     return numpy_array_;

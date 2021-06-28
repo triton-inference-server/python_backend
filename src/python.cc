@@ -224,7 +224,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<SharedMemory> shm_pool_;
 
 #ifdef TRITON_ENABLE_GPU
-  std::unordered_map<std::string, void*> cuda_ipc_mem_handles_;
+  std::unordered_map<std::string, void*> gpu_tensors_map_;
 #endif
 
   // Stub process pid
@@ -659,7 +659,9 @@ ModelInstanceState::ProcessRequests(
           (char**)&responses_shm, sizeof(Response) * response_batch->batch_size,
           response_batch->responses));
 
+#ifdef TRITON_ENABLE_GPU
   std::vector<cudaIpcMemHandle_t*> opened_ipc_mem_handles;
+#endif
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
@@ -798,6 +800,7 @@ ModelInstanceState::ProcessRequests(
                 raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
         cuda_copy |= cuda_used;
       } else if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+#ifdef TRITON_ENABLE_GPU
         char* data;
         if (!output_tensor->is_reused) {
           cudaIpcMemHandle_t* cuda_mem_handle;
@@ -828,12 +831,12 @@ ModelInstanceState::ProcessRequests(
                   shm_pool_, output_tensor->reused_tensor_name,
                   reused_tensor_name));
           std::unordered_map<std::string, void*>::const_iterator
-              cuda_ipc_mem_handle =
-                  cuda_ipc_mem_handles_.find(reused_tensor_name);
-          if (cuda_ipc_mem_handle == cuda_ipc_mem_handles_.end()) {
+              reused_gpu_tensor = gpu_tensors_map_.find(reused_tensor_name);
+          if (reused_gpu_tensor == gpu_tensors_map_.end()) {
             // TODO: This should not happen. Proper error handling
           } else {
-            data = reinterpret_cast<char*>(cuda_ipc_mem_handle->second);
+            data = reinterpret_cast<char*>(
+                reused_gpu_tensor->second /* pointer to tensor data */);
           }
         }
 
@@ -860,6 +863,10 @@ ModelInstanceState::ProcessRequests(
                 "Failed to copy memory type GPU", src_memory_type,
                 src_memory_type_id, actual_memory_type, actual_memory_type_id,
                 raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
+#else
+        // TODO handle
+
+#endif
       }
     }
 #ifdef TRITON_ENABLE_GPU
@@ -939,19 +946,6 @@ ModelInstanceState::ProcessRequests(
     }
   }
 #endif
-
-  // Close the CUDA memory handles
-  //   for (cudaIpcMemHandle_t* ipc_mem_handle : cuda_ipc_mem_handles_) {
-  //     cudaError_t err = cudaIpcCloseMemHandle(ipc_mem_handle);
-  //     if (err != cudaSuccess) {
-  //       LOG_MESSAGE(
-  //           TRITONSERVER_LOG_ERROR, std::string(
-  //                                       "failed to close CUDA IPC handle: " +
-  //                                       std::string(cudaGetErrorString(err)))
-  //                                       .c_str());
-  //     }
-  //   }
-  //   cuda_ipc_mem_handles_.clear();
 
   return nullptr;
 }
@@ -1336,56 +1330,89 @@ ModelInstanceState::GetInputTensor(
       false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
       HostPolicyName().c_str());
 
+  TRITONSERVER_MemoryType src_memory_type;
+  int64_t src_memory_type_id;
+  size_t src_byte_size;
+  const void* src_ptr;
+
+  RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
+      in, input_idx, &src_ptr, &src_byte_size, &src_memory_type,
+      &src_memory_type_id));
+
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
-  if (kind_ == TRITONSERVER_INSTANCEGROUPKIND_CPU) {
-    memory_type = TRITONSERVER_MEMORY_CPU;
-    memory_type_id = 0;
-    char* input_buffer;
-    RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-        shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
-        input_byte_size, input_name, input_shape, input_dims_count,
-        input_dtype));
-    collector.ProcessTensor(
-        input_name, input_buffer, input_byte_size, memory_type, memory_type_id);
-  } else {
-#ifdef TRITON_ENABLE_GPU
-    memory_type = TRITONSERVER_MEMORY_GPU;
-    memory_type_id = device_id_;
 
-    char* cuda_handle;
-    RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-        shm_pool_, input_tensor, cuda_handle, memory_type, memory_type_id,
-        input_byte_size, input_name, input_shape, input_dims_count,
-        input_dtype));
-
-    const void* buffer = nullptr;
-    std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
-    alloc_perference = {{TRITONSERVER_MEMORY_GPU, device_id_}};
-    collector.ProcessTensor(
-        input_name, nullptr, 0, alloc_perference,
-        reinterpret_cast<const char**>(&buffer), &input_byte_size, &memory_type,
-        &memory_type_id);
-
-    // TODO: Properly handle the deletion of cudaIpcMemHandle
-    cudaSetDevice(device_id_);
-
-    cudaError_t err = cudaIpcGetMemHandle(
-        reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-        const_cast<void*>(buffer));
-
-    cuda_ipc_mem_handles_.insert({input_name, const_cast<void*>(buffer)});
-    if (err != cudaSuccess) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
-                                        std::string(cudaGetErrorName(err)))
-                                           .c_str());
-    }
+// If TRITON_ENABLE_GPU is false, we need to copy the tensors
+// to the CPU.
+#ifndef TRITON_ENABLE_GPU
+  memory_type = TRITONSERVER_MEMORY_CPU;
+  memory_type_id = 0;
 #else
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        "Python backend needs to be rebuilt with TRITON_ENABLE_GPU=ON to "
-        "support GPU tensors.");
+  memory_type = src_memory_type;
+  memory_type_id = src_memory_type_id;
+#endif
+
+  switch (src_memory_type) {
+    case TRITONSERVER_MEMORY_CPU_PINNED:
+    case TRITONSERVER_MEMORY_CPU:
+#ifndef TRITON_ENABLE_GPU
+    case TRITONSERVER_MEMORY_GPU:
+#endif
+      char* input_buffer;
+      RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+          shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
+          input_byte_size, input_name, input_shape, input_dims_count,
+          input_dtype));
+      collector.ProcessTensor(
+          input_name, input_buffer, input_byte_size, memory_type,
+          memory_type_id);
+      break;
+#ifdef TRITON_ENABLE_GPU
+    case TRITONSERVER_MEMORY_GPU:
+      // We need to copy the input tensors to the CPU when the string type is
+      // TYPE_BYTES
+      if (input_dtype == TRITONSERVER_TYPE_BYTES) {
+        memory_type = TRITONSERVER_MEMORY_CPU;
+        memory_type_id = 0;
+        char* input_buffer;
+        RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+            shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
+            input_byte_size, input_name, input_shape, input_dims_count,
+            input_dtype));
+        collector.ProcessTensor(
+            input_name, input_buffer, input_byte_size, memory_type,
+            memory_type_id);
+        break;
+      } else {
+        char* cuda_handle;
+        RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+            shm_pool_, input_tensor, cuda_handle, memory_type, memory_type_id,
+            input_byte_size, input_name, input_shape, input_dims_count,
+            input_dtype));
+
+        const void* buffer = nullptr;
+        std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>>
+            alloc_perference;
+        alloc_perference = {{TRITONSERVER_MEMORY_GPU, device_id_}};
+        RETURN_IF_ERROR(collector.ProcessTensor(
+            input_name, nullptr, 0, alloc_perference,
+            reinterpret_cast<const char**>(&buffer), &input_byte_size,
+            &memory_type, &memory_type_id));
+
+        cudaSetDevice(device_id_);
+        cudaError_t err = cudaIpcGetMemHandle(
+            reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
+            const_cast<void*>(buffer));
+        if (err != cudaSuccess) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
+                                            std::string(cudaGetErrorName(err)))
+                                               .c_str());
+        }
+
+        gpu_tensors_map_.insert({input_name, const_cast<void*>(buffer)});
+      }
+      break;
 #endif
   }
 

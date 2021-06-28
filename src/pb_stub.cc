@@ -143,9 +143,12 @@ class Stub {
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   ResponseBatch* response_batch_;
-  std::unordered_map<void*, std::string> cuda_ipc_mem_handles_;
   std::vector<PbTensor*> tensors_to_remove_;
   bool require_cleanup_;
+
+#ifdef TRITON_ENABLE_GPU
+  std::unordered_map<void*, std::string> gpu_tensors_map_;
+#endif
 
  public:
   Stub(
@@ -302,7 +305,6 @@ class Stub {
     TRITONSERVER_MemoryType memory_type;
     int64_t memory_type_id;
 
-    require_cleanup_ = false;
     for (auto& output_tensor : output_tensors) {
       PbTensor* output_tensor_pb = output_tensor.cast<PbTensor*>();
       if (output_tensor_pb->TensorType() == PYTHONBACKEND_DLPACK) {
@@ -362,6 +364,7 @@ class Stub {
         // is already in shared memory.
         std::copy(data_ptr, data_ptr + byte_size, data_in_shm);
       } else {
+#ifdef TRITON_ENABLE_GPU
         char* cuda_handle;
         SaveTensorToSharedMemory(
             shm_pool_, output_tensor_shm, cuda_handle,
@@ -371,9 +374,9 @@ class Stub {
             dtype_triton);
 
         std::unordered_map<void*, std::string>::const_iterator
-            cuda_ipc_mem_handle =
-                cuda_ipc_mem_handles_.find(output_tensor_pb->GetDataPtr());
-        if (cuda_ipc_mem_handle == cuda_ipc_mem_handles_.end()) {
+            reused_gpu_tensor =
+                gpu_tensors_map_.find(output_tensor_pb->GetDataPtr());
+        if (reused_gpu_tensor == gpu_tensors_map_.end()) {
           cudaSetDevice(output_tensor_pb->MemoryTypeId());
           cudaError_t err = cudaIpcGetMemHandle(
               reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
@@ -390,9 +393,13 @@ class Stub {
           off_t reused_tensor_name_offset;
           SaveStringToSharedMemory(
               shm_pool_, reused_tensor_name_offset,
-              cuda_ipc_mem_handle->second.c_str());
+              reused_gpu_tensor->second.c_str());
           output_tensor_shm->reused_tensor_name = reused_tensor_name_offset;
         }
+#else
+        throw PythonBackendException(
+            "Python backend was not built with GPU tensor support");
+#endif
       }
       j += 1;
     }
@@ -510,6 +517,7 @@ class Stub {
           return;
         }
       } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
+#ifdef TRITON_ENABLE_GPU
         cudaIpcMemHandle_t* cuda_mem_handle;
         cudaSetDevice(raw_data->memory_type_id);
         shm_pool_->MapOffset(
@@ -525,14 +533,20 @@ class Stub {
                                            .c_str());
         }
 
-        cuda_ipc_mem_handles_.insert({static_cast<void*>(data), name});
+        // Clean up is required to remove the GPU tensors
+        require_cleanup_ = true;
+        gpu_tensors_map_.insert({static_cast<void*>(data), name});
 
         PbTensor py_input_tensor = PbTensor(
             name, shape, static_cast<int>(dtype), raw_data->memory_type,
             raw_data->memory_type_id, static_cast<void*>(data),
-            raw_data->byte_size);
+            raw_data->byte_size, nullptr);
 
         py_input_tensors.append(py_input_tensor);
+#else
+        throw PythonBackendException(
+            "Python backend was not compiled with GPU tensor support.");
+#endif
       }
     }
 
@@ -561,6 +575,7 @@ class Stub {
     SetErrorForResponseBatch(pb_exception.what());
   }
 
+
   int Execute()
   {
     // Reset the value for has_error
@@ -568,6 +583,7 @@ class Stub {
 
     // Reset the cleanup value
     response_batch_->cleanup = false;
+    require_cleanup_ = false;
 
     RequestBatch* request_batch;
     try {
@@ -684,7 +700,20 @@ class Stub {
       for (PbTensor*& pb_tensor : tensors_to_remove_) {
         pb_tensor->DeleteDLPack();
       }
+
       tensors_to_remove_.clear();
+
+#ifdef TRITON_ENABLE_GPU
+      for (const auto& gpu_tensor_pair : gpu_tensors_map_) {
+        cudaError_t err = cudaIpcCloseMemHandle(gpu_tensor_pair.first);
+        if (err != cudaSuccess) {
+          LOG_INFO << std::string(
+              "failed to close CUDA IPC handle:" +
+              std::string(cudaGetErrorString(err)));
+        }
+      }
+      gpu_tensors_map_.clear();
+#endif
     }
 
     return 0;
