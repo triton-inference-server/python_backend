@@ -330,10 +330,10 @@ ModelInstanceState::KillStubProcess()
 bool
 ModelInstanceState::WaitForStubNotification()
 {
-  uint64_t timeout_seceonds = 1000;
+  uint64_t timeout_seconds = 1000;
   boost::posix_time::ptime timeout =
       boost::get_system_time() +
-      boost::posix_time::milliseconds(timeout_seceonds);
+      boost::posix_time::milliseconds(timeout_seconds);
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
@@ -349,14 +349,14 @@ ModelInstanceState::WaitForStubNotification()
   }
 
   timeout = boost::get_system_time() +
-            boost::posix_time::milliseconds(timeout_seceonds);
+            boost::posix_time::milliseconds(timeout_seconds);
   while (!parent_cond_->timed_wait(*parent_lock_, timeout)) {
     if (!IsStubProcessAlive()) {
       return false;
     }
 
     timeout = boost::get_system_time() +
-              boost::posix_time::milliseconds(timeout_seceonds);
+              boost::posix_time::milliseconds(timeout_seconds);
   }
   return true;
 }
@@ -1096,6 +1096,7 @@ ModelInstanceState::StartStubProcess()
     // parent in a timely manner, kill the stub process and restart the
     // stub process.
     if (!NotifyStub() || !WaitForStubNotification()) {
+      LOG_MESSAGE(TRITONSERVER_LOG_INFO, "Stub didn't start!");
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           (std::string("Failed to initialize stub, stub process exited "

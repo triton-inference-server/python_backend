@@ -396,7 +396,6 @@ class Stub {
       }
       j += 1;
     }
-
   }
 
   void ProcessRequest(
@@ -682,7 +681,7 @@ class Stub {
         return 1;
       }
 
-      for (PbTensor* & pb_tensor : tensors_to_remove_) {
+      for (PbTensor*& pb_tensor : tensors_to_remove_) {
         pb_tensor->DeleteDLPack();
       }
       tensors_to_remove_.clear();
@@ -858,7 +857,10 @@ main(int argc, char** argv)
 
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
+<<<<<<< HEAD
 
+=======
+>>>>>>> Fix deadlock when init takes long
   std::atomic<bool> non_graceful_exit = {false};
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread(
@@ -885,12 +887,13 @@ main(int argc, char** argv)
           }
         }
       });
-  
+
   // Initialize needs to be called after the background health thread
   // has started. Otherwise, if the initialize takes long time, the
   // main process wrongly assumes that the stub process has crashed.
   stub->Initialize(model_version, argv[6] /* triton install path */);
 
+  stub->Initialize(model_version, argv[6] /* triton install path */);
   // Wait for messages from the parent process
   while (true) {
     stub->NotifyParent();
