@@ -863,9 +863,15 @@ ModelInstanceState::ProcessRequests(
                 "Failed to copy memory type GPU", src_memory_type,
                 src_memory_type_id, actual_memory_type, actual_memory_type_id,
                 raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
+        cuda_copy |= cuda_used;
 #else
-        // TODO handle
-
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONSERVER_ErrorNew(
+                TRITONSERVER_ERROR_INTERNAL,
+                "Python backend is compiled without GPU support. You need to "
+                "recompile the Python backend with TRITON_ENABLE_GPU=ON to "
+                "enable GPU support."));
 #endif
       }
     }
@@ -945,6 +951,7 @@ ModelInstanceState::ProcessRequests(
                                       .c_str());
     }
   }
+  opened_ipc_mem_handles.clear();
 #endif
 
   return nullptr;
@@ -1393,13 +1400,13 @@ ModelInstanceState::GetInputTensor(
         const void* buffer = nullptr;
         std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>>
             alloc_perference;
-        alloc_perference = {{TRITONSERVER_MEMORY_GPU, device_id_}};
+        alloc_perference = {{TRITONSERVER_MEMORY_GPU, memory_type_id}};
         RETURN_IF_ERROR(collector.ProcessTensor(
             input_name, nullptr, 0, alloc_perference,
             reinterpret_cast<const char**>(&buffer), &input_byte_size,
             &memory_type, &memory_type_id));
 
-        cudaSetDevice(device_id_);
+        cudaSetDevice(memory_type_id);
         cudaError_t err = cudaIpcGetMemHandle(
             reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
             const_cast<void*>(buffer));

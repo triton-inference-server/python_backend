@@ -104,7 +104,8 @@ PbTensor::IsCPU()
   if (tensor_type_ == PYTHONBACKEND_NUMPY ||
       ((tensor_type_ == PYTHONBACKEND_RAW ||
         tensor_type_ == PYTHONBACKEND_DLPACK) &&
-       memory_type_ == TRITONSERVER_MEMORY_CPU)) {
+       (memory_type_ == TRITONSERVER_MEMORY_CPU ||
+        memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED))) {
     return true;
   } else {
     return false;
@@ -244,7 +245,7 @@ PbTensor::FromDLPack(std::string name, py::capsule dlpack_tensor)
   return std::make_unique<PbTensor>(
       name, dims, static_cast<int>(dtype), memory_type, memory_type_id,
       memory_ptr, byte_size, dl_managed_tensor);
-}  
+}
 
 
 const std::string&
@@ -262,11 +263,10 @@ PbTensor::AsNumpy()
        memory_type_ == TRITONSERVER_MEMORY_CPU)) {
     if (numpy_array_.equal(py::none())) {
       py::object numpy_array = py::array(
-          py::dtype(triton_to_pybind_dtype(dtype_)), dims_,
-          (void*)memory_ptr_);
+          py::dtype(triton_to_pybind_dtype(dtype_)), dims_, (void*)memory_ptr_);
       numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
     }
-  } else if (tensor_type_ == PYTHONBACKEND_NUMPY) {
+
     return numpy_array_;
   } else {
     throw PythonBackendException(

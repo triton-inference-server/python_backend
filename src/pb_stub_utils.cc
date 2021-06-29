@@ -144,7 +144,8 @@ triton_to_pybind_dtype(int data_type)
       // Will be reinterpreted in the python code.
       dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
       break;
-    default:
+    case TRITONSERVER_TYPE_INVALID:
+      throw PythonBackendException("Dtype is invalid.");
       break;
   }
 
@@ -213,6 +214,10 @@ triton_to_dlpack_type(int data_type)
       dl_code = DLDataTypeCode::kDLFloat;
       dt_size = 64;
       break;
+    case TRITONSERVER_TYPE_BYTES:
+      throw PythonBackendException(
+          "TYPE_BYTES tensors cannot be converted to DLPack.");
+
     default:
       throw PythonBackendException(
           std::string("DType code \"") + std::to_string(data_type) +
@@ -220,9 +225,9 @@ triton_to_dlpack_type(int data_type)
       break;
   }
 
-  return dl_dtype;
   dl_dtype.code = dl_code;
   dl_dtype.bits = dt_size;
+  return dl_dtype;
 }
 
 TRITONSERVER_DataType
