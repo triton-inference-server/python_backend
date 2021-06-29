@@ -32,13 +32,21 @@ namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 PbTensor::PbTensor(std::string name, py::object numpy_array)
-    : name_(name), numpy_array_(numpy_array)
+    : name_(name)
 {
   dtype_ = numpy_to_triton_type(numpy_array.attr("dtype"));
   tensor_type_ = PYTHONBACKEND_NUMPY;
   memory_type_ = TRITONSERVER_MEMORY_CPU;
   memory_type_id_ = 0;
   dl_managed_tensor_ = nullptr;
+
+  bool is_contiguous =
+      numpy_array.attr("data").attr("c_contiguous").cast<bool>();
+  if (!is_contiguous) {
+    py::module numpy = py::module::import("numpy");
+    numpy_array = numpy.attr("ascontiguousarray")(numpy_array);
+  }
+  numpy_array_ = numpy_array;
   memory_ptr_ = numpy_array_.request().ptr;
 
   // Initialize tensor dimension
@@ -56,6 +64,12 @@ PbTensor::PbTensor(std::string name, py::object numpy_array, int dtype)
 {
   if (numpy_to_triton_type(numpy_array.attr("dtype")) != dtype) {
     numpy_array = numpy_array.attr("view")(triton_to_numpy_type(dtype));
+  }
+  bool is_contiguous =
+      numpy_array.attr("data").attr("c_contiguous").cast<bool>();
+  if (!is_contiguous) {
+    py::module numpy = py::module::import("numpy");
+    numpy_array = numpy.attr("ascontiguousarray")(numpy_array);
   }
   numpy_array_ = numpy_array;
   tensor_type_ = PYTHONBACKEND_NUMPY;
@@ -89,7 +103,7 @@ PbTensor::PbTensor(
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
     py::object numpy_array = py::array(
-        py::dtype(triton_to_pybind_dtype(dtype_)), dims_, (void*)memory_ptr_);
+        triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
     numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
   } else {
     numpy_array_ = py::none();

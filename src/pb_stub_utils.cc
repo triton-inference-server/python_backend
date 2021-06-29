@@ -58,9 +58,11 @@ numpy_to_triton_type(py::object data_type)
   else if (data_type.equal(np.attr("float64")))
     return 12;
   else if (
-      data_type.equal(np.attr("object_")) || data_type.equal(np.attr("bytes_")))
+      data_type.equal(np.attr("object_")) ||
+      data_type.equal(np.attr("bytes_")) ||
+      data_type.attr("type").equal(np.attr("bytes_")))
     return 13;
-  return 0;
+  throw PythonBackendException("NumPy dtype is not supported.");
 }
 
 py::object
