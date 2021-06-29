@@ -195,10 +195,14 @@ class ModelState : public BackendModel {
   // Get the Python execution environment
   std::string PythonExecutionEnv() { return python_execution_env_; }
 
+  // Force CPU only tensors
+  bool ForceCPUOnlyInputTensors() { return force_cpu_only_input_tensors_; }
+
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
   BackendState* backend_state_;
   std::string python_execution_env_;
+  bool force_cpu_only_input_tensors_;
 };
 
 TRITONSERVER_Error*
@@ -1337,90 +1341,73 @@ ModelInstanceState::GetInputTensor(
       false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
       HostPolicyName().c_str());
 
-  TRITONSERVER_MemoryType src_memory_type;
-  int64_t src_memory_type_id;
-  size_t src_byte_size;
-  const void* src_ptr;
-
-  RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
-      in, input_idx, &src_ptr, &src_byte_size, &src_memory_type,
-      &src_memory_type_id));
-
-  TRITONSERVER_MemoryType memory_type;
-  int64_t memory_type_id;
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  bool cpu_only_tensors = model_state->ForceCPUOnlyInputTensors();
+  if (input_dtype == TRITONSERVER_TYPE_BYTES) {
+    cpu_only_tensors = true;
+  }
 
 // If TRITON_ENABLE_GPU is false, we need to copy the tensors
 // to the CPU.
 #ifndef TRITON_ENABLE_GPU
-  memory_type = TRITONSERVER_MEMORY_CPU;
-  memory_type_id = 0;
-#else
-  memory_type = src_memory_type;
-  memory_type_id = src_memory_type_id;
+  cpu_only_tensors = true;
 #endif
+  if (cpu_only_tensors) {
+    char* input_buffer;
+    RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+        shm_pool_, input_tensor, input_buffer,
+        TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
+        input_byte_size, input_name, input_shape, input_dims_count,
+        input_dtype));
+    collector.ProcessTensor(
+        input_name, input_buffer, input_byte_size,
+        TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
+  } else {
+    TRITONSERVER_MemoryType src_memory_type;
+    int64_t src_memory_type_id;
+    size_t src_byte_size;
+    const void* src_ptr;
 
-  switch (src_memory_type) {
-    case TRITONSERVER_MEMORY_CPU_PINNED:
-    case TRITONSERVER_MEMORY_CPU:
-#ifndef TRITON_ENABLE_GPU
-    case TRITONSERVER_MEMORY_GPU:
-#endif
+    RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
+        in, input_idx, &src_ptr, &src_byte_size, &src_memory_type,
+        &src_memory_type_id));
+
+    if (src_memory_type == TRITONSERVER_MEMORY_GPU) {
+      char* cuda_handle;
+      RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
+          shm_pool_, input_tensor, cuda_handle, src_memory_type,
+          src_memory_type_id, input_byte_size, input_name, input_shape,
+          input_dims_count, input_dtype));
+
+      const void* buffer = nullptr;
+      std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
+      alloc_perference = {{TRITONSERVER_MEMORY_GPU, src_memory_type_id}};
+      RETURN_IF_ERROR(collector.ProcessTensor(
+          input_name, nullptr, 0, alloc_perference,
+          reinterpret_cast<const char**>(&buffer), &input_byte_size,
+          &src_memory_type, &src_memory_type_id));
+
+      cudaSetDevice(src_memory_type_id);
+      cudaError_t err = cudaIpcGetMemHandle(
+          reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
+          const_cast<void*>(buffer));
+      if (err != cudaSuccess) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
+                                          std::string(cudaGetErrorName(err)))
+                                             .c_str());
+      }
+    } else {
       char* input_buffer;
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
+          shm_pool_, input_tensor, input_buffer,
+          src_memory_type, src_memory_type_id,
           input_byte_size, input_name, input_shape, input_dims_count,
           input_dtype));
       collector.ProcessTensor(
-          input_name, input_buffer, input_byte_size, memory_type,
-          memory_type_id);
-      break;
-#ifdef TRITON_ENABLE_GPU
-    case TRITONSERVER_MEMORY_GPU:
-      // We need to copy the input tensors to the CPU when the string type is
-      // TYPE_BYTES
-      if (input_dtype == TRITONSERVER_TYPE_BYTES) {
-        memory_type = TRITONSERVER_MEMORY_CPU;
-        memory_type_id = 0;
-        char* input_buffer;
-        RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-            shm_pool_, input_tensor, input_buffer, memory_type, memory_type_id,
-            input_byte_size, input_name, input_shape, input_dims_count,
-            input_dtype));
-        collector.ProcessTensor(
-            input_name, input_buffer, input_byte_size, memory_type,
-            memory_type_id);
-        break;
-      } else {
-        char* cuda_handle;
-        RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-            shm_pool_, input_tensor, cuda_handle, memory_type, memory_type_id,
-            input_byte_size, input_name, input_shape, input_dims_count,
-            input_dtype));
-
-        const void* buffer = nullptr;
-        std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>>
-            alloc_perference;
-        alloc_perference = {{TRITONSERVER_MEMORY_GPU, memory_type_id}};
-        RETURN_IF_ERROR(collector.ProcessTensor(
-            input_name, nullptr, 0, alloc_perference,
-            reinterpret_cast<const char**>(&buffer), &input_byte_size,
-            &memory_type, &memory_type_id));
-
-        cudaSetDevice(memory_type_id);
-        cudaError_t err = cudaIpcGetMemHandle(
-            reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-            const_cast<void*>(buffer));
-        if (err != cudaSuccess) {
-          return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
-                                            std::string(cudaGetErrorName(err)))
-                                               .c_str());
-        }
-
-        gpu_tensors_map_.insert({input_name, const_cast<void*>(buffer)});
-      }
-      break;
-#endif
+          input_name, input_buffer, input_byte_size, src_memory_type,
+          src_memory_type_id);
+    }
   }
 
   return nullptr;
@@ -1454,6 +1441,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   THROW_IF_BACKEND_MODEL_ERROR(
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
   python_execution_env_ = "";
+  force_cpu_only_input_tensors_ = true;
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
@@ -1468,6 +1456,36 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
           TRITONSERVER_LOG_INFO,
           (std::string("Using Python execution env ") + python_execution_env_)
               .c_str());
+    } else {
+      // Delete the error
+      TRITONSERVER_ErrorDelete(error);
+    }
+
+    // Skip the FORCE_CPU_ONLY_INPUT_TENSORS variable if it doesn't exits.
+    std::string force_cpu_only_input_tensor;
+    error = nullptr;
+    error = GetParameterValue(
+        params, "FORCE_CPU_ONLY_INPUT_TENSORS", &force_cpu_only_input_tensor);
+    if (error == nullptr) {
+      if (force_cpu_only_input_tensor == "yes") {
+        force_cpu_only_input_tensors_ = true;
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO,
+            (std::string("Forcing CPU only input tensors.")).c_str());
+      } else if (force_cpu_only_input_tensor == "no") {
+        force_cpu_only_input_tensors_ = false;
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO,
+            (std::string("Input tensors can be both in CPU and GPU. "
+                         "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
+                .c_str());
+      } else {
+        throw triton::backend::BackendModelException(TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_UNSUPPORTED,
+            (std::string("Incorrect value for FORCE_CPU_ONLY_INPUT_TENSORS: ") +
+             force_cpu_only_input_tensor + "'")
+                .c_str()));
+      }
     } else {
       // Delete the error
       TRITONSERVER_ErrorDelete(error);

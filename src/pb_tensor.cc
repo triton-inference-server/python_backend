@@ -1,5 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights
-// reserved.
+// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -87,7 +86,14 @@ PbTensor::PbTensor(
   memory_type_id_ = memory_type_id;
   dtype_ = dtype;
   dims_ = dims;
-  numpy_array_ = py::none();
+  if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
+      memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
+    py::object numpy_array = py::array(
+        py::dtype(triton_to_pybind_dtype(dtype_)), dims_, (void*)memory_ptr_);
+    numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+  } else {
+    numpy_array_ = py::none();
+  }
   byte_size_ = byte_size;
   dl_managed_tensor_ = dl_managed_tensor;
 
@@ -257,16 +263,7 @@ PbTensor::Name()
 py::array&
 PbTensor::AsNumpy()
 {
-  if ((tensor_type_ == PYTHONBACKEND_RAW &&
-       memory_type_ == TRITONSERVER_MEMORY_CPU) ||
-      (tensor_type_ == PYTHONBACKEND_DLPACK &&
-       memory_type_ == TRITONSERVER_MEMORY_CPU)) {
-    if (numpy_array_.equal(py::none())) {
-      py::object numpy_array = py::array(
-          py::dtype(triton_to_pybind_dtype(dtype_)), dims_, (void*)memory_ptr_);
-      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
-    }
-
+  if (this->IsCPU()) {
     return numpy_array_;
   } else {
     throw PythonBackendException(

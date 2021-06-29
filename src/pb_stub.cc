@@ -822,6 +822,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("as_numpy", &PbTensor::AsNumpy)
       .def("triton_dtype", &PbTensor::TritonDtype)
       .def("to_dlpack", &PbTensor::ToDLPack)
+      .def("is_cpu", &PbTensor::IsCPU)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
   py::register_exception<PythonBackendException>(
