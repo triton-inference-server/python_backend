@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -1190,9 +1190,9 @@ ModelInstanceState::GetInputTensor(
   uint64_t input_byte_size;
   uint32_t input_buffer_count;
 
-  RETURN_IF_ERROR(TRITONBACKEND_InputProperties(
-      in, &input_name, &input_dtype, &input_shape, &input_dims_count,
-      &input_byte_size, &input_buffer_count));
+  RETURN_IF_ERROR(TRITONBACKEND_InputPropertiesForHostPolicy(
+      in, HostPolicyName().c_str(), &input_name, &input_dtype, &input_shape,
+      &input_dims_count, &input_byte_size, &input_buffer_count));
 
   // If input_byte_size is larger than 2GBs, reject request the request.
   uint64_t max_input_size = INT32_MAX;
@@ -1207,7 +1207,8 @@ ModelInstanceState::GetInputTensor(
   // sends each request individually to the python model
   BackendInputCollector collector(
       &request, 1, &responses, Model()->TritonMemoryManager(),
-      false /* pinned_enable */, CudaStream());
+      false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
+      HostPolicyName().c_str());
 
   const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
   const int memory_type_id = 0;
