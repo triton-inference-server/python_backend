@@ -29,82 +29,102 @@
 
 namespace triton { namespace backend { namespace python {
 
-int
+TRITONSERVER_DataType
 numpy_to_triton_type(py::object data_type)
 {
   py::module np = py::module::import("numpy");
   if (data_type.equal(np.attr("bool_")))
-    return 1;
+    return TRITONSERVER_TYPE_BOOL;
   else if (data_type.equal(np.attr("uint8")))
-    return 2;
+    return TRITONSERVER_TYPE_UINT8;
   else if (data_type.equal(np.attr("uint16")))
-    return 3;
+    return TRITONSERVER_TYPE_UINT16;
   else if (data_type.equal(np.attr("uint32")))
-    return 4;
+    return TRITONSERVER_TYPE_UINT32;
   else if (data_type.equal(np.attr("uint64")))
-    return 5;
+    return TRITONSERVER_TYPE_UINT64;
   else if (data_type.equal(np.attr("int8")))
-    return 6;
+    return TRITONSERVER_TYPE_INT8;
   else if (data_type.equal(np.attr("int16")))
-    return 7;
+    return TRITONSERVER_TYPE_INT16;
   else if (data_type.equal(np.attr("int32")))
-    return 8;
+    return TRITONSERVER_TYPE_INT32;
   else if (data_type.equal(np.attr("int64")))
-    return 9;
+    return TRITONSERVER_TYPE_INT64;
   else if (data_type.equal(np.attr("float16")))
-    return 10;
+    return TRITONSERVER_TYPE_FP16;
   else if (data_type.equal(np.attr("float32")))
-    return 11;
+    return TRITONSERVER_TYPE_FP32;
   else if (data_type.equal(np.attr("float64")))
-    return 12;
+    return TRITONSERVER_TYPE_FP64;
   else if (
       data_type.equal(np.attr("object_")) ||
       data_type.equal(np.attr("bytes_")) ||
       data_type.attr("type").equal(np.attr("bytes_")))
-    return 13;
+    return TRITONSERVER_TYPE_BYTES;
   throw PythonBackendException("NumPy dtype is not supported.");
 }
 
 py::object
-triton_to_numpy_type(int data_type)
+triton_to_numpy_type(TRITONSERVER_DataType data_type)
 {
   py::module np = py::module::import("numpy");
-  if (data_type == 1)
-    return np.attr("bool_");
-  else if (data_type == 2)
-    return np.attr("uint8");
-  else if (data_type == 3)
-    return np.attr("uint16");
-  else if (data_type == 4)
-    return np.attr("uint32");
-  else if (data_type == 5)
-    return np.attr("uint64");
-  else if (data_type == 6)
-    return np.attr("int8");
-  else if (data_type == 7)
-    return np.attr("int16");
-  else if (data_type == 8)
-    return np.attr("int32");
-  else if (data_type == 9)
-    return np.attr("int64");
-  else if (data_type == 10)
-    return np.attr("float16");
-  else if (data_type == 11)
-    return np.attr("float32");
-  else if (data_type == 12)
-    return np.attr("float64");
-  else if (data_type == 13)
-    return np.attr("object_");
-  return py::none();
+  py::object np_type;
+  switch (data_type) {
+    case TRITONSERVER_TYPE_BOOL:
+      np_type = np.attr("bool_");
+      break;
+    case TRITONSERVER_TYPE_UINT8:
+      np_type = np.attr("uint8");
+      break;
+    case TRITONSERVER_TYPE_UINT16:
+      np_type = np.attr("uint16");
+      break;
+    case TRITONSERVER_TYPE_UINT32:
+      np_type = np.attr("uint32");
+      break;
+    case TRITONSERVER_TYPE_UINT64:
+      np_type = np.attr("uint64");
+      break;
+    case TRITONSERVER_TYPE_INT8:
+      np_type = np.attr("int8");
+      break;
+    case TRITONSERVER_TYPE_INT16:
+      np_type = np.attr("int16");
+      break;
+    case TRITONSERVER_TYPE_INT32:
+      np_type = np.attr("int32");
+      break;
+    case TRITONSERVER_TYPE_INT64:
+      np_type = np.attr("int64");
+      break;
+    case TRITONSERVER_TYPE_FP16:
+      np_type = np.attr("float16");
+      break;
+    case TRITONSERVER_TYPE_FP32:
+      np_type = np.attr("float32");
+      break;
+    case TRITONSERVER_TYPE_FP64:
+      np_type = np.attr("float64");
+      break;
+    case TRITONSERVER_TYPE_BYTES:
+      np_type = np.attr("object_");
+      break;
+    default:
+      throw PythonBackendException(
+          "Unsupported triton dtype" +
+          std::to_string(static_cast<int>(data_type)));
+  }
+
+  return np_type;
 }
 
 py::dtype
-triton_to_pybind_dtype(int data_type)
+triton_to_pybind_dtype(TRITONSERVER_DataType data_type)
 {
-  TRITONSERVER_DataType dtype = static_cast<TRITONSERVER_DataType>(data_type);
   py::dtype dtype_numpy;
 
-  switch (dtype) {
+  switch (data_type) {
     case TRITONSERVER_TYPE_BOOL:
       dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
       break;
@@ -155,13 +175,10 @@ triton_to_pybind_dtype(int data_type)
 }
 
 DLDataType
-triton_to_dlpack_type(int data_type)
+triton_to_dlpack_type(TRITONSERVER_DataType triton_dtype)
 {
   DLDataType dl_dtype;
   DLDataTypeCode dl_code;
-
-  TRITONSERVER_DataType triton_dtype =
-      static_cast<TRITONSERVER_DataType>(data_type);
 
   // Number of bits required for the data type.
   size_t dt_size = 0;
@@ -222,7 +239,8 @@ triton_to_dlpack_type(int data_type)
 
     default:
       throw PythonBackendException(
-          std::string("DType code \"") + std::to_string(data_type) +
+          std::string("DType code \"") +
+          std::to_string(static_cast<int>(triton_dtype)) +
           "\" is not supported.");
       break;
   }

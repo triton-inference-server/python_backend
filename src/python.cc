@@ -1400,10 +1400,9 @@ ModelInstanceState::GetInputTensor(
     } else {
       char* input_buffer;
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, input_buffer,
-          src_memory_type, src_memory_type_id,
-          input_byte_size, input_name, input_shape, input_dims_count,
-          input_dtype));
+          shm_pool_, input_tensor, input_buffer, src_memory_type,
+          src_memory_type_id, input_byte_size, input_name, input_shape,
+          input_dims_count, input_dtype));
       collector.ProcessTensor(
           input_name, input_buffer, input_byte_size, src_memory_type,
           src_memory_type_id);

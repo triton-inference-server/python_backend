@@ -46,9 +46,10 @@ typedef enum PYTHONBACKEND_tensortype_enum {
 // PbTensor class is the representation of Triton tensors
 // inside Python backend.
 class PbTensor {
+private:
   std::string name_;
   py::array numpy_array_;
-  int dtype_;
+  TRITONSERVER_DataType dtype_;
   void* memory_ptr_;
   int64_t memory_type_id_;
   std::vector<int64_t> dims_;
@@ -61,7 +62,7 @@ class PbTensor {
   /// Create a PbTensor using a numpy array
   /// \param name The name of the tensor
   /// \param numpy_array Numpy array to use for the initialization of the tensor
-  PbTensor(std::string name, py::object numpy_array);
+  PbTensor(const std::string& name, py::object numpy_array);
 
   /// Create a PbTensor using a numpy array. This constructor is used for types
   /// that are not natively available in C++ such as float16. This constructor
@@ -69,7 +70,9 @@ class PbTensor {
   /// \param name The name of the tensor
   /// \param numpy_array Numpy array to use for the initialization of the tensor
   /// \param dtype The triton dtype
-  PbTensor(std::string name, py::object numpy_array, int dtype);
+  PbTensor(
+      const std::string& name, py::object numpy_array,
+      TRITONSERVER_DataType dtype);
 
   /// Create a PbTensor from raw pointer. This constructor is used for
   /// interfacing with DLPack tensors.
@@ -82,7 +85,7 @@ class PbTensor {
   /// contiguous and in C order.
   /// \param byte_size Total number of bytes that the tensor uses.
   PbTensor(
-      std::string name, std::vector<int64_t> dims, int dtype,
+      const std::string& name, const std::vector<int64_t>& dims, TRITONSERVER_DataType dtype,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       void* memory_ptr, uint64_t byte_size,
       DLManagedTensor* dl_managed_tensor = nullptr);
@@ -92,7 +95,7 @@ class PbTensor {
   /// \param dlpack source dlpack tensor
   /// \param name name of the tensor
   static std::unique_ptr<PbTensor> FromDLPack(
-      std::string name, py::capsule dlpack);
+      const std::string& name, const py::capsule& dlpack);
 
   /// Get a PyCapsule object containing the DLPack representation of the tensor.
   /// \return Capsule object containing pointer to a DLPack object.

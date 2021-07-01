@@ -501,13 +501,11 @@ class Stub {
             py::object deserialized =
                 deserialize_bytes(numpy_array).attr("reshape")(dims);
 
-            PbTensor py_input_tensor(
-                name_str, deserialized, static_cast<int>(dtype));
+            PbTensor py_input_tensor(name_str, deserialized, dtype);
             py_input_tensors.append(py_input_tensor);
           } else {
             py::array numpy_array(dtype_numpy, shape, (void*)data);
-            PbTensor py_input_tensor(
-                name_str, numpy_array, static_cast<int>(dtype));
+            PbTensor py_input_tensor(name_str, numpy_array, dtype);
             py_input_tensors.append(py_input_tensor);
           }
         }
@@ -538,9 +536,8 @@ class Stub {
         gpu_tensors_map_.insert({static_cast<void*>(data), name});
 
         PbTensor py_input_tensor = PbTensor(
-            name, shape, static_cast<int>(dtype), raw_data->memory_type,
-            raw_data->memory_type_id, static_cast<void*>(data),
-            raw_data->byte_size, nullptr);
+            name, shape, dtype, raw_data->memory_type, raw_data->memory_type_id,
+            static_cast<void*>(data), raw_data->byte_size, nullptr);
 
         py_input_tensors.append(py_input_tensor);
 #else

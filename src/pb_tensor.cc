@@ -31,7 +31,7 @@
 namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
-PbTensor::PbTensor(std::string name, py::object numpy_array)
+PbTensor::PbTensor(const std::string& name, py::object numpy_array)
     : name_(name)
 {
   dtype_ = numpy_to_triton_type(numpy_array.attr("dtype"));
@@ -59,7 +59,9 @@ PbTensor::PbTensor(std::string name, py::object numpy_array)
   byte_size_ = numpy_array_.nbytes();
 }
 
-PbTensor::PbTensor(std::string name, py::object numpy_array, int dtype)
+PbTensor::PbTensor(
+    const std::string& name, py::object numpy_array,
+    TRITONSERVER_DataType dtype)
     : name_(name)
 {
   if (numpy_to_triton_type(numpy_array.attr("dtype")) != dtype) {
@@ -90,9 +92,10 @@ PbTensor::PbTensor(std::string name, py::object numpy_array, int dtype)
 }
 
 PbTensor::PbTensor(
-    std::string name, std::vector<int64_t> dims, int dtype,
-    TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-    void* memory_ptr, uint64_t byte_size, DLManagedTensor* dl_managed_tensor)
+    const std::string& name, const std::vector<int64_t>& dims,
+    TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
+    int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
+    DLManagedTensor* dl_managed_tensor)
 {
   name_ = name;
   memory_ptr_ = memory_ptr;
@@ -102,8 +105,8 @@ PbTensor::PbTensor(
   dims_ = dims;
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
-    py::object numpy_array = py::array(
-        triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
+    py::object numpy_array =
+        py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
     numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
   } else {
     numpy_array_ = py::none();
@@ -216,7 +219,7 @@ PbTensor::DeleteDLPack()
 }
 
 std::unique_ptr<PbTensor>
-PbTensor::FromDLPack(std::string name, py::capsule dlpack_tensor)
+PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 {
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
@@ -263,7 +266,7 @@ PbTensor::FromDLPack(std::string name, py::capsule dlpack_tensor)
 
   PyCapsule_SetName(dlpack_tensor.ptr(), "used_dlpack");
   return std::make_unique<PbTensor>(
-      name, dims, static_cast<int>(dtype), memory_type, memory_type_id,
+      name, dims, dtype, memory_type, memory_type_id,
       memory_ptr, byte_size, dl_managed_tensor);
 }
 
