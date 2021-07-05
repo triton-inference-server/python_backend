@@ -59,6 +59,10 @@
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
+#ifdef TRITON_ENABLE_GPU
+#include <cuda.h>
+#endif
+
 
 #define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X) \
   do {                                                                 \
@@ -818,15 +822,23 @@ ModelInstanceState::ProcessRequests(
           cudaError_t err = cudaIpcOpenMemHandle(
               (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
           if (err != cudaSuccess) {
-            throw PythonBackendException(
-                std::string(
-                    "failed to open cuda ipc handle: " +
-                    std::string(cudaGetErrorString(err)))
-                    .c_str());
+            GUARDED_RESPOND_IF_ERROR(
+                responses, r,
+                TRITONSERVER_ErrorNew(
+                    TRITONSERVER_ERROR_INTERNAL,
+                    std::string(
+                        "failed to open cuda ipc handle: " +
+                        std::string(cudaGetErrorString(err)))
+                        .c_str()));
           }
 
           opened_ipc_mem_handles.push_back(
               reinterpret_cast<cudaIpcMemHandle_t*>(data));
+
+          // Adjust the device pointer with the offset.  cudaIpcOpenMemHandle
+          // will map the base address only and the offset needs to be manually
+          // adjusted.
+          data = data + raw_data->offset;
         } else {
           char* reused_tensor_name;
           GUARDED_RESPOND_IF_EXCEPTION(
@@ -867,6 +879,7 @@ ModelInstanceState::ProcessRequests(
                 "Failed to copy memory type GPU", src_memory_type,
                 src_memory_type_id, actual_memory_type, actual_memory_type_id,
                 raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
+
         cuda_copy |= cuda_used;
 #else
         GUARDED_RESPOND_IF_ERROR(
@@ -1354,19 +1367,22 @@ ModelInstanceState::GetInputTensor(
 #endif
   if (cpu_only_tensors) {
     char* input_buffer;
+    uint64_t* ptr_offset;
     RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
         shm_pool_, input_tensor, input_buffer,
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
-        input_byte_size, input_name, input_shape, input_dims_count,
-        input_dtype));
+        input_byte_size, input_name, input_shape, input_dims_count, input_dtype,
+        &ptr_offset));
     collector.ProcessTensor(
         input_name, input_buffer, input_byte_size,
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
+    *ptr_offset = 0;
   } else {
     TRITONSERVER_MemoryType src_memory_type;
     int64_t src_memory_type_id;
     size_t src_byte_size;
     const void* src_ptr;
+    uint64_t* ptr_offset;
 
     RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
         in, input_idx, &src_ptr, &src_byte_size, &src_memory_type,
@@ -1377,7 +1393,7 @@ ModelInstanceState::GetInputTensor(
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
           shm_pool_, input_tensor, cuda_handle, src_memory_type,
           src_memory_type_id, input_byte_size, input_name, input_shape,
-          input_dims_count, input_dtype));
+          input_dims_count, input_dtype, &ptr_offset));
 
       const void* buffer = nullptr;
       std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
@@ -1387,22 +1403,40 @@ ModelInstanceState::GetInputTensor(
           reinterpret_cast<const char**>(&buffer), &input_byte_size,
           &src_memory_type, &src_memory_type_id));
 
+      void* buffer_cast = const_cast<void*>(buffer);
       cudaSetDevice(src_memory_type_id);
       cudaError_t err = cudaIpcGetMemHandle(
-          reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-          const_cast<void*>(buffer));
+          reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle), buffer_cast);
       if (err != cudaSuccess) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
                                           std::string(cudaGetErrorName(err)))
                                              .c_str());
       }
+
+      CUdeviceptr start_address;
+      CUresult cuda_err = cuPointerGetAttribute(
+          &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+          reinterpret_cast<CUdeviceptr>(buffer_cast));
+      if (cuda_err != CUDA_SUCCESS) {
+        const char* error_string;
+        cuGetErrorString(cuda_err, &error_string);
+        throw PythonBackendException(
+            std::string(
+                "failed to get cuda pointer device attribute: " +
+                std::string(error_string))
+                .c_str());
+      }
+      *ptr_offset = reinterpret_cast<char*>(buffer_cast) -
+                    reinterpret_cast<char*>(start_address);
     } else {
       char* input_buffer;
+      uint64_t* ptr_offset;
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
           shm_pool_, input_tensor, input_buffer, src_memory_type,
           src_memory_type_id, input_byte_size, input_name, input_shape,
-          input_dims_count, input_dtype));
+          input_dims_count, input_dtype, &ptr_offset));
+      *ptr_offset = 0;
       collector.ProcessTensor(
           input_name, input_buffer, input_byte_size, src_memory_type,
           src_memory_type_id);

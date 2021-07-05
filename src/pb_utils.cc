@@ -86,7 +86,7 @@ void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size)
+    int memory_type_id, uint64_t byte_size, uint64_t** offset)
 {
   // raw data
   RawData* raw_data;
@@ -95,6 +95,7 @@ SaveRawDataToSharedMemory(
   raw_data->memory_type = memory_type;
   raw_data->memory_type_id = memory_type_id;
   raw_data->byte_size = byte_size;
+  *offset = &(raw_data->offset);
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     off_t buffer_offset;
     shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
@@ -104,7 +105,8 @@ SaveRawDataToSharedMemory(
 #ifdef TRITON_ENABLE_GPU
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
     off_t buffer_offset;
-    shm_pool->Map((char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
+    shm_pool->Map(
+        (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
     raw_data->memory_ptr = buffer_offset;
   }
 #else
@@ -159,13 +161,14 @@ SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, uint64_t byte_size, const char* name,
-    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype)
+    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
+    uint64_t** offset_ptr)
 {
   // Raw Data
   off_t raw_data_offset;
   SaveRawDataToSharedMemory(
       shm_pool, raw_data_offset, raw_data_ptr, memory_type, memory_type_id,
-      byte_size);
+      byte_size, offset_ptr);
   tensor->raw_data = raw_data_offset;
 
   // name

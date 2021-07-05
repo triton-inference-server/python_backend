@@ -70,6 +70,8 @@ namespace bi = boost::interprocess;
 //
 struct RawData {
   off_t memory_ptr;
+  // Offset represents the pointer offset.
+  uint64_t offset;
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
   uint64_t byte_size;
@@ -179,19 +181,17 @@ void SaveStringToSharedMemory(
 void LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str);
 
-void LoadRawDataFromSharedLibrary(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& tensor_shm_offset,
-    const Tensor& tensor);
 void SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size);
+    int memory_type_id, uint64_t byte_size, uint64_t **offset_ptr);
 
 void SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, uint64_t byte_size, const char* name,
-    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype);
+    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
+    uint64_t** offset_ptr);
 void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);

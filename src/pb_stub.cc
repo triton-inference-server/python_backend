@@ -24,6 +24,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <cuda.h>
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -355,10 +356,12 @@ class Stub {
           dims[i] = numpy_shape[i];
         }
 
+        uint64_t* ptr_offset;
         SaveTensorToSharedMemory(
             shm_pool_, output_tensor_shm, data_in_shm, memory_type,
             memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
-            dtype_triton);
+            dtype_triton, &ptr_offset);
+        *ptr_offset = 0;
 
         // TODO: We can remove this memcpy if the numpy object
         // is already in shared memory.
@@ -366,12 +369,13 @@ class Stub {
       } else {
 #ifdef TRITON_ENABLE_GPU
         char* cuda_handle;
+        uint64_t* ptr_offset;
         SaveTensorToSharedMemory(
             shm_pool_, output_tensor_shm, cuda_handle,
             output_tensor_pb->MemoryType(), output_tensor_pb->MemoryTypeId(),
             output_tensor_pb->ByteSize(), output_name.c_str(),
             output_tensor_pb->Dims().data(), output_tensor_pb->Dims().size(),
-            dtype_triton);
+            dtype_triton, &ptr_offset);
 
         std::unordered_map<void*, std::string>::const_iterator
             reused_gpu_tensor =
@@ -396,6 +400,22 @@ class Stub {
               reused_gpu_tensor->second.c_str());
           output_tensor_shm->reused_tensor_name = reused_tensor_name_offset;
         }
+
+        CUdeviceptr start_address;
+        CUresult cuda_err = cuPointerGetAttribute(
+            &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+            (CUdeviceptr)output_tensor_pb->GetDataPtr());
+        if (cuda_err != CUDA_SUCCESS) {
+          const char* error_string;
+          cuGetErrorString(cuda_err, &error_string);
+          throw PythonBackendException(
+              std::string(
+                  "failed to get cuda pointer device attribute: " +
+                  std::string(error_string))
+                  .c_str());
+        }
+        *ptr_offset = reinterpret_cast<char*>(output_tensor_pb->GetDataPtr()) -
+                      reinterpret_cast<char*>(start_address);
 #else
         throw PythonBackendException(
             "Python backend was not built with GPU tensor support");
@@ -534,6 +554,11 @@ class Stub {
         // Clean up is required to remove the GPU tensors
         require_cleanup_ = true;
         gpu_tensors_map_.insert({static_cast<void*>(data), name});
+
+        // Adjust the device pointer with the offset. cudaIpcOpenMemHandle will
+        // map the base address only and the offset needs to be manually
+        // adjusted.
+        data = data + raw_data->offset;
 
         PbTensor py_input_tensor = PbTensor(
             name, shape, dtype, raw_data->memory_type, raw_data->memory_type_id,
