@@ -224,11 +224,36 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 
-  // TODO: Make sure that the tensor is contiguous
   void* memory_ptr = dl_managed_tensor->dl_tensor.data;
+  memory_ptr = reinterpret_cast<char*>(memory_ptr) +
+               dl_managed_tensor->dl_tensor.byte_offset;
+
+  int64_t* strides = dl_managed_tensor->dl_tensor.strides;
+
+  int ndim = dl_managed_tensor->dl_tensor.ndim;
   std::vector<int64_t> dims(
       dl_managed_tensor->dl_tensor.shape,
-      dl_managed_tensor->dl_tensor.shape + dl_managed_tensor->dl_tensor.ndim);
+      dl_managed_tensor->dl_tensor.shape + ndim);
+
+  // Check if the input is contiguous and in C order
+  if (strides != nullptr) {
+    int64_t calculated_stride{1};
+    bool is_contiguous_c_order = true;
+    for (size_t i = 1; i < dims.size(); i++) {
+      if (strides[ndim - i] != calculated_stride) {
+        is_contiguous_c_order = false;
+        break;
+      }
+
+      calculated_stride *= dims[ndim - i];
+    }
+
+    if (!is_contiguous_c_order) {
+      throw PythonBackendException(
+          "Python backend only supports contiguous tensors that are in "
+          "C-order.");
+    }
+  }
 
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
@@ -266,8 +291,8 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 
   PyCapsule_SetName(dlpack_tensor.ptr(), "used_dlpack");
   return std::make_unique<PbTensor>(
-      name, dims, dtype, memory_type, memory_type_id,
-      memory_ptr, byte_size, dl_managed_tensor);
+      name, dims, dtype, memory_type, memory_type_id, memory_ptr, byte_size,
+      dl_managed_tensor);
 }
 
 
