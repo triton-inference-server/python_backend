@@ -63,8 +63,8 @@ LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str)
 {
   String* string;
-  shm_pool->MapOffset((char**)&string, sizeof(String), shm_offset);
-  shm_pool->MapOffset((char**)&str, string->length, string->data);
+  shm_pool->MapOffset((char**)&string, shm_offset);
+  shm_pool->MapOffset((char**)&str, string->data);
 }
 
 void
@@ -141,11 +141,10 @@ LoadMapFromSharedMemory(
     std::unordered_map<std::string, std::string>& map)
 {
   Dict* dict;
-  shm_pool->MapOffset((char**)&dict, sizeof(Dict), shm_offset);
+  shm_pool->MapOffset((char**)&dict, shm_offset);
 
   Pair* pairs;
-  shm_pool->MapOffset(
-      (char**)&pairs, sizeof(Pair) * dict->length, dict->values);
+  shm_pool->MapOffset((char**)&pairs, dict->values);
   for (size_t i = 0; i < dict->length; i++) {
     char* key;
     LoadStringFromSharedMemory(shm_pool, pairs[i].key, key);
