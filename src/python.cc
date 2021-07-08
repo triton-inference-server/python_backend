@@ -1197,8 +1197,8 @@ ModelInstanceState::GetInputTensor(
   uint64_t input_byte_size;
   uint32_t input_buffer_count;
 
-  RETURN_IF_ERROR(TRITONBACKEND_InputPropertiesForHostPolicy(
-      in, HostPolicyName().c_str(), &input_name, &input_dtype, &input_shape,
+  RETURN_IF_ERROR(TRITONBACKEND_InputProperties(
+      in, &input_name, &input_dtype, &input_shape,
       &input_dims_count, &input_byte_size, &input_buffer_count));
 
   // If input_byte_size is larger than 2GBs, reject request the request.
@@ -1214,8 +1214,7 @@ ModelInstanceState::GetInputTensor(
   // sends each request individually to the python model
   BackendInputCollector collector(
       &request, 1, &responses, Model()->TritonMemoryManager(),
-      false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
-      HostPolicyName().c_str());
+      false /* pinned_enable */, CudaStream());
 
   const TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
   const int memory_type_id = 0;
