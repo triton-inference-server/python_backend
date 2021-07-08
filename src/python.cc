@@ -1154,14 +1154,21 @@ ModelInstanceState::~ModelInstanceState()
         // Wait for stub notification
         parent_cond_->wait(*parent_lock_);
       }
-    }
-  }
 
-  // Terminate the stub process if it has been created.
-  if (stub_pid_ != 0) {
-    int status;
-    kill(stub_pid_, SIGTERM);
-    waitpid(stub_pid_, &status, 0);
+      // Terminate the stub process if it has been created.
+      if (stub_pid_ != 0) {
+        int status;
+        kill(stub_pid_, SIGTERM);
+        waitpid(stub_pid_, &status, 0);
+      }
+    } else {
+      // Force terminate the stub process if it is not healthy.
+      if (stub_pid_ != 0) {
+        int status;
+        kill(stub_pid_, SIGKILL);
+        waitpid(stub_pid_, &status, 0);
+      }
+    }
   }
 
   // Destory the lock before deletion of shared memory is triggered.
