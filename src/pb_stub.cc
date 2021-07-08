@@ -768,7 +768,10 @@ main(int argc, char** argv)
           }
         }
       });
-
+  
+  // Initialize needs to be called after the background health thread
+  // has started. Otherwise, if the initialize takes long time, the
+  // main process wrongly assumes that the stub process has crashed.
   stub->Initialize(model_version, argv[6] /* triton install path */);
 
   // Wait for messages from the parent process
