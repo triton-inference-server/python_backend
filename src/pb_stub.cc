@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -115,7 +115,7 @@ SignalHandler(int signum)
   // Skip the SIGINT
 }
 
-bool sigterm_received = false;
+std::atomic<bool> sigterm_received{false};
 
 void
 SigtermHandler(int signum)
@@ -742,9 +742,7 @@ main(int argc, char** argv)
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
 
-  stub->Initialize(model_version, argv[6] /* triton install path */);
   std::atomic<bool> non_graceful_exit = {false};
-
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread(
       [&parent_pid, &background_thread_running, &stub, &non_graceful_exit] {
@@ -770,6 +768,11 @@ main(int argc, char** argv)
           }
         }
       });
+  
+  // Initialize needs to be called after the background health thread
+  // has started. Otherwise, if the initialize takes long time, the
+  // main process wrongly assumes that the stub process has crashed.
+  stub->Initialize(model_version, argv[6] /* triton install path */);
 
   // Wait for messages from the parent process
   while (true) {
