@@ -113,7 +113,7 @@ sudo apt-get install rapidjson-dev libarchive-dev
 ```
 $ mkdir build
 $ cd build
-$ cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+$ cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=r<xx.yy> -DTRITON_COMMON_REPO_TAG=r<xx.yy> -DTRITON_CORE_REPO_TAG=r<xx.yy> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 $ make install
 ```
 
@@ -123,8 +123,9 @@ but the listed CMake argument can be used to override.
 
 * triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=[tag]
 * triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
+* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
 
-Set `DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
+Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
 this location is `/opt/tritonserver`.
 
 3. Copy example model and configuration
