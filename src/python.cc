@@ -1448,10 +1448,15 @@ ModelInstanceState::GetInputTensor(
     } else {
       char* input_buffer;
       uint64_t* ptr_offset;
+
+      // If the tensor is not in GPU, the tensor must be stored in CPU.
+      src_memory_type = TRITONSERVER_MEMORY_CPU;
+      src_memory_type_id = 0;
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, input_buffer, src_memory_type,
-          src_memory_type_id, input_byte_size, input_name, input_shape,
-          input_dims_count, input_dtype, &ptr_offset));
+          shm_pool_, input_tensor, input_buffer,
+          TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
+          input_byte_size, input_name, input_shape, input_dims_count,
+          input_dtype, &ptr_offset));
       *ptr_offset = 0;
       collector.ProcessTensor(
           input_name, input_buffer, input_byte_size, src_memory_type,
@@ -1792,7 +1797,8 @@ TRITONBACKEND_ModelInstanceExecute(
   ModelInstanceState* instance_state;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
-  TRITONSERVER_Error* err = instance_state->ProcessRequests(requests, request_count);
+  TRITONSERVER_Error* err =
+      instance_state->ProcessRequests(requests, request_count);
 
   // We should return the shared memory offset before returning from this
   // function. Otherwise there will be shared memory leaks if there is an error
