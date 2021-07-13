@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -62,7 +62,7 @@ class SharedMemory {
   SharedMemory(
       const std::string& shm_key, int64_t default_byte_size,
       int64_t shm_growth_bytes, bool truncate = false);
-  void MapOffset(char** shm_addr, size_t byte_size, off_t offset);
+  void MapOffset(char** shm_addr, off_t offset);
   void Map(char** shm_addr, size_t byte_size, off_t& offset);
   void SetOffset(off_t offset);
   ~SharedMemory() noexcept(false);

@@ -24,7 +24,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <cuda.h>
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -47,6 +46,7 @@
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
+#include <cuda.h>
 #endif
 
 namespace py = pybind11;
@@ -114,19 +114,13 @@ class LogMessage {
 };
 
 #define LOG_INFO_FL(FN, LN) LogMessage((char*)(FN), LN).stream()
+std::atomic<bool> non_graceful_exit = {false};
+
 
 void
 SignalHandler(int signum)
 {
-  // Skip the SIGINT
-}
-
-std::atomic<bool> sigterm_received{false};
-
-void
-SigtermHandler(int signum)
-{
-  sigterm_received = true;
+  // Skip the SIGINT and SIGTERM
 }
 
 class Stub {
@@ -137,15 +131,18 @@ class Stub {
   bi::interprocess_mutex* health_mutex_;
   bi::scoped_lock<bi::interprocess_mutex> stub_lock_;
   std::string model_path_;
+  std::string model_version_;
+  std::string triton_install_path_;
   IPCMessage* ipc_message_;
+  IPCControl* ipc_control_;
   std::unique_ptr<SharedMemory> shm_pool_;
   py::object PyRequest_;
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
-  ResponseBatch* response_batch_;
   std::vector<PbTensor*> tensors_to_remove_;
   bool require_cleanup_;
+  bool initialized_;
 
 #ifdef TRITON_ENABLE_GPU
   std::unordered_map<void*, std::string> gpu_tensors_map_;
@@ -154,16 +151,22 @@ class Stub {
  public:
   Stub(
       int64_t shm_growth_size, int64_t shm_default_size,
-      std::string& shm_region_name, std::string& model_path)
+      std::string& shm_region_name, const std::string& model_path,
+      const std::string& model_version, const std::string& triton_install_path,
+      off_t ipc_control_offset)
   {
-    try {
-      model_path_ = model_path;
-      stub_mutex_ = nullptr;
-      stub_cond_ = nullptr;
-      parent_mutex_ = nullptr;
-      parent_cond_ = nullptr;
-      health_mutex_ = nullptr;
+    model_path_ = model_path;
+    model_version_ = model_version;
+    triton_install_path_ = triton_install_path;
 
+    stub_mutex_ = nullptr;
+    stub_cond_ = nullptr;
+    parent_mutex_ = nullptr;
+    parent_cond_ = nullptr;
+    health_mutex_ = nullptr;
+
+    initialized_ = false;
+    try {
       // This boolean indicates whether a cleanup is required or not.
       require_cleanup_ = false;
 
@@ -171,56 +174,21 @@ class Stub {
           shm_region_name, shm_default_size, shm_growth_size);
 
       // Stub mutex and CV
-      bi::interprocess_mutex* stub_mutex;
-      off_t stub_mutex_offset;
-      shm_pool_->Map(
-          (char**)&stub_mutex, sizeof(bi::interprocess_mutex),
-          stub_mutex_offset);
-
-      bi::interprocess_condition* stub_cv;
-      off_t stub_cv_offset;
-      shm_pool_->Map(
-          (char**)&stub_cv, sizeof(bi::interprocess_condition), stub_cv_offset);
-
-      stub_cond_ = stub_cv;
-      stub_mutex_ = stub_mutex;
+      shm_pool_->MapOffset((char**)&ipc_control_, ipc_control_offset);
+      shm_pool_->MapOffset((char**)&stub_mutex_, ipc_control_->stub_mutex);
+      shm_pool_->MapOffset((char**)&stub_cond_, ipc_control_->stub_cond);
 
       // Parent Mutex and CV
-      bi::interprocess_mutex* parent_mutex;
-      off_t parent_mutex_offset;
-      shm_pool_->Map(
-          (char**)&parent_mutex, sizeof(bi::interprocess_mutex),
-          parent_mutex_offset);
-
-      bi::interprocess_condition* parent_cv;
-      off_t parent_cv_offset;
-      shm_pool_->Map(
-          (char**)&parent_cv, sizeof(bi::interprocess_condition),
-          parent_cv_offset);
+      shm_pool_->MapOffset((char**)&parent_mutex_, ipc_control_->parent_mutex);
+      shm_pool_->MapOffset((char**)&parent_cond_, ipc_control_->parent_cond);
 
       bi::interprocess_mutex* health_mutex;
-      off_t health_mutex_offset;
-      shm_pool_->Map(
-          (char**)&health_mutex, sizeof(bi::interprocess_mutex),
-          health_mutex_offset);
-
+      shm_pool_->MapOffset(
+          (char**)&health_mutex, ipc_control_->stub_health_mutex);
       health_mutex_ = health_mutex;
-      parent_mutex_ = parent_mutex;
-      parent_cond_ = parent_cv;
 
-      IPCMessage* ipc_message;
-      off_t ipc_offset;
-      shm_pool_->Map((char**)&ipc_message, sizeof(IPCMessage), ipc_offset);
-
-      off_t response_batch_offset;
-      shm_pool_->Map(
-          (char**)&response_batch_, sizeof(Response), response_batch_offset);
-      ipc_message->response_batch = response_batch_offset;
-      response_batch_->has_error = false;
-      ipc_message_ = ipc_message;
-
+      shm_pool_->MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
       stub_lock_ = bi::scoped_lock<bi::interprocess_mutex>(*stub_mutex_);
-      NotifyParent();
     }
     catch (const PythonBackendException& pb_exception) {
       LOG_INFO << pb_exception.what() << std::endl;
@@ -241,7 +209,7 @@ class Stub {
     parent_cond_->notify_one();
   }
 
-  bool& Health() { return ipc_message_->health; }
+  bool& Health() { return ipc_control_->stub_health; }
 
   std::unique_ptr<SharedMemory>& GetSharedMemory() { return shm_pool_; }
 
@@ -259,17 +227,18 @@ class Stub {
     }
   }
 
-  void SetErrorForResponseBatch(const char* err_message)
+  void SetErrorForResponseBatch(
+      ResponseBatch* response_batch, const char* err_message)
   {
     off_t err_string_offset = 0;
-    response_batch_->is_error_set = false;
-    response_batch_->has_error = true;
+    response_batch->is_error_set = false;
+    response_batch->has_error = true;
     LOG_IF_EXCEPTION(
         SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
 
     if (err_string_offset != 0) {
-      response_batch_->error = err_string_offset;
-      response_batch_->is_error_set = true;
+      response_batch->error = err_string_offset;
+      response_batch->is_error_set = true;
     }
   }
 
@@ -435,9 +404,7 @@ class Stub {
 
     uint32_t requested_input_count = request->requested_input_count;
     Tensor* input_tensors;
-    shm_pool_->MapOffset(
-        (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
-        request->inputs);
+    shm_pool_->MapOffset((char**)&input_tensors, request->inputs);
 
     py::list py_input_tensors;
     for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
@@ -448,20 +415,17 @@ class Stub {
       size_t dims_count = input_tensor->dims_count;
 
       RawData* raw_data;
-      shm_pool_->MapOffset(
-          (char**)&raw_data, sizeof(RawData), input_tensor->raw_data);
+      shm_pool_->MapOffset((char**)&raw_data, input_tensor->raw_data);
 
       int64_t* dims;
-      shm_pool_->MapOffset(
-          (char**)&dims, sizeof(int64_t) * dims_count, input_tensor->dims);
+      shm_pool_->MapOffset((char**)&dims, input_tensor->dims);
 
       TRITONSERVER_DataType dtype = input_tensor->dtype;
       std::vector<int64_t> shape{dims, dims + dims_count};
 
       char* data;
       if (raw_data->memory_type == TRITONSERVER_MEMORY_CPU) {
-        shm_pool_->MapOffset(
-            (char**)&data, raw_data->byte_size, raw_data->memory_ptr);
+        shm_pool_->MapOffset((char**)&data, raw_data->memory_ptr);
 
         py::dtype dtype_numpy;
         switch (dtype) {
@@ -538,9 +502,7 @@ class Stub {
 #ifdef TRITON_ENABLE_GPU
         cudaIpcMemHandle_t* cuda_mem_handle;
         cudaSetDevice(raw_data->memory_type_id);
-        shm_pool_->MapOffset(
-            (char**)&cuda_mem_handle, sizeof(cudaIpcMemHandle_t),
-            raw_data->memory_ptr);
+        shm_pool_->MapOffset((char**)&cuda_mem_handle, raw_data->memory_ptr);
 
         cudaError_t err = cudaIpcOpenMemHandle(
             (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
@@ -576,8 +538,7 @@ class Stub {
     uint32_t requested_output_count = request->requested_output_count;
     off_t* output_names;
     shm_pool_->MapOffset(
-        (char**)&output_names, sizeof(off_t) * requested_output_count,
-        request->requested_output_names);
+        (char**)&output_names, request->requested_output_names);
 
     for (size_t output_idx = 0; output_idx < requested_output_count;
          ++output_idx) {
@@ -592,65 +553,118 @@ class Stub {
         py_requested_output_names);
   }
 
-  void SetResponseFromException(const PythonBackendException& pb_exception)
+  void SetResponseFromException(
+      ResponseBatch* response_batch, const PythonBackendException& pb_exception)
   {
-    SetErrorForResponseBatch(pb_exception.what());
+    SetErrorForResponseBatch(response_batch, pb_exception.what());
   }
 
-
-  int Execute()
+  bool RunCommand()
   {
-    // Reset the value for has_error
-    response_batch_->has_error = false;
+    switch (ipc_message_->command) {
+      case PYTHONSTUB_CommandType::PYTHONSTUB_Initialize: {
+        InitializeArgs* initialize_args;
+        bool has_exception = false;
+        std::string error_string;
+        shm_pool_->MapOffset((char**)&initialize_args, ipc_message_->args);
+        initialize_args->response_has_error = false;
+        try {
+          Initialize(initialize_args);
+        }
+        catch (const PythonBackendException& pb_exception) {
+          has_exception = true;
+          error_string = pb_exception.what();
+        }
+        catch (const py::error_already_set& error) {
+          has_exception = true;
+          error_string = error.what();
+        }
 
-    // Reset the cleanup value
-    response_batch_->cleanup = false;
+        if (has_exception) {
+          LOG_INFO << "Failed to initialize Python stub: " << error_string;
+          initialize_args->response_has_error = true;
+          initialize_args->response_is_error_set = false;
+          off_t err_string_offset;
+          LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+              shm_pool_, err_string_offset, error_string.c_str()));
+          if (err_string_offset != 0) {
+            initialize_args->response_is_error_set = true;
+            initialize_args->response_error = err_string_offset;
+          }
+          return true;
+        }
+      } break;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_Execute: {
+        ExecuteArgs* execute_args;
+        bool has_exception = false;
+        std::string error_string;
+
+        shm_pool_->MapOffset((char**)&execute_args, ipc_message_->args);
+        ResponseBatch* response_batch;
+        shm_pool_->Map(
+            (char**)&response_batch, sizeof(ResponseBatch),
+            execute_args->response_batch);
+        response_batch->has_error = false;
+        try {
+          Execute(execute_args, response_batch);
+        }
+        catch (const PythonBackendException& pb_exception) {
+          has_exception = true;
+          error_string = pb_exception.what();
+        }
+        catch (const py::error_already_set& error) {
+          has_exception = true;
+          error_string = error.what();
+        }
+
+        if (has_exception) {
+          LOG_INFO << "Failed to execute request batch: " << error_string;
+          response_batch->has_error = true;
+          response_batch->is_error_set = false;
+          off_t err_string_offset;
+          LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+              shm_pool_, err_string_offset, error_string.c_str()));
+          if (err_string_offset != 0) {
+            response_batch->is_error_set = true;
+            response_batch->error = err_string_offset;
+          }
+        }
+      } break;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_Finalize:
+        return true;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup:
+        Cleanup();
+        break;
+      default:
+        break;
+    }
+
+    return false;
+  }
+
+  void Execute(ExecuteArgs* execute_args, ResponseBatch* response_batch)
+  {
+    response_batch->cleanup = false;
     require_cleanup_ = false;
 
     RequestBatch* request_batch;
-    try {
-      shm_pool_->MapOffset(
-          (char**)&request_batch, sizeof(RequestBatch),
-          ipc_message_->request_batch);
-    }
-    catch (const PythonBackendException& pb_exception) {
-      LOG_EXCEPTION(pb_exception);
-      SetResponseFromException(pb_exception);
-      return 0;
-    }
+    shm_pool_->MapOffset((char**)&request_batch, execute_args->request_batch);
     uint32_t batch_size = request_batch->batch_size;
 
-    // An empty batch size indicates termination
     if (batch_size == 0) {
-      return 1;
+      return;
     }
 
     Request* requests;
-    try {
-      shm_pool_->MapOffset(
-          (char**)&requests, sizeof(Request) * batch_size,
-          request_batch->requests);
-    }
-    catch (const PythonBackendException& pb_exception) {
-      LOG_EXCEPTION(pb_exception);
-      SetResponseFromException(pb_exception);
-      return 0;
-    }
+    shm_pool_->MapOffset((char**)&requests, request_batch->requests);
 
     py::list py_request_list;
     for (size_t i = 0; i < batch_size; i++) {
       Request* request = &requests[i];
       py::object infer_request;
-      try {
-        ProcessRequest(
-            request, response_batch_, infer_request, PyRequest_,
-            deserialize_bytes_);
-      }
-      catch (const PythonBackendException& pb_exception) {
-        LOG_EXCEPTION(pb_exception);
-        SetResponseFromException(pb_exception);
-        return 0;
-      }
+      ProcessRequest(
+          request, response_batch, infer_request, PyRequest_,
+          deserialize_bytes_);
       py_request_list.append(infer_request);
     }
 
@@ -659,160 +673,107 @@ class Stub {
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_path_ +
                             " does not implement `execute` method.";
-      LOG_INFO << message;
-      SetErrorForResponseBatch(message.c_str());
-
-      return 0;
+      throw PythonBackendException(message);
     }
 
     // Execute Response
-    try {
-      responses = model_instance_.attr("execute")(py_request_list);
-    }
-    catch (const py::error_already_set& e) {
-      LOG_INFO << e.what();
-      SetErrorForResponseBatch(e.what());
-
-      return 0;
-    }
+    responses = model_instance_.attr("execute")(py_request_list);
 
     Response* responses_shm;
     off_t responses_shm_offset;
     size_t response_size = py::len(responses);
 
-    try {
-      shm_pool_->Map(
-          (char**)&responses_shm, sizeof(Response) * response_size,
-          responses_shm_offset);
-    }
-    catch (const PythonBackendException& pb_exception) {
-      LOG_EXCEPTION(pb_exception);
-      SetResponseFromException(pb_exception);
-      return 0;
-    }
-    response_batch_->responses = responses_shm_offset;
-    response_batch_->batch_size = response_size;
+    shm_pool_->Map(
+        (char**)&responses_shm, sizeof(Response) * response_size,
+        responses_shm_offset);
+    response_batch->responses = responses_shm_offset;
+    response_batch->batch_size = response_size;
 
     size_t i = 0;
     for (auto& response : responses) {
       Response* response_shm = &responses_shm[i];
-      try {
-        ProcessResponse(
-            response_shm, response_batch_, response, serialize_bytes_);
-      }
-      catch (const PythonBackendException& pb_exception) {
-        LOG_EXCEPTION(pb_exception);
-        SetErrorForResponse(response_shm, pb_exception.what());
-      }
+      ProcessResponse(response_shm, response_batch, response, serialize_bytes_);
       i += 1;
     }
-
-    // When require_cleanup_ is true it needs one additional step for cleaning
-    // up the tensors on the client side.
-    if (require_cleanup_) {
-      response_batch_->cleanup = true;
-      NotifyParent();
-
-      // Exit if it has received a SIGTERM signal.
-      if (WaitForNotification()) {
-        LOG_INFO << "Received SIGTERM: exiting.";
-        return 1;
-      }
-
-      for (PbTensor*& pb_tensor : tensors_to_remove_) {
-        pb_tensor->DeleteDLPack();
-      }
-
-      tensors_to_remove_.clear();
-
-#ifdef TRITON_ENABLE_GPU
-      for (const auto& gpu_tensor_pair : gpu_tensors_map_) {
-        cudaError_t err = cudaIpcCloseMemHandle(gpu_tensor_pair.first);
-        if (err != cudaSuccess) {
-          LOG_INFO << std::string(
-              "failed to close CUDA IPC handle:" +
-              std::string(cudaGetErrorString(err)));
-        }
-      }
-      gpu_tensors_map_.clear();
-#endif
-    }
-
-    return 0;
   }
 
-  void Initialize(std::string& model_version, std::string triton_install_path)
+  void Initialize(InitializeArgs* initialize_args)
   {
-    try {
-      try {
-        py::module sys = py::module::import("sys");
+    py::module sys = py::module::import("sys");
 
-        std::string model_name =
-            model_path_.substr(model_path_.find_last_of("/") + 1);
-        std::string model_path_parent =
-            model_path_.substr(0, model_path_.find_last_of("/"));
-        std::string model_path_parent_parent =
-            model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-        std::string python_backend_folder = triton_install_path;
-        sys.attr("path").attr("append")(model_path_parent);
-        sys.attr("path").attr("append")(model_path_parent_parent);
-        sys.attr("path").attr("append")(python_backend_folder);
+    std::string model_name =
+        model_path_.substr(model_path_.find_last_of("/") + 1);
+    std::string model_path_parent =
+        model_path_.substr(0, model_path_.find_last_of("/"));
+    std::string model_path_parent_parent =
+        model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+    std::string python_backend_folder = triton_install_path_;
+    sys.attr("path").attr("append")(model_path_parent);
+    sys.attr("path").attr("append")(model_path_parent_parent);
+    sys.attr("path").attr("append")(python_backend_folder);
 
-        py::module python_backend_utils =
-            py::module::import("triton_python_backend_utils");
-        py::module c_python_backend_utils =
-            py::module::import("c_python_backend_utils");
-        py::setattr(
-            python_backend_utils, "Tensor",
-            c_python_backend_utils.attr("Tensor"));
+    py::module python_backend_utils =
+        py::module::import("triton_python_backend_utils");
+    py::module c_python_backend_utils =
+        py::module::import("c_python_backend_utils");
+    py::setattr(
+        python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
 
-        py::object TritonPythonModel =
-            py::module::import((model_version + std::string(".model")).c_str())
-                .attr("TritonPythonModel");
-        PyRequest_ = python_backend_utils.attr("InferenceRequest");
-        deserialize_bytes_ =
-            python_backend_utils.attr("deserialize_bytes_tensor");
-        serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
-        model_instance_ = TritonPythonModel();
+    py::object TritonPythonModel =
+        py::module::import((model_version_ + std::string(".model")).c_str())
+            .attr("TritonPythonModel");
+    PyRequest_ = python_backend_utils.attr("InferenceRequest");
+    deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
+    serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
+    model_instance_ = TritonPythonModel();
 
-        std::unordered_map<std::string, std::string> map;
-        LoadMapFromSharedMemory(shm_pool_, ipc_message_->request_batch, map);
-        py::dict model_config_params;
+    std::unordered_map<std::string, std::string> map;
+    LoadMapFromSharedMemory(shm_pool_, initialize_args->args, map);
+    py::dict model_config_params;
 
-        for (const auto& pair : map) {
-          model_config_params[pair.first.c_str()] = pair.second;
-        }
-        // Call initialize if exists.
-        if (py::hasattr(model_instance_, "initialize")) {
-          model_instance_.attr("initialize")(model_config_params);
-        }
-      }
-
-      catch (const py::error_already_set& e) {
-        LOG_INFO << e.what();
-        SetErrorForResponseBatch(e.what());
-
-        NotifyParent();
-        exit(1);
-      }
+    for (const auto& pair : map) {
+      model_config_params[pair.first.c_str()] = pair.second;
     }
-    catch (const PythonBackendException& pb_exception) {
-      LOG_INFO << "Failed to initialize Python stub: " << pb_exception.what();
-      NotifyParent();
-      exit(1);
+
+    // Call initialize if exists.
+    if (py::hasattr(model_instance_, "initialize")) {
+      model_instance_.attr("initialize")(model_config_params);
     }
+
+    initialized_ = true;
   }
 
   void UpdateHealth()
   {
     bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-    ipc_message_->health = true;
+    ipc_control_->stub_health = true;
+  }
+
+  void Cleanup()
+  {
+    for (PbTensor*& pb_tensor : tensors_to_remove_) {
+      pb_tensor->DeleteDLPack();
+    }
+
+    tensors_to_remove_.clear();
+
+#ifdef TRITON_ENABLE_GPU
+    for (const auto& gpu_tensor_pair : gpu_tensors_map_) {
+      cudaError_t err = cudaIpcCloseMemHandle(gpu_tensor_pair.first);
+      if (err != cudaSuccess) {
+        LOG_INFO << std::string(
+            "failed to close CUDA IPC handle:" +
+            std::string(cudaGetErrorString(err)));
+      }
+    }
+    gpu_tensors_map_.clear();
+#endif
   }
 
   void Finalize()
   {
     // Call finalize if exists.
-    if (py::hasattr(model_instance_, "finalize")) {
+    if (initialized_ && py::hasattr(model_instance_, "finalize")) {
       try {
         model_instance_.attr("finalize")();
       }
@@ -831,8 +792,8 @@ class Stub {
       timeout =
           boost::get_system_time() + boost::posix_time::milliseconds(1000);
     } while (!stub_cond_->timed_wait(stub_lock_, timeout) != 0 &&
-             !sigterm_received);
-    return sigterm_received;
+             !non_graceful_exit);
+    return non_graceful_exit;
   }
 };
 
@@ -856,12 +817,12 @@ extern "C" {
 int
 main(int argc, char** argv)
 {
-  if (argc < 7) {
-    LOG_INFO << "Expected 7 arguments, found " << argc << " arguments.";
+  if (argc < 8) {
+    LOG_INFO << "Expected 8 arguments, found " << argc << " arguments.";
     exit(1);
   }
   signal(SIGINT, SignalHandler);
-  signal(SIGTERM, SigtermHandler);
+  signal(SIGTERM, SignalHandler);
 
   // Path to model.py
   std::string model_path = argv[1];
@@ -888,82 +849,68 @@ main(int argc, char** argv)
   }
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
-  pid_t parent_pid = std::stoi(argv[5]);
   std::string triton_install_path = argv[6];
 
   std::unique_ptr<Stub> stub;
   try {
     stub = std::make_unique<Stub>(
-        shm_growth_size, shm_default_size, shm_region_name, model_path);
+        shm_growth_size, shm_default_size, shm_region_name, model_path,
+        model_version, argv[6] /* triton install path */,
+        std::stoi(argv[7]) /* IPCControl offset */);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
     exit(1);
   }
 
-  // Exit if it has received a SIGTERM signal.
-  if (stub->WaitForNotification()) {
-    LOG_INFO << "Received SIGTERM: exiting.";
-    exit(1);
-  }
-
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
-<<<<<<< HEAD
+  pid_t parent_pid = std::stoi(argv[5]);
 
-=======
->>>>>>> Fix deadlock when init takes long
-  std::atomic<bool> non_graceful_exit = {false};
   std::atomic<bool> background_thread_running = {true};
-  std::thread background_thread(
-      [&parent_pid, &background_thread_running, &stub, &non_graceful_exit] {
+  std::thread background_thread =
+      std::thread([&parent_pid, &background_thread_running, &stub] {
         while (background_thread_running) {
           // Every 300ms set the health variable to true. This variable is in
           // shared memory and will be set to false by the parent process.
-          // The parent process expects that the stub process sets this
-          // variable to true within 1 second.
+          // The parent process expects that the stub process sets this variable
+          // to true within 1 second.
           sleep(0.3);
 
           stub->UpdateHealth();
-          if (sigterm_received) {
-            background_thread_running = false;
-          }
 
           if (kill(parent_pid, 0) != 0) {
             // Destroy Stub
-            stub.reset();
             LOG_INFO << "Non-graceful termination detected. ";
             background_thread_running = false;
             non_graceful_exit = true;
-            sigterm_received = true;
           }
         }
       });
 
-  // Initialize needs to be called after the background health thread
-  // has started. Otherwise, if the initialize takes long time, the
-  // main process wrongly assumes that the stub process has crashed.
-  stub->Initialize(model_version, argv[6] /* triton install path */);
-
-  stub->Initialize(model_version, argv[6] /* triton install path */);
-  // Wait for messages from the parent process
+  // This is the only place where NotifyParent() and WaitForNotification() are
+  // allowed to be called. The stub process will always keep listening for new
+  // notifications from the parent process. After the notification is received
+  // the stub process will run the appropriate comamnd and wait for new
+  // notifications.
+  bool finalize = false;
   while (true) {
     stub->NotifyParent();
+    if (finalize) {
+      stub->Finalize();
+      break;
+    }
+
     if (stub->WaitForNotification()) {
       break;
     }
 
-    int stop = stub->Execute();
-    if (stop)
-      break;
-  }
-
-  if (!non_graceful_exit) {
-    stub->Finalize();
-    stub->NotifyParent();
+    finalize = stub->RunCommand();
   }
 
   background_thread_running = false;
+  // Destroy stub
+  stub.reset();
   background_thread.join();
   return 0;
 }
