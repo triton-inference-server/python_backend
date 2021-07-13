@@ -63,6 +63,9 @@ SharedMemory::SharedMemory(
          "model instance requires at least 64MBs of shared memory. Flag "
          "'--shm-size=5G' should be sufficient for common usecases. Error: " +
          ex.what());
+
+    // Remove the shared memory region if there was an error.
+    bi::shared_memory_object::remove(shm_key_.c_str());
     throw PythonBackendException(std::move(error_message));
   }
 
