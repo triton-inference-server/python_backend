@@ -108,23 +108,27 @@ On Ubuntu or Debian you can use the command below to install `rapidjson` and `li
 sudo apt-get install rapidjson-dev libarchive-dev
 ```
 
-2. Build Python backend
+2. Build Python backend. Replace \<GIT\_BRANCH\_NAME\> with the GitHub branch
+   that you want to compile. For release branches it should be r\<xx.yy\> (e.g.
+   r21.06).
 
 ```
 $ mkdir build
 $ cd build
-$ cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+$ cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 $ make install
 ```
 
 The following required Triton repositories will be pulled and used in
-the build. By default the "main" branch/tag will be used for each repo
-but the listed CMake argument can be used to override.
+the build. If the CMake variables below are not specified, "main" branch
+of those repositories will be used. \<GIT\_BRANCH\_NAME\> should be the same 
+as the Python backend repository branch that you are trying to compile.
 
-* triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=[tag]
-* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=[tag]
+* triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
 
-Set `DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
+Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
 this location is `/opt/tritonserver`.
 
 3. Copy example model and configuration
@@ -331,9 +335,12 @@ conda activate python-3-6
 # NumPy is required for Python models
 conda install numpy
 ```
-3. Clone the Python backend repository and compile the Python backend stub (replace \<xx.yy\> with the release number):
+3. Clone the Python backend repository and compile the Python backend stub
+   (replace \<GIT\_BRANCH\_NAME\> with the branch name that you want to use,
+   for release branches it should be r\<xx.yy\>):
 ```bash
-$ git clone https://github.com/triton-inference-server/python_backend -b <xx.yy>
+$ git clone https://github.com/triton-inference-server/python_backend -b
+<GIT_BRANCH_NAME>
 $ cd python_backend
 $ mkdir build && cd build
 $ cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
