@@ -250,8 +250,8 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 
     if (!is_contiguous_c_order) {
       throw PythonBackendException(
-          "Python backend only supports contiguous tensors that are in "
-          "C-order.");
+          "DLPack tensor is not contiguous. Only contiguous DLPack "
+          "tensors that are stored in C-Order are supported.");
     }
   }
 
@@ -295,6 +295,11 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
       dl_managed_tensor);
 }
 
+PbTensor::~PbTensor()
+{
+  DeleteDLPack();
+}
+
 
 const std::string&
 PbTensor::Name()
@@ -309,7 +314,7 @@ PbTensor::AsNumpy()
     return numpy_array_;
   } else {
     throw PythonBackendException(
-        "Tensors that are stored in GPU cannot be converted to NumPy");
+        "Tensor is stored in GPU and cannot be converted to NumPy.");
   }
 
   return numpy_array_;

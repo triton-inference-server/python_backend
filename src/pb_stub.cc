@@ -45,8 +45,8 @@
 #include "shm_manager.h"
 
 #ifdef TRITON_ENABLE_GPU
-#include <cuda_runtime_api.h>
 #include <cuda.h>
+#include <cuda_runtime_api.h>
 #endif
 
 namespace py = pybind11;
@@ -683,11 +683,20 @@ class Stub {
     off_t responses_shm_offset;
     size_t response_size = py::len(responses);
 
+    // If the number of request objects do not match the number of resposne
+    // objects throw an error.
+    if (response_size != batch_size) {
+      throw PythonBackendException(
+          "Number of InferenceResponse objects do not match the number of "
+          "InferenceRequest objects.");
+    }
+
     shm_pool_->Map(
         (char**)&responses_shm, sizeof(Response) * response_size,
         responses_shm_offset);
     response_batch->responses = responses_shm_offset;
     response_batch->batch_size = response_size;
+
 
     size_t i = 0;
     for (auto& response : responses) {
@@ -751,10 +760,7 @@ class Stub {
 
   void Cleanup()
   {
-    for (PbTensor*& pb_tensor : tensors_to_remove_) {
-      pb_tensor->DeleteDLPack();
-    }
-
+    // Deleting the tensors should automatically trigger the destructor.
     tensors_to_remove_.clear();
 
 #ifdef TRITON_ENABLE_GPU
@@ -884,6 +890,10 @@ main(int argc, char** argv)
             LOG_INFO << "Non-graceful termination detected. ";
             background_thread_running = false;
             non_graceful_exit = true;
+
+            // Destroy stub and exit.
+            stub.reset();
+            exit(1);
           }
         }
       });

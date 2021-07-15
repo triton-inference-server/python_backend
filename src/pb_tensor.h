@@ -46,7 +46,7 @@ typedef enum PYTHONBACKEND_tensortype_enum {
 // PbTensor class is the representation of Triton tensors
 // inside Python backend.
 class PbTensor {
-private:
+ private:
   std::string name_;
   py::array numpy_array_;
   TRITONSERVER_DataType dtype_;
@@ -85,9 +85,9 @@ private:
   /// contiguous and in C order.
   /// \param byte_size Total number of bytes that the tensor uses.
   PbTensor(
-      const std::string& name, const std::vector<int64_t>& dims, TRITONSERVER_DataType dtype,
-      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      void* memory_ptr, uint64_t byte_size,
+      const std::string& name, const std::vector<int64_t>& dims,
+      TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
+      int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
       DLManagedTensor* dl_managed_tensor = nullptr);
 
   /// Construct a Python backend tensor using a DLPack
@@ -145,5 +145,8 @@ private:
   /// Get the memory type id.
   /// \return The memory type id of the tensor.
   int64_t MemoryTypeId();
+
+  /// Destructor
+  ~PbTensor();
 };
 }}}  // namespace triton::backend::python
