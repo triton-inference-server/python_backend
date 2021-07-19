@@ -140,6 +140,8 @@ add_executable(
   triton-python-backend-stub
   src/pb_stub_utils.cc
   src/pb_stub_utils.h
+  src/infer_request.cc
+  src/infer_request.h
   src/pb_stub.cc
   src/pb_utils.cc
   src/pb_utils.h
