@@ -58,12 +58,11 @@ class InferRequest {
   /// space to save the inference request.
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm);
-  
+
   /// Create an Inference Request object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param request_offset Shared memory offset of the request.
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool,
-      off_t request_offset);
+      std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset);
 };
 }}};  // namespace triton::backend::python

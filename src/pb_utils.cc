@@ -106,6 +106,7 @@ GetDevicePointerOffset(void* d_ptr)
 }
 #endif
 
+
 void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,

@@ -1,6 +1,7 @@
 /build
 /.vscode
 *.so
+builddir
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
