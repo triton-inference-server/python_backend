@@ -231,7 +231,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::string model_path_;
   IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
-  std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
 
 #ifdef TRITON_ENABLE_GPU
@@ -406,7 +405,7 @@ ModelInstanceState::RespondErrorToAllRequests(
 void
 ModelInstanceState::ResetSharedMemoryOffset()
 {
-  shm_pool_->SetOffset(shm_reset_offset_);
+  SharedMemory::GetInstance().SetOffset(shm_reset_offset_);
 }
 
 bool
@@ -451,6 +450,7 @@ ModelInstanceState::ProcessRequests(
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
+  SharedMemory& shm_pool = SharedMemory::GetInstance();
 
   // For each request collect the total batch size for this inference
   // execution. The batch-size, number of inputs, and size of each
@@ -525,20 +525,20 @@ ModelInstanceState::ProcessRequests(
   ipc_message_->command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
   ExecuteArgs* exec_args;
   off_t exec_args_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&exec_args, sizeof(ExecuteArgs), exec_args_offset));
+  RETURN_IF_EXCEPTION(
+      shm_pool.Map((char**)&exec_args, sizeof(ExecuteArgs), exec_args_offset));
   ipc_message_->args = exec_args_offset;
 
   RequestBatch* request_batch;
   off_t request_batch_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&request_batch, sizeof(RequestBatch), request_batch_offset));
   exec_args->request_batch = request_batch_offset;
   request_batch->batch_size = request_count;
 
   Request* requests_shm;
   off_t requests_shm_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&requests_shm, sizeof(Request) * request_count,
       requests_shm_offset));
   request_batch->requests = requests_shm_offset;
@@ -579,7 +579,7 @@ ModelInstanceState::ProcessRequests(
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         &responses, request_count,
-        shm_pool_->Map(
+        shm_pool.Map(
             (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
             input_tensors_offset));
     python_infer_request->inputs = input_tensors_offset;
@@ -597,7 +597,7 @@ ModelInstanceState::ProcessRequests(
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         &responses, request_count,
-        shm_pool_->Map(
+        shm_pool.Map(
             (char**)&requested_output_names,
             sizeof(off_t) * requested_output_count,
             requested_output_names_offset));
@@ -617,7 +617,7 @@ ModelInstanceState::ProcessRequests(
       RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
           &responses, request_count,
           SaveStringToSharedMemory(
-              shm_pool_, output_name_offset, requested_output_name));
+              shm_pool, output_name_offset, requested_output_name));
       requested_output_names[iidx] = output_name_offset;
     }
 
@@ -629,7 +629,7 @@ ModelInstanceState::ProcessRequests(
     off_t id_offset;
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         &responses, request_count,
-        SaveStringToSharedMemory(shm_pool_, id_offset, id));
+        SaveStringToSharedMemory(shm_pool, id_offset, id));
     python_infer_request->id = id_offset;
 
     uint64_t correlation_id;
@@ -671,7 +671,7 @@ ModelInstanceState::ProcessRequests(
   ResponseBatch* response_batch;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       &responses, request_count,
-      shm_pool_->MapOffset((char**)&response_batch, exec_args->response_batch));
+      shm_pool.MapOffset((char**)&response_batch, exec_args->response_batch));
 
   // If inference fails, release all the requests and send an error response. If
   // inference fails at this stage, it usually indicates a bug in the model code
@@ -681,7 +681,7 @@ ModelInstanceState::ProcessRequests(
       RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
           &responses, request_count,
           LoadStringFromSharedMemory(
-              shm_pool_, response_batch->error, error_message));
+              shm_pool, response_batch->error, error_message));
       RespondErrorToAllRequests(
           error_message, responses, requests, request_count);
     } else {
@@ -697,7 +697,7 @@ ModelInstanceState::ProcessRequests(
   Response* responses_shm;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       &responses, request_count,
-      shm_pool_->MapOffset((char**)&responses_shm, response_batch->responses));
+      shm_pool.MapOffset((char**)&responses_shm, response_batch->responses));
 
 #ifdef TRITON_ENABLE_GPU
   std::vector<cudaIpcMemHandle_t*> opened_ipc_mem_handles;
@@ -715,8 +715,7 @@ ModelInstanceState::ProcessRequests(
       try {
         if (response_shm->is_error_set) {
           char* err_string;
-          LoadStringFromSharedMemory(
-              shm_pool_, response_shm->error, err_string);
+          LoadStringFromSharedMemory(shm_pool, response_shm->error, err_string);
           TRITONSERVER_Error* err =
               TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
 
@@ -760,7 +759,7 @@ ModelInstanceState::ProcessRequests(
     Tensor* output_tensors;
     GUARDED_RESPOND_IF_EXCEPTION(
         responses, r,
-        shm_pool_->MapOffset((char**)&output_tensors, response_shm->outputs));
+        shm_pool.MapOffset((char**)&output_tensors, response_shm->outputs));
 
     bool cuda_copy = false;
     std::set<std::string> requested_output_names;
@@ -778,13 +777,12 @@ ModelInstanceState::ProcessRequests(
       size_t dims_count = output_tensor->dims_count;
       int64_t* dims;
       GUARDED_RESPOND_IF_EXCEPTION(
-          responses, r,
-          shm_pool_->MapOffset((char**)&dims, output_tensor->dims));
+          responses, r, shm_pool.MapOffset((char**)&dims, output_tensor->dims));
 
       char* name;
       GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
-          LoadStringFromSharedMemory(shm_pool_, output_tensor->name, name));
+          LoadStringFromSharedMemory(shm_pool, output_tensor->name, name));
 
       // Skip the output tensor if it is not in the list of requested outputs
       if (requested_output_names.find(std::string(name)) ==
@@ -795,7 +793,7 @@ ModelInstanceState::ProcessRequests(
       RawData* raw_data;
       GUARDED_RESPOND_IF_EXCEPTION(
           responses, r,
-          shm_pool_->MapOffset((char**)&raw_data, output_tensor->raw_data));
+          shm_pool.MapOffset((char**)&raw_data, output_tensor->raw_data));
 
       TRITONSERVER_MemoryType src_memory_type = raw_data->memory_type;
       int64_t src_memory_type_id = raw_data->memory_type_id;
@@ -807,7 +805,7 @@ ModelInstanceState::ProcessRequests(
         char* data;
         GUARDED_RESPOND_IF_EXCEPTION(
             responses, r,
-            shm_pool_->MapOffset((char**)&data, raw_data->memory_ptr));
+            shm_pool.MapOffset((char**)&data, raw_data->memory_ptr));
 
         std::vector<int64_t> batch_shape(dims, dims + dims_count);
         void* buffer;
@@ -840,7 +838,7 @@ ModelInstanceState::ProcessRequests(
           cudaIpcMemHandle_t* cuda_mem_handle;
           GUARDED_RESPOND_IF_EXCEPTION(
               responses, r,
-              shm_pool_->MapOffset(
+              shm_pool.MapOffset(
                   (char**)&cuda_mem_handle, raw_data->memory_ptr));
           cudaSetDevice(src_memory_type_id);
 
@@ -869,7 +867,7 @@ ModelInstanceState::ProcessRequests(
           GUARDED_RESPOND_IF_EXCEPTION(
               responses, r,
               LoadStringFromSharedMemory(
-                  shm_pool_, output_tensor->reused_tensor_name,
+                  shm_pool, output_tensor->reused_tensor_name,
                   reused_tensor_name));
           std::unordered_map<std::string, void*>::const_iterator
               reused_gpu_tensor = gpu_tensors_map_.find(reused_tensor_name);
@@ -1131,12 +1129,13 @@ ModelInstanceState::StartStubProcess()
         {"model_name", model_state->Name()}};
 
     ipc_message_->command = PYTHONSTUB_CommandType::PYTHONSTUB_Initialize;
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
 
     InitializeArgs* initialize_args;
-    RETURN_IF_EXCEPTION(shm_pool_->Map(
+    RETURN_IF_EXCEPTION(shm_pool.Map(
         (char**)&initialize_args, sizeof(InitializeArgs), ipc_message_->args));
-    RETURN_IF_EXCEPTION(SaveMapToSharedMemory(
-        shm_pool_, initialize_args->args, initialize_map));
+    RETURN_IF_EXCEPTION(
+        SaveMapToSharedMemory(shm_pool, initialize_args->args, initialize_map));
 
     bool restart = false;
     if (!NotifyStubAndWait(restart)) {
@@ -1152,7 +1151,7 @@ ModelInstanceState::StartStubProcess()
       if (initialize_args->response_is_error_set) {
         char* err_message;
         RETURN_IF_EXCEPTION(LoadStringFromSharedMemory(
-            shm_pool_, initialize_args->response_error, err_message));
+            shm_pool, initialize_args->response_error, err_message));
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_message);
       } else {
         return TRITONSERVER_ErrorNew(
@@ -1181,8 +1180,9 @@ ModelInstanceState::SetupStubProcess()
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
 
+  SharedMemory& shm_pool = SharedMemory::GetInstance();
   try {
-    shm_pool_ = std::make_unique<SharedMemory>(
+    shm_pool.Initialize(
         shm_region_name, shm_default_size, shm_growth_size,
         true /* truncate */);
   }
@@ -1192,19 +1192,19 @@ ModelInstanceState::SetupStubProcess()
   }
 
   IPCControl* ipc_control;
-  shm_pool_->Map((char**)&ipc_control, sizeof(IPCControl), ipc_control_offset_);
+  shm_pool.Map((char**)&ipc_control, sizeof(IPCControl), ipc_control_offset_);
   ipc_control_ = ipc_control;
 
   // Stub mutex and CV
   bi::interprocess_mutex* stub_mutex;
   off_t stub_mutex_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&stub_mutex, sizeof(bi::interprocess_mutex), stub_mutex_offset));
   ipc_control_->stub_mutex = stub_mutex_offset;
 
   bi::interprocess_condition* stub_cv;
   off_t stub_cv_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&stub_cv, sizeof(bi::interprocess_condition), stub_cv_offset));
   ipc_control_->stub_cond = stub_cv_offset;
 
@@ -1214,21 +1214,21 @@ ModelInstanceState::SetupStubProcess()
   // Parent Mutex and CV
   bi::interprocess_mutex* parent_mutex;
   off_t parent_mutex_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&parent_mutex, sizeof(bi::interprocess_mutex),
       parent_mutex_offset));
   ipc_control_->parent_mutex = parent_mutex_offset;
 
   bi::interprocess_condition* parent_cv;
   off_t parent_cv_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&parent_cv, sizeof(bi::interprocess_condition),
       parent_cv_offset));
   ipc_control_->parent_cond = parent_cv_offset;
 
   bi::interprocess_mutex* health_mutex;
   off_t health_mutex_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
+  RETURN_IF_EXCEPTION(shm_pool.Map(
       (char**)&health_mutex, sizeof(bi::interprocess_mutex),
       health_mutex_offset));
   ipc_control_->stub_health_mutex = health_mutex_offset;
@@ -1239,7 +1239,7 @@ ModelInstanceState::SetupStubProcess()
 
   off_t ipc_offset;
   RETURN_IF_EXCEPTION(
-      shm_pool_->Map((char**)&ipc_message_, sizeof(IPCMessage), ipc_offset));
+      shm_pool.Map((char**)&ipc_message_, sizeof(IPCMessage), ipc_offset));
   ipc_control_->ipc_message = ipc_offset;
 
   // Offset that must be used for resetting the shared memory usage.
@@ -1323,11 +1323,13 @@ ModelInstanceState::~ModelInstanceState()
       force_kill = true;
     }
 
-    int status;
-    if (force_kill) {
-      kill(stub_pid_, SIGKILL);
+    if (stub_pid_ != 0) {
+      int status;
+      if (force_kill) {
+        kill(stub_pid_, SIGKILL);
+      }
+      waitpid(stub_pid_, &status, 0);
     }
-    waitpid(stub_pid_, &status, 0);
   }
 
   // Destory the lock before deletion of shared memory is triggered.
@@ -1340,6 +1342,7 @@ ModelInstanceState::GetInputTensor(
     TRITONBACKEND_Request* request,
     std::vector<TRITONBACKEND_Response*>& responses)
 {
+  SharedMemory& shm_pool = SharedMemory::GetInstance();
   const char* input_name;
   // Load iidx'th input name
   RETURN_IF_ERROR(
@@ -1390,7 +1393,7 @@ ModelInstanceState::GetInputTensor(
     char* input_buffer;
     uint64_t* ptr_offset;
     RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-        shm_pool_, input_tensor, input_buffer,
+        shm_pool, input_tensor, input_buffer,
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
         input_byte_size, input_name, input_shape, input_dims_count, input_dtype,
         &ptr_offset));
@@ -1413,7 +1416,7 @@ ModelInstanceState::GetInputTensor(
     if (src_memory_type == TRITONSERVER_MEMORY_GPU) {
       char* cuda_handle;
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, cuda_handle, src_memory_type,
+          shm_pool, input_tensor, cuda_handle, src_memory_type,
           src_memory_type_id, input_byte_size, input_name, input_shape,
           input_dims_count, input_dtype, &ptr_offset));
 
@@ -1461,7 +1464,7 @@ ModelInstanceState::GetInputTensor(
       src_memory_type = TRITONSERVER_MEMORY_CPU;
       src_memory_type_id = 0;
       RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, input_buffer,
+          shm_pool, input_tensor, input_buffer,
           TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
           input_byte_size, input_name, input_shape, input_dims_count,
           input_dtype, &ptr_offset));

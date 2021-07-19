@@ -215,32 +215,32 @@ struct PythonBackendException : std::exception {
 };
 
 void SaveMapToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
+    SharedMemory& shm_pool, off_t& shm_offset,
     const std::unordered_map<std::string, std::string>& map);
 
 void LoadMapFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset,
+    SharedMemory& shm_pool, off_t shm_offset,
     std::unordered_map<std::string, std::string>& map);
 
 void SaveStringToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
+    SharedMemory& shm_pool, off_t& shm_offset,
     const char* str);
 void LoadStringFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str);
+    SharedMemory& shm_pool, off_t shm_offset, char*& str);
 
 void SaveRawDataToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
+    SharedMemory& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int memory_type_id, uint64_t byte_size, uint64_t** offset_ptr);
 
 void SaveTensorToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
+    SharedMemory& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, uint64_t byte_size, const char* name,
     const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
     uint64_t** offset_ptr);
 void LoadTensorFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
+    SharedMemory& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
 
 void ExtractTarFile(std::string& archive_path, std::string& dst_path);

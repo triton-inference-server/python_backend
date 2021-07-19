@@ -38,7 +38,16 @@ namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
 
-SharedMemory::SharedMemory(
+SharedMemory&
+SharedMemory::GetInstance()
+{
+  static SharedMemory instance;
+
+  return instance;
+}
+
+void
+SharedMemory::Initialize(
     const std::string& shm_key, int64_t default_byte_size,
     int64_t shm_growth_bytes, bool truncate)
 {
@@ -126,6 +135,8 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 
   *offset_ += byte_size;
 }
+
+SharedMemory::SharedMemory() {}
 
 void
 SharedMemory::UpdateSharedMemory()

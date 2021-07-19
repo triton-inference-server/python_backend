@@ -137,7 +137,6 @@ class Stub {
   std::string triton_install_path_;
   IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
-  std::unique_ptr<SharedMemory> shm_pool_;
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
@@ -171,24 +170,24 @@ class Stub {
       // This boolean indicates whether a cleanup is required or not.
       require_cleanup_ = false;
 
-      shm_pool_ = std::make_unique<SharedMemory>(
-          shm_region_name, shm_default_size, shm_growth_size);
+      SharedMemory& shm_pool = SharedMemory::GetInstance();
+      shm_pool.Initialize(shm_region_name, shm_default_size, shm_growth_size);
 
       // Stub mutex and CV
-      shm_pool_->MapOffset((char**)&ipc_control_, ipc_control_offset);
-      shm_pool_->MapOffset((char**)&stub_mutex_, ipc_control_->stub_mutex);
-      shm_pool_->MapOffset((char**)&stub_cond_, ipc_control_->stub_cond);
+      shm_pool.MapOffset((char**)&ipc_control_, ipc_control_offset);
+      shm_pool.MapOffset((char**)&stub_mutex_, ipc_control_->stub_mutex);
+      shm_pool.MapOffset((char**)&stub_cond_, ipc_control_->stub_cond);
 
       // Parent Mutex and CV
-      shm_pool_->MapOffset((char**)&parent_mutex_, ipc_control_->parent_mutex);
-      shm_pool_->MapOffset((char**)&parent_cond_, ipc_control_->parent_cond);
+      shm_pool.MapOffset((char**)&parent_mutex_, ipc_control_->parent_mutex);
+      shm_pool.MapOffset((char**)&parent_cond_, ipc_control_->parent_cond);
 
       bi::interprocess_mutex* health_mutex;
-      shm_pool_->MapOffset(
+      shm_pool.MapOffset(
           (char**)&health_mutex, ipc_control_->stub_health_mutex);
       health_mutex_ = health_mutex;
 
-      shm_pool_->MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
+      shm_pool.MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
       stub_lock_ = std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(
           *stub_mutex_);
     }
@@ -213,15 +212,14 @@ class Stub {
 
   bool& Health() { return ipc_control_->stub_health; }
 
-  std::unique_ptr<SharedMemory>& GetSharedMemory() { return shm_pool_; }
-
   void SetErrorForResponse(Response* response, const char* err_message)
   {
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
     off_t err_string_offset = 0;
     response->is_error_set = false;
     response->has_error = true;
     LOG_IF_EXCEPTION(
-        SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
+        SaveStringToSharedMemory(shm_pool, err_string_offset, err_message));
 
     if (err_string_offset != 0) {
       response->error = err_string_offset;
@@ -232,11 +230,12 @@ class Stub {
   void SetErrorForResponseBatch(
       ResponseBatch* response_batch, const char* err_message)
   {
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
     off_t err_string_offset = 0;
     response_batch->is_error_set = false;
     response_batch->has_error = true;
     LOG_IF_EXCEPTION(
-        SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
+        SaveStringToSharedMemory(shm_pool, err_string_offset, err_message));
 
     if (err_string_offset != 0) {
       response_batch->error = err_string_offset;
@@ -253,6 +252,7 @@ class Stub {
 
     py::bool_ py_has_error = response.attr("has_error")();
     bool has_error = py_has_error;
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
 
     if (has_error) {
       py::str py_string_err = py::str(response.attr("error")());
@@ -269,7 +269,7 @@ class Stub {
     size_t j = 0;
     Tensor* output_tensors_shm;
     off_t output_tensors_offset;
-    shm_pool_->Map(
+    shm_pool.Map(
         (char**)&output_tensors_shm, sizeof(Tensor) * output_tensor_length,
         output_tensors_offset);
     response_shm->outputs = output_tensors_offset;
@@ -329,7 +329,7 @@ class Stub {
 
         uint64_t* ptr_offset;
         SaveTensorToSharedMemory(
-            shm_pool_, output_tensor_shm, data_in_shm, memory_type,
+            shm_pool, output_tensor_shm, data_in_shm, memory_type,
             memory_type_id, byte_size, output_name.c_str(), dims, dims_count,
             dtype_triton, &ptr_offset);
         *ptr_offset = 0;
@@ -342,7 +342,7 @@ class Stub {
         char* cuda_handle;
         uint64_t* ptr_offset;
         SaveTensorToSharedMemory(
-            shm_pool_, output_tensor_shm, cuda_handle,
+            shm_pool, output_tensor_shm, cuda_handle,
             output_tensor_pb->MemoryType(), output_tensor_pb->MemoryTypeId(),
             output_tensor_pb->ByteSize(), output_name.c_str(),
             output_tensor_pb->Dims().data(), output_tensor_pb->Dims().size(),
@@ -367,11 +367,11 @@ class Stub {
         } else {
           output_tensor_shm->is_reused = true;
           RawData* raw_data;
-          shm_pool_->MapOffset((char**)&raw_data, output_tensor_shm->raw_data);
+          shm_pool.MapOffset((char**)&raw_data, output_tensor_shm->raw_data);
           raw_data->offset = *ptr_offset;
           off_t reused_tensor_name_offset;
           SaveStringToSharedMemory(
-              shm_pool_, reused_tensor_name_offset,
+              shm_pool, reused_tensor_name_offset,
               reused_gpu_tensor->second.c_str());
           output_tensor_shm->reused_tensor_name = reused_tensor_name_offset;
         }
@@ -404,33 +404,34 @@ class Stub {
       Request* request, ResponseBatch* response_batch,
       py::object& deserialize_bytes)
   {
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
     char* id = nullptr;
-    LoadStringFromSharedMemory(shm_pool_, request->id, id);
+    LoadStringFromSharedMemory(shm_pool, request->id, id);
 
     uint32_t requested_input_count = request->requested_input_count;
     Tensor* input_tensors;
-    shm_pool_->MapOffset((char**)&input_tensors, request->inputs);
+    shm_pool.MapOffset((char**)&input_tensors, request->inputs);
 
     std::vector<PbTensor> py_input_tensors;
     for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
       Tensor* input_tensor = &input_tensors[input_idx];
 
       char* name = nullptr;
-      LoadStringFromSharedMemory(shm_pool_, input_tensor->name, name);
+      LoadStringFromSharedMemory(shm_pool, input_tensor->name, name);
       size_t dims_count = input_tensor->dims_count;
 
       RawData* raw_data;
-      shm_pool_->MapOffset((char**)&raw_data, input_tensor->raw_data);
+      shm_pool.MapOffset((char**)&raw_data, input_tensor->raw_data);
 
       int64_t* dims;
-      shm_pool_->MapOffset((char**)&dims, input_tensor->dims);
+      shm_pool.MapOffset((char**)&dims, input_tensor->dims);
 
       TRITONSERVER_DataType dtype = input_tensor->dtype;
       std::vector<int64_t> shape{dims, dims + dims_count};
 
       char* data;
       if (raw_data->memory_type == TRITONSERVER_MEMORY_CPU) {
-        shm_pool_->MapOffset((char**)&data, raw_data->memory_ptr);
+        shm_pool.MapOffset((char**)&data, raw_data->memory_ptr);
 
         py::dtype dtype_numpy;
         switch (dtype) {
@@ -506,7 +507,7 @@ class Stub {
 #ifdef TRITON_ENABLE_GPU
         cudaIpcMemHandle_t* cuda_mem_handle;
         cudaSetDevice(raw_data->memory_type_id);
-        shm_pool_->MapOffset((char**)&cuda_mem_handle, raw_data->memory_ptr);
+        shm_pool.MapOffset((char**)&cuda_mem_handle, raw_data->memory_ptr);
 
         cudaError_t err = cudaIpcOpenMemHandle(
             (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
@@ -545,14 +546,13 @@ class Stub {
     std::vector<std::string> requested_output_names;
     uint32_t requested_output_count = request->requested_output_count;
     off_t* output_names;
-    shm_pool_->MapOffset(
-        (char**)&output_names, request->requested_output_names);
+    shm_pool.MapOffset((char**)&output_names, request->requested_output_names);
 
     for (size_t output_idx = 0; output_idx < requested_output_count;
          ++output_idx) {
       char* output_name = nullptr;
       LoadStringFromSharedMemory(
-          shm_pool_, output_names[output_idx], output_name);
+          shm_pool, output_names[output_idx], output_name);
       requested_output_names.emplace_back(output_name);
     }
 
@@ -568,12 +568,13 @@ class Stub {
 
   bool RunCommand()
   {
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
     switch (ipc_message_->command) {
       case PYTHONSTUB_CommandType::PYTHONSTUB_Initialize: {
         InitializeArgs* initialize_args;
         bool has_exception = false;
         std::string error_string;
-        shm_pool_->MapOffset((char**)&initialize_args, ipc_message_->args);
+        shm_pool.MapOffset((char**)&initialize_args, ipc_message_->args);
         initialize_args->response_has_error = false;
         try {
           Initialize(initialize_args);
@@ -593,7 +594,7 @@ class Stub {
           initialize_args->response_is_error_set = false;
           off_t err_string_offset;
           LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-              shm_pool_, err_string_offset, error_string.c_str()));
+              shm_pool, err_string_offset, error_string.c_str()));
           if (err_string_offset != 0) {
             initialize_args->response_is_error_set = true;
             initialize_args->response_error = err_string_offset;
@@ -606,9 +607,9 @@ class Stub {
         bool has_exception = false;
         std::string error_string;
 
-        shm_pool_->MapOffset((char**)&execute_args, ipc_message_->args);
+        shm_pool.MapOffset((char**)&execute_args, ipc_message_->args);
         ResponseBatch* response_batch;
-        shm_pool_->Map(
+        shm_pool.Map(
             (char**)&response_batch, sizeof(ResponseBatch),
             execute_args->response_batch);
         response_batch->has_error = false;
@@ -630,7 +631,7 @@ class Stub {
           response_batch->is_error_set = false;
           off_t err_string_offset;
           LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-              shm_pool_, err_string_offset, error_string.c_str()));
+              shm_pool, err_string_offset, error_string.c_str()));
           if (err_string_offset != 0) {
             response_batch->is_error_set = true;
             response_batch->error = err_string_offset;
@@ -653,9 +654,10 @@ class Stub {
   {
     response_batch->cleanup = false;
     require_cleanup_ = false;
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
 
     RequestBatch* request_batch;
-    shm_pool_->MapOffset((char**)&request_batch, execute_args->request_batch);
+    shm_pool.MapOffset((char**)&request_batch, execute_args->request_batch);
     uint32_t batch_size = request_batch->batch_size;
 
     if (batch_size == 0) {
@@ -663,7 +665,7 @@ class Stub {
     }
 
     Request* requests;
-    shm_pool_->MapOffset((char**)&requests, request_batch->requests);
+    shm_pool.MapOffset((char**)&requests, request_batch->requests);
 
     py::list py_request_list;
     for (size_t i = 0; i < batch_size; i++) {
@@ -696,7 +698,7 @@ class Stub {
           "InferenceRequest objects.");
     }
 
-    shm_pool_->Map(
+    shm_pool.Map(
         (char**)&responses_shm, sizeof(Response) * response_size,
         responses_shm_offset);
     response_batch->responses = responses_shm_offset;
@@ -714,6 +716,7 @@ class Stub {
   void Initialize(InitializeArgs* initialize_args)
   {
     py::module sys = py::module::import("sys");
+    SharedMemory& shm_pool = SharedMemory::GetInstance();
 
     std::string model_name =
         model_path_.substr(model_path_.find_last_of("/") + 1);
@@ -733,7 +736,7 @@ class Stub {
     py::setattr(
         python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
     py::setattr(
-        python_backend_utils, "InferRequest",
+        python_backend_utils, "InferenceRequest",
         c_python_backend_utils.attr("InferenceRequest"));
 
     py::object TritonPythonModel =
@@ -744,7 +747,7 @@ class Stub {
     model_instance_ = TritonPythonModel();
 
     std::unordered_map<std::string, std::string> map;
-    LoadMapFromSharedMemory(shm_pool_, initialize_args->args, map);
+    LoadMapFromSharedMemory(shm_pool, initialize_args->args, map);
     py::dict model_config_params;
 
     for (const auto& pair : map) {

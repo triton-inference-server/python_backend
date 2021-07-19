@@ -59,12 +59,17 @@ class SharedMemory {
   void UpdateSharedMemory();
 
  public:
-  SharedMemory(
-      const std::string& shm_key, int64_t default_byte_size,
-      int64_t shm_growth_bytes, bool truncate = false);
+  static SharedMemory& GetInstance();
+  SharedMemory();
+  SharedMemory(SharedMemory const&) = delete;
+  void operator=(SharedMemory const&) = delete;
+
   void MapOffset(char** shm_addr, off_t offset);
   void Map(char** shm_addr, size_t byte_size, off_t& offset);
   void SetOffset(off_t offset);
+  void Initialize(
+      const std::string& shm_key, int64_t default_byte_size,
+      int64_t shm_growth_bytes, bool truncate = false);
   ~SharedMemory() noexcept(false);
 };
 
