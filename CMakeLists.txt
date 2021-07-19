@@ -85,6 +85,17 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pybind11)
 
 #
+# DLPack
+#
+FetchContent_Declare(
+  dlpack
+  GIT_REPOSITORY "https://github.com/dmlc/dlpack"
+  GIT_TAG "v0.5"
+  GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(dlpack)
+
+#
 # Boost
 #
 ExternalProject_Add(
@@ -98,6 +109,15 @@ ExternalProject_Add(
   BUILD_COMMAND ""
 )
 set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
+
+#
+# CUDA
+#
+if(${TRITON_ENABLE_GPU})
+  find_package(CUDAToolkit REQUIRED)
+  message(STATUS "Using CUDA ${CUDA_VERSION}")
+  set(CUDA_NVCC_FLAGS -std=c++11)
+endif() # TRITON_ENABLE_GPU
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -118,9 +138,13 @@ add_library(
 
 add_executable(
   triton-python-backend-stub
+  src/pb_stub_utils.cc
+  src/pb_stub_utils.h
   src/pb_stub.cc
   src/pb_utils.cc
   src/pb_utils.h
+  src/pb_tensor.cc
+  src/pb_tensor.h
   src/shm_manager.cc
   src/shm_manager.h
 )
@@ -162,10 +186,25 @@ target_link_libraries(
   PRIVATE
    Threads::Threads
    pybind11::embed
+   dlpack
    triton-backend-utils    # from repo-backend
    -larchive               # libarchive
    -lrt                    # shared memory 
 )
+
+if(${TRITON_ENABLE_GPU})
+  target_link_libraries(
+    triton-python-backend-stub
+    PUBLIC
+      CUDA::cuda_driver
+  )
+
+  target_link_libraries(
+    triton-python-backend
+    PUBLIC
+      CUDA::cuda_driver
+  )
+endif() # TRITON_ENABLE_GPU
 
 set_target_properties(
   triton-python-backend PROPERTIES

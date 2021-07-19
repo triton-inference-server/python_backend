@@ -26,6 +26,7 @@
 
 import numpy as np
 import struct
+import ctypes
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -138,7 +139,6 @@ class InferenceRequest:
         The names of the output tensors that should be calculated and
         returned for this request.
     """
-
     def __init__(self, inputs, request_id, correlation_id,
                  requested_output_names):
         self._inputs = inputs
@@ -195,7 +195,6 @@ class InferenceResponse:
         A TritonError object describing any errror encountered while creating
         resposne
     """
-
     def __init__(self, output_tensors, error=None):
         if type(output_tensors) is not list:
             raise TritonModelException('"output_tensors" must be a list.')
@@ -232,78 +231,6 @@ class InferenceResponse:
         return self._err
 
 
-class Tensor:
-    """A Tensor object is used to represent inputs and output data for an
-    InferenceRequest or InferenceResponse.
-    Parameters
-    ----------
-    name : str
-        Tensor name
-    numpy_array : numpy.ndarray
-        A numpy array containing input/output data
-    """
-
-    def __init__(self, name, numpy_array=None, triton_dtype=None):
-        if isinstance(numpy_array, (np.ndarray,)) and \
-            numpy_array.dtype.type == np.str_ or numpy_array.dtype == np.void:
-            raise TritonModelException(
-                'Tensor dtype used for numpy_array is not support by Python backend.'
-                ' Please use np.object_ instead.')
-
-        if triton_dtype is not None:
-            numpy_dtype = triton_to_numpy_type(triton_dtype)
-
-            if numpy_array.dtype != numpy_dtype:
-                # reinterpret the byte array as the correct data type.
-                numpy_array = numpy_array.view(numpy_dtype)
-        else:
-            triton_dtype = numpy_to_triton_type(numpy_array.dtype)
-            if triton_dtype is None:
-                triton_dtype = numpy_to_triton_type(numpy_array.dtype.type)
-
-        if not numpy_array.flags['C_CONTIGUOUS']:
-            numpy_array = np.ascontiguousarray(
-                numpy_array, dtype=numpy_array.dtype)
-
-        self._triton_dtype = triton_dtype
-        self._name = name
-        self._numpy_array = numpy_array
-
-    def name(self):
-        """Get the name of tensor
-        Returns
-        -------
-        str
-            The name of tensor
-        """
-        return self._name
-
-    def triton_dtype(self):
-        """Get triton dtype for the tensor
-        """
-        return self._triton_dtype
-
-    def as_numpy(self):
-        """Get the underlying numpy array
-        Returns
-        -------
-        numpy.ndarray
-            The numpy array
-        """
-        return self._numpy_array
-
-
-class RawData:
-    """Representing a raw data object.
-    """
-
-    def __init__(self, data_ptr, memory_type, memory_type_id, byte_size):
-        self._data_ptr = data_ptr
-        self._memory_type = memory_type
-        self._memory_type_id = memory_type_id
-        self._byte_size = byte_size
-
-
 class TritonError:
     """Error indicating non-Success status.
     Parameters
@@ -311,7 +238,6 @@ class TritonError:
     msg : str
         A brief description of error
     """
-
     def __init__(self, msg):
         self._msg = msg
 
@@ -336,7 +262,6 @@ class TritonModelException(Exception):
     msg : str
         A brief description of error
     """
-
     def __init__(self, msg):
         self._msg = msg
 
