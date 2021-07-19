@@ -41,9 +41,11 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include "infer_request.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
+
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
@@ -137,7 +139,6 @@ class Stub {
   IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
   std::unique_ptr<SharedMemory> shm_pool_;
-  py::object PyRequest_;
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
@@ -434,9 +435,8 @@ class Stub {
     }
   }
 
-  void ProcessRequest(
+  InferRequest ProcessRequest(
       Request* request, ResponseBatch* response_batch,
-      py::object& infer_request, py::object& PyRequest,
       py::object& deserialize_bytes)
   {
     char* id = nullptr;
@@ -446,7 +446,7 @@ class Stub {
     Tensor* input_tensors;
     shm_pool_->MapOffset((char**)&input_tensors, request->inputs);
 
-    py::list py_input_tensors;
+    std::vector<PbTensor> py_input_tensors;
     for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
       Tensor* input_tensor = &input_tensors[input_idx];
 
@@ -526,17 +526,16 @@ class Stub {
                 deserialize_bytes(numpy_array).attr("reshape")(dims);
 
             PbTensor py_input_tensor(name_str, deserialized, dtype);
-            py_input_tensors.append(py_input_tensor);
+            py_input_tensors.emplace_back(py_input_tensor);
           } else {
             py::array numpy_array(dtype_numpy, shape, (void*)data);
             PbTensor py_input_tensor(name_str, numpy_array, dtype);
-            py_input_tensors.append(py_input_tensor);
+            py_input_tensors.emplace_back(py_input_tensor);
           }
         }
         catch (const py::error_already_set& e) {
           LOG_INFO << e.what();
           throw PythonBackendException(e.what());
-          return;
         }
       } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
@@ -570,7 +569,7 @@ class Stub {
             name, shape, dtype, raw_data->memory_type, raw_data->memory_type_id,
             static_cast<void*>(data), raw_data->byte_size, nullptr);
 
-        py_input_tensors.append(py_input_tensor);
+        py_input_tensors.emplace_back(py_input_tensor);
 #else
         throw PythonBackendException(
             "Python backend was not compiled with GPU tensor support.");
@@ -578,7 +577,7 @@ class Stub {
       }
     }
 
-    py::list py_requested_output_names;
+    std::vector<std::string> requested_output_names;
     uint32_t requested_output_count = request->requested_output_count;
     off_t* output_names;
     shm_pool_->MapOffset(
@@ -589,12 +588,11 @@ class Stub {
       char* output_name = nullptr;
       LoadStringFromSharedMemory(
           shm_pool_, output_names[output_idx], output_name);
-      py_requested_output_names.append(output_name);
+      requested_output_names.emplace_back(output_name);
     }
 
-    infer_request = PyRequest(
-        py_input_tensors, id, request->correlation_id,
-        py_requested_output_names);
+    return InferRequest(
+        id, request->correlation_id, py_input_tensors, requested_output_names);
   }
 
   void SetResponseFromException(
@@ -705,10 +703,8 @@ class Stub {
     py::list py_request_list;
     for (size_t i = 0; i < batch_size; i++) {
       Request* request = &requests[i];
-      py::object infer_request;
-      ProcessRequest(
-          request, response_batch, infer_request, PyRequest_,
-          deserialize_bytes_);
+      InferRequest infer_request =
+          ProcessRequest(request, response_batch, deserialize_bytes_);
       py_request_list.append(infer_request);
     }
 
@@ -771,11 +767,13 @@ class Stub {
         py::module::import("c_python_backend_utils");
     py::setattr(
         python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
+    py::setattr(
+        python_backend_utils, "InferRequest",
+        c_python_backend_utils.attr("InferenceRequest"));
 
     py::object TritonPythonModel =
         py::module::import((model_version_ + std::string(".model")).c_str())
             .attr("TritonPythonModel");
-    PyRequest_ = python_backend_utils.attr("InferenceRequest");
     deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
     serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
     model_instance_ = TritonPythonModel();
@@ -865,6 +863,15 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("is_cpu", &PbTensor::IsCPU)
       .def("from_dlpack", &PbTensor::FromDLPack);
+
+  py::class_<InferRequest>(module, "InferenceRequest")
+      .def(py::init<
+           const std::string&, uint64_t, const std::vector<PbTensor>&,
+           const std::vector<std::string>&>())
+      .def("inputs", &InferRequest::Inputs)
+      .def("request_id", &InferRequest::RequestId)
+      .def("correlation_id", &InferRequest::CorrelationId)
+      .def("requested_output_names", &InferRequest::RequestedOutputNames);
 
   py::register_exception<PythonBackendException>(
       module, "PythonBackendException");
