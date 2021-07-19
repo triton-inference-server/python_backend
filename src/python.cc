@@ -875,9 +875,14 @@ ModelInstanceState::ProcessRequests(
               reused_gpu_tensor = gpu_tensors_map_.find(reused_tensor_name);
           if (reused_gpu_tensor == gpu_tensors_map_.end()) {
             // TODO: This should not happen. Proper error handling
+            GUARDED_RESPOND_IF_EXCEPTION(
+                responses, r,
+                TRITONSERVER_ErrorNew(
+                    TRITONSERVER_ERROR_INTERNAL,
+                    "Tensor is reused but cannot be found."));
           } else {
-            data = reinterpret_cast<char*>(
-                reused_gpu_tensor->second /* pointer to tensor data */);
+            data = reinterpret_cast<char*>(reused_gpu_tensor->second) +
+                   raw_data->offset;
           }
         }
 
@@ -1397,12 +1402,13 @@ ModelInstanceState::GetInputTensor(
     TRITONSERVER_MemoryType src_memory_type;
     int64_t src_memory_type_id;
     size_t src_byte_size;
+
     const void* src_ptr;
     uint64_t* ptr_offset;
 
     RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
-        in, input_idx, &src_ptr, &src_byte_size, &src_memory_type,
-        &src_memory_type_id));
+        in, 0 /* input buffer index */, &src_ptr, &src_byte_size,
+        &src_memory_type, &src_memory_type_id));
 
     if (src_memory_type == TRITONSERVER_MEMORY_GPU) {
       char* cuda_handle;
@@ -1445,6 +1451,8 @@ ModelInstanceState::GetInputTensor(
       }
       *ptr_offset = reinterpret_cast<char*>(buffer_cast) -
                     reinterpret_cast<char*>(start_address);
+      gpu_tensors_map_.insert(
+          {input_name, reinterpret_cast<void*>(start_address)});
     } else {
       char* input_buffer;
       uint64_t* ptr_offset;

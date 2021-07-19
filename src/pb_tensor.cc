@@ -181,7 +181,7 @@ PbTensor::ToDLPack()
   DLManagedTensor* dlpack_tensor = new DLManagedTensor;
   dlpack_tensor->dl_tensor.ndim = dims_.size();
   dlpack_tensor->dl_tensor.byte_offset = 0;
-  dlpack_tensor->dl_tensor.data = const_cast<void*>(memory_ptr_);
+  dlpack_tensor->dl_tensor.data = memory_ptr_;
   dlpack_tensor->dl_tensor.shape = &dims_[0];
   dlpack_tensor->dl_tensor.strides = nullptr;
   dlpack_tensor->deleter = [](DLManagedTensor* m) {};
@@ -329,6 +329,6 @@ PbTensor::TritonDtype()
 void*
 PbTensor::GetDataPtr()
 {
-  return static_cast<void*>(memory_ptr_);
+  return memory_ptr_;
 }
 }}}  // namespace triton::backend::python

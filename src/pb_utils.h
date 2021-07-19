@@ -83,6 +83,8 @@ struct ExecuteArgs {
   off_t response_batch;
 };
 
+size_t GetDevicePointerOffset(void* d_ptr);
+
 struct InitializeArgs {
   off_t args;
   // Indicates whether the response has an error or not.

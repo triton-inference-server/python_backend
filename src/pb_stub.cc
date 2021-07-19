@@ -129,7 +129,7 @@ class Stub {
   bi::interprocess_mutex* parent_mutex_;
   bi::interprocess_condition* parent_cond_;
   bi::interprocess_mutex* health_mutex_;
-  bi::scoped_lock<bi::interprocess_mutex> stub_lock_;
+  std::unique_ptr<bi::scoped_lock<bi::interprocess_mutex>> stub_lock_;
   std::string model_path_;
   std::string model_version_;
   std::string triton_install_path_;
@@ -188,7 +188,8 @@ class Stub {
       health_mutex_ = health_mutex;
 
       shm_pool_->MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
-      stub_lock_ = bi::scoped_lock<bi::interprocess_mutex>(*stub_mutex_);
+      stub_lock_ = std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(
+          *stub_mutex_);
     }
     catch (const PythonBackendException& pb_exception) {
       LOG_INFO << pb_exception.what() << std::endl;
@@ -345,10 +346,11 @@ class Stub {
             output_tensor_pb->ByteSize(), output_name.c_str(),
             output_tensor_pb->Dims().data(), output_tensor_pb->Dims().size(),
             dtype_triton, &ptr_offset);
-
+        char* d_ptr = reinterpret_cast<char*>(output_tensor_pb->GetDataPtr());
+        *ptr_offset = GetDevicePointerOffset(d_ptr);
+        char* base_addr = d_ptr - *ptr_offset;
         std::unordered_map<void*, std::string>::const_iterator
-            reused_gpu_tensor =
-                gpu_tensors_map_.find(output_tensor_pb->GetDataPtr());
+            reused_gpu_tensor = gpu_tensors_map_.find(base_addr);
         if (reused_gpu_tensor == gpu_tensors_map_.end()) {
           cudaSetDevice(output_tensor_pb->MemoryTypeId());
           cudaError_t err = cudaIpcGetMemHandle(
@@ -363,6 +365,9 @@ class Stub {
           }
         } else {
           output_tensor_shm->is_reused = true;
+          RawData* raw_data;
+          shm_pool_->MapOffset((char**)&raw_data, output_tensor_shm->raw_data);
+          raw_data->offset = *ptr_offset;
           off_t reused_tensor_name_offset;
           SaveStringToSharedMemory(
               shm_pool_, reused_tensor_name_offset,
@@ -515,7 +520,11 @@ class Stub {
 
         // Clean up is required to remove the GPU tensors
         require_cleanup_ = true;
-        gpu_tensors_map_.insert({static_cast<void*>(data), name});
+
+        size_t ptr_offset = GetDevicePointerOffset(static_cast<void*>(data));
+        gpu_tensors_map_.insert(
+            {reinterpret_cast<void*>(static_cast<char*>(data) - ptr_offset),
+             name});
 
         // Adjust the device pointer with the offset. cudaIpcOpenMemHandle will
         // map the base address only and the offset needs to be manually
@@ -797,10 +806,12 @@ class Stub {
     do {
       timeout =
           boost::get_system_time() + boost::posix_time::milliseconds(1000);
-    } while (!stub_cond_->timed_wait(stub_lock_, timeout) != 0 &&
+    } while (!stub_cond_->timed_wait(*stub_lock_, timeout) != 0 &&
              !non_graceful_exit);
     return non_graceful_exit;
   }
+
+  ~Stub() { stub_lock_.reset(); }
 };
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -908,20 +919,22 @@ main(int argc, char** argv)
     stub->NotifyParent();
     if (finalize) {
       stub->Finalize();
+      background_thread_running = false;
+      background_thread.join();
       break;
     }
 
     if (stub->WaitForNotification()) {
+      background_thread_running = false;
+      background_thread.join();
       break;
     }
 
     finalize = stub->RunCommand();
   }
 
-  background_thread_running = false;
-  // Destroy stub
   stub.reset();
-  background_thread.join();
+
   return 0;
 }
 }

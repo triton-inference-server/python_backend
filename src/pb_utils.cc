@@ -45,6 +45,7 @@
 #include "shm_manager.h"
 
 #ifdef TRITON_ENABLE_GPU
+#include <cuda.h>
 #include <cuda_runtime_api.h>
 #endif
 
@@ -81,6 +82,29 @@ SaveStringToSharedMemory(
   string_shm->data = str_data_offset;
   strcpy(string_data, str);
 }
+
+#ifdef TRITON_ENABLE_GPU
+size_t
+GetDevicePointerOffset(void* d_ptr)
+{
+  CUdeviceptr start_address;
+  CUresult cuda_err = cuPointerGetAttribute(
+      &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+      reinterpret_cast<CUdeviceptr>(d_ptr));
+  if (cuda_err != CUDA_SUCCESS) {
+    const char* error_string;
+    cuGetErrorString(cuda_err, &error_string);
+    throw PythonBackendException(
+        std::string(
+            "failed to get cuda pointer device attribute: " +
+            std::string(error_string))
+            .c_str());
+  }
+
+  return reinterpret_cast<char*>(d_ptr) -
+         reinterpret_cast<char*>(start_address);
+}
+#endif
 
 void
 SaveRawDataToSharedMemory(
