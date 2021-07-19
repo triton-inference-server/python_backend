@@ -811,7 +811,13 @@ class Stub {
     return non_graceful_exit;
   }
 
-  ~Stub() { stub_lock_.reset(); }
+  ~Stub()
+  {
+    // stub_lock_ must be destroyed before the shared memory is deconstructed.
+    // Otherwise, the shared memory will be destructed first and lead to
+    // segfault.
+    stub_lock_.reset();
+  }
 };
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -933,6 +939,11 @@ main(int argc, char** argv)
     finalize = stub->RunCommand();
   }
 
+  // Stub must be destroyed before the py::scoped_interpreter goes out of scope.
+  // The reason is that stub object has some attributes that are Python objects.
+  // If the scoped_interpreter is destroyed before the stub object, this process
+  // will no longer hold the GIL lock and destruction of the stub will result in
+  // segfault.
   stub.reset();
 
   return 0;
