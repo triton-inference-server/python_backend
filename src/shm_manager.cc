@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -63,6 +63,9 @@ SharedMemory::SharedMemory(
          "model instance requires at least 64MBs of shared memory. Flag "
          "'--shm-size=5G' should be sufficient for common usecases. Error: " +
          ex.what());
+
+    // Remove the shared memory region if there was an error.
+    bi::shared_memory_object::remove(shm_key_.c_str());
     throw PythonBackendException(std::move(error_message));
   }
 
@@ -76,9 +79,11 @@ SharedMemory::SharedMemory(
   // Set offset address
   offset_ = (off_t*)((char*)shm_addr_ + sizeof(size_t));
 
-  *offset_ = 0;
-  *offset_ += sizeof(off_t);
-  *offset_ += sizeof(size_t);
+  if (truncate) {
+    *offset_ = 0;
+    *offset_ += sizeof(off_t);
+    *offset_ += sizeof(size_t);
+  }
 
   shm_key_ = shm_key;
 }
@@ -146,7 +151,7 @@ SharedMemory::UpdateSharedMemory()
 }
 
 void
-SharedMemory::MapOffset(char** shm_addr, size_t byte_size, off_t offset)
+SharedMemory::MapOffset(char** shm_addr, off_t offset)
 {
   // Update shared memory pointer and capacity if necessary.
   UpdateSharedMemory();

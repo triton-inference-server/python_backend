@@ -44,6 +44,11 @@
 #include <unordered_map>
 #include "shm_manager.h"
 
+#ifdef TRITON_ENABLE_GPU
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+#endif
+
 namespace triton { namespace backend { namespace python {
 
 #define THROW_IF_ERROR(MSG, X)           \
@@ -59,8 +64,8 @@ LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str)
 {
   String* string;
-  shm_pool->MapOffset((char**)&string, sizeof(String), shm_offset);
-  shm_pool->MapOffset((char**)&str, string->length, string->data);
+  shm_pool->MapOffset((char**)&string, shm_offset);
+  shm_pool->MapOffset((char**)&str, string->data);
 }
 
 void
@@ -78,11 +83,34 @@ SaveStringToSharedMemory(
   strcpy(string_data, str);
 }
 
+#ifdef TRITON_ENABLE_GPU
+size_t
+GetDevicePointerOffset(void* d_ptr)
+{
+  CUdeviceptr start_address;
+  CUresult cuda_err = cuPointerGetAttribute(
+      &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+      reinterpret_cast<CUdeviceptr>(d_ptr));
+  if (cuda_err != CUDA_SUCCESS) {
+    const char* error_string;
+    cuGetErrorString(cuda_err, &error_string);
+    throw PythonBackendException(
+        std::string(
+            "failed to get cuda pointer device attribute: " +
+            std::string(error_string))
+            .c_str());
+  }
+
+  return reinterpret_cast<char*>(d_ptr) -
+         reinterpret_cast<char*>(start_address);
+}
+#endif
+
 void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size)
+    int memory_type_id, uint64_t byte_size, uint64_t** offset)
 {
   // raw data
   RawData* raw_data;
@@ -91,10 +119,24 @@ SaveRawDataToSharedMemory(
   raw_data->memory_type = memory_type;
   raw_data->memory_type_id = memory_type_id;
   raw_data->byte_size = byte_size;
+  *offset = &(raw_data->offset);
+  if (memory_type == TRITONSERVER_MEMORY_CPU) {
+    off_t buffer_offset;
+    shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
+    raw_data->memory_ptr = buffer_offset;
+  }
 
-  off_t buffer_offset;
-  shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
-  raw_data->memory_ptr = buffer_offset;
+#ifdef TRITON_ENABLE_GPU
+  if (memory_type == TRITONSERVER_MEMORY_GPU) {
+    off_t buffer_offset;
+    shm_pool->Map(
+        (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
+    raw_data->memory_ptr = buffer_offset;
+  }
+#else
+  throw PythonBackendException(
+      "Trying to create GPU tensors with TRITON_ENABLE_GPU disabled.");
+#endif
 }
 
 void
@@ -123,11 +165,10 @@ LoadMapFromSharedMemory(
     std::unordered_map<std::string, std::string>& map)
 {
   Dict* dict;
-  shm_pool->MapOffset((char**)&dict, sizeof(Dict), shm_offset);
+  shm_pool->MapOffset((char**)&dict, shm_offset);
 
   Pair* pairs;
-  shm_pool->MapOffset(
-      (char**)&pairs, sizeof(Pair) * dict->length, dict->values);
+  shm_pool->MapOffset((char**)&pairs, dict->values);
   for (size_t i = 0; i < dict->length; i++) {
     char* key;
     LoadStringFromSharedMemory(shm_pool, pairs[i].key, key);
@@ -142,14 +183,15 @@ void
 SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, const char* name,
-    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype)
+    int64_t memory_type_id, uint64_t byte_size, const char* name,
+    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
+    uint64_t** offset_ptr)
 {
   // Raw Data
   off_t raw_data_offset;
   SaveRawDataToSharedMemory(
       shm_pool, raw_data_offset, raw_data_ptr, memory_type, memory_type_id,
-      byte_size);
+      byte_size, offset_ptr);
   tensor->raw_data = raw_data_offset;
 
   // name

@@ -65,13 +65,59 @@ namespace bi = boost::interprocess;
     }                                                              \
     while (false)
 
+typedef enum PYTHONSTUB_commandtype_enum {
+  PYTHONSTUB_Execute,
+  PYTHONSTUB_Initialize,
+  PYTHONSTUB_PreInitialize,
+  PYTHONSTUB_Finalize,
+  PYTHONSTUB_TensorCleanup
+} PYTHONSTUB_CommandType;
+
+struct IPCMessage {
+  PYTHONSTUB_CommandType command;
+  off_t args;
+};
+
+struct ExecuteArgs {
+  off_t request_batch;
+  off_t response_batch;
+};
+
+size_t GetDevicePointerOffset(void* d_ptr);
+
+struct InitializeArgs {
+  off_t args;
+  // Indicates whether the response has an error or not.
+  bool response_has_error;
+  // Indicates whether the response error is set or not.
+  bool response_is_error_set;
+  // Contains the error message.
+  off_t response_error;
+};
+
+// Control data structure for the communication between the Python stub and the
+// main stub.
+struct IPCControl {
+  bool stub_health;
+  bool parent_health;
+  off_t parent_health_mutex;
+  off_t stub_mutex;
+  off_t stub_cond;
+  off_t parent_mutex;
+  off_t parent_cond;
+  off_t stub_health_mutex;
+  off_t ipc_message;
+};
+
 //
 // Represents a raw data
 //
 struct RawData {
   off_t memory_ptr;
+  // offset represents the pointer offset.
+  uint64_t offset;
   TRITONSERVER_MemoryType memory_type;
-  int memory_type_id;
+  int64_t memory_type_id;
   uint64_t byte_size;
 };
 
@@ -79,11 +125,19 @@ struct RawData {
 // Represents a Tensor object that will be passed to Python code.
 //
 struct Tensor {
-  off_t raw_data;  // Offset for raw data field.
-  off_t name;      // Offset for name field.
+  // Offset for raw data field.
+  off_t raw_data;
+  // Offset for name field.
+  off_t name;
   TRITONSERVER_DataType dtype;
-  off_t dims;  // Shared memory offset for the dimensions.
+  // Shared memory offset for the dimensions.
+  off_t dims;
   size_t dims_count;
+  // This field is only used by output tensors and
+  // indicates the name of the tensor in the input
+  // tensor that this tensor is using.
+  off_t reused_tensor_name;
+  bool is_reused;
 };
 
 struct String {
@@ -95,42 +149,44 @@ struct String {
 // Inference Request
 //
 struct Request {
-  off_t id;  // Offset for the id field.
+  // Offset for the id field.
+  off_t id;
   uint64_t correlation_id;
-  off_t inputs;  // Offset for input field.
+  // Offset for input field.
+  off_t inputs;
   uint32_t requested_input_count;
-  off_t requested_output_names;  // Offset for the requested output names
+  // Offset for the requested output names
+  off_t requested_output_names;
   uint32_t requested_output_count;
 };
 
 struct Response {
-  off_t outputs;  // Offset for Tensor output.
+  // Offset for Tensor output.
+  off_t outputs;
   uint32_t outputs_size;
   off_t error;
   bool has_error;
-  bool is_error_set;  // Indicates whether this error has a message or not.
+  // Indicates whether this error has a message or not.
+  bool is_error_set;
 };
 
 struct ResponseBatch {
-  off_t responses;  // Offset for response object.
+  // Offset for response object.
+  off_t responses;
   uint32_t batch_size;
   off_t error;
   bool has_error;
-  bool is_error_set;  // Indicates whether this error has a message or not.
+  // Indicates whether an additional call to stub is required for the clean up
+  // of the resources.
+  bool cleanup;
+  // Indicates whether this error has a message or not.
+  bool is_error_set;
 };
 
 struct RequestBatch {
-  off_t requests;  // Offset for request object.
+  // Offset for request object.
+  off_t requests;
   uint32_t batch_size;
-};
-
-struct IPCMessage {
-  // request points to a RequestBatch struct.
-  off_t request_batch;
-
-  // response points to a ResponseBatch struct.
-  off_t response_batch;
-  bool health;
 };
 
 // Representing a key value pair
@@ -172,19 +228,17 @@ void SaveStringToSharedMemory(
 void LoadStringFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str);
 
-void LoadRawDataFromSharedLibrary(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& tensor_shm_offset,
-    const Tensor& tensor);
 void SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size);
+    int memory_type_id, uint64_t byte_size, uint64_t** offset_ptr);
 
 void SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, const char* name,
-    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype);
+    int64_t memory_type_id, uint64_t byte_size, const char* name,
+    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
+    uint64_t** offset_ptr);
 void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);

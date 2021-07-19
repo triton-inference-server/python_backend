@@ -1,4 +1,4 @@
-// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,48 +24,37 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include <dlpack/dlpack.h>
+#include <pybind11/embed.h>
+#include <pybind11/numpy.h>
+#include <pybind11/stl.h>
+#include "triton/core/tritonserver.h"
 
-#include <unistd.h>
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
-
-
+namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 
-class SharedMemory {
-  std::string shm_key_;
-  size_t* capacity_;
-  off_t* offset_;
-  char* shm_addr_;
+/// Convert numpy dtype to triton dtype
+/// \param data_type numpy data type to be converted.
+/// \return equivalent triton dtype
+TRITONSERVER_DataType numpy_to_triton_type(py::object data_type);
 
-  // Current capcity, local to each process.
-  size_t current_capacity_;
+/// Convert triton dtype to numpy dtype
+/// \param data_type triton dtype to be converted.
+/// \return equivalent numpy data type.
+py::object triton_to_numpy_type(TRITONSERVER_DataType data_type);
 
-  // Amount of bytes to grow the shared memory when the pool is completely used.
-  int64_t shm_growth_bytes_;
+/// Convert triton dtype to dlpack dtype
+/// \param data_type triton dtype to be converted
+/// \return equivalent DLPack data type.
+DLDataType triton_to_dlpack_type(TRITONSERVER_DataType data_type);
 
-  // Get the amount of shared memory available.
-  size_t GetAvailableSharedMemory();
-  boost::interprocess::shared_memory_object shm_obj_;
-  std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
-  std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
-      old_shm_maps_;
+/// Convert dlpack type to triton type
+/// \param data_type triton dtype to be converted
+/// \return equivalent Triton dtype
+TRITONSERVER_DataType dlpack_to_triton_type(const DLDataType& data_type);
 
-  void UpdateSharedMemory();
-
- public:
-  SharedMemory(
-      const std::string& shm_key, int64_t default_byte_size,
-      int64_t shm_growth_bytes, bool truncate = false);
-  void MapOffset(char** shm_addr, off_t offset);
-  void Map(char** shm_addr, size_t byte_size, off_t& offset);
-  void SetOffset(off_t offset);
-  ~SharedMemory() noexcept(false);
-};
-
+/// Convert triton data to pybind data type.
+/// \param data_type triton dtype to be converted.
+/// \return equivalent pybind numpy dtype.
+py::dtype triton_to_pybind_dtype(TRITONSERVER_DataType data_type);
 }}}  // namespace triton::backend::python
