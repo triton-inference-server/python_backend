@@ -26,6 +26,8 @@
 
 #include "infer_request.h"
 
+#include "infer_response.h"
+
 namespace triton { namespace backend { namespace python {
 
 InferRequest::InferRequest(
@@ -62,5 +64,11 @@ InferRequest::RequestedOutputNames()
 {
   return requested_output_names_;
 }
+
+// std::unique_ptr<InferResponse>
+// InferRequest::Exec()
+// {
+
+// }
 
 }}}  // namespace triton::backend::python

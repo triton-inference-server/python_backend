@@ -32,6 +32,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <string>
+#include "pb_utils.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
 
@@ -111,6 +112,15 @@ class PbTensor {
   /// \throw If the tensor is stored in GPU, an exception is thrown
   /// \return NumPy representation of the Tensor
   const py::array& AsNumpy() const;
+
+  /// Save tensor inside shared memory.
+  void SaveToSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm) const;
+
+  /// Save a reused GPU tensor inside shared memory
+  void SaveReusedGPUTensorToSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm,
+      const std::string& reused_tensor_name) const;
 
   /// Get the triton dtype
   /// \return Triton dtype

@@ -27,6 +27,7 @@
 #include "pb_stub_utils.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
+#include <cuda.h>
 
 namespace py = pybind11;
 
@@ -318,6 +319,159 @@ PbTensor::AsNumpy() const
   }
 
   return numpy_array_;
+}
+
+void
+PbTensor::SaveToSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm) const
+{
+  const std::string& tensor_name = this->Name();
+  TRITONSERVER_DataType dtype_triton =
+      static_cast<TRITONSERVER_DataType>(this->TritonDtype());
+  tensor_shm->is_reused = false;
+  TRITONSERVER_MemoryType memory_type = TRITONSERVER_MEMORY_CPU;
+  int64_t memory_type_id = 0;
+
+  if (this->IsCPU()) {
+    py::array numpy_array = this->AsNumpy();
+    py::buffer_info buffer = numpy_array.request();
+    size_t dims_count = numpy_array.ndim();
+    memory_type = TRITONSERVER_MEMORY_CPU;
+    memory_type_id = 0;
+
+    char* data_in_shm;
+    char* data_ptr;
+
+    int64_t dims[dims_count];
+    ssize_t byte_size;
+
+    // Custom handling for type bytes.
+    // if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
+    //   py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
+    //   if (serialize_bytes.is_none()) {
+    //     const char* err_message = "An error happened during serialization.";
+    //     LOG_INFO << err_message;
+    //     SetErrorForResponse(response_shm, err_message);
+    //     break;
+    //   }
+
+    //   py::bytes serialized_bytes = serialized_bytes_or_none;
+    //   data_ptr = PyBytes_AsString(serialized_bytes.ptr());
+    //   byte_size = PyBytes_Size(serialized_bytes.ptr());
+    // } else {
+    data_ptr = static_cast<char*>(buffer.ptr);
+    byte_size = numpy_array.nbytes();
+    // }
+
+    const ssize_t* numpy_shape = numpy_array.shape();
+    for (size_t i = 0; i < dims_count; i++) {
+      dims[i] = numpy_shape[i];
+    }
+
+    uint64_t* ptr_offset;
+    SaveTensorToSharedMemory(
+        shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
+        byte_size, tensor_name.c_str(), dims, dims_count, dtype_triton,
+        &ptr_offset);
+    *ptr_offset = 0;
+
+    // TODO: We can remove this memcpy if the numpy object
+    // is already in shared memory.
+    std::copy(data_ptr, data_ptr + byte_size, data_in_shm);
+  } else {
+#ifdef TRITON_ENABLE_GPU
+    char* cuda_handle;
+    uint64_t* ptr_offset;
+    SaveTensorToSharedMemory(
+        shm_pool, tensor_shm, cuda_handle, this->MemoryType(),
+        this->MemoryTypeId(), this->ByteSize(), tensor_name.c_str(),
+        this->Dims().data(), this->Dims().size(), dtype_triton, &ptr_offset);
+    char* d_ptr = reinterpret_cast<char*>(this->GetDataPtr());
+    *ptr_offset = GetDevicePointerOffset(d_ptr);
+    cudaSetDevice(this->MemoryTypeId());
+    cudaError_t err = cudaIpcGetMemHandle(
+        reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
+        this->GetDataPtr());
+    if (err != cudaSuccess) {
+      throw PythonBackendException(std::string(
+                                       "failed to get cuda ipc handle: " +
+                                       std::string(cudaGetErrorString(err)))
+                                       .c_str());
+    }
+
+    CUdeviceptr start_address;
+    CUresult cuda_err = cuPointerGetAttribute(
+        &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+        (CUdeviceptr)this->GetDataPtr());
+    if (cuda_err != CUDA_SUCCESS) {
+      const char* error_string;
+      cuGetErrorString(cuda_err, &error_string);
+      throw PythonBackendException(
+          std::string(
+              "failed to get cuda pointer device attribute: " +
+              std::string(error_string))
+              .c_str());
+    }
+    *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
+                  reinterpret_cast<char*>(start_address);
+#else
+    throw PythonBackendException(
+        "Python backend was not built with GPU tensor support");
+#endif
+  }
+}
+
+void
+PbTensor::SaveReusedGPUTensorToSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm,
+    const std::string& reused_tensor_name) const
+{
+  const std::string& tensor_name = this->Name();
+  TRITONSERVER_DataType dtype_triton =
+      static_cast<TRITONSERVER_DataType>(this->TritonDtype());
+  if (this->IsCPU()) {
+    throw PythonBackendException(
+        "SaveReusedGPUTensorToSharedMemory should be only called on GPU "
+        "tensors.");
+  }
+
+#ifdef TRITON_ENABLE_GPU
+  char* cuda_handle;
+  uint64_t* ptr_offset;
+  SaveTensorToSharedMemory(
+      shm_pool, tensor_shm, cuda_handle, this->MemoryType(),
+      this->MemoryTypeId(), this->ByteSize(), tensor_name.c_str(),
+      this->Dims().data(), this->Dims().size(), dtype_triton, &ptr_offset);
+  char* d_ptr = reinterpret_cast<char*>(this->GetDataPtr());
+  *ptr_offset = GetDevicePointerOffset(d_ptr);
+  tensor_shm->is_reused = true;
+  RawData* raw_data;
+  shm_pool->MapOffset((char**)&raw_data, tensor_shm->raw_data);
+  raw_data->offset = *ptr_offset;
+  off_t reused_tensor_name_offset;
+  SaveStringToSharedMemory(
+      shm_pool, reused_tensor_name_offset, reused_tensor_name.c_str());
+  tensor_shm->reused_tensor_name = reused_tensor_name_offset;
+
+  CUdeviceptr start_address;
+  CUresult cuda_err = cuPointerGetAttribute(
+      &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+      (CUdeviceptr)this->GetDataPtr());
+  if (cuda_err != CUDA_SUCCESS) {
+    const char* error_string;
+    cuGetErrorString(cuda_err, &error_string);
+    throw PythonBackendException(
+        std::string(
+            "failed to get cuda pointer device attribute: " +
+            std::string(error_string))
+            .c_str());
+  }
+  *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
+                reinterpret_cast<char*>(start_address);
+#else
+  throw PythonBackendException(
+      "Python backend was not built with GPU tensor support");
+#endif
 }
 
 int

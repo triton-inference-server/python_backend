@@ -145,6 +145,7 @@ add_executable(
   src/infer_response.cc
   src/infer_response.h
   src/pb_stub.cc
+  src/pb_stub.h
   src/pb_utils.cc
   src/pb_utils.h
   src/pb_tensor.cc
