@@ -122,7 +122,7 @@ PbTensor::PbTensor(
 }
 
 bool
-PbTensor::IsCPU()
+PbTensor::IsCPU() const
 {
   if (tensor_type_ == PYTHONBACKEND_NUMPY ||
       ((tensor_type_ == PYTHONBACKEND_RAW ||
@@ -136,31 +136,31 @@ PbTensor::IsCPU()
 }
 
 TRITONSERVER_MemoryType
-PbTensor::MemoryType()
+PbTensor::MemoryType() const
 {
   return memory_type_;
 }
 
 int64_t
-PbTensor::MemoryTypeId()
+PbTensor::MemoryTypeId() const
 {
   return memory_type_id_;
 }
 
 uint64_t
-PbTensor::ByteSize()
+PbTensor::ByteSize() const
 {
   return byte_size_;
 }
 
 const std::vector<int64_t>&
-PbTensor::Dims()
+PbTensor::Dims() const
 {
   return dims_;
 }
 
 PYTHONBACKEND_TensorType
-PbTensor::TensorType()
+PbTensor::TensorType() const
 {
   return tensor_type_;
 }
@@ -302,13 +302,13 @@ PbTensor::~PbTensor()
 
 
 const std::string&
-PbTensor::Name()
+PbTensor::Name() const
 {
   return name_;
 }
 
-py::array&
-PbTensor::AsNumpy()
+const py::array&
+PbTensor::AsNumpy() const
 {
   if (this->IsCPU()) {
     return numpy_array_;
@@ -321,13 +321,13 @@ PbTensor::AsNumpy()
 }
 
 int
-PbTensor::TritonDtype()
+PbTensor::TritonDtype() const
 {
   return dtype_;
 }
 
 void*
-PbTensor::GetDataPtr()
+PbTensor::GetDataPtr() const
 {
   return memory_ptr_;
 }

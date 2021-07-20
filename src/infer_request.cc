@@ -31,9 +31,11 @@ namespace triton { namespace backend { namespace python {
 InferRequest::InferRequest(
     const std::string& request_id, uint64_t correlation_id,
     const std::vector<PbTensor>& inputs,
-    const std::vector<std::string>& requested_output_names)
+    const std::vector<std::string>& requested_output_names,
+    const std::string& model_name, const int64_t model_version)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
-      requested_output_names_(requested_output_names)
+      requested_output_names_(requested_output_names), model_name_(model_name),
+      model_version_(model_version)
 {
 }
 

@@ -584,6 +584,14 @@ ModelInstanceState::ProcessRequests(
             input_tensors_offset));
     python_infer_request->inputs = input_tensors_offset;
 
+    off_t model_name_offset;
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
+        SaveStringToSharedMemory(
+            shm_pool_, model_name_offset, model_state->Name().c_str()));
+    python_infer_request->model_name = model_name_offset;
+    python_infer_request->model_version = model_state->Version();
+
     for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
       Tensor* input_tensor = &input_tensors[iidx];
 

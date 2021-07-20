@@ -105,16 +105,16 @@ class PbTensor {
 
   /// Get the name of the tensor
   /// \return name of the tensor.
-  const std::string& Name();
+  const std::string& Name() const;
 
   /// Get NumPy representation of the tensor.
   /// \throw If the tensor is stored in GPU, an exception is thrown
   /// \return NumPy representation of the Tensor
-  py::array& AsNumpy();
+  const py::array& AsNumpy() const;
 
   /// Get the triton dtype
   /// \return Triton dtype
-  int TritonDtype();
+  int TritonDtype() const;
 
   /// This function will be automatically called by the stub when the tensor is
   /// no longer required.
@@ -122,31 +122,31 @@ class PbTensor {
 
   /// Get the type of the tensor
   /// \return Type of the tensor.
-  PYTHONBACKEND_TensorType TensorType();
+  PYTHONBACKEND_TensorType TensorType() const;
 
   /// Tells whether the Tensor is stored in CPU or not.
   /// \return A boolean value indicating whether the tensor is stored in CPU
   /// or not.
-  bool IsCPU();
+  bool IsCPU() const;
 
   /// Get the total byte size of the tensor.
-  uint64_t ByteSize();
+  uint64_t ByteSize() const;
 
   /// Get the triton memory type of the Tensor.
   /// \return the memory type of the tensor.
-  TRITONSERVER_MemoryType MemoryType();
+  TRITONSERVER_MemoryType MemoryType() const;
 
   /// Get the dimensions of the tensor
   /// \return A vector containing the tensor dimensions.
-  const std::vector<int64_t>& Dims();
+  const std::vector<int64_t>& Dims() const;
 
   /// Get the data pointer.
   /// \return The location to the memory where the data is stored.
-  void* GetDataPtr();
+  void* GetDataPtr() const;
 
   /// Get the memory type id.
   /// \return The memory type id of the tensor.
-  int64_t MemoryTypeId();
+  int64_t MemoryTypeId() const;
 
   /// Destructor
   ~PbTensor();

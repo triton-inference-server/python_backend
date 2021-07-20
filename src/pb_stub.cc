@@ -42,6 +42,7 @@
 #include <thread>
 #include <unordered_map>
 #include "infer_request.h"
+#include "infer_response.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
@@ -142,7 +143,7 @@ class Stub {
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
-  std::vector<PbTensor*> tensors_to_remove_;
+  std::vector<PbTensor> tensors_to_remove_;
   bool require_cleanup_;
   bool initialized_;
 
@@ -151,7 +152,15 @@ class Stub {
 #endif
 
  public:
-  Stub(
+  static Stub& GetInstance()
+  {
+    static Stub stub;
+    return stub;
+  }
+
+  Stub() {}
+
+  void Instantiate(
       int64_t shm_growth_size, int64_t shm_default_size,
       std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
@@ -281,16 +290,15 @@ class Stub {
 
   void ProcessResponse(
       Response* response_shm, ResponseBatch* response_batch,
-      py::handle response, py::object& serialize_bytes)
+      InferResponse* response, py::object& serialize_bytes)
   {
     // Initialize has_error to false
     response_shm->has_error = false;
 
-    py::bool_ py_has_error = response.attr("has_error")();
-    bool has_error = py_has_error;
+    bool has_error = response->HasError();
 
     if (has_error) {
-      py::str py_string_err = py::str(response.attr("error")());
+      py::str py_string_err = response->Error();
       std::string response_error = py_string_err;
       SetErrorForResponse(response_shm, response_error.c_str());
 
@@ -298,8 +306,8 @@ class Stub {
       return;
     }
 
-    py::list output_tensors = response.attr("output_tensors")();
-    size_t output_tensor_length = py::len(output_tensors);
+    const std::vector<PbTensor>& output_tensors = response->OutputTensors();
+    size_t output_tensor_length = output_tensors.size();
 
     size_t j = 0;
     Tensor* output_tensors_shm;
@@ -313,21 +321,20 @@ class Stub {
     int64_t memory_type_id;
 
     for (auto& output_tensor : output_tensors) {
-      PbTensor* output_tensor_pb = output_tensor.cast<PbTensor*>();
-      if (output_tensor_pb->TensorType() == PYTHONBACKEND_DLPACK) {
+      if (output_tensor.TensorType() == PYTHONBACKEND_DLPACK) {
         require_cleanup_ = true;
-        tensors_to_remove_.push_back(output_tensor_pb);
+        tensors_to_remove_.push_back(output_tensor);
       }
       Tensor* output_tensor_shm = &output_tensors_shm[j];
       output_tensor_shm->is_reused = false;
-      std::string output_name = output_tensor_pb->Name();
+      std::string output_name = output_tensor.Name();
       TRITONSERVER_DataType dtype_triton =
-          static_cast<TRITONSERVER_DataType>(output_tensor_pb->TritonDtype());
+          static_cast<TRITONSERVER_DataType>(output_tensor.TritonDtype());
       memory_type = TRITONSERVER_MEMORY_CPU;
       memory_type_id = 0;
 
-      if (output_tensor_pb->IsCPU()) {
-        py::array numpy_array = output_tensor_pb->AsNumpy();
+      if (output_tensor.IsCPU()) {
+        py::array numpy_array = output_tensor.AsNumpy();
         py::buffer_info buffer = numpy_array.request();
         size_t dims_count = numpy_array.ndim();
         memory_type = TRITONSERVER_MEMORY_CPU;
@@ -378,20 +385,20 @@ class Stub {
         uint64_t* ptr_offset;
         SaveTensorToSharedMemory(
             shm_pool_, output_tensor_shm, cuda_handle,
-            output_tensor_pb->MemoryType(), output_tensor_pb->MemoryTypeId(),
-            output_tensor_pb->ByteSize(), output_name.c_str(),
-            output_tensor_pb->Dims().data(), output_tensor_pb->Dims().size(),
+            output_tensor.MemoryType(), output_tensor.MemoryTypeId(),
+            output_tensor.ByteSize(), output_name.c_str(),
+            output_tensor.Dims().data(), output_tensor.Dims().size(),
             dtype_triton, &ptr_offset);
-        char* d_ptr = reinterpret_cast<char*>(output_tensor_pb->GetDataPtr());
+        char* d_ptr = reinterpret_cast<char*>(output_tensor.GetDataPtr());
         *ptr_offset = GetDevicePointerOffset(d_ptr);
         char* base_addr = d_ptr - *ptr_offset;
         std::unordered_map<void*, std::string>::const_iterator
             reused_gpu_tensor = gpu_tensors_map_.find(base_addr);
         if (reused_gpu_tensor == gpu_tensors_map_.end()) {
-          cudaSetDevice(output_tensor_pb->MemoryTypeId());
+          cudaSetDevice(output_tensor.MemoryTypeId());
           cudaError_t err = cudaIpcGetMemHandle(
               reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-              output_tensor_pb->GetDataPtr());
+              output_tensor.GetDataPtr());
           if (err != cudaSuccess) {
             throw PythonBackendException(
                 std::string(
@@ -414,7 +421,7 @@ class Stub {
         CUdeviceptr start_address;
         CUresult cuda_err = cuPointerGetAttribute(
             &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
-            (CUdeviceptr)output_tensor_pb->GetDataPtr());
+            (CUdeviceptr)output_tensor.GetDataPtr());
         if (cuda_err != CUDA_SUCCESS) {
           const char* error_string;
           cuGetErrorString(cuda_err, &error_string);
@@ -424,7 +431,7 @@ class Stub {
                   std::string(error_string))
                   .c_str());
         }
-        *ptr_offset = reinterpret_cast<char*>(output_tensor_pb->GetDataPtr()) -
+        *ptr_offset = reinterpret_cast<char*>(output_tensor.GetDataPtr()) -
                       reinterpret_cast<char*>(start_address);
 #else
         throw PythonBackendException(
@@ -591,8 +598,12 @@ class Stub {
       requested_output_names.emplace_back(output_name);
     }
 
+    char* model_name;
+    LoadStringFromSharedMemory(shm_pool_, request->model_name, model_name);
+
     return InferRequest(
-        id, request->correlation_id, py_input_tensors, requested_output_names);
+        id, request->correlation_id, py_input_tensors, requested_output_names,
+        model_name, request->model_version);
   }
 
   void SetResponseFromException(
@@ -703,21 +714,19 @@ class Stub {
     py::list py_request_list;
     for (size_t i = 0; i < batch_size; i++) {
       Request* request = &requests[i];
-      InferRequest infer_request =
-          ProcessRequest(request, response_batch, deserialize_bytes_);
-      py_request_list.append(infer_request);
+      py_request_list.append(
+          ProcessRequest(request, response_batch, deserialize_bytes_));
     }
-
-    py::list responses;
 
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_path_ +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
+    py::object request_list = py_request_list;
 
     // Execute Response
-    responses = model_instance_.attr("execute")(py_request_list);
+    py::list responses = model_instance_.attr("execute")(request_list);
 
     Response* responses_shm;
     off_t responses_shm_offset;
@@ -737,11 +746,12 @@ class Stub {
     response_batch->responses = responses_shm_offset;
     response_batch->batch_size = response_size;
 
-
     size_t i = 0;
     for (auto& response : responses) {
+      InferResponse* infer_response = response.cast<InferResponse*>();
       Response* response_shm = &responses_shm[i];
-      ProcessResponse(response_shm, response_batch, response, serialize_bytes_);
+      ProcessResponse(
+          response_shm, response_batch, infer_response, serialize_bytes_);
       i += 1;
     }
   }
@@ -768,8 +778,11 @@ class Stub {
     py::setattr(
         python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
     py::setattr(
-        python_backend_utils, "InferRequest",
+        python_backend_utils, "InferenceRequest",
         c_python_backend_utils.attr("InferenceRequest"));
+    py::setattr(
+        python_backend_utils, "InferenceResponse",
+        c_python_backend_utils.attr("InferenceResponse"));
 
     py::object TritonPythonModel =
         py::module::import((model_version_ + std::string(".model")).c_str())
@@ -867,11 +880,19 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<InferRequest>(module, "InferenceRequest")
       .def(py::init<
            const std::string&, uint64_t, const std::vector<PbTensor>&,
-           const std::vector<std::string>&>())
+           const std::vector<std::string>&, const std::string&,
+           const int64_t>())
       .def("inputs", &InferRequest::Inputs)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
+      // .def("exec", &InferRequest::Exec)
       .def("requested_output_names", &InferRequest::RequestedOutputNames);
+
+  py::class_<InferResponse>(module, "InferenceResponse")
+      .def(py::init<const std::vector<PbTensor>&, py::object>(), py::arg("output_tensors"), py::arg("error")=py::none())
+      .def("output_tensors", &InferResponse::OutputTensors)
+      .def("has_error", &InferResponse::HasError)
+      .def("error", &InferResponse::Error);
 
   py::register_exception<PythonBackendException>(
       module, "PythonBackendException");
@@ -916,9 +937,9 @@ main(int argc, char** argv)
   int64_t shm_growth_size = std::stoi(argv[4]);
   std::string triton_install_path = argv[6];
 
-  std::unique_ptr<Stub> stub;
+  Stub& stub = Stub::GetInstance();
   try {
-    stub = std::make_unique<Stub>(
+    stub.Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
         std::stoi(argv[7]) /* IPCControl offset */);
@@ -942,7 +963,7 @@ main(int argc, char** argv)
           // to true within 1 second.
           sleep(0.3);
 
-          stub->UpdateHealth();
+          stub.UpdateHealth();
 
           if (kill(parent_pid, 0) != 0) {
             // Destroy Stub
@@ -951,7 +972,7 @@ main(int argc, char** argv)
             non_graceful_exit = true;
 
             // Destroy stub and exit.
-            stub.reset();
+            // stub.reset();
             exit(1);
           }
         }
@@ -964,21 +985,21 @@ main(int argc, char** argv)
   // notifications.
   bool finalize = false;
   while (true) {
-    stub->NotifyParent();
+    stub.NotifyParent();
     if (finalize) {
-      stub->Finalize();
+      stub.Finalize();
       background_thread_running = false;
       background_thread.join();
       break;
     }
 
-    if (stub->WaitForNotification()) {
+    if (stub.WaitForNotification()) {
       background_thread_running = false;
       background_thread.join();
       break;
     }
 
-    finalize = stub->RunCommand();
+    finalize = stub.RunCommand();
   }
 
   // Stub must be destroyed before the py::scoped_interpreter goes out of scope.
@@ -986,7 +1007,7 @@ main(int argc, char** argv)
   // If the scoped_interpreter is destroyed before the stub object, this process
   // will no longer hold the GIL lock and destruction of the stub will result in
   // segfault.
-  stub.reset();
+  // stub.reset();
 
   return 0;
 }

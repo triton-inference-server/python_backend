@@ -142,6 +142,8 @@ add_executable(
   src/pb_stub_utils.h
   src/infer_request.cc
   src/infer_request.h
+  src/infer_response.cc
+  src/infer_response.h
   src/pb_stub.cc
   src/pb_utils.cc
   src/pb_utils.h
