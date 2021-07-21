@@ -294,7 +294,8 @@ Stub::ProcessResponse(
     return;
   }
 
-  const std::vector<PbTensor>& output_tensors = response->OutputTensors();
+  const std::vector<std::shared_ptr<PbTensor>>& output_tensors =
+      response->OutputTensors();
   size_t output_tensor_length = output_tensors.size();
 
   size_t j = 0;
@@ -307,26 +308,26 @@ Stub::ProcessResponse(
   response_shm->outputs_size = output_tensor_length;
 
   for (auto& output_tensor : output_tensors) {
-    if (output_tensor.TensorType() == PYTHONBACKEND_DLPACK) {
+    if (output_tensor->TensorType() == PYTHONBACKEND_DLPACK) {
       require_cleanup_ = true;
       tensors_to_remove_.push_back(output_tensor);
     }
 
     Tensor* output_tensor_shm = &output_tensors_shm[j];
-    if (output_tensor.IsCPU()) {
-      output_tensor.SaveToSharedMemory(
+    if (output_tensor->IsCPU()) {
+      output_tensor->SaveToSharedMemory(
           this->GetSharedMemory(), output_tensor_shm);
     } else {
-      char* d_ptr = reinterpret_cast<char*>(output_tensor.GetDataPtr());
+      char* d_ptr = reinterpret_cast<char*>(output_tensor->GetDataPtr());
       size_t ptr_offset = GetDevicePointerOffset(d_ptr);
       char* base_addr = d_ptr - ptr_offset;
       std::unordered_map<void*, std::string>::const_iterator reused_gpu_tensor =
           gpu_tensors_map_.find(base_addr);
       if (reused_gpu_tensor == gpu_tensors_map_.end()) {
-        output_tensor.SaveToSharedMemory(
+        output_tensor->SaveToSharedMemory(
             this->GetSharedMemory(), output_tensor_shm);
       } else {
-        output_tensor.SaveReusedGPUTensorToSharedMemory(
+        output_tensor->SaveReusedGPUTensorToSharedMemory(
             this->GetSharedMemory(), output_tensor_shm,
             reused_gpu_tensor->second);
       }
@@ -348,7 +349,7 @@ Stub::ProcessRequest(
   Tensor* input_tensors;
   shm_pool_->MapOffset((char**)&input_tensors, request->inputs);
 
-  std::vector<PbTensor> py_input_tensors;
+  std::vector<std::shared_ptr<PbTensor>> py_input_tensors;
   for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
     Tensor* input_tensor = &input_tensors[input_idx];
 
@@ -427,12 +428,12 @@ Stub::ProcessRequest(
           py::object deserialized =
               deserialize_bytes(numpy_array).attr("reshape")(dims);
 
-          PbTensor py_input_tensor(name_str, deserialized, dtype);
-          py_input_tensors.emplace_back(py_input_tensor);
+          py_input_tensors.emplace_back(
+              std::make_shared<PbTensor>(name_str, deserialized, dtype));
         } else {
           py::array numpy_array(dtype_numpy, shape, (void*)data);
-          PbTensor py_input_tensor(name_str, numpy_array, dtype);
-          py_input_tensors.emplace_back(py_input_tensor);
+          py_input_tensors.emplace_back(
+              std::make_shared<PbTensor>(name_str, numpy_array, dtype));
         }
       }
       catch (const py::error_already_set& e) {
@@ -467,11 +468,9 @@ Stub::ProcessRequest(
       // adjusted.
       data = data + raw_data->offset;
 
-      PbTensor py_input_tensor = PbTensor(
+      py_input_tensors.emplace_back(std::make_shared<PbTensor>(
           name, shape, dtype, raw_data->memory_type, raw_data->memory_type_id,
-          static_cast<void*>(data), raw_data->byte_size, nullptr);
-
-      py_input_tensors.emplace_back(py_input_tensor);
+          static_cast<void*>(data), raw_data->byte_size, nullptr));
 #else
       throw PythonBackendException(
           "Python backend was not compiled with GPU tensor support.");
@@ -780,8 +779,8 @@ Stub::GetOrCreateInstance()
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
-  py::class_<PbTensor>(module, "Tensor")
-      .def(py::init<std::string&, py::array&>())
+  py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
+      .def(py::init(&PbTensor::FromNumpy))
       .def("name", &PbTensor::Name)
       .def("as_numpy", &PbTensor::AsNumpy)
       .def("triton_dtype", &PbTensor::TritonDtype)
@@ -791,7 +790,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<InferRequest>(module, "InferenceRequest")
       .def(py::init<
-           const std::string&, uint64_t, const std::vector<PbTensor>&,
+           const std::string&, uint64_t,
+           const std::vector<std::shared_ptr<PbTensor>>&,
            const std::vector<std::string>&, const std::string&,
            const int64_t>())
       .def("inputs", &InferRequest::Inputs)
@@ -802,9 +802,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<InferResponse>(module, "InferenceResponse")
       .def(
-          py::init<const std::vector<PbTensor>&, py::object>(),
+          py::init<const std::vector<std::shared_ptr<PbTensor>>&, py::object>(),
           py::arg("output_tensors"), py::arg("error") = py::none())
-      .def("output_tensors", &InferResponse::OutputTensors)
+      .def(
+          "output_tensors", &InferResponse::OutputTensors,
+          py::return_value_policy::reference)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
 

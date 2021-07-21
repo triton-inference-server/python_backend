@@ -33,7 +33,7 @@ namespace triton { namespace backend { namespace python {
 class InferRequest {
   std::string request_id_;
   uint64_t correlation_id_;
-  std::vector<PbTensor> inputs_;
+  std::vector<std::shared_ptr<PbTensor>> inputs_;
   std::vector<std::string> requested_output_names_;
   std::string model_name_;
   int64_t model_version_;
@@ -41,11 +41,11 @@ class InferRequest {
  public:
   InferRequest(
       const std::string& request_id, uint64_t correlation_id,
-      const std::vector<PbTensor>& inputs,
+      const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::vector<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version);
 
-  const std::vector<PbTensor>& Inputs();
+  const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   uint64_t CorrelationId();
   const std::vector<std::string>& RequestedOutputNames();

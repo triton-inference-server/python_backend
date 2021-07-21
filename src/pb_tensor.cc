@@ -24,10 +24,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <cuda.h>
 #include "pb_stub_utils.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
-#include <cuda.h>
 
 namespace py = pybind11;
 
@@ -120,6 +120,12 @@ PbTensor::PbTensor(
   } else {
     tensor_type_ = PYTHONBACKEND_RAW;
   }
+}
+
+std::shared_ptr<PbTensor>
+PbTensor::FromNumpy(const std::string& name, py::object numpy_array)
+{
+  return std::make_shared<PbTensor>(name, numpy_array);
 }
 
 bool
@@ -219,7 +225,7 @@ PbTensor::DeleteDLPack()
   }
 }
 
-std::unique_ptr<PbTensor>
+std::shared_ptr<PbTensor>
 PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 {
   DLManagedTensor* dl_managed_tensor =
@@ -390,8 +396,7 @@ PbTensor::SaveToSharedMemory(
     *ptr_offset = GetDevicePointerOffset(d_ptr);
     cudaSetDevice(this->MemoryTypeId());
     cudaError_t err = cudaIpcGetMemHandle(
-        reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
-        this->GetDataPtr());
+        reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle), this->GetDataPtr());
     if (err != cudaSuccess) {
       throw PythonBackendException(std::string(
                                        "failed to get cuda ipc handle: " +

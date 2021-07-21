@@ -93,12 +93,22 @@ class PbTensor {
       int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
       DLManagedTensor* dl_managed_tensor = nullptr);
 
+  // Copying tensor objects is not allowed.
+  PbTensor(const PbTensor& other) = delete;
+  PbTensor& operator=(const PbTensor& other) = delete;
+
   /// Construct a Python backend tensor using a DLPack
   /// capsule.
   /// \param dlpack source dlpack tensor
   /// \param name name of the tensor
-  static std::unique_ptr<PbTensor> FromDLPack(
+  static std::shared_ptr<PbTensor> FromDLPack(
       const std::string& name, const py::capsule& dlpack);
+
+  /// Construct a Python backend tensor using a NumPy object.
+  /// \param numpy_array Numpy array
+  /// \param name name of the tensor
+  static std::shared_ptr<PbTensor> FromNumpy(
+      const std::string& name, py::object numpy_array);
 
   /// Get a PyCapsule object containing the DLPack representation of the tensor.
   /// \return Capsule object containing pointer to a DLPack object.
