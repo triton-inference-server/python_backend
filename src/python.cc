@@ -48,6 +48,7 @@
 #include <thread>
 #include <vector>
 #include "pb_env.h"
+#include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
@@ -258,8 +259,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Load Triton inputs to the appropriate Protobufs
   TRITONSERVER_Error* GetInputTensor(
-      const uint32_t input_idx, Tensor* input_tensor,
-      TRITONBACKEND_Request* request,
+      const uint32_t input_idx, Tensor* input_tensor_shm,
+      std::unique_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
       std::vector<TRITONBACKEND_Response*>& responses);
 
   TRITONSERVER_Error* ProcessRequests(
@@ -594,10 +595,12 @@ ModelInstanceState::ProcessRequests(
 
     for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
       Tensor* input_tensor = &input_tensors[iidx];
+      std::unique_ptr<PbTensor> pb_input_tensor;
 
       RESPOND_ALL_AND_RETURN_IF_ERROR(
           &responses, request_count,
-          GetInputTensor(iidx, input_tensor, request, responses));
+          GetInputTensor(
+              iidx, input_tensor, pb_input_tensor, request, responses));
     }
 
     off_t* requested_output_names;
@@ -864,6 +867,7 @@ ModelInstanceState::ProcessRequests(
                         std::string(cudaGetErrorString(err)))
                         .c_str()));
           }
+          std::cout << "Opened the IPC handle" << std::endl;
 
           opened_ipc_mem_handles.push_back(
               reinterpret_cast<cudaIpcMemHandle_t*>(data));
@@ -982,9 +986,10 @@ ModelInstanceState::ProcessRequests(
     // If parent fails to notify the stub or the stub fails to notify the
     // parent in a timely manner, kill the stub process and restart the
     // stub process.
+
     bool restart = true;
-    bool failed = NotifyStubAndWait(restart);
-    if (failed) {
+    bool success = NotifyStubAndWait(restart);
+    if (!success) {
       LOG_MESSAGE(
           TRITONSERVER_LOG_ERROR,
           "Python backend stub exited unexpectedly while performing tensor "
@@ -1356,8 +1361,8 @@ ModelInstanceState::~ModelInstanceState()
 
 TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(
-    const uint32_t input_idx, Tensor* input_tensor,
-    TRITONBACKEND_Request* request,
+    const uint32_t input_idx, Tensor* input_tensor_shm,
+    std::unique_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
     std::vector<TRITONBACKEND_Response*>& responses)
 {
   const char* input_name;
@@ -1400,96 +1405,50 @@ ModelInstanceState::GetInputTensor(
   if (input_dtype == TRITONSERVER_TYPE_BYTES) {
     cpu_only_tensors = true;
   }
+  TRITONSERVER_MemoryType src_memory_type;
+  int64_t src_memory_type_id;
+  size_t src_byte_size;
+  const void* src_ptr;
+  RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
+      in, 0 /* input buffer index */, &src_ptr, &src_byte_size,
+      &src_memory_type, &src_memory_type_id));
 
 // If TRITON_ENABLE_GPU is false, we need to copy the tensors
 // to the CPU.
 #ifndef TRITON_ENABLE_GPU
   cpu_only_tensors = true;
 #endif
-  if (cpu_only_tensors) {
-    char* input_buffer;
-    uint64_t* ptr_offset;
-    RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-        shm_pool_, input_tensor, input_buffer,
-        TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
-        input_byte_size, input_name, input_shape, input_dims_count, input_dtype,
-        &ptr_offset));
+  if (cpu_only_tensors || src_memory_type != TRITONSERVER_MEMORY_GPU) {
+    input_tensor = std::make_unique<PbTensor>(
+        std::string(input_name),
+        std::vector<int64_t>(input_shape, input_shape + input_dims_count),
+        input_dtype, TRITONSERVER_MEMORY_CPU /* memory_type */,
+        0 /* memory_type_id */, nullptr /* buffer ptr*/, input_byte_size,
+        nullptr /* DLManagedTensor */);
+    RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
+        shm_pool_, input_tensor_shm, false /* copy */));
+    char* input_buffer = reinterpret_cast<char*>(input_tensor->GetDataPtr());
     collector.ProcessTensor(
         input_name, input_buffer, input_byte_size,
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
-    *ptr_offset = 0;
   } else {
-    TRITONSERVER_MemoryType src_memory_type;
-    int64_t src_memory_type_id;
-    size_t src_byte_size;
-
-    const void* src_ptr;
-    uint64_t* ptr_offset;
-
-    RETURN_IF_ERROR(TRITONBACKEND_InputBuffer(
-        in, 0 /* input buffer index */, &src_ptr, &src_byte_size,
+    // Retreiving GPU input tensors
+    const void* buffer = nullptr;
+    std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
+    alloc_perference = {{TRITONSERVER_MEMORY_GPU, src_memory_type_id}};
+    RETURN_IF_ERROR(collector.ProcessTensor(
+        input_name, nullptr, 0, alloc_perference,
+        reinterpret_cast<const char**>(&buffer), &input_byte_size,
         &src_memory_type, &src_memory_type_id));
-
-    if (src_memory_type == TRITONSERVER_MEMORY_GPU) {
-      char* cuda_handle;
-      RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, cuda_handle, src_memory_type,
-          src_memory_type_id, input_byte_size, input_name, input_shape,
-          input_dims_count, input_dtype, &ptr_offset));
-
-      const void* buffer = nullptr;
-      std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
-      alloc_perference = {{TRITONSERVER_MEMORY_GPU, src_memory_type_id}};
-      RETURN_IF_ERROR(collector.ProcessTensor(
-          input_name, nullptr, 0, alloc_perference,
-          reinterpret_cast<const char**>(&buffer), &input_byte_size,
-          &src_memory_type, &src_memory_type_id));
-
-      void* buffer_cast = const_cast<void*>(buffer);
-      cudaSetDevice(src_memory_type_id);
-      cudaError_t err = cudaIpcGetMemHandle(
-          reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle), buffer_cast);
-      if (err != cudaSuccess) {
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, ("Failed to open device pointer." +
-                                          std::string(cudaGetErrorName(err)))
-                                             .c_str());
-      }
-
-      CUdeviceptr start_address;
-      CUresult cuda_err = cuPointerGetAttribute(
-          &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
-          reinterpret_cast<CUdeviceptr>(buffer_cast));
-      if (cuda_err != CUDA_SUCCESS) {
-        const char* error_string;
-        cuGetErrorString(cuda_err, &error_string);
-        throw PythonBackendException(
-            std::string(
-                "failed to get cuda pointer device attribute: " +
-                std::string(error_string))
-                .c_str());
-      }
-      *ptr_offset = reinterpret_cast<char*>(buffer_cast) -
-                    reinterpret_cast<char*>(start_address);
-      gpu_tensors_map_.insert(
-          {input_name, reinterpret_cast<void*>(start_address)});
-    } else {
-      char* input_buffer;
-      uint64_t* ptr_offset;
-
-      // If the tensor is not in GPU, the tensor must be stored in CPU.
-      src_memory_type = TRITONSERVER_MEMORY_CPU;
-      src_memory_type_id = 0;
-      RETURN_IF_EXCEPTION(SaveTensorToSharedMemory(
-          shm_pool_, input_tensor, input_buffer,
-          TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */,
-          input_byte_size, input_name, input_shape, input_dims_count,
-          input_dtype, &ptr_offset));
-      *ptr_offset = 0;
-      collector.ProcessTensor(
-          input_name, input_buffer, input_byte_size, src_memory_type,
-          src_memory_type_id);
-    }
+    input_tensor = std::make_unique<PbTensor>(
+        std::string(input_name),
+        std::vector<int64_t>(input_shape, input_shape + input_dims_count),
+        input_dtype, src_memory_type, src_memory_type_id,
+        const_cast<void*>(buffer), input_byte_size,
+        nullptr /* DLManagedTensor */);
+    RETURN_IF_EXCEPTION(
+        input_tensor->SaveToSharedMemory(shm_pool_, input_tensor_shm));
+    gpu_tensors_map_.insert({input_name, input_tensor->GetGPUStartAddress()});
   }
 
   return nullptr;

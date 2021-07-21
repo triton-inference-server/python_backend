@@ -132,6 +132,8 @@ add_library(
   src/pb_utils.h
   src/pb_env.cc
   src/pb_env.h
+  src/pb_tensor.cc
+  src/pb_tensor.h
   src/shm_manager.cc
   src/shm_manager.h
 )
@@ -176,10 +178,12 @@ target_compile_options(
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
   -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
 )
+target_compile_definitions(triton-python-backend-stub PRIVATE TRITON_PB_STUB)
 
 target_link_libraries(
   triton-python-backend
   PRIVATE
+    dlpack
     triton-core-serverstub  # from repo-core
     triton-backend-utils    # from repo-backend
     ZLIB::ZLIB

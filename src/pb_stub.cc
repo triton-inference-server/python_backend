@@ -286,6 +286,7 @@ Stub::ProcessResponse(
   bool has_error = response->HasError();
 
   if (has_error) {
+    response_shm->has_error = true;
     py::str py_string_err = response->Error();
     std::string response_error = py_string_err;
     SetErrorForResponse(response_shm, response_error.c_str());
@@ -294,46 +295,23 @@ Stub::ProcessResponse(
     return;
   }
 
-  const std::vector<std::shared_ptr<PbTensor>>& output_tensors =
+  std::vector<std::shared_ptr<PbTensor>>& output_tensors =
       response->OutputTensors();
-  size_t output_tensor_length = output_tensors.size();
-
-  size_t j = 0;
-  Tensor* output_tensors_shm;
-  off_t output_tensors_offset;
-  shm_pool_->Map(
-      (char**)&output_tensors_shm, sizeof(Tensor) * output_tensor_length,
-      output_tensors_offset);
-  response_shm->outputs = output_tensors_offset;
-  response_shm->outputs_size = output_tensor_length;
-
   for (auto& output_tensor : output_tensors) {
     if (output_tensor->TensorType() == PYTHONBACKEND_DLPACK) {
-      require_cleanup_ = true;
+      response_batch->cleanup = true;
       tensors_to_remove_.push_back(output_tensor);
     }
 
-    Tensor* output_tensor_shm = &output_tensors_shm[j];
-    if (output_tensor->IsCPU()) {
-      output_tensor->SaveToSharedMemory(
-          this->GetSharedMemory(), output_tensor_shm);
-    } else {
-      char* d_ptr = reinterpret_cast<char*>(output_tensor->GetDataPtr());
-      size_t ptr_offset = GetDevicePointerOffset(d_ptr);
-      char* base_addr = d_ptr - ptr_offset;
+    if (!output_tensor->IsCPU()) {
       std::unordered_map<void*, std::string>::const_iterator reused_gpu_tensor =
-          gpu_tensors_map_.find(base_addr);
-      if (reused_gpu_tensor == gpu_tensors_map_.end()) {
-        output_tensor->SaveToSharedMemory(
-            this->GetSharedMemory(), output_tensor_shm);
-      } else {
-        output_tensor->SaveReusedGPUTensorToSharedMemory(
-            this->GetSharedMemory(), output_tensor_shm,
-            reused_gpu_tensor->second);
+          gpu_tensors_map_.find(output_tensor->GetGPUStartAddress());
+      if (reused_gpu_tensor != gpu_tensors_map_.end()) {
+        output_tensor->SetReusedGPUTensorName(reused_gpu_tensor->second);
       }
     }
 
-    j += 1;
+    response->SaveToSharedMemory(shm_pool_, response_shm);
   }
 }
 
@@ -346,135 +324,19 @@ Stub::ProcessRequest(
   LoadStringFromSharedMemory(shm_pool_, request->id, id);
 
   uint32_t requested_input_count = request->requested_input_count;
-  Tensor* input_tensors;
-  shm_pool_->MapOffset((char**)&input_tensors, request->inputs);
 
   std::vector<std::shared_ptr<PbTensor>> py_input_tensors;
   for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
-    Tensor* input_tensor = &input_tensors[input_idx];
+    std::shared_ptr<PbTensor> pb_input_tensor;
+    pb_input_tensor = PbTensor::LoadFromSharedMemory(
+        shm_pool_, request->inputs + sizeof(Tensor) * input_idx);
+    py_input_tensors.emplace_back(pb_input_tensor);
 
-    char* name = nullptr;
-    LoadStringFromSharedMemory(shm_pool_, input_tensor->name, name);
-    size_t dims_count = input_tensor->dims_count;
-
-    RawData* raw_data;
-    shm_pool_->MapOffset((char**)&raw_data, input_tensor->raw_data);
-
-    int64_t* dims;
-    shm_pool_->MapOffset((char**)&dims, input_tensor->dims);
-
-    TRITONSERVER_DataType dtype = input_tensor->dtype;
-    std::vector<int64_t> shape{dims, dims + dims_count};
-
-    char* data;
-    if (raw_data->memory_type == TRITONSERVER_MEMORY_CPU) {
-      shm_pool_->MapOffset((char**)&data, raw_data->memory_ptr);
-
-      py::dtype dtype_numpy;
-      switch (dtype) {
-        case TRITONSERVER_TYPE_BOOL:
-          dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT8:
-          dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT16:
-          dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT32:
-          dtype_numpy = py::dtype(py::format_descriptor<uint32_t>::format());
-          break;
-        case TRITONSERVER_TYPE_UINT64:
-          dtype_numpy = py::dtype(py::format_descriptor<uint64_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT8:
-          dtype_numpy = py::dtype(py::format_descriptor<int8_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT16:
-          dtype_numpy = py::dtype(py::format_descriptor<int16_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT32:
-          dtype_numpy = py::dtype(py::format_descriptor<int32_t>::format());
-          break;
-        case TRITONSERVER_TYPE_INT64:
-          dtype_numpy = py::dtype(py::format_descriptor<int64_t>::format());
-          break;
-        case TRITONSERVER_TYPE_FP16:
-          // Will be reinterpreted in the python code.
-          dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-          break;
-        case TRITONSERVER_TYPE_FP32:
-          dtype_numpy = py::dtype(py::format_descriptor<float>::format());
-          break;
-        case TRITONSERVER_TYPE_FP64:
-          dtype_numpy = py::dtype(py::format_descriptor<double>::format());
-          break;
-        case TRITONSERVER_TYPE_BYTES:
-          // Will be reinterpreted in the python code.
-          dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-          break;
-        default:
-          break;
-      }
-      std::string name_str(name);
-
-      try {
-        // Custom handling for bytes
-        if (dtype == TRITONSERVER_TYPE_BYTES) {
-          py::array numpy_array(
-              dtype_numpy, {raw_data->byte_size}, (void*)data);
-          py::list dims = py::cast(shape);
-
-          py::object deserialized =
-              deserialize_bytes(numpy_array).attr("reshape")(dims);
-
-          py_input_tensors.emplace_back(
-              std::make_shared<PbTensor>(name_str, deserialized, dtype));
-        } else {
-          py::array numpy_array(dtype_numpy, shape, (void*)data);
-          py_input_tensors.emplace_back(
-              std::make_shared<PbTensor>(name_str, numpy_array, dtype));
-        }
-      }
-      catch (const py::error_already_set& e) {
-        LOG_INFO << e.what();
-        throw PythonBackendException(e.what());
-      }
-    } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
-      cudaIpcMemHandle_t* cuda_mem_handle;
-      cudaSetDevice(raw_data->memory_type_id);
-      shm_pool_->MapOffset((char**)&cuda_mem_handle, raw_data->memory_ptr);
-
-      cudaError_t err = cudaIpcOpenMemHandle(
-          (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
-      if (err != cudaSuccess) {
-        throw PythonBackendException(std::string(
-                                         "failed to open cuda ipc handle: " +
-                                         std::string(cudaGetErrorString(err)))
-                                         .c_str());
-      }
-
-      // Clean up is required to remove the GPU tensors
-      require_cleanup_ = true;
-
-      size_t ptr_offset = GetDevicePointerOffset(static_cast<void*>(data));
+    if (!pb_input_tensor->IsCPU()) {
+      response_batch->cleanup = true;
       gpu_tensors_map_.insert(
-          {reinterpret_cast<void*>(static_cast<char*>(data) - ptr_offset),
-           name});
-
-      // Adjust the device pointer with the offset. cudaIpcOpenMemHandle will
-      // map the base address only and the offset needs to be manually
-      // adjusted.
-      data = data + raw_data->offset;
-
-      py_input_tensors.emplace_back(std::make_shared<PbTensor>(
-          name, shape, dtype, raw_data->memory_type, raw_data->memory_type_id,
-          static_cast<void*>(data), raw_data->byte_size, nullptr));
-#else
-      throw PythonBackendException(
-          "Python backend was not compiled with GPU tensor support.");
-#endif
+          {reinterpret_cast<void*>(pb_input_tensor->GetGPUStartAddress()),
+           pb_input_tensor->Name()});
     }
   }
 
@@ -715,6 +577,7 @@ void
 Stub::Cleanup()
 {
   // Deleting the tensors should automatically trigger the destructor.
+  std::cout << "Cleaning up" << std::endl;
   tensors_to_remove_.clear();
 
 #ifdef TRITON_ENABLE_GPU

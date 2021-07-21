@@ -28,15 +28,18 @@
 #pragma once
 
 #include <dlpack/dlpack.h>
+
+#ifdef TRITON_PB_STUB
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+namespace py = pybind11;
+#endif
+
 #include <string>
 #include "pb_utils.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
-
-namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
@@ -51,7 +54,9 @@ typedef enum PYTHONBACKEND_tensortype_enum {
 class PbTensor {
  private:
   std::string name_;
+#ifdef TRITON_PB_STUB
   py::array numpy_array_;
+#endif
   TRITONSERVER_DataType dtype_;
   void* memory_ptr_;
   int64_t memory_type_id_;
@@ -60,8 +65,11 @@ class PbTensor {
   PYTHONBACKEND_TensorType tensor_type_;
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
+  std::string reused_gpu_tensor_name_;
+  bool is_reused_ = false;
 
  public:
+#ifdef TRITON_PB_STUB
   /// Create a PbTensor using a numpy array
   /// \param name The name of the tensor
   /// \param numpy_array Numpy array to use for the initialization of the tensor
@@ -76,6 +84,7 @@ class PbTensor {
   PbTensor(
       const std::string& name, py::object numpy_array,
       TRITONSERVER_DataType dtype);
+#endif
 
   /// Create a PbTensor from raw pointer. This constructor is used for
   /// interfacing with DLPack tensors.
@@ -97,6 +106,7 @@ class PbTensor {
   PbTensor(const PbTensor& other) = delete;
   PbTensor& operator=(const PbTensor& other) = delete;
 
+#ifdef TRITON_PB_STUB
   /// Construct a Python backend tensor using a DLPack
   /// capsule.
   /// \param dlpack source dlpack tensor
@@ -113,24 +123,30 @@ class PbTensor {
   /// Get a PyCapsule object containing the DLPack representation of the tensor.
   /// \return Capsule object containing pointer to a DLPack object.
   py::capsule ToDLPack();
+#endif
+
+  static std::shared_ptr<PbTensor> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
 
   /// Get the name of the tensor
   /// \return name of the tensor.
   const std::string& Name() const;
 
+  void* GetGPUStartAddress();
+
+#ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.
   /// \throw If the tensor is stored in GPU, an exception is thrown
   /// \return NumPy representation of the Tensor
   const py::array& AsNumpy() const;
+#endif
 
   /// Save tensor inside shared memory.
   void SaveToSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm) const;
-
-  /// Save a reused GPU tensor inside shared memory
-  void SaveReusedGPUTensorToSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm,
-      const std::string& reused_tensor_name) const;
+      bool copy = true);
+
+  void SetReusedGPUTensorName(const std::string& reused_gpu_tensor_name);
 
   /// Get the triton dtype
   /// \return Triton dtype
@@ -164,9 +180,19 @@ class PbTensor {
   /// \return The location to the memory where the data is stored.
   void* GetDataPtr() const;
 
+  /// Set the underlying pointer to use. This must be only used when the tensor
+  /// is being reused.
+  void SetDataPtr(void* ptr);
+
+  bool IsReused();
+
+  /// Get the reused GPU tensor name
+  const std::string& ReusedGPUTensorName();
+
   /// Get the memory type id.
   /// \return The memory type id of the tensor.
   int64_t MemoryTypeId() const;
+  PbTensor();
 
   /// Destructor
   ~PbTensor();
