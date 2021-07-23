@@ -68,6 +68,8 @@ namespace bi = boost::interprocess;
 typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_Execute,
   PYTHONSTUB_Initialize,
+  PYTHONSTUB_InferExecRequest,
+  PYTHONSTUB_InferExecResponse,
   PYTHONSTUB_PreInitialize,
   PYTHONSTUB_Finalize,
   PYTHONSTUB_TensorCleanup
@@ -81,6 +83,8 @@ struct IPCMessage {
 struct ExecuteArgs {
   off_t request_batch;
   off_t response_batch;
+  off_t bls_request_batch;
+  off_t bls_response_batch;
 };
 
 size_t GetDevicePointerOffset(void* d_ptr);

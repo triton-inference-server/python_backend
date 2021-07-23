@@ -456,6 +456,7 @@ PbTensor::GetGPUStartAddress()
       "Calling GetGPUStartAddress function on a CPU tensor.");
 }
 
+
 void
 PbTensor::SaveToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm, bool copy)

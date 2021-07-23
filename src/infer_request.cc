@@ -26,7 +26,10 @@
 
 #include "infer_request.h"
 
+#ifdef TRITON_PB_STUB
 #include "infer_response.h"
+#include "pb_stub.h"
+#endif
 
 namespace triton { namespace backend { namespace python {
 
@@ -65,10 +68,85 @@ InferRequest::RequestedOutputNames()
   return requested_output_names_;
 }
 
+void
+InferRequest::SaveToSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm)
+{
+  request_shm->correlation_id = this->CorrelationId();
+  off_t id_offset;
+  SaveStringToSharedMemory(shm_pool, id_offset, this->RequestId().c_str());
+  request_shm->id = id_offset;
+  request_shm->requested_output_count = this->RequestedOutputNames().size();
+  off_t requested_output_names_offset;
+  off_t* requested_output_names;
+  shm_pool->Map(
+      (char**)&requested_output_names,
+      sizeof(off_t) * request_shm->requested_output_count,
+      requested_output_names_offset);
+
+  request_shm->requested_output_names = requested_output_names_offset;
+  size_t i = 0;
+  for (auto& requested_output_name : requested_output_names_) {
+    SaveStringToSharedMemory(
+        shm_pool, requested_output_names[i], requested_output_name.c_str());
+    i++;
+  }
+
+  request_shm->requested_input_count = this->Inputs().size();
+  request_shm->model_version = this->model_version_;
+  SaveStringToSharedMemory(
+      shm_pool, request_shm->model_name, this->model_name_.c_str());
+}
+
+std::unique_ptr<InferRequest>
+InferRequest::LoadFromSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset)
+{
+  Request* request;
+  shm_pool->MapOffset((char**)&request, request_offset);
+
+  char* id = nullptr;
+  LoadStringFromSharedMemory(shm_pool, request->id, id);
+
+  uint32_t requested_input_count = request->requested_input_count;
+
+  std::vector<std::shared_ptr<PbTensor>> py_input_tensors;
+  for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
+    std::shared_ptr<PbTensor> pb_input_tensor = PbTensor::LoadFromSharedMemory(
+        shm_pool, request->inputs + sizeof(Tensor) * input_idx);
+    py_input_tensors.emplace_back(std::move(pb_input_tensor));
+  }
+
+  std::vector<std::string> requested_output_names;
+  uint32_t requested_output_count = request->requested_output_count;
+  off_t* output_names;
+  shm_pool->MapOffset((char**)&output_names, request->requested_output_names);
+
+  for (size_t output_idx = 0; output_idx < requested_output_count;
+       ++output_idx) {
+    char* output_name = nullptr;
+    LoadStringFromSharedMemory(shm_pool, output_names[output_idx], output_name);
+    requested_output_names.emplace_back(output_name);
+  }
+
+  char* model_name;
+  LoadStringFromSharedMemory(shm_pool, request->model_name, model_name);
+  return std::make_unique<InferRequest>(
+      id, request->correlation_id, std::move(py_input_tensors), requested_output_names,
+      model_name, request->model_version);
+}
+
+// #ifdef TRITON_PB_STUB
 // std::unique_ptr<InferResponse>
 // InferRequest::Exec()
 // {
+//   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
+//   // TODO: Handle identity tensors
+//   for (auto& input_tensor : inputs) {
+//     input_tensor->SaveToSharedMemory(stub->GetSharedMemory(), );
+//   }
 // }
+// #endif
 
 }}}  // namespace triton::backend::python

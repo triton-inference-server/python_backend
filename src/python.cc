@@ -47,6 +47,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "infer_request.h"
 #include "pb_env.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -260,7 +261,7 @@ class ModelInstanceState : public BackendModelInstance {
   // Load Triton inputs to the appropriate Protobufs
   TRITONSERVER_Error* GetInputTensor(
       const uint32_t input_idx, Tensor* input_tensor_shm,
-      std::unique_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
+      std::shared_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
       std::vector<TRITONBACKEND_Response*>& responses);
 
   TRITONSERVER_Error* ProcessRequests(
@@ -567,7 +568,6 @@ ModelInstanceState::ProcessRequests(
     RESPOND_ALL_AND_RETURN_IF_ERROR(
         &responses, request_count,
         TRITONBACKEND_RequestInputCount(request, &requested_input_count));
-    python_infer_request->requested_input_count = requested_input_count;
 
     uint32_t requested_output_count = 0;
     RESPOND_ALL_AND_RETURN_IF_ERROR(
@@ -585,36 +585,20 @@ ModelInstanceState::ProcessRequests(
             input_tensors_offset));
     python_infer_request->inputs = input_tensors_offset;
 
-    off_t model_name_offset;
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
-        SaveStringToSharedMemory(
-            shm_pool_, model_name_offset, model_state->Name().c_str()));
-    python_infer_request->model_name = model_name_offset;
-    python_infer_request->model_version = model_state->Version();
 
+    std::vector<std::shared_ptr<PbTensor>> pb_input_tensors;
     for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
       Tensor* input_tensor = &input_tensors[iidx];
-      std::unique_ptr<PbTensor> pb_input_tensor;
+      std::shared_ptr<PbTensor> pb_input_tensor;
 
       RESPOND_ALL_AND_RETURN_IF_ERROR(
           &responses, request_count,
           GetInputTensor(
               iidx, input_tensor, pb_input_tensor, request, responses));
+      pb_input_tensors.emplace_back(std::move(pb_input_tensor));
     }
 
-    off_t* requested_output_names;
-    off_t requested_output_names_offset;
-
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
-        shm_pool_->Map(
-            (char**)&requested_output_names,
-            sizeof(off_t) * requested_output_count,
-            requested_output_names_offset));
-    python_infer_request->requested_output_names =
-        requested_output_names_offset;
-
+    std::vector<std::string> requested_output_names;
     // Append the list of requested outputs to the inference_request
     for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
       const char* requested_output_name;
@@ -622,14 +606,7 @@ ModelInstanceState::ProcessRequests(
           &responses, request_count,
           TRITONBACKEND_RequestOutputName(
               request, iidx, &requested_output_name));
-
-      // output name
-      off_t output_name_offset;
-      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-          &responses, request_count,
-          SaveStringToSharedMemory(
-              shm_pool_, output_name_offset, requested_output_name));
-      requested_output_names[iidx] = output_name_offset;
+      requested_output_names.emplace_back(requested_output_name);
     }
 
     // request id
@@ -637,17 +614,17 @@ ModelInstanceState::ProcessRequests(
     RESPOND_ALL_AND_RETURN_IF_ERROR(
         &responses, request_count, TRITONBACKEND_RequestId(request, &id));
 
-    off_t id_offset;
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
-        SaveStringToSharedMemory(shm_pool_, id_offset, id));
-    python_infer_request->id = id_offset;
-
     uint64_t correlation_id;
     RESPOND_ALL_AND_RETURN_IF_ERROR(
         &responses, request_count,
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
-    python_infer_request->correlation_id = correlation_id;
+
+    InferRequest infer_request(
+        id, correlation_id, pb_input_tensors, requested_output_names,
+        model_state->Name(), model_state->Version());
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
+        infer_request.SaveToSharedMemory(shm_pool_, python_infer_request));
   }
 
   uint64_t compute_start_ns = 0;
@@ -674,6 +651,11 @@ ModelInstanceState::ProcessRequests(
 
     return nullptr;
   }
+
+  // // If the command is no longer execute it indicates a BLS request.
+  // if (ipc_message_->command == PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+  //   ipc_message_->args
+  // }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -781,8 +763,19 @@ ModelInstanceState::ProcessRequests(
     }
 
     for (size_t j = 0; j < response_shm->outputs_size; ++j) {
-      std::shared_ptr<PbTensor> output_tensor = PbTensor::LoadFromSharedMemory(
-          shm_pool_, response_shm->outputs + sizeof(Tensor) * j);
+      std::shared_ptr<PbTensor> output_tensor;
+
+      try {
+        output_tensor = PbTensor::LoadFromSharedMemory(
+            shm_pool_, response_shm->outputs + sizeof(Tensor) * j);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONSERVER_ErrorNew(
+                TRITONSERVER_ERROR_INTERNAL, pb_exception.what()));
+        continue;
+      }
 
       if (requested_output_names.find(output_tensor->Name()) ==
           requested_output_names.end()) {
@@ -1252,7 +1245,7 @@ ModelInstanceState::~ModelInstanceState()
 TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(
     const uint32_t input_idx, Tensor* input_tensor_shm,
-    std::unique_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
+    std::shared_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
     std::vector<TRITONBACKEND_Response*>& responses)
 {
   const char* input_name;
@@ -1337,7 +1330,8 @@ ModelInstanceState::GetInputTensor(
         const_cast<void*>(buffer), input_byte_size,
         nullptr /* DLManagedTensor */);
     gpu_tensors_map_.insert(
-          {input_tensor->Name(), reinterpret_cast<void*>(input_tensor->GetGPUStartAddress())});
+        {input_tensor->Name(),
+         reinterpret_cast<void*>(input_tensor->GetGPUStartAddress())});
     RETURN_IF_EXCEPTION(
         input_tensor->SaveToSharedMemory(shm_pool_, input_tensor_shm));
   }

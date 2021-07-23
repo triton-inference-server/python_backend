@@ -49,5 +49,11 @@ class InferRequest {
   const std::string& RequestId();
   uint64_t CorrelationId();
   const std::vector<std::string>& RequestedOutputNames();
+  void SaveToSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm);
+  static std::unique_ptr<InferRequest> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool,
+      off_t request_offset);
+      //  std::unique_ptr<InferResponse> Exec();
 };
 }}};  // namespace triton::backend::python

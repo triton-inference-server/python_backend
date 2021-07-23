@@ -131,6 +131,8 @@ add_library(
   src/pb_utils.cc
   src/pb_utils.h
   src/pb_env.cc
+  src/infer_request.cc
+  src/infer_request.h
   src/pb_env.h
   src/pb_tensor.cc
   src/pb_tensor.h

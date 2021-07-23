@@ -315,50 +315,22 @@ Stub::ProcessResponse(
   }
 }
 
-InferRequest
+std::unique_ptr<InferRequest>
 Stub::ProcessRequest(
-    Request* request, ResponseBatch* response_batch,
+    off_t request_offset, ResponseBatch* response_batch,
     py::object& deserialize_bytes)
 {
-  char* id = nullptr;
-  LoadStringFromSharedMemory(shm_pool_, request->id, id);
-
-  uint32_t requested_input_count = request->requested_input_count;
-
-  std::vector<std::shared_ptr<PbTensor>> py_input_tensors;
-  for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
-    std::shared_ptr<PbTensor> pb_input_tensor;
-    pb_input_tensor = PbTensor::LoadFromSharedMemory(
-        shm_pool_, request->inputs + sizeof(Tensor) * input_idx);
-    py_input_tensors.emplace_back(pb_input_tensor);
-
-    if (!pb_input_tensor->IsCPU()) {
+  std::unique_ptr<InferRequest> infer_request = InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
+  for (auto& input_tensor : infer_request->Inputs()) {
+    if (!input_tensor->IsCPU()) {
       response_batch->cleanup = true;
       gpu_tensors_map_.insert(
-          {reinterpret_cast<void*>(pb_input_tensor->GetGPUStartAddress()),
-           pb_input_tensor->Name()});
+          {reinterpret_cast<void*>(input_tensor->GetGPUStartAddress()),
+           input_tensor->Name()});
     }
   }
 
-  std::vector<std::string> requested_output_names;
-  uint32_t requested_output_count = request->requested_output_count;
-  off_t* output_names;
-  shm_pool_->MapOffset((char**)&output_names, request->requested_output_names);
-
-  for (size_t output_idx = 0; output_idx < requested_output_count;
-       ++output_idx) {
-    char* output_name = nullptr;
-    LoadStringFromSharedMemory(
-        shm_pool_, output_names[output_idx], output_name);
-    requested_output_names.emplace_back(output_name);
-  }
-
-  char* model_name;
-  LoadStringFromSharedMemory(shm_pool_, request->model_name, model_name);
-
-  return InferRequest(
-      id, request->correlation_id, py_input_tensors, requested_output_names,
-      model_name, request->model_version);
+  return infer_request;
 }
 
 void
@@ -466,14 +438,11 @@ Stub::Execute(ExecuteArgs* execute_args, ResponseBatch* response_batch)
     return;
   }
 
-  Request* requests;
-  shm_pool_->MapOffset((char**)&requests, request_batch->requests);
-
   py::list py_request_list;
   for (size_t i = 0; i < batch_size; i++) {
-    Request* request = &requests[i];
+    off_t request_offset = request_batch->requests + i * sizeof(Request);
     py_request_list.append(
-        ProcessRequest(request, response_batch, deserialize_bytes_));
+        ProcessRequest(request_offset, response_batch, deserialize_bytes_));
   }
 
   if (!py::hasattr(model_instance_, "execute")) {

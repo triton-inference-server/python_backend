@@ -79,8 +79,8 @@ class Stub {
   void ProcessResponse(
       Response* response_shm, ResponseBatch* response_batch,
       InferResponse* response, py::object& serialize_bytes);
-  InferRequest ProcessRequest(
-      Request* request, ResponseBatch* response_batch,
+  std::unique_ptr<InferRequest> ProcessRequest(
+      off_t request_offset, ResponseBatch* response_batch,
       py::object& deserialize_bytes);
   void SetResponseFromException(
       ResponseBatch* response_batch,
