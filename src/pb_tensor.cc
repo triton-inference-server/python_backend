@@ -239,7 +239,6 @@ void
 PbTensor::DeleteDLPack()
 {
   if (dl_managed_tensor_ != nullptr) {
-    std::cout << "Tensor deallocated" << std::endl;
     dl_managed_tensor_->deleter(dl_managed_tensor_);
     dl_managed_tensor_ = nullptr;
   }
@@ -264,6 +263,7 @@ PbTensor::LoadFromSharedMemory(
   shm_pool->MapOffset((char**)&dims, tensor_shm->dims);
 
   std::string reused_gpu_tensor_name;
+  void* data_base = nullptr;
   char* data = nullptr;
   if (raw_data->memory_type == TRITONSERVER_MEMORY_CPU) {
     shm_pool->MapOffset((char**)&data, raw_data->memory_ptr);
@@ -276,12 +276,17 @@ PbTensor::LoadFromSharedMemory(
 
       cudaError_t err = cudaIpcOpenMemHandle(
           (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+      data_base = data;
       if (err != cudaSuccess) {
         throw PythonBackendException(std::string(
                                          "failed to open cuda ipc handle: " +
                                          std::string(cudaGetErrorString(err)))
                                          .c_str());
       }
+      // Adjust the offset. cudaIpcOpenMemHandle will map the base address of a
+      // GPU pointer and the offset is not preserved when transferring the
+      // pointer using cudaIpcMemHandle.
+      data = data + raw_data->offset;
     } else {
       char* reused_gpu_tensor;
       LoadStringFromSharedMemory(
@@ -289,21 +294,22 @@ PbTensor::LoadFromSharedMemory(
       reused_gpu_tensor_name = reused_gpu_tensor;
     }
 
-    // Adjust the offset. cudaIpcOpenMemHandle will map the base address of a
-    // GPU pointer and the offset is not preserved when transferring the pointer
-    // using cudaIpcMemHandle.
-    data = data + raw_data->offset;
 #endif
   }
 
   std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
       name, std::vector<int64_t>(dims, dims + dims_count), tensor_shm->dtype,
       raw_data->memory_type, raw_data->memory_type_id, data,
-      raw_data->byte_size, nullptr /**/);
+      raw_data->byte_size, nullptr /* DLManaged Tensor */);
 
 #ifdef TRITON_ENABLE_GPU
   if (reused_gpu_tensor_name != "") {
     pb_tensor->SetReusedGPUTensorName(reused_gpu_tensor_name);
+    pb_tensor->reused_tensor_offset_ = raw_data->offset;
+  }
+
+  if (data_base != nullptr) {
+    pb_tensor->cuda_ipc_mem_handle_ = data_base;
   }
 #endif
 
@@ -389,8 +395,18 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 }
 #endif
 
-PbTensor::~PbTensor()
+PbTensor::~PbTensor() noexcept(false)
 {
+  if (cuda_ipc_mem_handle_ != nullptr) {
+    cudaError_t err = cudaIpcCloseMemHandle(cuda_ipc_mem_handle_);
+    cuda_ipc_mem_handle_ = nullptr;
+    if (err != cudaSuccess) {
+      throw PythonBackendException(std::string(
+                                       "failed to close cuda ipc handle: " +
+                                       std::string(cudaGetErrorString(err)))
+                                       .c_str());
+    }
+  }
   DeleteDLPack();
 }
 
@@ -533,7 +549,8 @@ PbTensor::SaveToSharedMemory(
 void
 PbTensor::SetDataPtr(void* ptr)
 {
-  memory_ptr_ = ptr;
+  memory_ptr_ = reinterpret_cast<void*>(
+      (reinterpret_cast<char*>(ptr) + reused_tensor_offset_));
 }
 
 bool

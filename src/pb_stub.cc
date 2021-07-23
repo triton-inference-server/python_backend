@@ -577,18 +577,9 @@ void
 Stub::Cleanup()
 {
   // Deleting the tensors should automatically trigger the destructor.
-  std::cout << "Cleaning up" << std::endl;
   tensors_to_remove_.clear();
 
 #ifdef TRITON_ENABLE_GPU
-  for (const auto& gpu_tensor_pair : gpu_tensors_map_) {
-    cudaError_t err = cudaIpcCloseMemHandle(gpu_tensor_pair.first);
-    if (err != cudaSuccess) {
-      LOG_INFO << std::string(
-          "failed to close CUDA IPC handle:" +
-          std::string(cudaGetErrorString(err)));
-    }
-  }
   gpu_tensors_map_.clear();
 #endif
 }

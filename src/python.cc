@@ -235,10 +235,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
 
-#ifdef TRITON_ENABLE_GPU
-  std::unordered_map<std::string, void*> gpu_tensors_map_;
-#endif
-
   // Stub process pid
   pid_t stub_pid_;
 
@@ -249,6 +245,10 @@ class ModelInstanceState : public BackendModelInstance {
   // Path to python execution environment
   std::string path_to_libpython_;
   std::string path_to_activate_;
+
+#ifdef TRITON_ENABLE_GPU
+  std::unordered_map<std::string, void*> gpu_tensors_map_;
+#endif
 
  public:
   static TRITONSERVER_Error* Create(
@@ -710,9 +710,6 @@ ModelInstanceState::ProcessRequests(
       &responses, request_count,
       shm_pool_->MapOffset((char**)&responses_shm, response_batch->responses));
 
-#ifdef TRITON_ENABLE_GPU
-  std::vector<cudaIpcMemHandle_t*> opened_ipc_mem_handles;
-#endif
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
@@ -783,156 +780,63 @@ ModelInstanceState::ProcessRequests(
       requested_output_names.insert(output_name);
     }
 
-    for (size_t j = 0; j < requested_output_count; ++j) {
-      Tensor* output_tensor = &output_tensors[j];
-      TRITONSERVER_DataType triton_dt = output_tensor->dtype;
-      size_t dims_count = output_tensor->dims_count;
-      int64_t* dims;
-      GUARDED_RESPOND_IF_EXCEPTION(
-          responses, r,
-          shm_pool_->MapOffset((char**)&dims, output_tensor->dims));
+    for (size_t j = 0; j < response_shm->outputs_size; ++j) {
+      std::shared_ptr<PbTensor> output_tensor = PbTensor::LoadFromSharedMemory(
+          shm_pool_, response_shm->outputs + sizeof(Tensor) * j);
 
-      char* name;
-      GUARDED_RESPOND_IF_EXCEPTION(
-          responses, r,
-          LoadStringFromSharedMemory(shm_pool_, output_tensor->name, name));
-
-      // Skip the output tensor if it is not in the list of requested outputs
-      if (requested_output_names.find(std::string(name)) ==
+      if (requested_output_names.find(output_tensor->Name()) ==
           requested_output_names.end()) {
         continue;
       }
 
-      RawData* raw_data;
-      GUARDED_RESPOND_IF_EXCEPTION(
-          responses, r,
-          shm_pool_->MapOffset((char**)&raw_data, output_tensor->raw_data));
-
-      TRITONSERVER_MemoryType src_memory_type = raw_data->memory_type;
-      int64_t src_memory_type_id = raw_data->memory_type_id;
+      TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
+      int64_t src_memory_type_id = output_tensor->MemoryTypeId();
 
       TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
       int64_t actual_memory_type_id = src_memory_type_id;
 
-      if (actual_memory_type == TRITONSERVER_MEMORY_CPU) {
-        char* data;
-        GUARDED_RESPOND_IF_EXCEPTION(
-            responses, r,
-            shm_pool_->MapOffset((char**)&data, raw_data->memory_ptr));
-
-        std::vector<int64_t> batch_shape(dims, dims + dims_count);
-        void* buffer;
-
-        TRITONBACKEND_Output* response_output;
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_ResponseOutput(
-                response, &response_output, name, triton_dt, batch_shape.data(),
-                batch_shape.size()));
-
-        bool cuda_used;
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_OutputBuffer(
-                response_output, &buffer, raw_data->byte_size,
-                &actual_memory_type, &actual_memory_type_id));
-
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            CopyBuffer(
-                "Failed to copy memory type CPU", src_memory_type,
-                src_memory_type_id, actual_memory_type, actual_memory_type_id,
-                raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
-        cuda_copy |= cuda_used;
-      } else if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
-        char* data;
-        if (!output_tensor->is_reused) {
-          cudaIpcMemHandle_t* cuda_mem_handle;
-          GUARDED_RESPOND_IF_EXCEPTION(
-              responses, r,
-              shm_pool_->MapOffset(
-                  (char**)&cuda_mem_handle, raw_data->memory_ptr));
-          cudaSetDevice(src_memory_type_id);
-
-          cudaError_t err = cudaIpcOpenMemHandle(
-              (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
-          if (err != cudaSuccess) {
-            GUARDED_RESPOND_IF_ERROR(
-                responses, r,
-                TRITONSERVER_ErrorNew(
-                    TRITONSERVER_ERROR_INTERNAL,
-                    std::string(
-                        "failed to open cuda ipc handle: " +
-                        std::string(cudaGetErrorString(err)))
-                        .c_str()));
-          }
-          std::cout << "Opened the IPC handle" << std::endl;
-
-          opened_ipc_mem_handles.push_back(
-              reinterpret_cast<cudaIpcMemHandle_t*>(data));
-
-          // Adjust the device pointer with the offset.  cudaIpcOpenMemHandle
-          // will map the base address only and the offset needs to be manually
-          // adjusted.
-          data = data + raw_data->offset;
-        } else {
-          char* reused_tensor_name;
-          GUARDED_RESPOND_IF_EXCEPTION(
-              responses, r,
-              LoadStringFromSharedMemory(
-                  shm_pool_, output_tensor->reused_tensor_name,
-                  reused_tensor_name));
+      if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+        if (output_tensor->IsReused()) {
           std::unordered_map<std::string, void*>::const_iterator
-              reused_gpu_tensor = gpu_tensors_map_.find(reused_tensor_name);
+              reused_gpu_tensor =
+                  gpu_tensors_map_.find(output_tensor->ReusedGPUTensorName());
+
+          // If the tensor is reused, it must be in the GPU tensors map.
           if (reused_gpu_tensor == gpu_tensors_map_.end()) {
-            // TODO: This should not happen. Proper error handling
             GUARDED_RESPOND_IF_EXCEPTION(
                 responses, r,
                 TRITONSERVER_ErrorNew(
                     TRITONSERVER_ERROR_INTERNAL,
                     "Tensor is reused but cannot be found."));
           } else {
-            data = reinterpret_cast<char*>(reused_gpu_tensor->second) +
-                   raw_data->offset;
+            output_tensor->SetDataPtr(reused_gpu_tensor->second);
           }
         }
-
-        std::vector<int64_t> batch_shape(dims, dims + dims_count);
-        void* buffer;
-
-        TRITONBACKEND_Output* response_output;
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_ResponseOutput(
-                response, &response_output, name, triton_dt, batch_shape.data(),
-                batch_shape.size()));
-
-        bool cuda_used;
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONBACKEND_OutputBuffer(
-                response_output, &buffer, raw_data->byte_size,
-                &actual_memory_type, &actual_memory_type_id));
-
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            CopyBuffer(
-                "Failed to copy memory type GPU", src_memory_type,
-                src_memory_type_id, actual_memory_type, actual_memory_type_id,
-                raw_data->byte_size, data, buffer, CudaStream(), &cuda_used));
-
-        cuda_copy |= cuda_used;
-#else
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_INTERNAL,
-                "Python backend is compiled without GPU support. You need to "
-                "recompile the Python backend with TRITON_ENABLE_GPU=ON to "
-                "enable GPU support."));
-#endif
       }
+      TRITONBACKEND_Output* response_output;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_ResponseOutput(
+              response, &response_output, output_tensor->Name().c_str(),
+              static_cast<TRITONSERVER_DataType>(output_tensor->TritonDtype()),
+              output_tensor->Dims().data(), output_tensor->Dims().size()));
+
+      void* buffer;
+      bool cuda_used;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_OutputBuffer(
+              response_output, &buffer, output_tensor->ByteSize(),
+              &actual_memory_type, &actual_memory_type_id));
+
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          CopyBuffer(
+              "Failed to copy the output tensor to buffer.", src_memory_type,
+              src_memory_type_id, actual_memory_type, actual_memory_type_id,
+              output_tensor->ByteSize(), output_tensor->GetDataPtr(), buffer,
+              CudaStream(), &cuda_used));
+      cuda_copy |= cuda_used;
     }
 #ifdef TRITON_ENABLE_GPU
     if (cuda_copy) {
@@ -996,20 +900,6 @@ ModelInstanceState::ProcessRequests(
           "cleanup.");
     }
   }
-
-#ifdef TRITON_ENABLE_GPU
-  for (cudaIpcMemHandle_t* cuda_ipc_handle : opened_ipc_mem_handles) {
-    cudaError_t err = cudaIpcCloseMemHandle(cuda_ipc_handle);
-    if (err != cudaSuccess) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR, std::string(
-                                      "failed to close CUDA IPC handle:" +
-                                      std::string(cudaGetErrorString(err)))
-                                      .c_str());
-    }
-  }
-  opened_ipc_mem_handles.clear();
-#endif
 
   return nullptr;
 }
@@ -1446,9 +1336,10 @@ ModelInstanceState::GetInputTensor(
         input_dtype, src_memory_type, src_memory_type_id,
         const_cast<void*>(buffer), input_byte_size,
         nullptr /* DLManagedTensor */);
+    gpu_tensors_map_.insert(
+          {input_tensor->Name(), reinterpret_cast<void*>(input_tensor->GetGPUStartAddress())});
     RETURN_IF_EXCEPTION(
         input_tensor->SaveToSharedMemory(shm_pool_, input_tensor_shm));
-    gpu_tensors_map_.insert({input_name, input_tensor->GetGPUStartAddress()});
   }
 
   return nullptr;
@@ -1788,8 +1679,8 @@ TRITONBACKEND_ModelInstanceExecute(
       instance_state->ProcessRequests(requests, request_count);
 
   // We should return the shared memory offset before returning from this
-  // function. Otherwise there will be shared memory leaks if there is an error
-  // when processing the requests
+  // function. Otherwise there will be shared memory leaks if there is an
+  // error when processing the requests
   instance_state->ResetSharedMemoryOffset();
   if (err != nullptr) {
     return err;
@@ -1824,5 +1715,4 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 }
 
 }  // extern "C"
-
 }}}  // namespace triton::backend::python

@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <cuda_runtime_api.h>
 #include <dlpack/dlpack.h>
 
 #ifdef TRITON_PB_STUB
@@ -66,7 +67,9 @@ class PbTensor {
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
   std::string reused_gpu_tensor_name_;
+  void* cuda_ipc_mem_handle_ = nullptr;
   bool is_reused_ = false;
+  uint64_t reused_tensor_offset_ = 0;
 
  public:
 #ifdef TRITON_PB_STUB
@@ -134,6 +137,8 @@ class PbTensor {
 
   void* GetGPUStartAddress();
 
+  cudaIpcMemHandle_t* CudaIpcMemHandle();
+
 #ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.
   /// \throw If the tensor is stored in GPU, an exception is thrown
@@ -195,6 +200,6 @@ class PbTensor {
   PbTensor();
 
   /// Destructor
-  ~PbTensor();
+  ~PbTensor() noexcept(false);
 };
 }}}  // namespace triton::backend::python
