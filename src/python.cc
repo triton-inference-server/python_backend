@@ -48,6 +48,7 @@
 #include <thread>
 #include <vector>
 #include "infer_request.h"
+#include "infer_response.h"
 #include "pb_env.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -585,7 +586,6 @@ ModelInstanceState::ProcessRequests(
             input_tensors_offset));
     python_infer_request->inputs = input_tensors_offset;
 
-
     std::vector<std::shared_ptr<PbTensor>> pb_input_tensors;
     for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
       Tensor* input_tensor = &input_tensors[iidx];
@@ -653,7 +653,8 @@ ModelInstanceState::ProcessRequests(
   }
 
   // // If the command is no longer execute it indicates a BLS request.
-  // if (ipc_message_->command == PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+  // if (ipc_message_->command ==
+  // PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
   //   ipc_message_->args
   // }
 
@@ -692,23 +693,21 @@ ModelInstanceState::ProcessRequests(
       &responses, request_count,
       shm_pool_->MapOffset((char**)&responses_shm, response_batch->responses));
 
-
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
 
-    // Get response r
-    Response* response_shm = &responses_shm[r];
+    std::unique_ptr<InferResponse> infer_response =
+        InferResponse::LoadFromSharedMemory(
+            shm_pool_, response_batch->responses + sizeof(Response) * r);
 
-    if (response_shm->has_error) {
+    if (infer_response->HasError()) {
       try {
-        if (response_shm->is_error_set) {
-          char* err_string;
-          LoadStringFromSharedMemory(
-              shm_pool_, response_shm->error, err_string);
-          TRITONSERVER_Error* err =
-              TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
+        if (infer_response->IsErrorMessageSet()) {
+          TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              infer_response->Error()->Message().c_str());
 
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseSend(
@@ -747,11 +746,6 @@ ModelInstanceState::ProcessRequests(
         responses, r,
         TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
 
-    Tensor* output_tensors;
-    GUARDED_RESPOND_IF_EXCEPTION(
-        responses, r,
-        shm_pool_->MapOffset((char**)&output_tensors, response_shm->outputs));
-
     bool cuda_copy = false;
     std::set<std::string> requested_output_names;
     for (size_t j = 0; j < requested_output_count; ++j) {
@@ -762,20 +756,7 @@ ModelInstanceState::ProcessRequests(
       requested_output_names.insert(output_name);
     }
 
-    for (size_t j = 0; j < response_shm->outputs_size; ++j) {
-      std::shared_ptr<PbTensor> output_tensor;
-
-      try {
-        output_tensor = PbTensor::LoadFromSharedMemory(
-            shm_pool_, response_shm->outputs + sizeof(Tensor) * j);
-      }
-      catch (const PythonBackendException& pb_exception) {
-        GUARDED_RESPOND_IF_ERROR(
-            responses, r,
-            TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_INTERNAL, pb_exception.what()));
-        continue;
-      }
+    for (auto& output_tensor : infer_response->OutputTensors()) {
 
       if (requested_output_names.find(output_tensor->Name()) ==
           requested_output_names.end()) {

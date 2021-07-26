@@ -121,29 +121,6 @@ def deserialize_bytes_tensor(encoded_tensor):
     return (np.array(strs, dtype=np.object_))
 
 
-class TritonError:
-    """Error indicating non-Success status.
-    Parameters
-    ----------
-    msg : str
-        A brief description of error
-    """
-    def __init__(self, msg):
-        self._msg = msg
-
-    def __str__(self):
-        msg = super().__str__() if self._msg is None else self._msg
-        return msg
-
-    def message(self):
-        """Get the error message.
-        Returns
-        -------
-        str
-            The message associated with this error, or None if no message.
-        """
-        return self._msg
-
 
 class TritonModelException(Exception):
     """Exception indicating non-Success status.

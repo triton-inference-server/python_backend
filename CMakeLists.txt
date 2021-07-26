@@ -134,6 +134,8 @@ add_library(
   src/infer_request.cc
   src/infer_request.h
   src/pb_env.h
+  src/pb_error.cc
+  src/pb_error.h
   src/pb_tensor.cc
   src/pb_tensor.h
   src/shm_manager.cc
@@ -150,6 +152,8 @@ add_executable(
   src/infer_response.h
   src/pb_stub.cc
   src/pb_stub.h
+  src/pb_error.cc
+  src/pb_error.h
   src/pb_utils.cc
   src/pb_utils.h
   src/pb_tensor.cc

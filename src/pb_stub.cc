@@ -287,7 +287,7 @@ Stub::ProcessResponse(
 
   if (has_error) {
     response_shm->has_error = true;
-    py::str py_string_err = response->Error();
+    py::str py_string_err = response->Error()->Message();
     std::string response_error = py_string_err;
     SetErrorForResponse(response_shm, response_error.c_str());
 
@@ -320,7 +320,8 @@ Stub::ProcessRequest(
     off_t request_offset, ResponseBatch* response_batch,
     py::object& deserialize_bytes)
 {
-  std::unique_ptr<InferRequest> infer_request = InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
+  std::unique_ptr<InferRequest> infer_request =
+      InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
   for (auto& input_tensor : infer_request->Inputs()) {
     if (!input_tensor->IsCPU()) {
       response_batch->cleanup = true;
@@ -511,6 +512,9 @@ Stub::Initialize(InitializeArgs* initialize_args)
   py::setattr(
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
+  py::setattr(
+      python_backend_utils, "TritonError",
+      c_python_backend_utils.attr("TritonError"));
 
   py::object TritonPythonModel =
       py::module::import((model_version_ + std::string(".model")).c_str())
@@ -624,14 +628,18 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("requested_output_names", &InferRequest::RequestedOutputNames);
 
   py::class_<InferResponse>(module, "InferenceResponse")
-      .def(
-          py::init<const std::vector<std::shared_ptr<PbTensor>>&, py::object>(),
-          py::arg("output_tensors"), py::arg("error") = py::none())
+      .def(py::init<
+           const std::vector<std::shared_ptr<PbTensor>>&,
+           std::shared_ptr<PbError>>())
       .def(
           "output_tensors", &InferResponse::OutputTensors,
           py::return_value_policy::reference)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
+
+  py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
+      .def(py::init<std::string>())
+      .def("message", &PbError::Message);
 
   py::register_exception<PythonBackendException>(
       module, "PythonBackendException");

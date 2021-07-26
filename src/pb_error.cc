@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,30 +24,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-
 #include "pb_error.h"
-#include "pb_tensor.h"
-#include "pb_utils.h"
 
-namespace triton { namespace backend { namespace python {
-class InferResponse {
-  std::vector<std::shared_ptr<PbTensor>> output_tensors_;
-  std::shared_ptr<PbError> error_;
-  bool is_message_set_ = false;
-
- public:
-  InferResponse(
-      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error);
-  InferResponse(const std::vector<std::shared_ptr<PbTensor>>& output_tensors);
-  bool IsErrorMessageSet();
-  std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
-  void SaveToSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm);
-  static std::unique_ptr<InferResponse> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset);
-  bool HasError();
-  std::shared_ptr<PbError>& Error();
-};
-}}}  // namespace triton::backend::python
+const std::string&
+PbError::Message()
+{
+  return message_;
+}
