@@ -65,6 +65,14 @@ namespace bi = boost::interprocess;
     }                                                              \
     while (false)
 
+#define THROW_IF_TRITON_ERROR(X)                                          \
+  do {                                                                    \
+    TRITONSERVER_Error* tie_err__ = (X);                                  \
+    if (tie_err__ != nullptr) {                                           \
+      throw PythonBackendException(TRITONSERVER_ErrorMessage(tie_err__)); \
+    }                                                                     \
+  } while (false)
+
 typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_Execute,
   PYTHONSTUB_Initialize,
@@ -77,7 +85,10 @@ typedef enum PYTHONSTUB_commandtype_enum {
 
 struct IPCMessage {
   PYTHONSTUB_CommandType command;
+  PYTHONSTUB_CommandType stub_command;
   off_t args;
+  off_t stub_request;
+  off_t stub_response;
 };
 
 struct ExecuteArgs {
@@ -220,6 +231,9 @@ struct PythonBackendException : std::exception {
 
   std::string message_;
 };
+
+TRITONSERVER_Error*
+CreateTritonErrorFromException(const PythonBackendException& pb_exception);
 
 void SaveMapToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,

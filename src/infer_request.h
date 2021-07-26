@@ -48,6 +48,8 @@ class InferRequest {
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   uint64_t CorrelationId();
+  const std::string& ModelName();
+  int64_t ModelVersion();
   const std::vector<std::string>& RequestedOutputNames();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm);

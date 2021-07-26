@@ -70,6 +70,7 @@ class PbTensor {
   void* cuda_ipc_mem_handle_ = nullptr;
   bool is_reused_ = false;
   uint64_t reused_tensor_offset_ = 0;
+  off_t shm_offset_;
 
  public:
 #ifdef TRITON_PB_STUB
@@ -99,11 +100,12 @@ class PbTensor {
   /// \param memory_ptr Pointer to the location of the data. Data must be
   /// contiguous and in C order.
   /// \param byte_size Total number of bytes that the tensor uses.
+  /// \param shm_offset
   PbTensor(
       const std::string& name, const std::vector<int64_t>& dims,
       TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
       int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
-      DLManagedTensor* dl_managed_tensor = nullptr);
+      DLManagedTensor* dl_managed_tensor = nullptr, off_t shm_offset = 0);
 
   // Copying tensor objects is not allowed.
   PbTensor(const PbTensor& other) = delete;

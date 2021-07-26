@@ -49,5 +49,9 @@ class InferResponse {
       std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset);
   bool HasError();
   std::shared_ptr<PbError>& Error();
+
+  // Copying inference response objects is not allowed.
+  InferResponse(const InferResponse& other) = delete;
+  InferResponse& operator=(const InferResponse& other) = delete;
 };
 }}}  // namespace triton::backend::python

@@ -101,7 +101,7 @@ PbTensor::PbTensor(
     const std::string& name, const std::vector<int64_t>& dims,
     TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
-    DLManagedTensor* dl_managed_tensor)
+    DLManagedTensor* dl_managed_tensor, off_t shm_offset)
 {
   name_ = name;
   memory_ptr_ = memory_ptr;
@@ -109,6 +109,7 @@ PbTensor::PbTensor(
   memory_type_id_ = memory_type_id;
   dtype_ = dtype;
   dims_ = dims;
+  shm_offset_ = shm_offset;
 
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
@@ -493,19 +494,23 @@ PbTensor::SaveToSharedMemory(
     data_ptr = static_cast<char*>(memory_ptr_);
     // }
 
-    uint64_t* ptr_offset;
-    SaveTensorToSharedMemory(
-        shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
-        byte_size_, tensor_name.c_str(), dims_.data(), dims_count, dtype_triton,
-        &ptr_offset);
-    *ptr_offset = 0;
+    if (shm_offset_ == 0) {
+      uint64_t* ptr_offset;
+      SaveTensorToSharedMemory(
+          shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
+          byte_size_, tensor_name.c_str(), dims_.data(), dims_count,
+          dtype_triton, &ptr_offset);
+      *ptr_offset = 0;
 
-    // TODO: We can remove this memcpy if the numpy object
-    // is already in shared memory.
-    if (copy) {
-      std::copy(data_ptr, data_ptr + byte_size_, data_in_shm);
+      // TODO: We can remove this memcpy if the numpy object
+      // is already in shared memory.
+      if (copy) {
+        std::copy(data_ptr, data_ptr + byte_size_, data_in_shm);
+      } else {
+        memory_ptr_ = reinterpret_cast<void*>(data_in_shm);
+      }
     } else {
-      memory_ptr_ = reinterpret_cast<void*>(data_in_shm);
+
     }
   } else {
 #ifdef TRITON_ENABLE_GPU

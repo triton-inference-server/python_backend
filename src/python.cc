@@ -58,6 +58,7 @@
 #include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
+#
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
@@ -212,12 +213,6 @@ class ModelState : public BackendModel {
   bool force_cpu_only_input_tensors_;
 };
 
-TRITONSERVER_Error*
-CreateTritonErrorFromException(const PythonBackendException& pb_exception)
-{
-  return TRITONSERVER_ErrorNew(
-      TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-}
 
 class ModelInstanceState : public BackendModelInstance {
   ModelInstanceState(
@@ -236,6 +231,7 @@ class ModelInstanceState : public BackendModelInstance {
   IPCControl* ipc_control_;
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
+  std::vector<std::unique_ptr<InferResponse>> infer_responses_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -251,7 +247,6 @@ class ModelInstanceState : public BackendModelInstance {
 #ifdef TRITON_ENABLE_GPU
   std::unordered_map<std::string, void*> gpu_tensors_map_;
 #endif
-
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -652,11 +647,11 @@ ModelInstanceState::ProcessRequests(
     return nullptr;
   }
 
-  // // If the command is no longer execute it indicates a BLS request.
-  // if (ipc_message_->command ==
-  // PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
-  //   ipc_message_->args
-  // }
+  // If the command is no longer execute it indicates a BLS request.
+  while (ipc_message_->stub_command ==
+      PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+    InferRequest::LoadFromSharedMemory(ipc_message_->stub_args);
+  }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -757,7 +752,6 @@ ModelInstanceState::ProcessRequests(
     }
 
     for (auto& output_tensor : infer_response->OutputTensors()) {
-
       if (requested_output_names.find(output_tensor->Name()) ==
           requested_output_names.end()) {
         continue;

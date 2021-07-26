@@ -68,6 +68,18 @@ InferRequest::RequestedOutputNames()
   return requested_output_names_;
 }
 
+const std::string&
+InferRequest::ModelName()
+{
+  return model_name_;
+}
+
+int64_t
+InferRequest::ModelVersion()
+{
+  return model_version_;
+}
+
 void
 InferRequest::SaveToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm)
@@ -132,8 +144,8 @@ InferRequest::LoadFromSharedMemory(
   char* model_name;
   LoadStringFromSharedMemory(shm_pool, request->model_name, model_name);
   return std::make_unique<InferRequest>(
-      id, request->correlation_id, std::move(py_input_tensors), requested_output_names,
-      model_name, request->model_version);
+      id, request->correlation_id, std::move(py_input_tensors),
+      requested_output_names, model_name, request->model_version);
 }
 
 // #ifdef TRITON_PB_STUB

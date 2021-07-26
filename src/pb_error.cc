@@ -26,8 +26,10 @@
 
 #include "pb_error.h"
 
+namespace triton { namespace backend { namespace python {
 const std::string&
 PbError::Message()
 {
   return message_;
 }
+}}}  // namespace triton::backend::python
