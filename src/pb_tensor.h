@@ -27,7 +27,10 @@
 
 #pragma once
 
+#ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
+#endif
+
 #include <dlpack/dlpack.h>
 
 #ifdef TRITON_PB_STUB
@@ -57,6 +60,8 @@ class PbTensor {
   std::string name_;
 #ifdef TRITON_PB_STUB
   py::array numpy_array_;
+  // Storing the serialized version of the numpy array
+  py::array numpy_array_serialized_;
 #endif
   TRITONSERVER_DataType dtype_;
   void* memory_ptr_;
@@ -66,7 +71,9 @@ class PbTensor {
   PYTHONBACKEND_TensorType tensor_type_;
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
+#ifdef TRITON_ENABLE_GPU
   cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
+#endif
   bool is_reused_ = false;
   uint64_t reused_tensor_offset_ = 0;
   bool destruct_cuda_ipc_mem_handle_ = false;
@@ -130,17 +137,16 @@ class PbTensor {
   py::capsule ToDLPack();
 #endif
 
-  static std::shared_ptr<PbTensor> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
-  void SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle);
-
   /// Get the name of the tensor
   /// \return name of the tensor.
   const std::string& Name() const;
-
+  static std::shared_ptr<PbTensor> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
+#ifdef TRITON_ENABLE_GPU
+  void SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle);
   void* GetGPUStartAddress();
-
   cudaIpcMemHandle_t* CudaIpcMemHandle();
+#endif
 
 #ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.

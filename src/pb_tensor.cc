@@ -24,7 +24,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
+#endif
+
 #ifdef TRITON_PB_STUB
 #include "pb_stub_utils.h"
 namespace py = pybind11;
@@ -52,7 +55,18 @@ PbTensor::PbTensor(const std::string& name, py::object numpy_array)
     numpy_array = numpy.attr("ascontiguousarray")(numpy_array);
   }
   numpy_array_ = numpy_array;
-  memory_ptr_ = numpy_array_.request().ptr;
+
+  if (dtype_ == TRITONSERVER_TYPE_BYTES) {
+    py::module triton_pb_utils =
+        py::module::import("triton_python_backend_utils");
+    numpy_array_serialized_ =
+        triton_pb_utils.attr("serialize_byte_tensor")(numpy_array);
+    memory_ptr_ = numpy_array_serialized_.request().ptr;
+    byte_size_ = numpy_array_serialized_.nbytes();
+  } else {
+    memory_ptr_ = numpy_array_.request().ptr;
+    byte_size_ = numpy_array_.nbytes();
+  }
 
   // Initialize tensor dimension
   size_t dims_count = numpy_array_.ndim();
@@ -61,7 +75,6 @@ PbTensor::PbTensor(const std::string& name, py::object numpy_array)
   for (size_t i = 0; i < dims_count; i++) {
     dims_.push_back(numpy_shape[i]);
   }
-  byte_size_ = numpy_array_.nbytes();
 }
 
 PbTensor::PbTensor(
@@ -79,9 +92,21 @@ PbTensor::PbTensor(
     numpy_array = numpy.attr("ascontiguousarray")(numpy_array);
   }
   numpy_array_ = numpy_array;
+
+  if (dtype == TRITONSERVER_TYPE_BYTES) {
+    py::module triton_pb_utils =
+        py::module::import("triton_python_backend_utils");
+    numpy_array_serialized_ =
+        triton_pb_utils.attr("serialize_byte_tensor")(numpy_array);
+    memory_ptr_ = numpy_array_serialized_.request().ptr;
+    byte_size_ = numpy_array_serialized_.nbytes();
+
+  } else {
+    memory_ptr_ = numpy_array_.request().ptr;
+    byte_size_ = numpy_array_.nbytes();
+  }
   tensor_type_ = PYTHONBACKEND_NUMPY;
   memory_type_ = TRITONSERVER_MEMORY_CPU;
-  memory_ptr_ = numpy_array_.request().ptr;
   dtype_ = dtype;
 
   // Initialize tensor dimension
@@ -91,7 +116,6 @@ PbTensor::PbTensor(
   for (size_t i = 0; i < dims_count; i++) {
     dims_.push_back(numpy_shape[i]);
   }
-  byte_size_ = numpy_array_.nbytes();
   memory_type_id_ = 0;
   dl_managed_tensor_ = nullptr;
 }
@@ -114,9 +138,20 @@ PbTensor::PbTensor(
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
-    py::object numpy_array =
-        py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
-    numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+    if (dtype != TRITONSERVER_TYPE_BYTES) {
+      py::object numpy_array =
+          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
+      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+    } else {
+      py::object numpy_array = py::array(
+          triton_to_pybind_dtype(TRITONSERVER_TYPE_UINT8), {byte_size},
+          (void*)memory_ptr_);
+      py::module triton_pb_utils =
+          py::module::import("triton_python_backend_utils");
+      numpy_array_ =
+          triton_pb_utils.attr("deserialize_bytes_tensor")(numpy_array)
+              .attr("reshape")(dims);
+    }
   } else {
     numpy_array_ = py::none();
   }
@@ -206,6 +241,11 @@ delete_unused_dltensor(PyObject* dlp)
 py::capsule
 PbTensor::ToDLPack()
 {
+  if (dtype_ == TRITONSERVER_TYPE_BYTES) {
+    throw PythonBackendException(
+        "DLPack does not have support for string tensors.");
+  }
+
   DLManagedTensor* dlpack_tensor = new DLManagedTensor;
   dlpack_tensor->dl_tensor.ndim = dims_.size();
   dlpack_tensor->dl_tensor.byte_offset = 0;
@@ -215,11 +255,6 @@ PbTensor::ToDLPack()
   dlpack_tensor->deleter = [](DLManagedTensor* m) {};
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
   dlpack_tensor->dl_tensor.dtype = triton_to_dlpack_type(dtype_);
-
-  if (dtype_ == TRITONSERVER_TYPE_BYTES) {
-    throw PythonBackendException(
-        "DLPack does not have support for string tensors.");
-  }
 
   switch (memory_type_) {
     case TRITONSERVER_MEMORY_GPU:
@@ -476,22 +511,7 @@ PbTensor::SaveToSharedMemory(
     char* data_in_shm;
     char* data_ptr;
 
-    // Custom handling for type bytes.
-    // if (dtype_triton == TRITONSERVER_TYPE_BYTES) {
-    //   py::object serialized_bytes_or_none = serialize_bytes(numpy_array);
-    //   if (serialize_bytes.is_none()) {
-    //     const char* err_message = "An error happened during
-    //     serialization."; LOG_INFO << err_message;
-    //     SetErrorForResponse(response_shm, err_message);
-    //     break;
-    //   }
-
-    //   py::bytes serialized_bytes = serialized_bytes_or_none;
-    //   data_ptr = PyBytes_AsString(serialized_bytes.ptr());
-    //   byte_size = PyBytes_Size(serialized_bytes.ptr());
-    // } else {
     data_ptr = static_cast<char*>(memory_ptr_);
-    // }
 
     uint64_t* ptr_offset;
     SaveTensorToSharedMemory(
