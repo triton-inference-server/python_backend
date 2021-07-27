@@ -149,10 +149,6 @@ struct Tensor {
   // Shared memory offset for the dimensions.
   off_t dims;
   size_t dims_count;
-  // This field is only used by output tensors and
-  // indicates the name of the tensor in the input
-  // tensor that this tensor is using.
-  off_t reused_tensor_name;
   bool is_reused;
 };
 
@@ -232,8 +228,6 @@ struct PythonBackendException : std::exception {
   std::string message_;
 };
 
-TRITONSERVER_Error*
-CreateTritonErrorFromException(const PythonBackendException& pb_exception);
 
 void SaveMapToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,

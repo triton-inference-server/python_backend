@@ -66,10 +66,10 @@ class PbTensor {
   PYTHONBACKEND_TensorType tensor_type_;
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
-  std::string reused_gpu_tensor_name_;
-  void* cuda_ipc_mem_handle_ = nullptr;
+  cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
   bool is_reused_ = false;
   uint64_t reused_tensor_offset_ = 0;
+  bool destruct_cuda_ipc_mem_handle_ = false;
   off_t shm_offset_;
 
  public:
@@ -132,6 +132,7 @@ class PbTensor {
 
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
+  void SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle);
 
   /// Get the name of the tensor
   /// \return name of the tensor.
@@ -153,8 +154,6 @@ class PbTensor {
       std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm,
       bool copy = true);
 
-  void SetReusedGPUTensorName(const std::string& reused_gpu_tensor_name);
-
   /// Get the triton dtype
   /// \return Triton dtype
   int TritonDtype() const;
@@ -171,6 +170,8 @@ class PbTensor {
   /// \return A boolean value indicating whether the tensor is stored in CPU
   /// or not.
   bool IsCPU() const;
+
+  bool IsReused();
 
   /// Get the total byte size of the tensor.
   uint64_t ByteSize() const;
@@ -190,11 +191,6 @@ class PbTensor {
   /// Set the underlying pointer to use. This must be only used when the tensor
   /// is being reused.
   void SetDataPtr(void* ptr);
-
-  bool IsReused();
-
-  /// Get the reused GPU tensor name
-  const std::string& ReusedGPUTensorName();
 
   /// Get the memory type id.
   /// \return The memory type id of the tensor.

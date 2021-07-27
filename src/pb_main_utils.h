@@ -29,6 +29,8 @@
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
+TRITONSERVER_Error*
+CreateTritonErrorFromException(const PythonBackendException& pb_exception);
 std::unique_ptr<InferResponse> ExecuteInferRequest(
     TRITONSERVER_Server* server,
     const std::unique_ptr<InferRequest>& infer_request);

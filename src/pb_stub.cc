@@ -304,15 +304,15 @@ Stub::ProcessResponse(
     }
 
     if (!output_tensor->IsCPU()) {
-      std::unordered_map<void*, std::string>::const_iterator reused_gpu_tensor =
-          gpu_tensors_map_.find(output_tensor->GetGPUStartAddress());
+      std::unordered_map<void*, cudaIpcMemHandle_t*>::const_iterator
+          reused_gpu_tensor =
+              gpu_tensors_map_.find(output_tensor->GetGPUStartAddress());
       if (reused_gpu_tensor != gpu_tensors_map_.end()) {
-        output_tensor->SetReusedGPUTensorName(reused_gpu_tensor->second);
+        output_tensor->SetReusedIpcHandle(reused_gpu_tensor->second);
       }
     }
-
-    response->SaveToSharedMemory(shm_pool_, response_shm);
   }
+  response->SaveToSharedMemory(shm_pool_, response_shm);
 }
 
 std::unique_ptr<InferRequest>
@@ -327,7 +327,7 @@ Stub::ProcessRequest(
       response_batch->cleanup = true;
       gpu_tensors_map_.insert(
           {reinterpret_cast<void*>(input_tensor->GetGPUStartAddress()),
-           input_tensor->Name()});
+           input_tensor->CudaIpcMemHandle()});
     }
   }
 
@@ -628,9 +628,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("requested_output_names", &InferRequest::RequestedOutputNames);
 
   py::class_<InferResponse>(module, "InferenceResponse")
-      .def(py::init<
-           const std::vector<std::shared_ptr<PbTensor>>&,
-           std::shared_ptr<PbError>>())
+      .def(
+          py::init<
+              const std::vector<std::shared_ptr<PbTensor>>&,
+              std::shared_ptr<PbError>>(),
+          py::arg("output_tensors"), py::arg("error") = nullptr)
       .def(
           "output_tensors", &InferResponse::OutputTensors,
           py::return_value_policy::reference)

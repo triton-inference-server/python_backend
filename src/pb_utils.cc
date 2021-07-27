@@ -106,8 +106,6 @@ GetDevicePointerOffset(void* d_ptr)
 }
 #endif
 
-TRITONSERVER_Error*
-CreateTritonErrorFromException(const PythonBackendException& pb_exception);
 
 void
 SaveRawDataToSharedMemory(

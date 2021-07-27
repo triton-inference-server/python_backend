@@ -133,9 +133,11 @@ PbTensor::PbTensor(
 }
 
 void
-PbTensor::SetReusedGPUTensorName(const std::string& reused_gpu_tensor_name)
+PbTensor::SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
 {
-  reused_gpu_tensor_name_ = reused_gpu_tensor_name;
+  destruct_cuda_ipc_mem_handle_ = false;
+  cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+  is_reused_ = true;
 }
 
 #ifdef TRITON_PB_STUB
@@ -264,20 +266,24 @@ PbTensor::LoadFromSharedMemory(
   shm_pool->MapOffset((char**)&dims, tensor_shm->dims);
 
   std::string reused_gpu_tensor_name;
-  void* data_base = nullptr;
+  std::shared_ptr<PbTensor> pb_tensor;
+
   char* data = nullptr;
   if (raw_data->memory_type == TRITONSERVER_MEMORY_CPU) {
     shm_pool->MapOffset((char**)&data, raw_data->memory_ptr);
+    pb_tensor = std::make_shared<PbTensor>(
+        name, std::vector<int64_t>(dims, dims + dims_count), tensor_shm->dtype,
+        raw_data->memory_type, raw_data->memory_type_id, data,
+        raw_data->byte_size, nullptr /* DLManaged Tensor */);
   } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
+    cudaIpcMemHandle_t* cuda_ipc_mem_handle;
+    shm_pool->MapOffset((char**)&cuda_ipc_mem_handle, raw_data->memory_ptr);
     if (!tensor_shm->is_reused) {
-      cudaIpcMemHandle_t* cuda_mem_handle;
-      shm_pool->MapOffset((char**)&cuda_mem_handle, raw_data->memory_ptr);
       cudaSetDevice(raw_data->memory_type_id);
 
       cudaError_t err = cudaIpcOpenMemHandle(
-          (void**)&data, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
-      data_base = data;
+          (void**)&data, *cuda_ipc_mem_handle, cudaIpcMemLazyEnablePeerAccess);
       if (err != cudaSuccess) {
         throw PythonBackendException(std::string(
                                          "failed to open cuda ipc handle: " +
@@ -288,31 +294,23 @@ PbTensor::LoadFromSharedMemory(
       // GPU pointer and the offset is not preserved when transferring the
       // pointer using cudaIpcMemHandle.
       data = data + raw_data->offset;
+      pb_tensor = std::make_shared<PbTensor>(
+          name, std::vector<int64_t>(dims, dims + dims_count),
+          tensor_shm->dtype, raw_data->memory_type, raw_data->memory_type_id,
+          data, raw_data->byte_size, nullptr /* DLManaged Tensor */);
+      pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
     } else {
-      char* reused_gpu_tensor;
-      LoadStringFromSharedMemory(
-          shm_pool, tensor_shm->reused_tensor_name, reused_gpu_tensor);
-      reused_gpu_tensor_name = reused_gpu_tensor;
+      pb_tensor = std::make_shared<PbTensor>(
+          name, std::vector<int64_t>(dims, dims + dims_count),
+          tensor_shm->dtype, raw_data->memory_type, raw_data->memory_type_id,
+          data, raw_data->byte_size, nullptr /* DLManaged Tensor */);
+      pb_tensor->reused_tensor_offset_ = raw_data->offset;
+      pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+      pb_tensor->is_reused_ = true;
     }
 
 #endif
   }
-
-  std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
-      name, std::vector<int64_t>(dims, dims + dims_count), tensor_shm->dtype,
-      raw_data->memory_type, raw_data->memory_type_id, data,
-      raw_data->byte_size, nullptr /* DLManaged Tensor */);
-
-#ifdef TRITON_ENABLE_GPU
-  if (reused_gpu_tensor_name != "") {
-    pb_tensor->SetReusedGPUTensorName(reused_gpu_tensor_name);
-    pb_tensor->reused_tensor_offset_ = raw_data->offset;
-  }
-
-  if (data_base != nullptr) {
-    pb_tensor->cuda_ipc_mem_handle_ = data_base;
-  }
-#endif
 
   return pb_tensor;
 }
@@ -398,8 +396,9 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 
 PbTensor::~PbTensor() noexcept(false)
 {
-  if (cuda_ipc_mem_handle_ != nullptr) {
-    cudaError_t err = cudaIpcCloseMemHandle(cuda_ipc_mem_handle_);
+  if (!IsCPU() && cuda_ipc_mem_handle_ != nullptr &&
+      destruct_cuda_ipc_mem_handle_) {
+    cudaError_t err = cudaIpcCloseMemHandle(GetGPUStartAddress());
     cuda_ipc_mem_handle_ = nullptr;
     if (err != cudaSuccess) {
       throw PythonBackendException(std::string(
@@ -494,23 +493,19 @@ PbTensor::SaveToSharedMemory(
     data_ptr = static_cast<char*>(memory_ptr_);
     // }
 
-    if (shm_offset_ == 0) {
-      uint64_t* ptr_offset;
-      SaveTensorToSharedMemory(
-          shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
-          byte_size_, tensor_name.c_str(), dims_.data(), dims_count,
-          dtype_triton, &ptr_offset);
-      *ptr_offset = 0;
+    uint64_t* ptr_offset;
+    SaveTensorToSharedMemory(
+        shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
+        byte_size_, tensor_name.c_str(), dims_.data(), dims_count, dtype_triton,
+        &ptr_offset);
+    *ptr_offset = 0;
 
-      // TODO: We can remove this memcpy if the numpy object
-      // is already in shared memory.
-      if (copy) {
-        std::copy(data_ptr, data_ptr + byte_size_, data_in_shm);
-      } else {
-        memory_ptr_ = reinterpret_cast<void*>(data_in_shm);
-      }
+    // TODO: We can remove this memcpy if the numpy object
+    // is already in shared memory.
+    if (copy) {
+      std::copy(data_ptr, data_ptr + byte_size_, data_in_shm);
     } else {
-
+      memory_ptr_ = reinterpret_cast<void*>(data_in_shm);
     }
   } else {
 #ifdef TRITON_ENABLE_GPU
@@ -522,7 +517,7 @@ PbTensor::SaveToSharedMemory(
         this->Dims().data(), this->Dims().size(), dtype_triton, &ptr_offset);
     char* d_ptr = reinterpret_cast<char*>(this->GetDataPtr());
     *ptr_offset = GetDevicePointerOffset(d_ptr);
-    if (reused_gpu_tensor_name_ == "") {
+    if (!IsReused()) {
       cudaSetDevice(this->MemoryTypeId());
       cudaError_t err = cudaIpcGetMemHandle(
           reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle),
@@ -533,15 +528,14 @@ PbTensor::SaveToSharedMemory(
                                          std::string(cudaGetErrorString(err)))
                                          .c_str());
       }
+      cuda_ipc_mem_handle_ = reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle);
     } else {
       tensor_shm->is_reused = true;
       RawData* raw_data;
       shm_pool->MapOffset((char**)&raw_data, tensor_shm->raw_data);
       raw_data->offset = *ptr_offset;
-      off_t reused_tensor_name_offset;
-      SaveStringToSharedMemory(
-          shm_pool, reused_tensor_name_offset, reused_gpu_tensor_name_.c_str());
-      tensor_shm->reused_tensor_name = reused_tensor_name_offset;
+      *(reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle)) =
+          *CudaIpcMemHandle();
     }
     void* start_address = this->GetGPUStartAddress();
     *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
@@ -559,16 +553,16 @@ PbTensor::SetDataPtr(void* ptr)
       (reinterpret_cast<char*>(ptr) + reused_tensor_offset_));
 }
 
+cudaIpcMemHandle_t*
+PbTensor::CudaIpcMemHandle()
+{
+  return cuda_ipc_mem_handle_;
+}
+
 bool
 PbTensor::IsReused()
 {
-  return reused_gpu_tensor_name_ != "";
-}
-
-const std::string&
-PbTensor::ReusedGPUTensorName()
-{
-  return reused_gpu_tensor_name_;
+  return is_reused_;
 }
 
 int

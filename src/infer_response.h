@@ -39,7 +39,7 @@ class InferResponse {
  public:
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error);
+      std::shared_ptr<PbError> error = nullptr);
   InferResponse(const std::vector<std::shared_ptr<PbTensor>>& output_tensors);
   bool IsErrorMessageSet();
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();

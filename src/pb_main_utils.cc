@@ -44,6 +44,13 @@ InferResponseComplete(
   }
 }
 
+TRITONSERVER_Error*
+CreateTritonErrorFromException(const PythonBackendException& pb_exception)
+{
+  return TRITONSERVER_ErrorNew(
+      TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+}
+
 void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)

@@ -30,7 +30,9 @@
 #include <sys/vfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <array>
 #include <atomic>
+#include <boost/functional/hash.hpp>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
@@ -50,6 +52,7 @@
 #include "infer_request.h"
 #include "infer_response.h"
 #include "pb_env.h"
+#include "pb_main_utils.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
@@ -245,7 +248,10 @@ class ModelInstanceState : public BackendModelInstance {
   std::string path_to_activate_;
 
 #ifdef TRITON_ENABLE_GPU
-  std::unordered_map<std::string, void*> gpu_tensors_map_;
+  std::unordered_map<
+      std::array<char, sizeof(cudaIpcMemHandle_t)>, void*,
+      boost::hash<std::array<char, sizeof(cudaIpcMemHandle_t)>>>
+      gpu_tensors_map_;
 #endif
  public:
   static TRITONSERVER_Error* Create(
@@ -648,10 +654,10 @@ ModelInstanceState::ProcessRequests(
   }
 
   // If the command is no longer execute it indicates a BLS request.
-  while (ipc_message_->stub_command ==
-      PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
-    InferRequest::LoadFromSharedMemory(ipc_message_->stub_args);
-  }
+  // while (ipc_message_->stub_command ==
+  //     PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+  //   InferRequest::LoadFromSharedMemory(ipc_message_->stub_args);
+  // }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -763,22 +769,28 @@ ModelInstanceState::ProcessRequests(
       TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
       int64_t actual_memory_type_id = src_memory_type_id;
 
-      if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-        if (output_tensor->IsReused()) {
-          std::unordered_map<std::string, void*>::const_iterator
-              reused_gpu_tensor =
-                  gpu_tensors_map_.find(output_tensor->ReusedGPUTensorName());
+      if (actual_memory_type == TRITONSERVER_MEMORY_GPU &&
+          output_tensor->IsReused()) {
+        std::array<char, sizeof(cudaIpcMemHandle_t)> cuda_handle;
+        char* cuda_handle_ptr =
+            reinterpret_cast<char*>(output_tensor->CudaIpcMemHandle());
+        std::copy(
+            cuda_handle_ptr, cuda_handle_ptr + cuda_handle.size(),
+            cuda_handle.begin());
+        std::unordered_map<
+            std::array<char, sizeof(cudaIpcMemHandle_t)>, void*>::const_iterator
+            reused_gpu_tensor = gpu_tensors_map_.find(cuda_handle);
 
-          // If the tensor is reused, it must be in the GPU tensors map.
-          if (reused_gpu_tensor == gpu_tensors_map_.end()) {
-            GUARDED_RESPOND_IF_EXCEPTION(
-                responses, r,
-                TRITONSERVER_ErrorNew(
-                    TRITONSERVER_ERROR_INTERNAL,
-                    "Tensor is reused but cannot be found."));
-          } else {
-            output_tensor->SetDataPtr(reused_gpu_tensor->second);
-          }
+
+        // If the tensor is reused, it must be in the GPU tensors map.
+        if (reused_gpu_tensor == gpu_tensors_map_.end()) {
+          GUARDED_RESPOND_IF_EXCEPTION(
+              responses, r,
+              TRITONSERVER_ErrorNew(
+                  TRITONSERVER_ERROR_INTERNAL,
+                  "Tensor is reused but cannot be found."));
+        } else {
+          output_tensor->SetDataPtr(reused_gpu_tensor->second);
         }
       }
       TRITONBACKEND_Output* response_output;
@@ -1304,11 +1316,17 @@ ModelInstanceState::GetInputTensor(
         input_dtype, src_memory_type, src_memory_type_id,
         const_cast<void*>(buffer), input_byte_size,
         nullptr /* DLManagedTensor */);
-    gpu_tensors_map_.insert(
-        {input_tensor->Name(),
-         reinterpret_cast<void*>(input_tensor->GetGPUStartAddress())});
     RETURN_IF_EXCEPTION(
         input_tensor->SaveToSharedMemory(shm_pool_, input_tensor_shm));
+    std::array<char, CUDA_IPC_HANDLE_SIZE> cuda_mem_handle_array;
+    char* cuda_handle =
+        reinterpret_cast<char*>(input_tensor->CudaIpcMemHandle());
+    std::copy(
+        cuda_handle, cuda_handle + cuda_mem_handle_array.size(),
+        cuda_mem_handle_array.begin());
+    gpu_tensors_map_.insert(
+        {cuda_mem_handle_array,
+         reinterpret_cast<void*>(input_tensor->GetGPUStartAddress())});
   }
 
   return nullptr;

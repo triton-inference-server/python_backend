@@ -63,7 +63,8 @@ InferResponse::SaveToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm)
 {
   size_t output_tensor_length = output_tensors_.size();
-  response_shm->has_error = true;
+  response_shm->has_error = false;
+  response_shm->is_error_set = false;
 
   Tensor* output_tensors_shm;
   off_t output_tensors_offset;

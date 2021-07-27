@@ -128,9 +128,9 @@ configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 add_library(
   triton-python-backend SHARED
   src/python.cc
-  src/pb_utils.cc
-  src/pb_utils.h
   src/pb_env.cc
+  src/infer_response.cc
+  src/infer_response.h
   src/pb_main_utils.cc
   src/pb_main_utils.h
   src/infer_request.cc
@@ -140,6 +140,8 @@ add_library(
   src/pb_error.h
   src/pb_tensor.cc
   src/pb_tensor.h
+  src/pb_utils.cc
+  src/pb_utils.h
   src/shm_manager.cc
   src/shm_manager.h
 )
