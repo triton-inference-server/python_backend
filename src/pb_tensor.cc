@@ -119,7 +119,7 @@ PbTensor::PbTensor(
   memory_type_id_ = 0;
   dl_managed_tensor_ = nullptr;
 }
-#endif
+#endif // TRITON_PB_STUB
 
 PbTensor::PbTensor(
     const std::string& name, const std::vector<int64_t>& dims,
@@ -166,22 +166,6 @@ PbTensor::PbTensor(
     tensor_type_ = PYTHONBACKEND_RAW;
   }
 }
-
-void
-PbTensor::SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
-{
-  destruct_cuda_ipc_mem_handle_ = false;
-  cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
-  is_reused_ = true;
-}
-
-#ifdef TRITON_PB_STUB
-std::shared_ptr<PbTensor>
-PbTensor::FromNumpy(const std::string& name, py::object numpy_array)
-{
-  return std::make_shared<PbTensor>(name, numpy_array);
-}
-#endif
 
 bool
 PbTensor::IsCPU() const
@@ -238,6 +222,12 @@ delete_unused_dltensor(PyObject* dlp)
   }
 }
 
+std::shared_ptr<PbTensor>
+PbTensor::FromNumpy(const std::string& name, py::object numpy_array)
+{
+  return std::make_shared<PbTensor>(name, numpy_array);
+}
+
 py::capsule
 PbTensor::ToDLPack()
 {
@@ -271,7 +261,7 @@ PbTensor::ToDLPack()
   return py::capsule(
       static_cast<void*>(dlpack_tensor), "dltensor", &delete_unused_dltensor);
 }
-#endif
+#endif // TRITON_PB_STUB
 
 void
 PbTensor::DeleteDLPack()
@@ -343,8 +333,7 @@ PbTensor::LoadFromSharedMemory(
       pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
       pb_tensor->is_reused_ = true;
     }
-
-#endif
+#endif // TRITON_ENABLE_GPU
   }
 
   return pb_tensor;
@@ -427,10 +416,11 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
       name, dims, dtype, memory_type, memory_type_id, memory_ptr, byte_size,
       dl_managed_tensor);
 }
-#endif
+#endif // TRITON_PB_STUB
 
 PbTensor::~PbTensor() noexcept(false)
 {
+#ifdef TRITON_ENABLE_GPU
   if (!IsCPU() && cuda_ipc_mem_handle_ != nullptr &&
       destruct_cuda_ipc_mem_handle_) {
     cudaError_t err = cudaIpcCloseMemHandle(GetGPUStartAddress());
@@ -442,6 +432,7 @@ PbTensor::~PbTensor() noexcept(false)
                                        .c_str());
     }
   }
+#endif // TRITON_ENABLE_GPU
   DeleteDLPack();
 }
 
@@ -464,8 +455,9 @@ PbTensor::AsNumpy() const
 
   return numpy_array_;
 }
-#endif
+#endif // TRITON_PB_STUB
 
+#ifdef TRITON_ENABLE_GPU
 void*
 PbTensor::GetGPUStartAddress()
 {
@@ -491,6 +483,20 @@ PbTensor::GetGPUStartAddress()
       "Calling GetGPUStartAddress function on a CPU tensor.");
 }
 
+void
+PbTensor::SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
+{
+  destruct_cuda_ipc_mem_handle_ = false;
+  cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+  is_reused_ = true;
+}
+
+cudaIpcMemHandle_t*
+PbTensor::CudaIpcMemHandle()
+{
+  return cuda_ipc_mem_handle_;
+}
+#endif // TRITON_ENABLE_GPU
 
 void
 PbTensor::SaveToSharedMemory(
@@ -560,23 +566,18 @@ PbTensor::SaveToSharedMemory(
     void* start_address = this->GetGPUStartAddress();
     *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
                   reinterpret_cast<char*>(start_address);
-  }
 #else
     throw PythonBackendException(
         "Python backend was not built with GPU tensor support");
-#endif
+#endif // TRITON_ENABLE_GPU
+  }
 }
+
 void
 PbTensor::SetDataPtr(void* ptr)
 {
   memory_ptr_ = reinterpret_cast<void*>(
       (reinterpret_cast<char*>(ptr) + reused_tensor_offset_));
-}
-
-cudaIpcMemHandle_t*
-PbTensor::CudaIpcMemHandle()
-{
-  return cuda_ipc_mem_handle_;
 }
 
 bool

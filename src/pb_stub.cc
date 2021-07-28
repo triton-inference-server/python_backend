@@ -303,6 +303,7 @@ Stub::ProcessResponse(
       tensors_to_remove_.push_back(output_tensor);
     }
 
+#ifdef TRITON_ENABLE_GPU
     if (!output_tensor->IsCPU()) {
       std::unordered_map<void*, cudaIpcMemHandle_t*>::const_iterator
           reused_gpu_tensor =
@@ -311,6 +312,7 @@ Stub::ProcessResponse(
         output_tensor->SetReusedIpcHandle(reused_gpu_tensor->second);
       }
     }
+#endif
   }
   response->SaveToSharedMemory(shm_pool_, response_shm);
 }
@@ -322,6 +324,7 @@ Stub::ProcessRequest(
 {
   std::unique_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
+#ifdef TRITON_ENABLE_GPU
   for (auto& input_tensor : infer_request->Inputs()) {
     if (!input_tensor->IsCPU()) {
       response_batch->cleanup = true;
@@ -330,6 +333,7 @@ Stub::ProcessRequest(
            input_tensor->CudaIpcMemHandle()});
     }
   }
+#endif
 
   return infer_request;
 }
