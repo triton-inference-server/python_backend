@@ -568,6 +568,12 @@ Stub::Finalize()
   }
 }
 
+IPCMessage*
+Stub::GetIPCMessage()
+{
+  return ipc_message_;
+}
+
 // Wait for notification from the server. Returns true if the parent process
 // has received a SIGTERM, and false otherwise.
 bool
@@ -621,7 +627,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("inputs", &InferRequest::Inputs)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
-      // .def("exec", &InferRequest::Exec)
+      .def("exec", &InferRequest::Exec)
       .def("requested_output_names", &InferRequest::RequestedOutputNames);
 
   py::class_<InferResponse>(module, "InferenceResponse")

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <string>
+#include "infer_response.h"
 #include "pb_tensor.h"
 
 namespace triton { namespace backend { namespace python {
@@ -64,5 +65,8 @@ class InferRequest {
   /// \param request_offset Shared memory offset of the request.
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset);
+#ifdef TRITON_PB_STUB
+  std::unique_ptr<InferResponse> Exec();
+#endif
 };
 }}};  // namespace triton::backend::python

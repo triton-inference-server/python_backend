@@ -232,6 +232,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::string model_path_;
   IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
+  std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
@@ -653,6 +654,63 @@ ModelInstanceState::ProcessRequests(
     return nullptr;
   }
 
+  // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
+  // that inference request exeuction has finished.
+  while (ipc_message_->stub_command ==
+         PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+    ExecuteArgs* exec_args;
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
+        shm_pool_->MapOffset((char**)&exec_args, ipc_message_->stub_args));
+    RequestBatch* request_batch;
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
+        shm_pool_->MapOffset((char**)&request_batch, exec_args->request_batch));
+
+    if (request_batch->batch_size == 1) {
+      std::unique_ptr<InferRequest> infer_request;
+      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+          &responses, request_count,
+          infer_request = InferRequest::LoadFromSharedMemory(
+              shm_pool_, request_batch->requests));
+      std::unique_ptr<InferResponse> infer_response;
+      TRITONSERVER_InferenceResponse* inference_response;
+      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+          &responses, request_count,
+          infer_response = ExecuteInferRequest(
+              model_state->TritonServer(), infer_request, shm_pool_,
+              &inference_response));
+      bls_inference_responses_.push_back(inference_response);
+
+      ResponseBatch* response_batch;
+      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+          &responses, request_count,
+          shm_pool_->Map(
+              (char**)&response_batch, sizeof(ResponseBatch),
+              exec_args->response_batch));
+      response_batch->batch_size = 1;
+      response_batch->has_error = false;
+      response_batch->is_error_set = false;
+      response_batch->cleanup = false;
+
+      Response* response;
+      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+          &responses, request_count,
+          shm_pool_->Map(
+              (char**)&response, sizeof(Response), response_batch->responses));
+
+      infer_response->SaveToSharedMemory(shm_pool_, response);
+    }
+
+    if (!NotifyStubAndWait(restart)) {
+      RespondErrorToAllRequests(
+          "The stub process has exited unexpectedly.", responses, requests,
+          request_count);
+
+      return nullptr;
+    }
+  }
+
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
 
@@ -876,6 +934,13 @@ ModelInstanceState::ProcessRequests(
           "cleanup.");
     }
   }
+  for (auto& bls_inference_response : bls_inference_responses_) {
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceResponseDelete(bls_inference_response),
+        " failed to release BLS inference response.");
+  }
+
+  bls_inference_responses_.clear();
 
   return nullptr;
 }  // namespace python

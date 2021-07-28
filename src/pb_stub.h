@@ -91,6 +91,7 @@ class Stub {
   void UpdateHealth();
   void Cleanup();
   void Finalize();
+  IPCMessage* GetIPCMessage();
 
   // Wait for notification from the server. Returns true if the parent process
   // has received a SIGTERM, and false otherwise.

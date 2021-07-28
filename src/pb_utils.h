@@ -77,12 +77,16 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_Execute,
   PYTHONSTUB_Initialize,
   PYTHONSTUB_Finalize,
-  PYTHONSTUB_TensorCleanup
+  PYTHONSTUB_TensorCleanup,
+  PYTHONSTUB_InferExecRequest,
+  PYTHONSTUB_InferExecResponse
 } PYTHONSTUB_CommandType;
 
 struct IPCMessage {
   PYTHONSTUB_CommandType command;
+  PYTHONSTUB_CommandType stub_command;
   off_t args;
+  off_t stub_args;
 };
 
 struct ExecuteArgs {
