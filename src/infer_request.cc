@@ -148,17 +148,4 @@ InferRequest::LoadFromSharedMemory(
       requested_output_names, model_name, request->model_version);
 }
 
-// #ifdef TRITON_PB_STUB
-// std::unique_ptr<InferResponse>
-// InferRequest::Exec()
-// {
-//   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-
-//   // TODO: Handle identity tensors
-//   for (auto& input_tensor : inputs) {
-//     input_tensor->SaveToSharedMemory(stub->GetSharedMemory(), );
-//   }
-// }
-// #endif
-
 }}}  // namespace triton::backend::python

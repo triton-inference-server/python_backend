@@ -653,12 +653,6 @@ ModelInstanceState::ProcessRequests(
     return nullptr;
   }
 
-  // If the command is no longer execute it indicates a BLS request.
-  // while (ipc_message_->stub_command ==
-  //     PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
-  //   InferRequest::LoadFromSharedMemory(ipc_message_->stub_args);
-  // }
-
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
 
