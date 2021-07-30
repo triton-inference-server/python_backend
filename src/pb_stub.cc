@@ -35,6 +35,7 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/thread/thread_time.hpp>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -190,6 +191,22 @@ class Stub {
       shm_pool_->MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
       stub_lock_ = std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(
           *stub_mutex_);
+
+      // If model is using an execution environment, we need to fix the
+      // LD_LIBRARY_PATH so that it doesn't interfere with the way binaries used
+      // to work.
+      if (ipc_control_->uses_env) {
+        std::string ld_library_path = std::getenv("LD_LIBRARY_PATH");
+        ld_library_path = ld_library_path.substr(ld_library_path.find(':') + 1);
+        int status = setenv(
+            "LD_LIBRARY_PATH", const_cast<char*>(ld_library_path.c_str()),
+            1 /* overwrite */);
+        if (status != 0) {
+          throw PythonBackendException(
+              "Failed to correct the LD_LIBRARY_PATH environment in the Python "
+              "backend stub.");
+        }
+      }
     }
     catch (const PythonBackendException& pb_exception) {
       LOG_INFO << pb_exception.what() << std::endl;

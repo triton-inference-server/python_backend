@@ -1077,12 +1077,14 @@ ModelInstanceState::StartStubProcess()
 
     std::string bash_argument;
     bash_argument = ss.str();
+    ipc_control_->uses_env = false;
     if (model_state->PythonExecutionEnv() != "") {
+      ipc_control_->uses_env = true;
       // Need to properly set the LD_LIBRARY_PATH so that Python environments
       // using different python versions load properly.
-      bash_argument = "export LD_LIBRARY_PATH=" + path_to_libpython_ +
-                      ":$LD_LIBRARY_PATH; source " + path_to_activate_ +
-                      " && " + bash_argument;
+      bash_argument = "source " + path_to_activate_ +
+                      " && LD_LIBRARY_PATH=" + path_to_libpython_ +
+                      ":$LD_LIBRARY_PATH; "+ bash_argument;
     }
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
