@@ -1077,6 +1077,10 @@ ModelInstanceState::StartStubProcess()
 
     std::string bash_argument;
     bash_argument = ss.str();
+
+    // This shared memory variable indicates whether the
+    // stub process should revert the LD_LIBRARY_PATH changes to avoid
+    // shared library issues in executables and libraries.
     ipc_control_->uses_env = false;
     if (model_state->PythonExecutionEnv() != "") {
       ipc_control_->uses_env = true;

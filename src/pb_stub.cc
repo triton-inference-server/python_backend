@@ -196,15 +196,27 @@ class Stub {
       // LD_LIBRARY_PATH so that it doesn't interfere with the way binaries used
       // to work.
       if (ipc_control_->uses_env) {
-        std::string ld_library_path = std::getenv("LD_LIBRARY_PATH");
-        ld_library_path = ld_library_path.substr(ld_library_path.find(':') + 1);
-        int status = setenv(
-            "LD_LIBRARY_PATH", const_cast<char*>(ld_library_path.c_str()),
-            1 /* overwrite */);
-        if (status != 0) {
-          throw PythonBackendException(
-              "Failed to correct the LD_LIBRARY_PATH environment in the Python "
-              "backend stub.");
+        char* ld_library_path = std::getenv("LD_LIBRARY_PATH");
+
+        if (ld_library_path != nullptr) {
+          std::string ld_library_path_str = ld_library_path;
+          // If we use an Execute Environment, the path must contain a colon.
+          size_t find_pos = ld_library_path_str.find(':');
+          if (find_pos == std::string::npos) {
+            throw PythonBackendException(
+                "LD_LIBRARY_PATH must contain a colon when passing an "
+                "execution environment.");
+          }
+          ld_library_path_str = ld_library_path_str.substr(find_pos+1);
+          int status = setenv(
+              "LD_LIBRARY_PATH", const_cast<char*>(ld_library_path_str.c_str()),
+              1 /* overwrite */);
+          if (status != 0) {
+            throw PythonBackendException(
+                "Failed to correct the LD_LIBRARY_PATH environment in the "
+                "Python "
+                "backend stub.");
+          }
         }
       }
     }
