@@ -192,9 +192,12 @@ class Stub {
       stub_lock_ = std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(
           *stub_mutex_);
 
-      // If model is using an execution environment, we need to fix the
-      // LD_LIBRARY_PATH so that it doesn't interfere with the way binaries used
-      // to work.
+      // If the Python model is using an execution environment, we need to
+      // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
+      // <Python Shared Lib>:$OLD_LD_LIBRARY_PATH). The <Python Shared Lib>
+      // section was added before launching the stub process and it may
+      // interfere with the shared library resolution of other executable and
+      // binaries.
       if (ipc_control_->uses_env) {
         char* ld_library_path = std::getenv("LD_LIBRARY_PATH");
 
@@ -207,16 +210,19 @@ class Stub {
                 "LD_LIBRARY_PATH must contain a colon when passing an "
                 "execution environment.");
           }
-          ld_library_path_str = ld_library_path_str.substr(find_pos+1);
+          ld_library_path_str = ld_library_path_str.substr(find_pos + 1);
           int status = setenv(
               "LD_LIBRARY_PATH", const_cast<char*>(ld_library_path_str.c_str()),
               1 /* overwrite */);
           if (status != 0) {
             throw PythonBackendException(
                 "Failed to correct the LD_LIBRARY_PATH environment in the "
-                "Python "
-                "backend stub.");
+                "Python backend stub.");
           }
+        } else {
+          throw PythonBackendException(
+            "When using an execution environment, LD_LIBRARY_PATH variable cannot be empty."
+          );
         }
       }
     }
