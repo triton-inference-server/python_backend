@@ -35,6 +35,7 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/thread/thread_time.hpp>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -190,6 +191,40 @@ class Stub {
       shm_pool_->MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
       stub_lock_ = std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(
           *stub_mutex_);
+
+      // If the Python model is using an execution environment, we need to
+      // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
+      // <Python Shared Lib>:$OLD_LD_LIBRARY_PATH). The <Python Shared Lib>
+      // section was added before launching the stub process and it may
+      // interfere with the shared library resolution of other executable and
+      // binaries.
+      if (ipc_control_->uses_env) {
+        char* ld_library_path = std::getenv("LD_LIBRARY_PATH");
+
+        if (ld_library_path != nullptr) {
+          std::string ld_library_path_str = ld_library_path;
+          // If we use an Execute Environment, the path must contain a colon.
+          size_t find_pos = ld_library_path_str.find(':');
+          if (find_pos == std::string::npos) {
+            throw PythonBackendException(
+                "LD_LIBRARY_PATH must contain a colon when passing an "
+                "execution environment.");
+          }
+          ld_library_path_str = ld_library_path_str.substr(find_pos + 1);
+          int status = setenv(
+              "LD_LIBRARY_PATH", const_cast<char*>(ld_library_path_str.c_str()),
+              1 /* overwrite */);
+          if (status != 0) {
+            throw PythonBackendException(
+                "Failed to correct the LD_LIBRARY_PATH environment in the "
+                "Python backend stub.");
+          }
+        } else {
+          throw PythonBackendException(
+            "When using an execution environment, LD_LIBRARY_PATH variable cannot be empty."
+          );
+        }
+      }
     }
     catch (const PythonBackendException& pb_exception) {
       LOG_INFO << pb_exception.what() << std::endl;
