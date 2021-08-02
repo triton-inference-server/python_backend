@@ -51,11 +51,19 @@ class InferRequest {
   const std::string& ModelName();
   int64_t ModelVersion();
   const std::vector<std::string>& RequestedOutputNames();
+
+  /// Save an Inference Request to shared memory.
+  /// \param shm_pool Shared memory pool to save the inference request.
+  /// \param request_shm A pointer to a location in shared memory with enough
+  /// space to save the inference request.
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm);
+  
+  /// Create an Inference Request object from shared memory.
+  /// \param shm_pool Shared memory pool
+  /// \param request_offset Shared memory offset of the request.
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool,
       off_t request_offset);
-      //  std::unique_ptr<InferResponse> Exec();
 };
 }}};  // namespace triton::backend::python
