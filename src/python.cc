@@ -1068,21 +1068,33 @@ ModelInstanceState::StartStubProcess()
       python_backend_stub = model_python_backend_stub;
     }
 
-    std::stringstream ss;
-    ss << "exec " << python_backend_stub << " " << model_path_ << " "
-       << shm_region_name << " " << shm_default_size << " " << shm_growth_size
-       << " " << parent_pid_ << " "
-       << model_state->StateForBackend()->python_lib << " "
-       << ipc_control_offset_;
-
     std::string bash_argument;
-    bash_argument = ss.str();
+
+    // This shared memory variable indicates whether the
+    // stub process should revert the LD_LIBRARY_PATH changes to avoid
+    // shared library issues in executables and libraries.
+    ipc_control_->uses_env = false;
     if (model_state->PythonExecutionEnv() != "") {
+      std::stringstream ss;
+      ss << "source " << path_to_activate_
+         << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
+         << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
+         << " " << shm_region_name << " " << shm_default_size << " "
+         << shm_growth_size << " " << parent_pid_ << " "
+         << model_state->StateForBackend()->python_lib << " "
+         << ipc_control_offset_;
+      ipc_control_->uses_env = true;
       // Need to properly set the LD_LIBRARY_PATH so that Python environments
       // using different python versions load properly.
-      bash_argument = "export LD_LIBRARY_PATH=" + path_to_libpython_ +
-                      ":$LD_LIBRARY_PATH; source " + path_to_activate_ +
-                      " && " + bash_argument;
+      bash_argument = ss.str();
+    } else {
+      std::stringstream ss;
+      ss << " exec " << python_backend_stub
+         << " " << model_path_ << " " << shm_region_name << " "
+         << shm_default_size << " " << shm_growth_size << " " << parent_pid_
+         << " " << model_state->StateForBackend()->python_lib << " "
+         << ipc_control_offset_;
+      bash_argument = ss.str();
     }
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,

@@ -100,6 +100,7 @@ struct InitializeArgs {
 struct IPCControl {
   bool stub_health;
   bool parent_health;
+  bool uses_env;
   off_t parent_health_mutex;
   off_t stub_mutex;
   off_t stub_cond;
