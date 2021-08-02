@@ -58,8 +58,7 @@ namespace py = pybind11;
 using namespace pybind11::literals;
 namespace bi = boost::interprocess;
 
-namespace triton { namespace backend {
-namespace python {
+namespace triton { namespace backend { namespace python {
 
 #define LOG_IF_EXCEPTION(X)                              \
   do {                                                   \
@@ -211,12 +210,6 @@ Stub::Instantiate(
     exit(1);
   }
 }
-catch (const PythonBackendException& pb_exception)
-{
-  LOG_INFO << pb_exception.what() << std::endl;
-  exit(1);
-}
-}  // namespace python
 
 void
 Stub::NotifyParent()
@@ -765,5 +758,4 @@ main(int argc, char** argv)
   return 0;
 }
 }
-}}  // namespace triton::backend
-}  // namespace triton::backend::python
+}}}  // namespace triton::backend::python
