@@ -57,9 +57,9 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
   std::unordered_map<void*, cudaIpcMemHandle_t*> gpu_tensors_map_;
-#endif
+#endif // TRITON_ENABLE_GPU_TENSORS
 
  public:
   Stub(){};

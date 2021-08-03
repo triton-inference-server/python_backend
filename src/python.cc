@@ -66,9 +66,9 @@
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
-#endif
+#endif // TRITON_ENABLE_GPU_TENSORS
 
 
 #define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X) \
@@ -248,12 +248,12 @@ class ModelInstanceState : public BackendModelInstance {
   std::string path_to_libpython_;
   std::string path_to_activate_;
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
   std::unordered_map<
       std::array<char, sizeof(cudaIpcMemHandle_t)>, void*,
       boost::hash<std::array<char, sizeof(cudaIpcMemHandle_t)>>>
       gpu_tensors_map_;
-#endif
+#endif // TRITON_ENABLE_GPU_TENSORS
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -821,7 +821,7 @@ ModelInstanceState::ProcessRequests(
       TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
       int64_t actual_memory_type_id = src_memory_type_id;
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
       if (actual_memory_type == TRITONSERVER_MEMORY_GPU &&
           output_tensor->IsReused()) {
         std::array<char, sizeof(cudaIpcMemHandle_t)> cuda_handle;
@@ -1344,11 +1344,12 @@ ModelInstanceState::GetInputTensor(
       in, 0 /* input buffer index */, &src_ptr, &src_byte_size,
       &src_memory_type, &src_memory_type_id));
 
-// If TRITON_ENABLE_GPU is false, we need to copy the tensors
+// If TRITON_ENABLE_GPU_TENSORS is false, we need to copy the tensors
 // to the CPU.
-#ifndef TRITON_ENABLE_GPU
+#ifndef TRITON_ENABLE_GPU_TENSORS
   cpu_only_tensors = true;
-#endif
+#endif // TRITON_ENABLE_GPU_TENSORS
+
   if (cpu_only_tensors || src_memory_type != TRITONSERVER_MEMORY_GPU) {
     input_tensor = std::make_unique<PbTensor>(
         std::string(input_name),
@@ -1363,7 +1364,7 @@ ModelInstanceState::GetInputTensor(
         input_name, input_buffer, input_byte_size,
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
   } else {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
     // Retreiving GPU input tensors
     const void* buffer = nullptr;
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
@@ -1392,9 +1393,8 @@ ModelInstanceState::GetInputTensor(
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
-        "Python backend was built with TRITON_ENABLE_GPU=OFF but received a "
-        "GPU tensor.");
-#endif  // TRITON_ENABLE_GPU
+        "Python backend does not support GPU tensors.");
+#endif  // TRITON_ENABLE_GPU_TENSORS
   }
 
   return nullptr;

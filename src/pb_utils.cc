@@ -44,7 +44,7 @@
 #include <unordered_map>
 #include "shm_manager.h"
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #endif
@@ -83,7 +83,7 @@ SaveStringToSharedMemory(
   strcpy(string_data, str);
 }
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 size_t
 GetDevicePointerOffset(void* d_ptr)
 {
@@ -104,8 +104,7 @@ GetDevicePointerOffset(void* d_ptr)
   return reinterpret_cast<char*>(d_ptr) -
          reinterpret_cast<char*>(start_address);
 }
-#endif
-
+#endif // TRITON_ENABLE_GPU_TENSORS
 
 void
 SaveRawDataToSharedMemory(
@@ -128,15 +127,15 @@ SaveRawDataToSharedMemory(
   }
 
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
     off_t buffer_offset;
     shm_pool->Map(
         (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
     raw_data->memory_ptr = buffer_offset;
 #else
   throw PythonBackendException(
-      "Trying to create GPU tensors with TRITON_ENABLE_GPU disabled.");
-#endif
+      "Python backend does not support GPU tensors.");
+#endif // TRITON_ENABLE_GPU_TENSORS
   }
 }
 

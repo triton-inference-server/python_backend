@@ -66,10 +66,10 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
-  // Initially attempt to make the actual memory type and id that we
-  // allocate be the same as preferred memory type
-  *actual_memory_type = preferred_memory_type;
-  *actual_memory_type_id = preferred_memory_type_id;
+  // TODO: Add support for GPU tensors in BLS. Currently, all the tensors
+  // will be stored in CPU.
+  *actual_memory_type = TRITONSERVER_MEMORY_CPU;
+  *actual_memory_type_id = 0;
 
   SharedMemory* shm_pool = reinterpret_cast<SharedMemory*>(userp);
 
@@ -81,7 +81,8 @@ ResponseAlloc(
   } else {
     switch (*actual_memory_type) {
       case TRITONSERVER_MEMORY_CPU:
-      case TRITONSERVER_MEMORY_CPU_PINNED: {
+      case TRITONSERVER_MEMORY_CPU_PINNED: 
+      case TRITONSERVER_MEMORY_GPU: {
         off_t tensor_offset;
         try {
           shm_pool->Map((char**)buffer, byte_size, tensor_offset);
@@ -89,28 +90,9 @@ ResponseAlloc(
         catch (const PythonBackendException& pb_exception) {
           return CreateTritonErrorFromException(pb_exception);
         }
+        // Store the buffer offset in the userp;
         *buffer_userp = new off_t(tensor_offset);
       } break;
-
-      case TRITONSERVER_MEMORY_GPU: {
-        // throw PythonBackendException("Not supported!");
-        // auto err = cudaSetDevice(*actual_memory_type_id);
-        // if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
-        //     (err != cudaErrorInsufficientDriver)) {
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
-            "GPU tensors are not supported in BLS");
-      }
-
-        // err = cudaMalloc(&allocated_ptr, byte_size);
-        // if (err != cudaSuccess) {
-        //   return TRITONSERVER_ErrorNew(
-        //       TRITONSERVER_ERROR_INTERNAL,
-        //       std::string(
-        //           "cudaMalloc failed: " +
-        //           std::string(cudaGetErrorString(err))) .c_str());
-        // }
-        // break;
     }
   }
 
@@ -123,52 +105,8 @@ ResponseRelease(
     size_t byte_size, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id)
 {
-  //   std::string* name = nullptr;
-  //   if (buffer_userp != nullptr) {
-  //     name = reinterpret_cast<std::string*>(buffer_userp);
-  //   } else {
-  //     name = new std::string("<unknown>");
-  //   }
-
-  //   std::cout << "Releasing buffer " << buffer << " of size " << byte_size
-  //             << " in " << TRITONSERVER_MemoryTypeString(memory_type)
-  //             << " for result '" << *name << "'" << std::endl;
-  //   switch (memory_type) {
-  //     case TRITONSERVER_MEMORY_CPU:
-  //       free(buffer);
-  //       break;
-  // #ifdef TRITON_ENABLE_GPU
-  //     case TRITONSERVER_MEMORY_CPU_PINNED: {
-  //       auto err = cudaSetDevice(memory_type_id);
-  //       if (err == cudaSuccess) {
-  //         err = cudaFreeHost(buffer);
-  //       }
-  //       if (err != cudaSuccess) {
-  //         std::cerr << "error: failed to cudaFree " << buffer << ": "
-  //                   << cudaGetErrorString(err) << std::endl;
-  //       }
-  //       break;
-  //     }
-  //     case TRITONSERVER_MEMORY_GPU: {
-  //       auto err = cudaSetDevice(memory_type_id);
-  //       if (err == cudaSuccess) {
-  //         err = cudaFree(buffer);
-  //       }
-  //       if (err != cudaSuccess) {
-  //         std::cerr << "error: failed to cudaFree " << buffer << ": "
-  //                   << cudaGetErrorString(err) << std::endl;
-  //       }
-  //       break;
-  //     }
-  // #endif  // TRITON_ENABLE_GPU
-  //     default:
-  //       std::cerr << "error: unexpected buffer allocated in CUDA managed
-  //       memory"
-  //                 << std::endl;
-  //       break;
-  //   }
-
-  //   delete name;
+  off_t* offset = reinterpret_cast<off_t*>(buffer_userp);
+  delete offset;
 
   return nullptr;  // Success
 }
