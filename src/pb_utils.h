@@ -65,10 +65,17 @@ namespace bi = boost::interprocess;
     }                                                              \
     while (false)
 
+#define THROW_IF_TRITON_ERROR(X)                                          \
+  do {                                                                    \
+    TRITONSERVER_Error* tie_err__ = (X);                                  \
+    if (tie_err__ != nullptr) {                                           \
+      throw PythonBackendException(TRITONSERVER_ErrorMessage(tie_err__)); \
+    }                                                                     \
+  } while (false)
+
 typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_Execute,
   PYTHONSTUB_Initialize,
-  PYTHONSTUB_PreInitialize,
   PYTHONSTUB_Finalize,
   PYTHONSTUB_TensorCleanup
 } PYTHONSTUB_CommandType;
@@ -134,10 +141,6 @@ struct Tensor {
   // Shared memory offset for the dimensions.
   off_t dims;
   size_t dims_count;
-  // This field is only used by output tensors and
-  // indicates the name of the tensor in the input
-  // tensor that this tensor is using.
-  off_t reused_tensor_name;
   bool is_reused;
 };
 
@@ -159,6 +162,8 @@ struct Request {
   // Offset for the requested output names
   off_t requested_output_names;
   uint32_t requested_output_count;
+  off_t model_name;
+  int64_t model_version;
 };
 
 struct Response {
@@ -214,6 +219,7 @@ struct PythonBackendException : std::exception {
 
   std::string message_;
 };
+
 
 void SaveMapToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,

@@ -126,17 +126,17 @@ SaveRawDataToSharedMemory(
     raw_data->memory_ptr = buffer_offset;
   }
 
-#ifdef TRITON_ENABLE_GPU
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
+#ifdef TRITON_ENABLE_GPU
     off_t buffer_offset;
     shm_pool->Map(
         (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
     raw_data->memory_ptr = buffer_offset;
-  }
 #else
   throw PythonBackendException(
       "Trying to create GPU tensors with TRITON_ENABLE_GPU disabled.");
 #endif
+  }
 }
 
 void
