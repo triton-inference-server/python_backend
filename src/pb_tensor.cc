@@ -26,7 +26,7 @@
 
 #ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
-#endif // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 #ifdef TRITON_PB_STUB
 #include "pb_stub_utils.h"
@@ -525,7 +525,7 @@ PbTensor::SaveToSharedMemory(
     SaveTensorToSharedMemory(
         shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
         byte_size_, tensor_name.c_str(), dims_.data(), dims_count, dtype_triton,
-        &ptr_offset);
+        &ptr_offset, shm_offset_);
     *ptr_offset = 0;
 
     // TODO: We can remove this memcpy if the numpy object
@@ -569,8 +569,7 @@ PbTensor::SaveToSharedMemory(
     *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
                   reinterpret_cast<char*>(start_address);
 #else
-    throw PythonBackendException(
-        "GPU tensors are not supported.");
+    throw PythonBackendException("GPU tensors are not supported.");
 #endif  // TRITON_ENABLE_GPU_TENSORS
   }
 }

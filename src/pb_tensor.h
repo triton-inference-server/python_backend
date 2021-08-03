@@ -29,7 +29,7 @@
 
 #ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda_runtime_api.h>
-#endif // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 #include <dlpack/dlpack.h>
 
@@ -73,11 +73,11 @@ class PbTensor {
   DLManagedTensor* dl_managed_tensor_;
 #ifdef TRITON_ENABLE_GPU_TENSORS
   cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
-#endif // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU_TENSORS
   bool is_reused_ = false;
   uint64_t reused_tensor_offset_ = 0;
   bool destruct_cuda_ipc_mem_handle_ = false;
-  off_t shm_offset_;
+  off_t shm_offset_ = 0;
 
  public:
 #ifdef TRITON_PB_STUB
@@ -107,7 +107,7 @@ class PbTensor {
   /// \param memory_ptr Pointer to the location of the data. Data must be
   /// contiguous and in C order.
   /// \param byte_size Total number of bytes that the tensor uses.
-  /// \param shm_offset
+  /// \param shm_offset The shared memory offset of the device pointer.
   PbTensor(
       const std::string& name, const std::vector<int64_t>& dims,
       TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
@@ -146,7 +146,7 @@ class PbTensor {
   void SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle);
   void* GetGPUStartAddress();
   cudaIpcMemHandle_t* CudaIpcMemHandle();
-#endif // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 #ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.

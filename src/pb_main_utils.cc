@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <future>
+#include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
 
 #include "pb_main_utils.h"
@@ -38,11 +39,14 @@ CreateTritonErrorFromException(const PythonBackendException& pb_exception)
   return TRITONSERVER_ErrorNew(
       TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
 }
+
 void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
 {
-  // We reuse the request so we don't delete it here.
+  LOG_IF_ERROR(
+      TRITONSERVER_InferenceRequestDelete(request),
+      "Failed to delete inference request.");
 }
 
 void
@@ -81,7 +85,7 @@ ResponseAlloc(
   } else {
     switch (*actual_memory_type) {
       case TRITONSERVER_MEMORY_CPU:
-      case TRITONSERVER_MEMORY_CPU_PINNED: 
+      case TRITONSERVER_MEMORY_CPU_PINNED:
       case TRITONSERVER_MEMORY_GPU: {
         off_t tensor_offset;
         try {
@@ -118,96 +122,116 @@ ExecuteInferRequest(
     const std::unique_ptr<SharedMemory>& shm_pool,
     TRITONSERVER_InferenceResponse** triton_response)
 {
+  std::unique_ptr<InferResponse> infer_response;
   bool is_ready = false;
   const char* model_name = infer_request->ModelName().c_str();
-  int64_t model_version = infer_request->ModelVersion();
-  THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelIsReady(
-      server, model_name, model_version, &is_ready));
-
+  TRITONSERVER_InferenceResponse* response = nullptr;
   TRITONSERVER_ResponseAllocator* allocator = nullptr;
-  THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorNew(
-      &allocator, ResponseAlloc, ResponseRelease, nullptr /* start_fn */));
-
-  // Inference
   TRITONSERVER_InferenceRequest* irequest = nullptr;
-  THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
-      &irequest, server, model_name, model_version));
 
-  THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
-      irequest, infer_request->RequestId().c_str()));
+  try {
+    int64_t model_version = infer_request->ModelVersion();
+    THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelIsReady(
+        server, model_name, model_version, &is_ready));
 
-  THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
-      irequest, InferRequestComplete, nullptr /* request_release_userp */));
+    THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorNew(
+        &allocator, ResponseAlloc, ResponseRelease, nullptr /* start_fn */));
 
-  for (auto& infer_input : infer_request->Inputs()) {
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAddInput(
-        irequest, infer_input->Name().c_str(),
-        static_cast<TRITONSERVER_DataType>(infer_input->TritonDtype()),
-        infer_input->Dims().data(), infer_input->Dims().size()));
+    // Inference
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
+        &irequest, server, model_name, model_version));
 
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAppendInputData(
-        irequest, infer_input->Name().c_str(), infer_input->GetDataPtr(),
-        infer_input->ByteSize(), infer_input->MemoryType(),
-        infer_input->MemoryTypeId()));
-  }
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
+        irequest, infer_request->RequestId().c_str()));
 
-  for (auto& requested_output_name : infer_request->RequestedOutputNames()) {
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAddRequestedOutput(
-        irequest, requested_output_name.c_str()));
-  }
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
+        irequest, InferRequestComplete, nullptr /* request_release_userp */));
 
-  std::unique_ptr<InferResponse> infer_response;
+    for (auto& infer_input : infer_request->Inputs()) {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAddInput(
+          irequest, infer_input->Name().c_str(),
+          static_cast<TRITONSERVER_DataType>(infer_input->TritonDtype()),
+          infer_input->Dims().data(), infer_input->Dims().size()));
 
-  {
-    auto p = new std::promise<TRITONSERVER_InferenceResponse*>();
-    std::future<TRITONSERVER_InferenceResponse*> completed = p->get_future();
-
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
-        irequest, allocator, shm_pool.get(), InferResponseComplete,
-        reinterpret_cast<void*>(p)));
-
-    THROW_IF_TRITON_ERROR(
-        TRITONSERVER_ServerInferAsync(server, irequest, nullptr /* trace */));
-
-    // Wait for the inference to complete.
-    TRITONSERVER_InferenceResponse* response = completed.get();
-    *triton_response = response;
-
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
-
-    uint32_t output_count;
-    THROW_IF_TRITON_ERROR(
-        TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
-
-    std::vector<std::shared_ptr<PbTensor>> output_tensors;
-    for (uint32_t idx = 0; idx < output_count; ++idx) {
-      const char* cname;
-      TRITONSERVER_DataType datatype;
-      const int64_t* shape;
-      uint64_t dim_count;
-      const void* base;
-      size_t byte_size;
-      TRITONSERVER_MemoryType memory_type;
-      int64_t memory_type_id;
-      void* userp;
-
-      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseOutput(
-          response, idx, &cname, &datatype, &shape, &dim_count, &base,
-          &byte_size, &memory_type, &memory_type_id, &userp));
-      std::string sname = cname;
-      std::vector<int64_t> dims_vector{shape, shape + dim_count};
-      output_tensors.push_back(std::make_shared<PbTensor>(
-          sname, dims_vector, datatype, memory_type, memory_type_id,
-          const_cast<void*>(base), byte_size, nullptr /* DLManagedTensor */));
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAppendInputData(
+          irequest, infer_input->Name().c_str(), infer_input->GetDataPtr(),
+          infer_input->ByteSize(), infer_input->MemoryType(),
+          infer_input->MemoryTypeId()));
     }
 
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestDelete(irequest));
+    for (auto& requested_output_name : infer_request->RequestedOutputNames()) {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAddRequestedOutput(
+          irequest, requested_output_name.c_str()));
+    }
 
-    std::shared_ptr<PbError> pb_error;
-    infer_response = std::make_unique<InferResponse>(output_tensors, pb_error);
+    {
+      auto p = new std::promise<TRITONSERVER_InferenceResponse*>();
+      std::future<TRITONSERVER_InferenceResponse*> completed = p->get_future();
+
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
+          irequest, allocator, shm_pool.get(), InferResponseComplete,
+          reinterpret_cast<void*>(p)));
+
+      THROW_IF_TRITON_ERROR(
+          TRITONSERVER_ServerInferAsync(server, irequest, nullptr /* trace */));
+
+      // Wait for the inference to complete.
+      TRITONSERVER_InferenceResponse* response = completed.get();
+      *triton_response = response;
+
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
+
+      uint32_t output_count;
+      THROW_IF_TRITON_ERROR(
+          TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
+
+      std::vector<std::shared_ptr<PbTensor>> output_tensors;
+      for (uint32_t idx = 0; idx < output_count; ++idx) {
+        const char* cname;
+        TRITONSERVER_DataType datatype;
+        const int64_t* shape;
+        uint64_t dim_count;
+        const void* base;
+        size_t byte_size;
+        TRITONSERVER_MemoryType memory_type;
+        int64_t memory_type_id;
+        void* userp;
+
+        THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseOutput(
+            response, idx, &cname, &datatype, &shape, &dim_count, &base,
+            &byte_size, &memory_type, &memory_type_id, &userp));
+        std::string sname = cname;
+        std::vector<int64_t> dims_vector{shape, shape + dim_count};
+        output_tensors.push_back(std::make_shared<PbTensor>(
+            sname, dims_vector, datatype, memory_type, memory_type_id,
+            const_cast<void*>(base), byte_size, nullptr /* DLManagedTensor */,
+            *(reinterpret_cast<off_t*>(userp))));
+      }
+
+      std::shared_ptr<PbError> pb_error;
+      infer_response =
+          std::make_unique<InferResponse>(output_tensors, pb_error);
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    if (response != nullptr) {
+      LOG_IF_ERROR(
+          TRITONSERVER_InferenceResponseDelete(response),
+          "Failed to delete inference resposne.");
+    }
+
+    std::shared_ptr<PbError> pb_error =
+        std::make_shared<PbError>(pb_exception.what());
+    infer_response = std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{}, pb_error);
+  }
+
+  if (allocator != nullptr) {
+    LOG_IF_ERROR(
+        TRITONSERVER_ResponseAllocatorDelete(allocator),
+        "Failed to delete allocator.");
   }
 
   return infer_response;
 }
-
 }}};  // namespace triton::backend::python

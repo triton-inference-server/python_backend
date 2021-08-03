@@ -25,7 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "infer_request.h"
-
+#include "pb_utils.h"
 #ifdef TRITON_PB_STUB
 #include "infer_response.h"
 #include "pb_stub.h"
@@ -184,16 +184,23 @@ InferRequest::Exec()
   ipc_message->stub_command =
       PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
   stub->NotifyParent();
-  if (stub->WaitForNotification()) {
-    // TODO: Handle
-  }
-  ipc_message->stub_command =
-      PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
+  stub->WaitForNotification();
+
+  ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
 
   ResponseBatch* response_batch;
   shm_pool->MapOffset((char**)&response_batch, exec_args->response_batch);
 
-  // TODO: Error checking
+  if (response_batch->has_error) {
+    if (response_batch->is_error_set) {
+      char* err_string;
+      LoadStringFromSharedMemory(shm_pool, response_batch->error, err_string);
+      throw PythonBackendException(err_string);
+    } else {
+      throw PythonBackendException(
+          "An error occurred while performing BLS request.");
+    }
+  }
   return InferResponse::LoadFromSharedMemory(
       shm_pool, response_batch->responses);
 }

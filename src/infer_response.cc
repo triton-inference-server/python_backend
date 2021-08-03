@@ -82,6 +82,7 @@ InferResponse::SaveToSharedMemory(
   }
 
   if (this->HasError()) {
+    response_shm->has_error = true;
     off_t error_offset;
     SaveStringToSharedMemory(
         shm_pool, error_offset, this->Error()->Message().c_str());
