@@ -694,7 +694,9 @@ ModelInstanceState::ProcessRequests(
         std::unique_ptr<InferResponse> infer_response;
         infer_response = request_executor_->Infer(
             infer_request, shm_pool_, &inference_response);
-        bls_inference_responses_.push_back(inference_response);
+
+        if (inference_response != nullptr)
+          bls_inference_responses_.push_back(inference_response);
 
         Response* response;
         shm_pool_->Map(

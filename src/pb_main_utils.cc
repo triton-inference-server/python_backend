@@ -140,6 +140,13 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelIsReady(
         server_, model_name, model_version, &is_ready));
 
+    if (!is_ready) {
+      throw PythonBackendException(
+          (std::string("Failed for execute the inference request. Model '") +
+           model_name + "' is not ready.")
+              .c_str());
+    }
+
     // Inference
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
         &irequest, server_, model_name, model_version));
@@ -175,11 +182,11 @@ RequestExecutor::Infer(
           irequest, response_allocator_, shm_pool.get(), InferResponseComplete,
           reinterpret_cast<void*>(p)));
 
-      THROW_IF_TRITON_ERROR(
-          TRITONSERVER_ServerInferAsync(server_, irequest, nullptr /* trace */));
+      THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
+          server_, irequest, nullptr /* trace */));
 
       // Wait for the inference to complete.
-      TRITONSERVER_InferenceResponse* response = completed.get();
+      response = completed.get();
       *triton_response = response;
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
@@ -222,7 +229,6 @@ RequestExecutor::Infer(
           TRITONSERVER_InferenceResponseDelete(response),
           "Failed to delete inference resposne.");
     }
-
     std::shared_ptr<PbError> pb_error =
         std::make_shared<PbError>(pb_exception.what());
     infer_response = std::make_unique<InferResponse>(
@@ -232,7 +238,8 @@ RequestExecutor::Infer(
   return infer_response;
 }
 
-RequestExecutor::~RequestExecutor() {
+RequestExecutor::~RequestExecutor()
+{
   if (response_allocator_ != nullptr) {
     LOG_IF_ERROR(
         TRITONSERVER_ResponseAllocatorDelete(response_allocator_),
