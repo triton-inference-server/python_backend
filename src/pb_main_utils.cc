@@ -115,9 +115,16 @@ ResponseRelease(
   return nullptr;  // Success
 }
 
+RequestExecutor::RequestExecutor(TRITONSERVER_Server* server) : server_(server)
+{
+  TRITONSERVER_ResponseAllocator* allocator;
+  THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorNew(
+      &allocator, ResponseAlloc, ResponseRelease, nullptr /* start_fn */));
+  response_allocator_ = allocator;
+}
+
 std::unique_ptr<InferResponse>
-ExecuteInferRequest(
-    TRITONSERVER_Server* server,
+RequestExecutor::Infer(
     const std::unique_ptr<InferRequest>& infer_request,
     const std::unique_ptr<SharedMemory>& shm_pool,
     TRITONSERVER_InferenceResponse** triton_response)
@@ -125,21 +132,17 @@ ExecuteInferRequest(
   std::unique_ptr<InferResponse> infer_response;
   bool is_ready = false;
   const char* model_name = infer_request->ModelName().c_str();
-  TRITONSERVER_InferenceResponse* response = nullptr;
-  TRITONSERVER_ResponseAllocator* allocator = nullptr;
   TRITONSERVER_InferenceRequest* irequest = nullptr;
+  TRITONSERVER_InferenceResponse* response = nullptr;
 
   try {
     int64_t model_version = infer_request->ModelVersion();
     THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelIsReady(
-        server, model_name, model_version, &is_ready));
-
-    THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorNew(
-        &allocator, ResponseAlloc, ResponseRelease, nullptr /* start_fn */));
+        server_, model_name, model_version, &is_ready));
 
     // Inference
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
-        &irequest, server, model_name, model_version));
+        &irequest, server_, model_name, model_version));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
@@ -169,11 +172,11 @@ ExecuteInferRequest(
       std::future<TRITONSERVER_InferenceResponse*> completed = p->get_future();
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
-          irequest, allocator, shm_pool.get(), InferResponseComplete,
+          irequest, response_allocator_, shm_pool.get(), InferResponseComplete,
           reinterpret_cast<void*>(p)));
 
       THROW_IF_TRITON_ERROR(
-          TRITONSERVER_ServerInferAsync(server, irequest, nullptr /* trace */));
+          TRITONSERVER_ServerInferAsync(server_, irequest, nullptr /* trace */));
 
       // Wait for the inference to complete.
       TRITONSERVER_InferenceResponse* response = completed.get();
@@ -226,12 +229,15 @@ ExecuteInferRequest(
         std::vector<std::shared_ptr<PbTensor>>{}, pb_error);
   }
 
-  if (allocator != nullptr) {
-    LOG_IF_ERROR(
-        TRITONSERVER_ResponseAllocatorDelete(allocator),
-        "Failed to delete allocator.");
-  }
-
   return infer_response;
 }
+
+RequestExecutor::~RequestExecutor() {
+  if (response_allocator_ != nullptr) {
+    LOG_IF_ERROR(
+        TRITONSERVER_ResponseAllocatorDelete(response_allocator_),
+        "Failed to delete allocator.");
+  }
+}
+
 }}};  // namespace triton::backend::python

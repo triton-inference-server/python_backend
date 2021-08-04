@@ -309,7 +309,7 @@ Stub::ProcessResponse(
 #endif
     }
   }
-  response->SaveToSharedMemory(shm_pool_, response_shm);
+  response->SaveToSharedMemory(shm_pool_, response_shm, true /* copy */);
 }
 
 std::unique_ptr<InferRequest>

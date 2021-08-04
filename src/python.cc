@@ -244,6 +244,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
+  std::unique_ptr<RequestExecutor> request_executor_;
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
 
   // Stub process pid
@@ -315,6 +316,8 @@ ModelInstanceState::ModelInstanceState(
     : BackendModelInstance(model_state, triton_model_instance), stub_pid_(0),
       initialized_(false)
 {
+  request_executor_ =
+      std::make_unique<RequestExecutor>(model_state->TritonServer());
 }
 
 TRITONSERVER_Error*
@@ -689,16 +692,16 @@ ModelInstanceState::ProcessRequests(
         infer_request = InferRequest::LoadFromSharedMemory(
             shm_pool_, request_batch->requests);
         std::unique_ptr<InferResponse> infer_response;
-        infer_response = ExecuteInferRequest(
-            model_state->TritonServer(), infer_request, shm_pool_,
-            &inference_response);
+        infer_response = request_executor_->Infer(
+            infer_request, shm_pool_, &inference_response);
         bls_inference_responses_.push_back(inference_response);
 
         Response* response;
         shm_pool_->Map(
             (char**)&response, sizeof(Response), response_batch->responses);
 
-        infer_response->SaveToSharedMemory(shm_pool_, response);
+        infer_response->SaveToSharedMemory(
+            shm_pool_, response, false /* copy */);
       }
     }
     catch (const PythonBackendException& pb_exception) {
@@ -716,6 +719,7 @@ ModelInstanceState::ProcessRequests(
       }
     }
 
+    bool restart = true;
     if (!NotifyStubAndWait(restart)) {
       RespondErrorToAllRequests(
           "The stub process has exited unexpectedly.", responses, requests,
