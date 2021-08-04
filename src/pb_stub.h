@@ -45,6 +45,7 @@ class Stub {
   std::unique_ptr<bi::scoped_lock<bi::interprocess_mutex>> stub_lock_;
   std::string model_path_;
   std::string model_version_;
+  std::string model_instance_name_;
   std::string triton_install_path_;
   IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
@@ -67,9 +68,9 @@ class Stub {
 
   void Instantiate(
       int64_t shm_growth_size, int64_t shm_default_size,
-      std::string& shm_region_name, const std::string& model_path,
+      const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
-      off_t ipc_control_offset);
+      off_t ipc_control_offset, const std::string& model_instance_name);
   void NotifyParent();
   bool& Health();
   std::unique_ptr<SharedMemory>& GetSharedMemory();

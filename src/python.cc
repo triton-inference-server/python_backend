@@ -404,12 +404,14 @@ ModelInstanceState::RespondErrorToAllRequests(
     if (responses[r] == nullptr)
       continue;
 
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        (std::string("Failed to process the request(s), message: ") + message)
-            .c_str());
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
+    std::string err_message =
+        std::string(
+            "Failed to process the request(s) for model instance '" + Name() +
+            "', message: ") +
+        message;
+
+    TRITONSERVER_Error* err =
+        TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_message.c_str());
     LOG_IF_ERROR(
         TRITONBACKEND_ResponseSend(
             responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
@@ -1046,7 +1048,7 @@ ModelInstanceState::StartStubProcess()
          << " " << shm_region_name << " " << shm_default_size << " "
          << shm_growth_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
-         << ipc_control_offset_;
+         << ipc_control_offset_ << " " << Name();
       ipc_control_->uses_env = true;
       // Need to properly set the LD_LIBRARY_PATH so that Python environments
       // using different python versions load properly.
@@ -1057,7 +1059,7 @@ ModelInstanceState::StartStubProcess()
          << shm_region_name << " " << shm_default_size << " " << shm_growth_size
          << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
-         << ipc_control_offset_;
+         << ipc_control_offset_ << " " << Name();
       bash_argument = ss.str();
     }
     LOG_MESSAGE(

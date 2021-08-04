@@ -40,13 +40,20 @@ CreateTritonErrorFromException(const PythonBackendException& pb_exception)
       TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
 }
 
+static auto inference_request_deleter =
+    [](TRITONSERVER_InferenceRequest* infer_request) {
+      if (infer_request != nullptr) {
+        LOG_IF_ERROR(
+            TRITONSERVER_InferenceRequestDelete(infer_request),
+            "Failed to delete inference request.");
+      }
+    };
+
 void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
 {
-  LOG_IF_ERROR(
-      TRITONSERVER_InferenceRequestDelete(request),
-      "Failed to delete inference request.");
+   // Inference request will be deleted using deleter.
 }
 
 void
@@ -132,7 +139,9 @@ RequestExecutor::Infer(
   std::unique_ptr<InferResponse> infer_response;
   bool is_ready = false;
   const char* model_name = infer_request->ModelName().c_str();
-  TRITONSERVER_InferenceRequest* irequest = nullptr;
+  std::unique_ptr<
+      TRITONSERVER_InferenceRequest, decltype(inference_request_deleter)>
+      request(nullptr, inference_request_deleter);
   TRITONSERVER_InferenceResponse* response = nullptr;
 
   try {
@@ -147,9 +156,12 @@ RequestExecutor::Infer(
               .c_str());
     }
 
+    TRITONSERVER_InferenceRequest* irequest;
+
     // Inference
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
         &irequest, server_, model_name, model_version));
+    request.reset(irequest);
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
@@ -228,7 +240,9 @@ RequestExecutor::Infer(
       LOG_IF_ERROR(
           TRITONSERVER_InferenceResponseDelete(response),
           "Failed to delete inference resposne.");
+      *triton_response = nullptr;
     }
+
     std::shared_ptr<PbError> pb_error =
         std::make_shared<PbError>(pb_exception.what());
     infer_response = std::make_unique<InferResponse>(
