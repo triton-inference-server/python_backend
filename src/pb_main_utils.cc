@@ -53,7 +53,7 @@ void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
 {
-   // Inference request will be deleted using deleter.
+  // Inference request will be deleted using deleter.
 }
 
 void
@@ -99,7 +99,9 @@ ResponseAlloc(
           shm_pool->Map((char**)buffer, byte_size, tensor_offset);
         }
         catch (const PythonBackendException& pb_exception) {
-          return CreateTritonErrorFromException(pb_exception);
+          TRITONSERVER_Error* err =
+              CreateTritonErrorFromException(pb_exception);
+          return err;
         }
         // Store the buffer offset in the userp;
         *buffer_userp = new off_t(tensor_offset);

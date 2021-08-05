@@ -152,57 +152,80 @@ InferRequest::LoadFromSharedMemory(
 std::unique_ptr<InferResponse>
 InferRequest::Exec()
 {
+  ResponseBatch* response_batch = nullptr;
+  bool responses_is_set = false;
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<SharedMemory>& shm_pool = stub->GetSharedMemory();
   IPCMessage* ipc_message = stub->GetIPCMessage();
+  try {
+    ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
 
-  ExecuteArgs* exec_args;
-  shm_pool->Map(
-      (char**)&exec_args, sizeof(ExecuteArgs), ipc_message->stub_args);
+    ExecuteArgs* exec_args;
+    shm_pool->Map(
+        (char**)&exec_args, sizeof(ExecuteArgs), ipc_message->stub_args);
 
-  RequestBatch* request_batch;
-  shm_pool->Map(
-      (char**)&request_batch, sizeof(RequestBatch), exec_args->request_batch);
-  request_batch->batch_size = 1;
+    RequestBatch* request_batch;
+    shm_pool->Map(
+        (char**)&request_batch, sizeof(RequestBatch), exec_args->request_batch);
+    request_batch->batch_size = 1;
 
-  Request* request;
-  shm_pool->Map((char**)&request, sizeof(Request), request_batch->requests);
+    Request* request;
+    shm_pool->Map((char**)&request, sizeof(Request), request_batch->requests);
 
-  request->requested_input_count = this->Inputs().size();
-  Tensor* tensors;
-  shm_pool->Map(
-      (char**)&tensors, sizeof(Tensor) * request->requested_input_count,
-      request->inputs);
+    request->requested_input_count = this->Inputs().size();
+    Tensor* tensors;
+    shm_pool->Map(
+        (char**)&tensors, sizeof(Tensor) * request->requested_input_count,
+        request->inputs);
 
-  // TODO: Custom handling for GPU
-  size_t i = 0;
-  for (auto& input_tensor : this->Inputs()) {
-    input_tensor->SaveToSharedMemory(shm_pool, &tensors[i]);
-    i += 1;
-  }
-  this->SaveToSharedMemory(shm_pool, request);
-  ipc_message->stub_command =
-      PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
-  stub->NotifyParent();
-  stub->WaitForNotification();
+    // TODO: Custom handling for GPU
+    size_t i = 0;
+    for (auto& input_tensor : this->Inputs()) {
+      input_tensor->SaveToSharedMemory(shm_pool, &tensors[i]);
+      i += 1;
+    }
+    this->SaveToSharedMemory(shm_pool, request);
 
-  ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
+    ipc_message->stub_command =
+        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
+    stub->NotifyParent();
+    stub->WaitForNotification();
 
-  ResponseBatch* response_batch;
-  shm_pool->MapOffset((char**)&response_batch, exec_args->response_batch);
+    ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
 
-  if (response_batch->has_error) {
-    if (response_batch->is_error_set) {
-      char* err_string;
-      LoadStringFromSharedMemory(shm_pool, response_batch->error, err_string);
-      throw PythonBackendException(err_string);
-    } else {
-      throw PythonBackendException(
-          "An error occurred while performing BLS request.");
+    shm_pool->MapOffset((char**)&response_batch, exec_args->response_batch);
+    responses_is_set = true;
+
+    if (response_batch->has_error) {
+      if (response_batch->is_error_set) {
+        char* err_string;
+        LoadStringFromSharedMemory(shm_pool, response_batch->error, err_string);
+        return std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(err_string));
+      } else {
+        return std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(
+                "An error occurred while performing BLS request."));
+      }
     }
   }
-  return InferResponse::LoadFromSharedMemory(
-      shm_pool, response_batch->responses);
+  catch (const PythonBackendException& pb_exception) {
+    return std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{},
+        std::make_shared<PbError>(pb_exception.what()));
+  }
+
+  if (responses_is_set) {
+    return InferResponse::LoadFromSharedMemory(
+        shm_pool, response_batch->responses);
+  } else {
+    return std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{},
+        std::make_shared<PbError>(
+            "An error occurred while performing BLS request."));
+  }
 }
 #endif
 

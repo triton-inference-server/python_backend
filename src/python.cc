@@ -773,12 +773,11 @@ ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
 
-    std::unique_ptr<InferResponse> infer_response =
-        InferResponse::LoadFromSharedMemory(
-            shm_pool_, response_batch->responses + sizeof(Response) * r);
-
-    if (infer_response->HasError()) {
-      try {
+    std::unique_ptr<InferResponse> infer_response;
+    try {
+      infer_response = InferResponse::LoadFromSharedMemory(
+          shm_pool_, response_batch->responses + sizeof(Response) * r);
+      if (infer_response->HasError()) {
         if (infer_response->IsErrorMessageSet()) {
           TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
               TRITONSERVER_ERROR_INTERNAL,
@@ -800,20 +799,23 @@ ModelInstanceState::ProcessRequests(
               "failed sending response");
           TRITONSERVER_ErrorDelete(err);
         }
-      }
-      catch (const PythonBackendException& pb_exception) {
-        TRITONSERVER_Error* err = CreateTritonErrorFromException(pb_exception);
 
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(
-                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-            "failed sending response");
-      }
+        responses[r] = nullptr;
 
+        // If has_error is true, we do not look at the response even if the
+        // response is set.
+        continue;
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+          TRITONSERVER_Error* err =
+              TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseSend(
+                  responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+              "failed sending response");
+          TRITONSERVER_ErrorDelete(err);
       responses[r] = nullptr;
-
-      // If has_error is true, we do not look at the response even if the
-      // response is set.
       continue;
     }
 
@@ -901,10 +903,10 @@ ModelInstanceState::ProcessRequests(
 #endif  // TRITON_ENABLE_GPU
 
     // If error happens at this stage, we can only log it
-    LOG_IF_ERROR(
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r,
         TRITONBACKEND_ResponseSend(
-            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr),
-        "failed sending response");
+            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr));
   }
 
   uint64_t exec_end_ns = 0;
@@ -1337,16 +1339,6 @@ ModelInstanceState::GetInputTensor(
   RETURN_IF_ERROR(TRITONBACKEND_InputPropertiesForHostPolicy(
       in, HostPolicyName().c_str(), &input_name, &input_dtype, &input_shape,
       &input_dims_count, &input_byte_size, &input_buffer_count));
-
-  // If input_byte_size is larger than 2GBs, reject request the request.
-  uint64_t max_input_size = INT32_MAX;
-  if (input_byte_size > max_input_size) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_UNSUPPORTED,
-        "Python backend does not support input size larger than 2GBs, "
-        "consider "
-        "partitioning your input into multiple inputs.");
-  }
 
   BackendInputCollector collector(
       &request, 1, &responses, Model()->TritonMemoryManager(),

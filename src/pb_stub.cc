@@ -409,7 +409,7 @@ Stub::RunCommand()
         LOG_INFO << err_message.c_str();
         response_batch->has_error = true;
         response_batch->is_error_set = false;
-        off_t err_string_offset;
+        off_t err_string_offset = 0;
         LOG_IF_EXCEPTION(SaveStringToSharedMemory(
             shm_pool_, err_string_offset, error_string.c_str()));
         if (err_string_offset != 0) {
