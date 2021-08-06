@@ -38,6 +38,7 @@ project(tritonpythonbackend LANGUAGES C CXX)
 # because python backend does not need to access CUDA or GPUs
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" OFF)
+option(TRITON_ENABLE_GPU_TENSORS "Allow GPU input and output tensors" OFF)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
 
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")

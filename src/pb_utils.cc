@@ -44,7 +44,7 @@
 #include <unordered_map>
 #include "shm_manager.h"
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #endif
@@ -83,7 +83,7 @@ SaveStringToSharedMemory(
   strcpy(string_data, str);
 }
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 size_t
 GetDevicePointerOffset(void* d_ptr)
 {
@@ -104,13 +104,14 @@ GetDevicePointerOffset(void* d_ptr)
   return reinterpret_cast<char*>(d_ptr) -
          reinterpret_cast<char*>(start_address);
 }
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, uint64_t** offset)
+    int memory_type_id, uint64_t byte_size, uint64_t** offset,
+    off_t raw_ptr_offset)
 {
   // raw data
   RawData* raw_data;
@@ -121,21 +122,27 @@ SaveRawDataToSharedMemory(
   raw_data->byte_size = byte_size;
   *offset = &(raw_data->offset);
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
-    off_t buffer_offset;
-    shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
-    raw_data->memory_ptr = buffer_offset;
+    // If the raw_ptr_offset is not equal to zero, the user has provided
+    // the offset for the raw ptr.
+    if (raw_ptr_offset == 0) {
+      off_t buffer_offset;
+      shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
+      raw_data->memory_ptr = buffer_offset;
+    } else {
+      raw_data->memory_ptr = raw_ptr_offset;
+    }
   }
 
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
     off_t buffer_offset;
     shm_pool->Map(
         (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
     raw_data->memory_ptr = buffer_offset;
 #else
-  throw PythonBackendException(
-      "Trying to create GPU tensors with TRITON_ENABLE_GPU disabled.");
-#endif
+    throw PythonBackendException(
+        "Python backend does not support GPU tensors.");
+#endif  // TRITON_ENABLE_GPU_TENSORS
   }
 }
 
@@ -185,13 +192,13 @@ SaveTensorToSharedMemory(
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, uint64_t byte_size, const char* name,
     const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
-    uint64_t** offset_ptr)
+    uint64_t** offset_ptr, off_t raw_ptr_offset)
 {
-  // Raw Data
   off_t raw_data_offset;
+  // Raw Data
   SaveRawDataToSharedMemory(
       shm_pool, raw_data_offset, raw_data_ptr, memory_type, memory_type_id,
-      byte_size, offset_ptr);
+      byte_size, offset_ptr, raw_ptr_offset);
   tensor->raw_data = raw_data_offset;
 
   // name

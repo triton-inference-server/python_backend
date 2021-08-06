@@ -26,7 +26,6 @@
 
 import numpy as np
 import struct
-import ctypes
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -68,10 +67,9 @@ def serialize_byte_tensor(input_tensor):
     if input_tensor.size == 0:
         return None
 
-    # If the input is a tensor of string/bytes objects, then must flatten those into
-    # a 1-dimensional array containing the 4-byte byte size followed by the
-    # actual element bytes. All elements are concatenated together in "C"
-    # order.
+    # If the input is a tensor of string/bytes objects, then must flatten those
+    # into a 1-dimensional array containing the 4-byte byte size followed by the
+    # actual element bytes. All elements are concatenated together in "C" order.
     if (input_tensor.dtype == np.object_) or (input_tensor.dtype.type
                                               == np.bytes_):
         flattened_ls = []
@@ -121,31 +119,6 @@ def deserialize_bytes_tensor(encoded_tensor):
     return (np.array(strs, dtype=np.object_))
 
 
-
-class TritonModelException(Exception):
-    """Exception indicating non-Success status.
-    Parameters
-    ----------
-    msg : str
-        A brief description of error
-    """
-    def __init__(self, msg):
-        self._msg = msg
-
-    def __str__(self):
-        msg = super().__str__() if self._msg is None else self._msg
-        return msg
-
-    def message(self):
-        """Get the exception message.
-        Returns
-        -------
-        str
-            The message associated with this exception, or None if no message.
-        """
-        return self._msg
-
-
 def get_input_tensor_by_name(inference_request, name):
     """Find an input Tensor in the inference_request that has the given
     name
@@ -165,6 +138,29 @@ def get_input_tensor_by_name(inference_request, name):
     for input_tensor in input_tensors:
         if input_tensor.name() == name:
             return input_tensor
+
+    return None
+
+
+def get_output_tensor_by_name(inference_response, name):
+    """Find an output Tensor in the inference_response that has the given
+    name
+    Parameters
+    ----------
+    inference_response : InferenceResponse
+        InferenceResponse object
+    name : str
+        name of the output Tensor object
+    Returns
+    -------
+    Tensor
+        The output Tensor with the specified name, or None if no
+        output Tensor with this name exists
+    """
+    output_tensors = inference_response.output_tensors()
+    for output_tensor in output_tensors:
+        if output_tensor.name() == name:
+            return output_tensor
 
     return None
 

@@ -44,7 +44,7 @@ class InferResponse {
   bool IsErrorMessageSet();
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm);
+      std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm, bool copy);
   static std::unique_ptr<InferResponse> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset);
   bool HasError();

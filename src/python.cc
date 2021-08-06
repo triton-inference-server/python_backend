@@ -61,14 +61,23 @@
 #include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
-#
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
+
+#define LOG_IF_EXCEPTION(X)                                     \
+  do {                                                          \
+    try {                                                       \
+      (X);                                                      \
+    }                                                           \
+    catch (const PythonBackendException& pb_exception) {        \
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what()); \
+    }                                                           \
+  } while (false)
 
 
 #define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X) \
@@ -232,8 +241,10 @@ class ModelInstanceState : public BackendModelInstance {
   std::string model_path_;
   IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
+  std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
+  std::unique_ptr<RequestExecutor> request_executor_;
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
 
   // Stub process pid
@@ -247,12 +258,12 @@ class ModelInstanceState : public BackendModelInstance {
   std::string path_to_libpython_;
   std::string path_to_activate_;
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
   std::unordered_map<
       std::array<char, sizeof(cudaIpcMemHandle_t)>, void*,
       boost::hash<std::array<char, sizeof(cudaIpcMemHandle_t)>>>
       gpu_tensors_map_;
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -271,6 +282,7 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Create the stub process.
   TRITONSERVER_Error* SetupStubProcess();
+  void CleanupBLSResponses();
 
   // Notifies the stub process on the new request.  Returns false if the parent
   // process fails to acquire the lock.
@@ -305,6 +317,8 @@ ModelInstanceState::ModelInstanceState(
     : BackendModelInstance(model_state, triton_model_instance), stub_pid_(0),
       initialized_(false)
 {
+  request_executor_ =
+      std::make_unique<RequestExecutor>(model_state->TritonServer());
 }
 
 TRITONSERVER_Error*
@@ -391,12 +405,14 @@ ModelInstanceState::RespondErrorToAllRequests(
     if (responses[r] == nullptr)
       continue;
 
-    TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        (std::string("Failed to process the request(s), message: ") + message)
-            .c_str());
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_INFO, "Failed to process the batch of requests.");
+    std::string err_message =
+        std::string(
+            "Failed to process the request(s) for model instance '" + Name() +
+            "', message: ") +
+        message;
+
+    TRITONSERVER_Error* err =
+        TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_message.c_str());
     LOG_IF_ERROR(
         TRITONBACKEND_ResponseSend(
             responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
@@ -653,6 +669,71 @@ ModelInstanceState::ProcessRequests(
     return nullptr;
   }
 
+  // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
+  // that inference request exeuction has finished.
+  while (ipc_message_->stub_command ==
+         PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+    bool is_response_batch_set = false;
+    ResponseBatch* response_batch;
+    TRITONSERVER_InferenceResponse* inference_response = nullptr;
+    try {
+      ExecuteArgs* exec_args;
+      shm_pool_->MapOffset((char**)&exec_args, ipc_message_->stub_args);
+      RequestBatch* request_batch;
+      shm_pool_->MapOffset((char**)&request_batch, exec_args->request_batch);
+      shm_pool_->Map(
+          (char**)&response_batch, sizeof(ResponseBatch),
+          exec_args->response_batch);
+      response_batch->batch_size = 1;
+      response_batch->has_error = false;
+      response_batch->is_error_set = false;
+      response_batch->cleanup = false;
+      is_response_batch_set = true;
+
+      if (request_batch->batch_size == 1) {
+        std::unique_ptr<InferRequest> infer_request;
+        infer_request = InferRequest::LoadFromSharedMemory(
+            shm_pool_, request_batch->requests);
+        std::unique_ptr<InferResponse> infer_response;
+        infer_response = request_executor_->Infer(
+            infer_request, shm_pool_, &inference_response);
+
+        if (inference_response != nullptr)
+          bls_inference_responses_.push_back(inference_response);
+
+        Response* response;
+        shm_pool_->Map(
+            (char**)&response, sizeof(Response), response_batch->responses);
+
+        infer_response->SaveToSharedMemory(
+            shm_pool_, response, false /* copy */);
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+      if (is_response_batch_set) {
+        response_batch->has_error = true;
+        off_t string_offset = 0;
+        LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+            shm_pool_, string_offset, pb_exception.what()));
+        if (string_offset != 0) {
+          response_batch->is_error_set = true;
+          response_batch->error = string_offset;
+        }
+      } else {
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
+      }
+    }
+
+    bool restart = true;
+    if (!NotifyStubAndWait(restart)) {
+      RespondErrorToAllRequests(
+          "The stub process has exited unexpectedly.", responses, requests,
+          request_count);
+
+      return nullptr;
+    }
+  }
+
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
 
@@ -693,12 +774,11 @@ ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
 
-    std::unique_ptr<InferResponse> infer_response =
-        InferResponse::LoadFromSharedMemory(
-            shm_pool_, response_batch->responses + sizeof(Response) * r);
-
-    if (infer_response->HasError()) {
-      try {
+    std::unique_ptr<InferResponse> infer_response;
+    try {
+      infer_response = InferResponse::LoadFromSharedMemory(
+          shm_pool_, response_batch->responses + sizeof(Response) * r);
+      if (infer_response->HasError()) {
         if (infer_response->IsErrorMessageSet()) {
           TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
               TRITONSERVER_ERROR_INTERNAL,
@@ -720,20 +800,23 @@ ModelInstanceState::ProcessRequests(
               "failed sending response");
           TRITONSERVER_ErrorDelete(err);
         }
-      }
-      catch (const PythonBackendException& pb_exception) {
-        TRITONSERVER_Error* err = CreateTritonErrorFromException(pb_exception);
 
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(
-                responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-            "failed sending response");
-      }
+        responses[r] = nullptr;
 
+        // If has_error is true, we do not look at the response even if the
+        // response is set.
+        continue;
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+      LOG_IF_ERROR(
+          TRITONBACKEND_ResponseSend(
+              responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+          "failed sending response");
+      TRITONSERVER_ErrorDelete(err);
       responses[r] = nullptr;
-
-      // If has_error is true, we do not look at the response even if the
-      // response is set.
       continue;
     }
 
@@ -763,7 +846,7 @@ ModelInstanceState::ProcessRequests(
       TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
       int64_t actual_memory_type_id = src_memory_type_id;
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
       if (actual_memory_type == TRITONSERVER_MEMORY_GPU &&
           output_tensor->IsReused()) {
         std::array<char, sizeof(cudaIpcMemHandle_t)> cuda_handle;
@@ -821,10 +904,10 @@ ModelInstanceState::ProcessRequests(
 #endif  // TRITON_ENABLE_GPU
 
     // If error happens at this stage, we can only log it
-    LOG_IF_ERROR(
+    GUARDED_RESPOND_IF_ERROR(
+        responses, r,
         TRITONBACKEND_ResponseSend(
-            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr),
-        "failed sending response");
+            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr));
   }
 
   uint64_t exec_end_ns = 0;
@@ -878,7 +961,19 @@ ModelInstanceState::ProcessRequests(
   }
 
   return nullptr;
-}  // namespace python
+}
+
+void
+ModelInstanceState::CleanupBLSResponses()
+{
+  for (auto& bls_inference_response : bls_inference_responses_) {
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceResponseDelete(bls_inference_response),
+        " failed to release BLS inference response.");
+  }
+
+  bls_inference_responses_.clear();
+}
 
 bool
 ModelInstanceState::IsStubProcessAlive()
@@ -961,18 +1056,18 @@ ModelInstanceState::StartStubProcess()
          << " " << shm_region_name << " " << shm_default_size << " "
          << shm_growth_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
-         << ipc_control_offset_;
+         << ipc_control_offset_ << " " << Name();
       ipc_control_->uses_env = true;
       // Need to properly set the LD_LIBRARY_PATH so that Python environments
       // using different python versions load properly.
       bash_argument = ss.str();
     } else {
       std::stringstream ss;
-      ss << " exec " << python_backend_stub
-         << " " << model_path_ << " " << shm_region_name << " "
-         << shm_default_size << " " << shm_growth_size << " " << parent_pid_
-         << " " << model_state->StateForBackend()->python_lib << " "
-         << ipc_control_offset_;
+      ss << " exec " << python_backend_stub << " " << model_path_ << " "
+         << shm_region_name << " " << shm_default_size << " " << shm_growth_size
+         << " " << parent_pid_ << " "
+         << model_state->StateForBackend()->python_lib << " "
+         << ipc_control_offset_ << " " << Name();
       bash_argument = ss.str();
     }
     LOG_MESSAGE(
@@ -1251,16 +1346,6 @@ ModelInstanceState::GetInputTensor(
       in, HostPolicyName().c_str(), &input_name, &input_dtype, &input_shape,
       &input_dims_count, &input_byte_size, &input_buffer_count));
 
-  // If input_byte_size is larger than 2GBs, reject request the request.
-  uint64_t max_input_size = INT32_MAX;
-  if (input_byte_size > max_input_size) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_UNSUPPORTED,
-        "Python backend does not support input size larger than 2GBs, "
-        "consider "
-        "partitioning your input into multiple inputs.");
-  }
-
   BackendInputCollector collector(
       &request, 1, &responses, Model()->TritonMemoryManager(),
       false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
@@ -1279,11 +1364,12 @@ ModelInstanceState::GetInputTensor(
       in, 0 /* input buffer index */, &src_ptr, &src_byte_size,
       &src_memory_type, &src_memory_type_id));
 
-// If TRITON_ENABLE_GPU is false, we need to copy the tensors
+// If TRITON_ENABLE_GPU_TENSORS is false, we need to copy the tensors
 // to the CPU.
-#ifndef TRITON_ENABLE_GPU
+#ifndef TRITON_ENABLE_GPU_TENSORS
   cpu_only_tensors = true;
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
+
   if (cpu_only_tensors || src_memory_type != TRITONSERVER_MEMORY_GPU) {
     input_tensor = std::make_unique<PbTensor>(
         std::string(input_name),
@@ -1298,7 +1384,7 @@ ModelInstanceState::GetInputTensor(
         input_name, input_buffer, input_byte_size,
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
   } else {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
     // Retreiving GPU input tensors
     const void* buffer = nullptr;
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
@@ -1327,9 +1413,8 @@ ModelInstanceState::GetInputTensor(
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
-        "Python backend was built with TRITON_ENABLE_GPU=OFF but received a "
-        "GPU tensor.");
-#endif  // TRITON_ENABLE_GPU
+        "Python backend does not support GPU tensors.");
+#endif  // TRITON_ENABLE_GPU_TENSORS
   }
 
   return nullptr;
@@ -1667,6 +1752,7 @@ TRITONBACKEND_ModelInstanceExecute(
       instance, reinterpret_cast<void**>(&instance_state)));
   TRITONSERVER_Error* err =
       instance_state->ProcessRequests(requests, request_count);
+  instance_state->CleanupBLSResponses();
 
   // We should return the shared memory offset before returning from this
   // function. Otherwise there will be shared memory leaks if there is an
@@ -1678,7 +1764,6 @@ TRITONBACKEND_ModelInstanceExecute(
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
-
     LOG_IF_ERROR(
         TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
         "failed releasing request");

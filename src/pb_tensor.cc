@@ -24,9 +24,9 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 #ifdef TRITON_PB_STUB
 #include "pb_stub_utils.h"
@@ -119,7 +119,7 @@ PbTensor::PbTensor(
   memory_type_id_ = 0;
   dl_managed_tensor_ = nullptr;
 }
-#endif // TRITON_PB_STUB
+#endif  // TRITON_PB_STUB
 
 PbTensor::PbTensor(
     const std::string& name, const std::vector<int64_t>& dims,
@@ -261,7 +261,7 @@ PbTensor::ToDLPack()
   return py::capsule(
       static_cast<void*>(dlpack_tensor), "dltensor", &delete_unused_dltensor);
 }
-#endif // TRITON_PB_STUB
+#endif  // TRITON_PB_STUB
 
 void
 PbTensor::DeleteDLPack()
@@ -301,7 +301,7 @@ PbTensor::LoadFromSharedMemory(
         raw_data->memory_type, raw_data->memory_type_id, data,
         raw_data->byte_size, nullptr /* DLManaged Tensor */);
   } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
     cudaIpcMemHandle_t* cuda_ipc_mem_handle;
     shm_pool->MapOffset((char**)&cuda_ipc_mem_handle, raw_data->memory_ptr);
     if (!tensor_shm->is_reused) {
@@ -333,7 +333,9 @@ PbTensor::LoadFromSharedMemory(
       pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
       pb_tensor->is_reused_ = true;
     }
-#endif // TRITON_ENABLE_GPU
+#else
+    throw PythonBackendException("GPU Tensor is not supported.");
+#endif  // TRITON_ENABLE_GPU_TENSORS
   }
 
   return pb_tensor;
@@ -416,11 +418,11 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
       name, dims, dtype, memory_type, memory_type_id, memory_ptr, byte_size,
       dl_managed_tensor);
 }
-#endif // TRITON_PB_STUB
+#endif  // TRITON_PB_STUB
 
 PbTensor::~PbTensor() noexcept(false)
 {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
   if (!IsCPU() && cuda_ipc_mem_handle_ != nullptr &&
       destruct_cuda_ipc_mem_handle_) {
     cudaError_t err = cudaIpcCloseMemHandle(GetGPUStartAddress());
@@ -432,7 +434,7 @@ PbTensor::~PbTensor() noexcept(false)
                                        .c_str());
     }
   }
-#endif // TRITON_ENABLE_GPU
+#endif  // TRITON_ENABLE_GPU_TENSORS
   DeleteDLPack();
 }
 
@@ -455,9 +457,9 @@ PbTensor::AsNumpy() const
 
   return numpy_array_;
 }
-#endif // TRITON_PB_STUB
+#endif  // TRITON_PB_STUB
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 void*
 PbTensor::GetGPUStartAddress()
 {
@@ -496,7 +498,7 @@ PbTensor::CudaIpcMemHandle()
 {
   return cuda_ipc_mem_handle_;
 }
-#endif // TRITON_ENABLE_GPU
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 void
 PbTensor::SaveToSharedMemory(
@@ -523,7 +525,7 @@ PbTensor::SaveToSharedMemory(
     SaveTensorToSharedMemory(
         shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
         byte_size_, tensor_name.c_str(), dims_.data(), dims_count, dtype_triton,
-        &ptr_offset);
+        &ptr_offset, shm_offset_);
     *ptr_offset = 0;
 
     // TODO: We can remove this memcpy if the numpy object
@@ -534,7 +536,7 @@ PbTensor::SaveToSharedMemory(
       memory_ptr_ = reinterpret_cast<void*>(data_in_shm);
     }
   } else {
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
     char* cuda_handle;
     uint64_t* ptr_offset;
     SaveTensorToSharedMemory(
@@ -567,9 +569,8 @@ PbTensor::SaveToSharedMemory(
     *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
                   reinterpret_cast<char*>(start_address);
 #else
-    throw PythonBackendException(
-        "Python backend was not built with GPU tensor support");
-#endif // TRITON_ENABLE_GPU
+    throw PythonBackendException("GPU tensors are not supported.");
+#endif  // TRITON_ENABLE_GPU_TENSORS
   }
 }
 
