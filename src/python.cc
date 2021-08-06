@@ -282,6 +282,7 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Create the stub process.
   TRITONSERVER_Error* SetupStubProcess();
+  void CleanupBLSResponses();
 
   // Notifies the stub process on the new request.  Returns false if the parent
   // process fails to acquire the lock.
@@ -808,13 +809,13 @@ ModelInstanceState::ProcessRequests(
       }
     }
     catch (const PythonBackendException& pb_exception) {
-          TRITONSERVER_Error* err =
-              TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-          LOG_IF_ERROR(
-              TRITONBACKEND_ResponseSend(
-                  responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-              "failed sending response");
-          TRITONSERVER_ErrorDelete(err);
+      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+      LOG_IF_ERROR(
+          TRITONBACKEND_ResponseSend(
+              responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+          "failed sending response");
+      TRITONSERVER_ErrorDelete(err);
       responses[r] = nullptr;
       continue;
     }
@@ -958,6 +959,13 @@ ModelInstanceState::ProcessRequests(
           "cleanup.");
     }
   }
+
+  return nullptr;
+}
+
+void
+ModelInstanceState::CleanupBLSResponses()
+{
   for (auto& bls_inference_response : bls_inference_responses_) {
     LOG_IF_ERROR(
         TRITONSERVER_InferenceResponseDelete(bls_inference_response),
@@ -965,9 +973,7 @@ ModelInstanceState::ProcessRequests(
   }
 
   bls_inference_responses_.clear();
-
-  return nullptr;
-}  // namespace python
+}
 
 bool
 ModelInstanceState::IsStubProcessAlive()
@@ -1746,6 +1752,7 @@ TRITONBACKEND_ModelInstanceExecute(
       instance, reinterpret_cast<void**>(&instance_state)));
   TRITONSERVER_Error* err =
       instance_state->ProcessRequests(requests, request_count);
+  instance_state->CleanupBLSResponses();
 
   // We should return the shared memory offset before returning from this
   // function. Otherwise there will be shared memory leaks if there is an
