@@ -47,10 +47,10 @@
 #include "pb_utils.h"
 #include "shm_manager.h"
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
 #include <cuda.h>
 #include <cuda_runtime_api.h>
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
 #include "pb_stub.h"
 
@@ -131,13 +131,14 @@ SignalHandler(int signum)
 void
 Stub::Instantiate(
     int64_t shm_growth_size, int64_t shm_default_size,
-    std::string& shm_region_name, const std::string& model_path,
+    const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
-    off_t ipc_control_offset)
+    off_t ipc_control_offset, const std::string& model_instance_name)
 {
   model_path_ = model_path;
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
+  model_instance_name_ = model_instance_name;
 
   stub_mutex_ = nullptr;
   stub_cond_ = nullptr;
@@ -296,18 +297,20 @@ Stub::ProcessResponse(
       tensors_to_remove_.push_back(output_tensor);
     }
 
-#ifdef TRITON_ENABLE_GPU
     if (!output_tensor->IsCPU()) {
+#ifdef TRITON_ALLOW_GPU_TENSORS
       std::unordered_map<void*, cudaIpcMemHandle_t*>::const_iterator
           reused_gpu_tensor =
               gpu_tensors_map_.find(output_tensor->GetGPUStartAddress());
       if (reused_gpu_tensor != gpu_tensors_map_.end()) {
         output_tensor->SetReusedIpcHandle(reused_gpu_tensor->second);
       }
-    }
+#else
+      throw PythonBackendException("GPU tensors is not supported.");
 #endif
+    }
   }
-  response->SaveToSharedMemory(shm_pool_, response_shm);
+  response->SaveToSharedMemory(shm_pool_, response_shm, true /* copy */);
 }
 
 std::unique_ptr<InferRequest>
@@ -317,7 +320,7 @@ Stub::ProcessRequest(
 {
   std::unique_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
   for (auto& input_tensor : infer_request->Inputs()) {
     if (!input_tensor->IsCPU()) {
       response_batch->cleanup = true;
@@ -326,7 +329,7 @@ Stub::ProcessRequest(
            input_tensor->CudaIpcMemHandle()});
     }
   }
-#endif
+#endif  // TRITON_ENABLE_GPU_TENSORS
 
   return infer_request;
 }
@@ -398,10 +401,15 @@ Stub::RunCommand()
       }
 
       if (has_exception) {
-        LOG_INFO << "Failed to execute request batch: " << error_string;
+        std::string err_message =
+            std::string(
+                "Failed to process the request(s) for model '" +
+                model_instance_name_ + "', message: ") +
+            error_string;
+        LOG_INFO << err_message.c_str();
         response_batch->has_error = true;
         response_batch->is_error_set = false;
-        off_t err_string_offset;
+        off_t err_string_offset = 0;
         LOG_IF_EXCEPTION(SaveStringToSharedMemory(
             shm_pool_, err_string_offset, error_string.c_str()));
         if (err_string_offset != 0) {
@@ -486,8 +494,7 @@ Stub::Initialize(InitializeArgs* initialize_args)
 {
   py::module sys = py::module::import("sys");
 
-  std::string model_name =
-      model_path_.substr(model_path_.find_last_of("/") + 1);
+  std::string model_name = model_path_.substr(model_path_.find_last_of("/") + 1);
   std::string model_path_parent =
       model_path_.substr(0, model_path_.find_last_of("/"));
   std::string model_path_parent_parent =
@@ -512,6 +519,9 @@ Stub::Initialize(InitializeArgs* initialize_args)
   py::setattr(
       python_backend_utils, "TritonError",
       c_python_backend_utils.attr("TritonError"));
+  py::setattr(
+      python_backend_utils, "TritonModelException",
+      c_python_backend_utils.attr("TritonModelException"));
 
   py::object TritonPythonModel =
       py::module::import((model_version_ + std::string(".model")).c_str())
@@ -549,7 +559,7 @@ Stub::Cleanup()
   // Deleting the tensors should automatically trigger the destructor.
   tensors_to_remove_.clear();
 
-#ifdef TRITON_ENABLE_GPU
+#ifdef TRITON_ENABLE_GPU_TENSORS
   gpu_tensors_map_.clear();
 #endif
 }
@@ -566,6 +576,12 @@ Stub::Finalize()
       LOG_INFO << e.what();
     }
   }
+}
+
+IPCMessage*
+Stub::GetIPCMessage()
+{
+  return ipc_message_;
 }
 
 // Wait for notification from the server. Returns true if the parent process
@@ -613,15 +629,19 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
   py::class_<InferRequest>(module, "InferenceRequest")
-      .def(py::init<
-           const std::string&, uint64_t,
-           const std::vector<std::shared_ptr<PbTensor>>&,
-           const std::vector<std::string>&, const std::string&,
-           const int64_t>())
+      .def(
+          py::init<
+              const std::string&, uint64_t,
+              const std::vector<std::shared_ptr<PbTensor>>&,
+              const std::vector<std::string>&, const std::string&,
+              const int64_t>(),
+          py::arg("request_id") = "", py::arg("correlation_id") = 0,
+          py::arg("inputs"), py::arg("requested_output_names"),
+          py::arg("model_name"), py::arg("model_version") = -1)
       .def("inputs", &InferRequest::Inputs)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
-      // .def("exec", &InferRequest::Exec)
+      .def("exec", &InferRequest::Exec)
       .def("requested_output_names", &InferRequest::RequestedOutputNames);
 
   py::class_<InferResponse>(module, "InferenceResponse")
@@ -641,7 +661,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("message", &PbError::Message);
 
   py::register_exception<PythonBackendException>(
-      module, "PythonBackendException");
+      module, "TritonModelException");
 }
 
 extern "C" {
@@ -649,8 +669,8 @@ extern "C" {
 int
 main(int argc, char** argv)
 {
-  if (argc < 8) {
-    LOG_INFO << "Expected 8 arguments, found " << argc << " arguments.";
+  if (argc < 9) {
+    LOG_INFO << "Expected 9 arguments, found " << argc << " arguments.";
     exit(1);
   }
   signal(SIGINT, SignalHandler);
@@ -682,13 +702,14 @@ main(int argc, char** argv)
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
   std::string triton_install_path = argv[6];
+  std::string model_instance_name = argv[8];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl offset */);
+        std::stoi(argv[7]) /* IPCControl offset */, model_instance_name);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();

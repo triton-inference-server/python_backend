@@ -31,4 +31,18 @@
 namespace triton { namespace backend { namespace python {
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
+
+class RequestExecutor {
+  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
+  TRITONSERVER_Server* server_;
+
+ public:
+  std::unique_ptr<InferResponse> Infer(
+      const std::unique_ptr<InferRequest>& infer_request,
+      const std::unique_ptr<SharedMemory>& shm_pool,
+      TRITONSERVER_InferenceResponse** response);
+  RequestExecutor(TRITONSERVER_Server* server);
+  ~RequestExecutor();
+};
+
 }}}  // namespace triton::backend::python
