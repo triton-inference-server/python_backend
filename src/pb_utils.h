@@ -77,12 +77,16 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_Execute,
   PYTHONSTUB_Initialize,
   PYTHONSTUB_Finalize,
-  PYTHONSTUB_TensorCleanup
+  PYTHONSTUB_TensorCleanup,
+  PYTHONSTUB_InferExecRequest,
+  PYTHONSTUB_InferExecResponse
 } PYTHONSTUB_CommandType;
 
 struct IPCMessage {
   PYTHONSTUB_CommandType command;
+  PYTHONSTUB_CommandType stub_command;
   off_t args;
+  off_t stub_args;
 };
 
 struct ExecuteArgs {
@@ -238,14 +242,16 @@ void LoadStringFromSharedMemory(
 void SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, uint64_t** offset_ptr);
+    int memory_type_id, uint64_t byte_size, uint64_t** offset_ptr,
+    off_t raw_ptr_offset = 0);
 
 void SaveTensorToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, uint64_t byte_size, const char* name,
     const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
-    uint64_t** offset_ptr);
+    uint64_t** offset_ptr, off_t raw_ptr_offset);
+
 void LoadTensorFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
     Tensor& tensor);
