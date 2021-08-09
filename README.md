@@ -481,12 +481,13 @@ pipeline (or more generally a DAG, directed acyclic graph). However, there are
 many other use cases that are not supported because as part of the model
 pipeline they require loops, conditionals (if-then-else), data-dependent
 control-flow and other custom logic to be intermixed with model execution. We
-call this combination of custom logic and model executions a Business Logic
-Scripting (BLS). 
+call this combination of custom logic and model executions *Business Logic
+Scripting (BLS)*. 
 
-Starting from 21.08, you can execute inference requests on any other model that
-is served by Triton as a part of your Python model execution. Example below
-shows how to use this feature:
+Starting from 21.08, you can implement BLS in your Python model. A new set of
+utility functions allows you to execute inference requests on other models being
+served by Triton as a part of executing your Python model. Example below shows
+how to use this feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
