@@ -393,6 +393,16 @@ Packing environment at '/home/iman/miniconda3/envs/python-3-6' to 'python-3-6.ta
 [########################################] | 100% Completed |  4.5s
 ```
 
+**Important Note:** Before installing the packages in your conda environment, make sure that you
+have exported [`PYTHONNOUSERSITE`](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONNOUSERSITE) environment variable:
+
+```
+export PYTHONNOUSERSITE=True
+```
+
+If this variable is not exported and similar packages are installed outside your conda environment,
+your tar file may not contain all the dependencies required for an isolated Python environment.
+
 After creating the tar file from the conda environment, you need to tell Python
 backend to use that environment for your model. You can do this by adding the
 lines below to the `config.pbtxt` file:
