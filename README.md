@@ -1,5 +1,5 @@
 <!--
-# Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -44,6 +44,7 @@ any C++ code.
 * [Error Handling](#error-handling)
 * [Managing Shared Memory](#managing-shared-memory)
 * [Building From Source](#building-from-source)
+* [Business Logic Scripting (beta)](#business-logic-scripting-beta)
 
 ## Quick Start
 
@@ -471,6 +472,79 @@ properly set the `--shm-size` flag depending on the size of your inputs and
 outputs. The default value for docker run command is `64MB` which is very
 small.
 
+# Business Logic Scripting (beta)
+
+Triton's
+[ensemble](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#ensemble-models)
+feature supports many use cases where multiple models are composed into a
+pipeline (or more generally a DAG, directed acyclic graph). However, there are
+many other use cases that are not supported because as part of the model
+pipeline they require loops, conditionals (if-then-else), data-dependent
+control-flow and other custom logic to be intermixed with model execution. We
+call this combination of custom logic and model executions *Business Logic
+Scripting (BLS)*. 
+
+Starting from 21.08, you can implement BLS in your Python model. A new set of
+utility functions allows you to execute inference requests on other models being
+served by Triton as a part of executing your Python model. Example below shows
+how to use this feature:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+  ...
+    def execute(self, requests):
+      ...
+      # Create an InferenceRequest object. `model_name`,
+      # `requested_output_names`, and `inputs` are the required arguments and
+      # must be provided when constructing an InferenceRequest object. Make sure
+      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      inference_request = pb_utils.InferenceRequest(
+          model_name='model_name',
+          requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+          inputs=[<pb_utils.Tensor object>])
+
+      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and model
+      # version in addition to the arguments described above. These arguments
+      # are optional. An example containing all the arguments:
+      # inference_request = pb_utils.InferenceRequest(model_name='model_name',
+      #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+      #   inputs=[<list of pb_utils.Tensor objects>],
+      #   request_id="1", correlation_id=4, model_version=1)
+
+      # Execute the inference_request and wait for the response
+      inference_response = inference_request.exec()
+
+      # Check if the inference response has an error
+      if inference_response.has_error():
+          raise pb_utils.TritonModelException(inference_response.error().message())
+      else:
+          # Extract the output tensors from the inference response.
+          output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
+          output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+
+          # Decide the next steps for model execution based on the received output
+          # tensors. It is possible to use the same output tensors to for the final
+          # inference resposne too.
+```
+
+A complete example for BLS in Python backend is included in the
+[Examples](#examples) section.
+
+## Limitations
+
+- The number of inference requests that can be executed as a part of your model
+execution is limited to the amount of shared memory available to the Triton
+server.  If you are using Docker to start the TritonServer, you can control the
+shared memory usage using the
+[`--shm-size`](https://docs.docker.com/engine/reference/run/) flag.
+- You need to make sure that the inference requests performed as a part of your model
+do not create a circular dependency. For example, if model A performs an inference request
+on itself and there are no more model instances ready to execute the inference request, the
+model will block on the inference execution forever.
+
 # Examples
 
 For using the Triton Python client in these examples you need to install
@@ -486,12 +560,15 @@ find the files in [examples/add_sub](examples/add_sub).
 ## AddSubNet in PyTorch
 
 In order to use this model, you need to install PyTorch. We recommend using
-`pip` method mentioned in the [PyTorch
-website](https://pytorch.org/get-started/locally/). Make sure that PyTorch is
-available in the same Python environment as other dependencies. If you need
-to create another Python environment, please refer to the "Changing Python
-Runtime Path" section of this readme. You can find the files for this example
-in [examples/pytorch](examples/pytorch).
+`pip` method mentioned in the [PyTorch website](https://pytorch.org/get-started/locally/).
+Make sure that PyTorch is available in the same Python environment as other
+dependencies. Alternatively, you can create a [Python Execution Environment](#using-custom-python-execution-environments).
+You can find the files for this example in [examples/pytorch](examples/pytorch).
+
+## Business Logic Scripting
+
+The BLS example needs the dependencies required for both of the above examples.
+You can find the complete example instructions in [examples/bls](examples/bls/README.md).
 
 # Reporting problems, asking questions
 
