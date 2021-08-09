@@ -25,11 +25,11 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <future>
+#include "pb_utils.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
 
 #include "pb_main_utils.h"
-#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 
