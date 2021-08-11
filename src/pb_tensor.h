@@ -143,8 +143,17 @@ class PbTensor {
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
 #ifdef TRITON_ENABLE_GPU
+  /// Set the cudaIpcMemHandle for the tensors that are reused.
+  /// \param cuda_ipc_mem_handle reusued tensor cudaIpcMemHandle
   void SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle);
+
+  /// Get the GPU start address.
+  /// \return The start address of a device pointer.
+  /// \throws PythonBackendException if the tensor is stored in CPU.
   void* GetGPUStartAddress();
+
+  /// Get the cuda IPC handle corresponding to this tensor.
+  /// \return The cudaIpcMemHandle
   cudaIpcMemHandle_t* CudaIpcMemHandle();
 
   /// Get the GPU pointer offset.

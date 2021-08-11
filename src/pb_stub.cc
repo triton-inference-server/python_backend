@@ -24,9 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <pybind11/embed.h>
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
+#include "pb_stub.h"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -50,8 +49,6 @@
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
 #endif  // TRITON_ENABLE_GPU
-
-#include "pb_stub.h"
 
 namespace py = pybind11;
 using namespace pybind11::literals;

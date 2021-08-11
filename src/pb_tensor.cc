@@ -471,7 +471,6 @@ PbTensor::GetGPUStartAddress()
         &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
         (CUdeviceptr)this->GetDataPtr());
 
-
     return reinterpret_cast<void*>(start_address);
   }
 
