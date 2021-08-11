@@ -135,6 +135,10 @@ add_library(
   src/pb_main_utils.h
   src/infer_request.cc
   src/infer_request.h
+  src/message_queue.cc
+  src/message_queue.h
+  src/ipc_message.cc
+  src/ipc_message.h
   src/pb_env.h
   src/pb_error.cc
   src/pb_error.h
@@ -154,6 +158,10 @@ add_executable(
   src/infer_request.h
   src/infer_response.cc
   src/infer_response.h
+  src/ipc_message.cc
+  src/ipc_message.h
+  src/message_queue.cc
+  src/message_queue.h
   src/pb_stub.cc
   src/pb_stub.h
   src/pb_error.cc

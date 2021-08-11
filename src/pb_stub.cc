@@ -42,6 +42,7 @@
 #include <unordered_map>
 #include "infer_request.h"
 #include "infer_response.h"
+#include "message_queue.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
@@ -135,11 +136,6 @@ Stub::Instantiate(
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
   model_instance_name_ = model_instance_name;
-
-  stub_mutex_ = nullptr;
-  stub_cond_ = nullptr;
-  parent_mutex_ = nullptr;
-  parent_cond_ = nullptr;
   health_mutex_ = nullptr;
 
   initialized_ = false;
@@ -150,23 +146,17 @@ Stub::Instantiate(
     shm_pool_ = std::make_unique<SharedMemory>(
         shm_region_name, shm_default_size, shm_growth_size);
 
-    // Stub mutex and CV
     shm_pool_->MapOffset((char**)&ipc_control_, ipc_control_offset);
-    shm_pool_->MapOffset((char**)&stub_mutex_, ipc_control_->stub_mutex);
-    shm_pool_->MapOffset((char**)&stub_cond_, ipc_control_->stub_cond);
-
-    // Parent Mutex and CV
-    shm_pool_->MapOffset((char**)&parent_mutex_, ipc_control_->parent_mutex);
-    shm_pool_->MapOffset((char**)&parent_cond_, ipc_control_->parent_cond);
 
     bi::interprocess_mutex* health_mutex;
     shm_pool_->MapOffset(
         (char**)&health_mutex, ipc_control_->stub_health_mutex);
     health_mutex_ = health_mutex;
 
-    shm_pool_->MapOffset((char**)&ipc_message_, ipc_control_->ipc_message);
-    stub_lock_ =
-        std::make_unique<bi::scoped_lock<bi::interprocess_mutex>>(*stub_mutex_);
+    stub_message_queue_ = MessageQueue::LoadFromSharedMemory(
+        shm_pool_, ipc_control_->stub_message_queue);
+    parent_message_queue_ = MessageQueue::LoadFromSharedMemory(
+        shm_pool_, ipc_control_->parent_message_queue);
 
     // If the Python model is using an execution environment, we need to
     // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
@@ -206,20 +196,6 @@ Stub::Instantiate(
     LOG_INFO << pb_exception.what() << std::endl;
     exit(1);
   }
-}
-
-void
-Stub::NotifyParent()
-{
-  if (parent_mutex_ == nullptr || parent_cond_ == nullptr) {
-    LOG_INFO << "Parent process mutex and conditional variable is not "
-                "initialized. "
-             << "Exiting..";
-    exit(1);
-  }
-
-  bi::scoped_lock<bi::interprocess_mutex> lk(*parent_mutex_);
-  parent_cond_->notify_one();
 }
 
 bool&
@@ -337,18 +313,87 @@ Stub::SetResponseFromException(
   SetErrorForResponseBatch(response_batch, pb_exception.what());
 }
 
+std::unique_ptr<IPCMessage>
+Stub::PopMessage()
+{
+  while (true) {
+    {
+      std::lock_guard<std::mutex> gaurd{messages_mutex_};
+      if (!messages_.empty()) {
+        std::unique_ptr<IPCMessage> message = std::move(messages_.back());
+        messages_.pop_back();
+        return message;
+      }
+    }
+
+    this->Fetch();
+  }
+}
+
+void
+Stub::Fetch()
+{
+  std::lock_guard<std::mutex> gaurd{messages_mutex_};
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::LoadFromSharedMemory(shm_pool_, stub_message_queue_->Pop());
+  std::cout << "Receieved message is_response=" << ipc_message->IsResponse()
+            << " request id=" << ipc_message->RequestOffset() << std::endl;
+  messages_.emplace_back(std::move(ipc_message));
+}
+
+std::unique_ptr<IPCMessage>
+Stub::FindMessageByRequestId(off_t request_id)
+{
+  std::cout << "Looking for the message with request id" << request_id
+            << std::endl;
+  while (true) {
+    {
+      std::lock_guard<std::mutex> gaurd{messages_mutex_};
+      if (!messages_.empty()) {
+        for (auto it = messages_.begin(); it != messages_.end(); it++) {
+          std::cout << "[Iterating over the messages] predicate="
+                    << ((*it)->IsResponse() &&
+                        (*it)->RequestOffset() == request_id)
+                    << " is resposne " << ((*it)->IsResponse())
+                    << ((*it)->RequestOffset()) << std::endl;
+          if ((*it)->IsResponse() && (*it)->RequestOffset() == request_id) {
+            std::cout << "Message was found" << std::endl;
+            std::unique_ptr<IPCMessage> found_message = std::move(*it);
+            messages_.erase(it);
+            return found_message;
+          }
+        }
+      }
+    }
+
+    this->Fetch();
+  }
+}
+
 bool
 Stub::RunCommand()
 {
-  switch (ipc_message_->command) {
-    case PYTHONSTUB_CommandType::PYTHONSTUB_Initialize: {
-      InitializeArgs* initialize_args;
+  // Fetch a message from Poll
+  std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
+
+  switch (ipc_message->Command()) {
+    case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
       std::string error_string;
-      shm_pool_->MapOffset((char**)&initialize_args, ipc_message_->args);
-      initialize_args->response_has_error = false;
+
+      std::unique_ptr<IPCMessage> initialize_response_msg =
+          std::make_unique<IPCMessage>(shm_pool_);
+      initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
+
+      InitializeResponse* initialize_response;
+      shm_pool_->Map(
+          (char**)&initialize_response, sizeof(InitializeResponse),
+          initialize_response_msg->Args());
+      initialize_response->response_has_error = false;
+      initialize_response->response_is_error_set = false;
+
       try {
-        Initialize(initialize_args);
+        Initialize(ipc_message->Args());
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -361,31 +406,40 @@ Stub::RunCommand()
 
       if (has_exception) {
         LOG_INFO << "Failed to initialize Python stub: " << error_string;
-        initialize_args->response_has_error = true;
-        initialize_args->response_is_error_set = false;
+        initialize_response->response_has_error = true;
+        initialize_response->response_is_error_set = false;
         off_t err_string_offset;
         LOG_IF_EXCEPTION(SaveStringToSharedMemory(
             shm_pool_, err_string_offset, error_string.c_str()));
         if (err_string_offset != 0) {
-          initialize_args->response_is_error_set = true;
-          initialize_args->response_error = err_string_offset;
+          initialize_response->response_is_error_set = true;
+          initialize_response->response_error = err_string_offset;
         }
+
+        parent_message_queue_->Push(
+            initialize_response_msg->SharedMemoryOffset());
         return true;
       }
+      parent_message_queue_->Push(
+          initialize_response_msg->SharedMemoryOffset());
     } break;
-    case PYTHONSTUB_CommandType::PYTHONSTUB_Execute: {
-      ExecuteArgs* execute_args;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
+      RequestBatch* request_batch;
       bool has_exception = false;
       std::string error_string;
 
-      shm_pool_->MapOffset((char**)&execute_args, ipc_message_->args);
+      std::unique_ptr<IPCMessage> execute_response =
+          std::make_unique<IPCMessage>(shm_pool_);
+      execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+
+      shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
       ResponseBatch* response_batch;
       shm_pool_->Map(
           (char**)&response_batch, sizeof(ResponseBatch),
-          execute_args->response_batch);
+          execute_response->Args());
       response_batch->has_error = false;
       try {
-        Execute(execute_args, response_batch);
+        Execute(request_batch, response_batch);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -413,11 +467,16 @@ Stub::RunCommand()
           response_batch->error = err_string_offset;
         }
       }
+      parent_message_queue_->Push(execute_response->SharedMemoryOffset());
     } break;
-    case PYTHONSTUB_CommandType::PYTHONSTUB_Finalize:
+    case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
+      ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
+      parent_message_queue_->Push(ipc_message->SharedMemoryOffset());
       return true;
     case PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup:
       Cleanup();
+      ipc_message->Command() = PYTHONSTUB_TensorCleanup;
+      parent_message_queue_->Push(ipc_message->SharedMemoryOffset());
       break;
     default:
       break;
@@ -427,13 +486,11 @@ Stub::RunCommand()
 }
 
 void
-Stub::Execute(ExecuteArgs* execute_args, ResponseBatch* response_batch)
+Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
 {
   response_batch->cleanup = false;
   require_cleanup_ = false;
 
-  RequestBatch* request_batch;
-  shm_pool_->MapOffset((char**)&request_batch, execute_args->request_batch);
   uint32_t batch_size = request_batch->batch_size;
 
   if (batch_size == 0) {
@@ -486,7 +543,7 @@ Stub::Execute(ExecuteArgs* execute_args, ResponseBatch* response_batch)
 }
 
 void
-Stub::Initialize(InitializeArgs* initialize_args)
+Stub::Initialize(off_t map_offset)
 {
   py::module sys = py::module_::import("sys");
 
@@ -540,7 +597,7 @@ Stub::Initialize(InitializeArgs* initialize_args)
   model_instance_ = TritonPythonModel();
 
   std::unordered_map<std::string, std::string> map;
-  LoadMapFromSharedMemory(shm_pool_, initialize_args->args, map);
+  LoadMapFromSharedMemory(shm_pool_, map_offset, map);
   py::dict model_config_params;
 
   for (const auto& pair : map) {
@@ -587,23 +644,10 @@ Stub::Finalize()
   }
 }
 
-IPCMessage*
-Stub::GetIPCMessage()
+void
+Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
-  return ipc_message_;
-}
-
-// Wait for notification from the server. Returns true if the parent process
-// has received a SIGTERM, and false otherwise.
-bool
-Stub::WaitForNotification()
-{
-  boost::posix_time::ptime timeout;
-  do {
-    timeout = boost::get_system_time() + boost::posix_time::milliseconds(1000);
-  } while (!stub_cond_->timed_wait(*stub_lock_, timeout) != 0 &&
-           !non_graceful_exit);
-  return non_graceful_exit;
+  parent_message_queue_->Push(ipc_message->SharedMemoryOffset());
 }
 
 Stub::~Stub()
@@ -735,8 +779,8 @@ main(int argc, char** argv)
         while (background_thread_running) {
           // Every 300ms set the health variable to true. This variable is in
           // shared memory and will be set to false by the parent process.
-          // The parent process expects that the stub process sets this variable
-          // to true within 1 second.
+          // The parent process expects that the stub process sets this
+          // variable to true within 1 second.
           sleep(0.3);
 
           stub->UpdateHealth();
@@ -761,15 +805,8 @@ main(int argc, char** argv)
   // notifications.
   bool finalize = false;
   while (true) {
-    stub->NotifyParent();
     if (finalize) {
       stub->Finalize();
-      background_thread_running = false;
-      background_thread.join();
-      break;
-    }
-
-    if (stub->WaitForNotification()) {
       background_thread_running = false;
       background_thread.join();
       break;
@@ -778,11 +815,11 @@ main(int argc, char** argv)
     finalize = stub->RunCommand();
   }
 
-  // Stub must be destroyed before the py::scoped_interpreter goes out of scope.
-  // The reason is that stub object has some attributes that are Python objects.
-  // If the scoped_interpreter is destroyed before the stub object, this process
-  // will no longer hold the GIL lock and destruction of the stub will result in
-  // segfault.
+  // Stub must be destroyed before the py::scoped_interpreter goes out of
+  // scope. The reason is that stub object has some attributes that are Python
+  // objects. If the scoped_interpreter is destroyed before the stub object,
+  // this process will no longer hold the GIL lock and destruction of the stub
+  // will result in segfault.
   stub.reset();
 
   return 0;

@@ -1,4 +1,4 @@
-// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,49 +26,48 @@
 
 #pragma once
 
-#include <unistd.h>
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
-
+#include <boost/interprocess/sync/interprocess_semaphore.hpp>
+#include <cstddef>
+#include "ipc_message.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
+namespace bi = boost::interprocess;
 
-class SharedMemory {
-  std::string shm_key_;
-  size_t* capacity_;
-  off_t* offset_;
-  char* shm_addr_;
-  boost::interprocess::interprocess_mutex *shm_mutex_;
-
-  // Current capcity, local to each process.
-  size_t current_capacity_;
-
-  // Amount of bytes to grow the shared memory when the pool is completely used.
-  int64_t shm_growth_bytes_;
-
-  // Get the amount of shared memory available.
-  size_t GetAvailableSharedMemory();
-  boost::interprocess::shared_memory_object shm_obj_;
-  std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
-  std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
-      old_shm_maps_;
-
-  void UpdateSharedMemory();
-
- public:
-  SharedMemory(
-      const std::string& shm_key, int64_t default_byte_size,
-      int64_t shm_growth_bytes, bool truncate = false);
-  void MapOffset(char** shm_addr, off_t offset);
-  void Map(char** shm_addr, size_t byte_size, off_t& offset);
-  off_t Offset();
-  void SetOffset(off_t offset);
-  ~SharedMemory() noexcept(false);
+/// Struct holding the represenation of a message queue inside the shared
+/// memory.
+/// \param size Total size of the message queue.
+/// \param mutex Offset of the mutex variable protecting index.
+/// \param index Used element index.
+/// \param sem_empty Semaphore object counting the number of empty buffer slots.
+/// \param sem_full Semaphore object counting the number of used buffer slots.
+struct MessageQueueShm {
+  std::size_t size;
+  off_t buffer;
+  off_t mutex;
+  int index;
+  off_t sem_empty;
+  off_t sem_full;
 };
 
+class MessageQueue {
+  std::size_t* size_;
+  off_t* buffer_;
+  bi::interprocess_mutex* mutex_;
+  int* index_;
+  bi::interprocess_semaphore* sem_empty_;
+  bi::interprocess_semaphore* sem_full_;
+  off_t shm_struct_;
+
+ public:
+  MessageQueue(
+      std::unique_ptr<SharedMemory>& shm_pool, std::size_t number_of_messages);
+  MessageQueue() {}
+  void Push(off_t message);
+  off_t Pop();
+  off_t ShmOffset();
+  static std::unique_ptr<MessageQueue> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemory>& shm_pool, off_t message_queue_offset);
+};
 }}}  // namespace triton::backend::python

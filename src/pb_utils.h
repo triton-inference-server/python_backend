@@ -76,29 +76,8 @@ namespace bi = boost::interprocess;
     }                                                                     \
   } while (false)
 
-typedef enum PYTHONSTUB_commandtype_enum {
-  PYTHONSTUB_Execute,
-  PYTHONSTUB_Initialize,
-  PYTHONSTUB_Finalize,
-  PYTHONSTUB_TensorCleanup,
-  PYTHONSTUB_InferExecRequest,
-  PYTHONSTUB_InferExecResponse
-} PYTHONSTUB_CommandType;
 
-struct IPCMessage {
-  PYTHONSTUB_CommandType command;
-  PYTHONSTUB_CommandType stub_command;
-  off_t args;
-  off_t stub_args;
-};
-
-struct ExecuteArgs {
-  off_t request_batch;
-  off_t response_batch;
-};
-
-struct InitializeArgs {
-  off_t args;
+struct InitializeResponse {
   // Indicates whether the response has an error or not.
   bool response_has_error;
   // Indicates whether the response error is set or not.
@@ -114,12 +93,9 @@ struct IPCControl {
   bool parent_health;
   bool uses_env;
   off_t parent_health_mutex;
-  off_t stub_mutex;
-  off_t stub_cond;
-  off_t parent_mutex;
-  off_t parent_cond;
   off_t stub_health_mutex;
-  off_t ipc_message;
+  off_t stub_message_queue;
+  off_t parent_message_queue;
 };
 
 //
@@ -225,7 +201,6 @@ struct PythonBackendException : std::exception {
   std::string message_;
 };
 
-
 void SaveMapToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
     const std::unordered_map<std::string, std::string>& map);
@@ -286,6 +261,6 @@ class CUDADriverAPI {
       CUdeviceptr* start_address, CUpointer_attribute attr,
       CUdeviceptr device_ptr);
 };
-#endif // TRITON_ENABLE_GPU
+#endif  // TRITON_ENABLE_GPU
 
 }}}  // namespace triton::backend::python

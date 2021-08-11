@@ -24,7 +24,9 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <boost/interprocess/sync/scoped_lock.hpp>
 #include "infer_request.h"
+
 #include "pb_utils.h"
 #ifdef TRITON_PB_STUB
 #include "infer_response.h"
@@ -156,17 +158,17 @@ InferRequest::Exec()
   bool responses_is_set = false;
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<SharedMemory>& shm_pool = stub->GetSharedMemory();
-  IPCMessage* ipc_message = stub->GetIPCMessage();
-  try {
-    ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
 
-    ExecuteArgs* exec_args;
-    shm_pool->Map(
-        (char**)&exec_args, sizeof(ExecuteArgs), ipc_message->stub_args);
+  try {
+    std::unique_ptr<IPCMessage> ipc_message =
+        std::make_unique<IPCMessage>(shm_pool);
+
+    ipc_message->Command() =
+        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
 
     RequestBatch* request_batch;
     shm_pool->Map(
-        (char**)&request_batch, sizeof(RequestBatch), exec_args->request_batch);
+        (char**)&request_batch, sizeof(RequestBatch), ipc_message->Args());
     request_batch->batch_size = 1;
 
     Request* request;
@@ -185,15 +187,13 @@ InferRequest::Exec()
       i += 1;
     }
     this->SaveToSharedMemory(shm_pool, request);
+    stub->SendIPCMessage(ipc_message);
 
-    ipc_message->stub_command =
-        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
-    stub->NotifyParent();
-    stub->WaitForNotification();
-
-    ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
-
-    shm_pool->MapOffset((char**)&response_batch, exec_args->response_batch);
+    std::cout << "Message was sent to the parent process " << std::endl;
+    std::unique_ptr<IPCMessage> bls_response =
+        stub->FindMessageByRequestId(ipc_message->SharedMemoryOffset());
+    std::cout << "Response received " << std::endl;
+    shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
     responses_is_set = true;
 
     if (response_batch->has_error) {
