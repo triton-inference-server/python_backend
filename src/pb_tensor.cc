@@ -24,9 +24,9 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
 
 #ifdef TRITON_PB_STUB
 #include "pb_stub_utils.h"
@@ -301,7 +301,7 @@ PbTensor::LoadFromSharedMemory(
         raw_data->memory_type, raw_data->memory_type_id, data,
         raw_data->byte_size, nullptr /* DLManaged Tensor */);
   } else if (raw_data->memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
     cudaIpcMemHandle_t* cuda_ipc_mem_handle;
     shm_pool->MapOffset((char**)&cuda_ipc_mem_handle, raw_data->memory_ptr);
     if (!tensor_shm->is_reused) {
@@ -335,7 +335,7 @@ PbTensor::LoadFromSharedMemory(
     }
 #else
     throw PythonBackendException("GPU Tensor is not supported.");
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
   }
 
   return pb_tensor;
@@ -422,7 +422,7 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 
 PbTensor::~PbTensor() noexcept(false)
 {
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
   if (!IsCPU() && cuda_ipc_mem_handle_ != nullptr &&
       destruct_cuda_ipc_mem_handle_) {
     cudaError_t err = cudaIpcCloseMemHandle(GetGPUStartAddress());
@@ -434,7 +434,7 @@ PbTensor::~PbTensor() noexcept(false)
                                        .c_str());
     }
   }
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
   DeleteDLPack();
 }
 
@@ -459,30 +459,36 @@ PbTensor::AsNumpy() const
 }
 #endif  // TRITON_PB_STUB
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
 void*
 PbTensor::GetGPUStartAddress()
 {
   if (!this->IsCPU()) {
+    CUDADriverAPI& driver_api = CUDADriverAPI::getInstance();
     CUdeviceptr start_address;
-    CUresult cuda_err = cuPointerGetAttribute(
+
+    driver_api.PointerGetAttribute(
         &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
         (CUdeviceptr)this->GetDataPtr());
-    if (cuda_err != CUDA_SUCCESS) {
-      const char* error_string;
-      cuGetErrorString(cuda_err, &error_string);
-      throw PythonBackendException(
-          std::string(
-              "failed to get cuda pointer device attribute: " +
-              std::string(error_string))
-              .c_str());
-    }
 
     return reinterpret_cast<void*>(start_address);
   }
 
   throw PythonBackendException(
       "Calling GetGPUStartAddress function on a CPU tensor.");
+}
+
+uint64_t
+PbTensor::GetGPUPointerOffset()
+{
+  if (!this->IsCPU()) {
+    uint64_t offset = reinterpret_cast<char*>(this->GetDataPtr()) -
+                      reinterpret_cast<char*>(this->GetGPUStartAddress());
+    return offset;
+  }
+
+  throw PythonBackendException(
+      "Calling GetGPUPointerOffset function on a CPU tensor.");
 }
 
 void
@@ -498,7 +504,7 @@ PbTensor::CudaIpcMemHandle()
 {
   return cuda_ipc_mem_handle_;
 }
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
 
 void
 PbTensor::SaveToSharedMemory(
@@ -536,15 +542,15 @@ PbTensor::SaveToSharedMemory(
       memory_ptr_ = reinterpret_cast<void*>(data_in_shm);
     }
   } else {
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
     char* cuda_handle;
     uint64_t* ptr_offset;
     SaveTensorToSharedMemory(
         shm_pool, tensor_shm, cuda_handle, this->MemoryType(),
         this->MemoryTypeId(), this->ByteSize(), tensor_name.c_str(),
-        this->Dims().data(), this->Dims().size(), dtype_triton, &ptr_offset);
-    char* d_ptr = reinterpret_cast<char*>(this->GetDataPtr());
-    *ptr_offset = GetDevicePointerOffset(d_ptr);
+        this->Dims().data(), this->Dims().size(), dtype_triton, &ptr_offset,
+        shm_offset_);
+    *ptr_offset = this->GetGPUPointerOffset();
     if (!IsReused()) {
       cudaSetDevice(this->MemoryTypeId());
       cudaError_t err = cudaIpcGetMemHandle(
@@ -565,12 +571,10 @@ PbTensor::SaveToSharedMemory(
       *(reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle)) =
           *CudaIpcMemHandle();
     }
-    void* start_address = this->GetGPUStartAddress();
-    *ptr_offset = reinterpret_cast<char*>(this->GetDataPtr()) -
-                  reinterpret_cast<char*>(start_address);
+    *ptr_offset = this->GetGPUPointerOffset();
 #else
     throw PythonBackendException("GPU tensors are not supported.");
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
   }
 }
 

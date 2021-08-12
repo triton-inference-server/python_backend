@@ -24,9 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <pybind11/embed.h>
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
+#include "pb_stub.h"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -47,12 +46,9 @@
 #include "pb_utils.h"
 #include "shm_manager.h"
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
-#include <cuda.h>
+#ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
-#endif  // TRITON_ENABLE_GPU_TENSORS
-
-#include "pb_stub.h"
+#endif  // TRITON_ENABLE_GPU
 
 namespace py = pybind11;
 using namespace pybind11::literals;
@@ -298,7 +294,7 @@ Stub::ProcessResponse(
     }
 
     if (!output_tensor->IsCPU()) {
-#ifdef TRITON_ALLOW_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
       std::unordered_map<void*, cudaIpcMemHandle_t*>::const_iterator
           reused_gpu_tensor =
               gpu_tensors_map_.find(output_tensor->GetGPUStartAddress());
@@ -320,7 +316,7 @@ Stub::ProcessRequest(
 {
   std::unique_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
   for (auto& input_tensor : infer_request->Inputs()) {
     if (!input_tensor->IsCPU()) {
       response_batch->cleanup = true;
@@ -329,7 +325,7 @@ Stub::ProcessRequest(
            input_tensor->CudaIpcMemHandle()});
     }
   }
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
 
   return infer_request;
 }
@@ -559,7 +555,7 @@ Stub::Cleanup()
   // Deleting the tensors should automatically trigger the destructor.
   tensors_to_remove_.clear();
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
   gpu_tensors_map_.clear();
 #endif
 }

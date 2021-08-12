@@ -24,12 +24,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "pb_main_utils.h"
+
 #include <future>
+#include "pb_utils.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
-
-#include "pb_main_utils.h"
-#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 
