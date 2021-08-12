@@ -24,15 +24,23 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <pybind11/embed.h>
+#include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <memory>
+#include "infer_request.h"
+#include "infer_response.h"
+#include "pb_tensor.h"
 #include "pb_utils.h"
 
 #pragma once
 
 namespace bi = boost::interprocess;
+namespace py = pybind11;
+using namespace pybind11::literals;
 
 namespace triton { namespace backend { namespace python {
 
@@ -58,9 +66,9 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
   std::unordered_map<void*, cudaIpcMemHandle_t*> gpu_tensors_map_;
-#endif // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
 
  public:
   Stub(){};

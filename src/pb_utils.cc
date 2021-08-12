@@ -28,6 +28,7 @@
 
 #include <archive.h>
 #include <archive_entry.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -44,7 +45,7 @@
 #include <unordered_map>
 #include "shm_manager.h"
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #endif
@@ -83,29 +84,6 @@ SaveStringToSharedMemory(
   strcpy(string_data, str);
 }
 
-#ifdef TRITON_ENABLE_GPU_TENSORS
-size_t
-GetDevicePointerOffset(void* d_ptr)
-{
-  CUdeviceptr start_address;
-  CUresult cuda_err = cuPointerGetAttribute(
-      &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
-      reinterpret_cast<CUdeviceptr>(d_ptr));
-  if (cuda_err != CUDA_SUCCESS) {
-    const char* error_string;
-    cuGetErrorString(cuda_err, &error_string);
-    throw PythonBackendException(
-        std::string(
-            "failed to get cuda pointer device attribute: " +
-            std::string(error_string))
-            .c_str());
-  }
-
-  return reinterpret_cast<char*>(d_ptr) -
-         reinterpret_cast<char*>(start_address);
-}
-#endif  // TRITON_ENABLE_GPU_TENSORS
-
 void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
@@ -134,7 +112,7 @@ SaveRawDataToSharedMemory(
   }
 
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU_TENSORS
+#ifdef TRITON_ENABLE_GPU
     off_t buffer_offset;
     shm_pool->Map(
         (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
@@ -142,7 +120,7 @@ SaveRawDataToSharedMemory(
 #else
     throw PythonBackendException(
         "Python backend does not support GPU tensors.");
-#endif  // TRITON_ENABLE_GPU_TENSORS
+#endif  // TRITON_ENABLE_GPU
   }
 }
 
@@ -340,5 +318,69 @@ FileExists(std::string& path)
   struct stat buffer;
   return stat(path.c_str(), &buffer) == 0;
 }
+
+#ifdef TRITON_ENABLE_GPU
+
+CUDADriverAPI::CUDADriverAPI()
+{
+  dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
+
+  // If libcuda.so is succesfully opened, it must be able to find
+  // "cuPointerGetAttribute" and "cuGetErrorString" symbols.
+  if (dl_open_handle_ != nullptr) {
+    void* cu_pointer_get_attribute_fn =
+        dlsym(dl_open_handle_, "cuPointerGetAttribute");
+    if (cu_pointer_get_attribute_fn == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to dlsym 'cuPointerGetAttribute'. Error: ") +
+          dlerror());
+    }
+    *((void**)&cu_pointer_get_attribute_fn_) = cu_pointer_get_attribute_fn;
+
+    void* cu_get_error_string_fn = dlsym(dl_open_handle_, "cuGetErrorString");
+    if (cu_get_error_string_fn == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to dlsym 'cuGetErrorString'. Error: ") +
+          dlerror());
+    }
+    *((void**)&cu_get_error_string_fn_) = cu_get_error_string_fn;
+  }
+}
+
+void
+CUDADriverAPI::PointerGetAttribute(
+    CUdeviceptr* start_address, CUpointer_attribute attribute,
+    CUdeviceptr dev_ptr)
+{
+  CUresult cuda_err =
+      (*cu_pointer_get_attribute_fn_)(start_address, attribute, dev_ptr);
+  if (cuda_err != CUDA_SUCCESS) {
+    const char* error_string;
+    (*cu_get_error_string_fn_)(cuda_err, &error_string);
+    throw PythonBackendException(
+        std::string(
+            "failed to get cuda pointer device attribute: " +
+            std::string(error_string))
+            .c_str());
+  }
+}
+
+bool
+CUDADriverAPI::IsAvailable()
+{
+  return dl_open_handle_ != nullptr;
+}
+
+CUDADriverAPI::~CUDADriverAPI() noexcept(false)
+{
+  if (dl_open_handle_ != nullptr) {
+    int status = dlclose(dl_open_handle_);
+    if (status != 0) {
+      throw PythonBackendException("Failed to close the libcuda handle.");
+    }
+  }
+}
+
+#endif
 
 }}}  // namespace triton::backend::python

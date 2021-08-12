@@ -37,8 +37,7 @@ project(tritonpythonbackend LANGUAGES C CXX)
 # GPU support is disabled by default because python backend doesn't
 # because python backend does not need to access CUDA or GPUs
 #
-option(TRITON_ENABLE_GPU "Enable GPU support in backend" OFF)
-option(TRITON_ENABLE_GPU_TENSORS "Allow GPU input and output tensors" OFF)
+option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
 
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
@@ -199,6 +198,7 @@ target_link_libraries(
     triton-backend-utils    # from repo-backend
     ZLIB::ZLIB
     -larchive               # shared memory 
+    -ldl                    # dlopen
 )
 
 target_link_libraries(
@@ -210,19 +210,16 @@ target_link_libraries(
    triton-backend-utils    # from repo-backend
    -larchive               # libarchive
    -lrt                    # shared memory 
+   -ldl                    # dlopen
 )
 
 if(${TRITON_ENABLE_GPU})
   target_link_libraries(
     triton-python-backend-stub
-    PUBLIC
-      CUDA::cuda_driver
   )
 
   target_link_libraries(
     triton-python-backend
-    PUBLIC
-      CUDA::cuda_driver
   )
 endif() # TRITON_ENABLE_GPU
 

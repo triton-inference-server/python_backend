@@ -26,6 +26,9 @@
 
 #pragma once
 
+#ifdef TRITON_ENABLE_GPU
+#include <cuda.h>
+#endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
 #include <climits>
 #include <exception>
@@ -93,8 +96,6 @@ struct ExecuteArgs {
   off_t request_batch;
   off_t response_batch;
 };
-
-size_t GetDevicePointerOffset(void* d_ptr);
 
 struct InitializeArgs {
   off_t args;
@@ -259,5 +260,32 @@ void LoadTensorFromSharedMemory(
 void ExtractTarFile(std::string& archive_path, std::string& dst_path);
 
 bool FileExists(std::string& path);
+
+#ifdef TRITON_ENABLE_GPU
+class CUDADriverAPI {
+ public:
+  static CUDADriverAPI& getInstance()
+  {
+    static CUDADriverAPI instance;
+    return instance;
+  }
+
+ private:
+  void* dl_open_handle_ = nullptr;
+  CUresult (*cu_pointer_get_attribute_fn_)(
+      CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
+  CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
+  CUDADriverAPI();
+  ~CUDADriverAPI() noexcept(false);
+
+ public:
+  CUDADriverAPI(CUDADriverAPI const&) = delete;
+  void operator=(CUDADriverAPI const&) = delete;
+  bool IsAvailable();
+  void PointerGetAttribute(
+      CUdeviceptr* start_address, CUpointer_attribute attr,
+      CUdeviceptr device_ptr);
+};
+#endif // TRITON_ENABLE_GPU
 
 }}}  // namespace triton::backend::python
