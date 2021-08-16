@@ -189,10 +189,9 @@ InferRequest::Exec()
     this->SaveToSharedMemory(shm_pool, request);
     stub->SendIPCMessage(ipc_message);
 
-    std::cout << "Message was sent to the parent process " << std::endl;
+    // Get the response for the current message.
     std::unique_ptr<IPCMessage> bls_response =
         stub->FindMessageByRequestId(ipc_message->SharedMemoryOffset());
-    std::cout << "Response received " << std::endl;
     shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
     responses_is_set = true;
 
@@ -226,6 +225,16 @@ InferRequest::Exec()
         std::make_shared<PbError>(
             "An error occurred while performing BLS request."));
   }
+}
+
+py::object
+InferRequest::AsyncExec()
+{
+  py::object loop =
+      py::module_::import("asyncio.events").attr("get_event_loop")();
+  py::cpp_function callback = [this]() { return this->Exec(); };
+  py::object f = loop.attr("run_in_executor")(py::none(), callback);
+  return f;
 }
 #endif
 

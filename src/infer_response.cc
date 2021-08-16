@@ -97,9 +97,7 @@ InferResponse::LoadFromSharedMemory(
 {
   Response* response;
   shm_pool->MapOffset((char**)&response, response_offset);
-
   uint32_t requested_output_count = response->outputs_size;
-  std::cout << "Output count is " << requested_output_count << std::endl;
 
   std::shared_ptr<PbError> pb_error;
   if (response->has_error) {

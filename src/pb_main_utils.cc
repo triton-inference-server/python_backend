@@ -209,7 +209,6 @@ RequestExecutor::Infer(
       THROW_IF_TRITON_ERROR(
           TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
 
-      std::cout << "Output count in the main process is " << output_count << std::endl;
       std::vector<std::shared_ptr<PbTensor>> output_tensors;
       for (uint32_t idx = 0; idx < output_count; ++idx) {
         const char* cname;

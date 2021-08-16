@@ -61,13 +61,51 @@ class MessageQueue {
   off_t shm_struct_;
 
  public:
+  /// Create a Message queue.
+  /// \param shm_pool Shared memory pool
+  /// \param number_of_messages Maximum number of messages that the
+  /// message queue can hold.
   MessageQueue(
       std::unique_ptr<SharedMemory>& shm_pool, std::size_t number_of_messages);
   MessageQueue() {}
+
+  /// Push a message inside the message queue.
+  /// \param message The shared memory offset of the message.
   void Push(off_t message);
+  void Push(off_t message, int const& duration, bool& success);
+
+  /// Pop a message from the message queue. This call will block until there
+  /// is a message inside the message queue to return. \return the offset of
+  /// the new message.
   off_t Pop();
+
+  off_t Pop(int const& duration, bool& success);
+
+  /// Pop a message from the shared memory only if the request id matches.
+  /// \param shm_pool Shared memory pool.
+  /// \param message_id The offset of a message that will be returned from this
+  /// function must match this parameter.
+  /// \param found If a response to that message_id is found, this parameter
+  /// will be set to true. Otherwise, it will be false.
+  /// \return The offset of the message.
+  off_t PopIf(
+      std::unique_ptr<SharedMemory>& shm_pool, off_t message_id, bool& found);
+
+  /// An override for the PopIf function above. The difference is that the locks
+  /// are no longer blocking and will only lock for specified amount of time.
+  /// \param success is set to true if the Pop operation was succesful.
+  /// \param duration specifies the timeout for locking.
+  off_t PopIf(
+      std::unique_ptr<SharedMemory>& shm_pool, off_t message_id, bool& found,
+      int const& duration, bool& success);
+
   off_t ShmOffset();
   static std::unique_ptr<MessageQueue> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, off_t message_queue_offset);
+
+  /// Resets the semaphores for the message queue. This function is useful for
+  /// when the stub process may have exited unexpectedly and the semaphores need
+  /// to be restarted so that the message queue is in a proper state.
+  void ResetSemaphores();
 };
 }}}  // namespace triton::backend::python

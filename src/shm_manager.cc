@@ -95,6 +95,7 @@ SharedMemory::SharedMemory(
     *offset_ = 0;
     *offset_ += sizeof(off_t);
     *offset_ += sizeof(size_t);
+    *offset_ += sizeof(bi::interprocess_mutex);
   }
 
   shm_key_ = shm_key;

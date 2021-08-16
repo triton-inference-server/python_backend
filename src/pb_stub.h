@@ -67,6 +67,7 @@ class Stub {
   std::vector<std::shared_ptr<PbTensor>> tensors_to_remove_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
   std::mutex messages_mutex_;
+  std::condition_variable messages_cv_;
   bool require_cleanup_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;

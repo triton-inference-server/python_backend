@@ -316,64 +316,34 @@ Stub::SetResponseFromException(
 std::unique_ptr<IPCMessage>
 Stub::PopMessage()
 {
-  while (true) {
-    {
-      std::lock_guard<std::mutex> gaurd{messages_mutex_};
-      if (!messages_.empty()) {
-        std::unique_ptr<IPCMessage> message = std::move(messages_.back());
-        messages_.pop_back();
-        return message;
-      }
-    }
-
-    this->Fetch();
+  bool success = false;
+  std::unique_ptr<IPCMessage> ipc_message;
+  off_t message;
+  while (!success) {
+    message = stub_message_queue_->Pop(1000, success);
   }
-}
+  ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
-void
-Stub::Fetch()
-{
-  std::lock_guard<std::mutex> gaurd{messages_mutex_};
-  std::unique_ptr<IPCMessage> ipc_message =
-      IPCMessage::LoadFromSharedMemory(shm_pool_, stub_message_queue_->Pop());
-  std::cout << "Receieved message is_response=" << ipc_message->IsResponse()
-            << " request id=" << ipc_message->RequestOffset() << std::endl;
-  messages_.emplace_back(std::move(ipc_message));
+  return ipc_message;
 }
 
 std::unique_ptr<IPCMessage>
 Stub::FindMessageByRequestId(off_t request_id)
 {
-  std::cout << "Looking for the message with request id" << request_id
-            << std::endl;
-  while (true) {
-    {
-      std::lock_guard<std::mutex> gaurd{messages_mutex_};
-      if (!messages_.empty()) {
-        for (auto it = messages_.begin(); it != messages_.end(); it++) {
-          std::cout << "[Iterating over the messages] predicate="
-                    << ((*it)->IsResponse() &&
-                        (*it)->RequestOffset() == request_id)
-                    << " is resposne " << ((*it)->IsResponse())
-                    << ((*it)->RequestOffset()) << std::endl;
-          if ((*it)->IsResponse() && (*it)->RequestOffset() == request_id) {
-            std::cout << "Message was found" << std::endl;
-            std::unique_ptr<IPCMessage> found_message = std::move(*it);
-            messages_.erase(it);
-            return found_message;
-          }
-        }
-      }
-    }
-
-    this->Fetch();
+  bool found = false;
+  bool success = false;
+  off_t response;
+  while (!found || !success) {
+    response =
+        stub_message_queue_->PopIf(shm_pool_, request_id, found, 1000, success);
   }
+
+  return IPCMessage::LoadFromSharedMemory(shm_pool_, response);
 }
 
 bool
 Stub::RunCommand()
 {
-  // Fetch a message from Poll
   std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
 
   switch (ipc_message->Command()) {
@@ -416,12 +386,11 @@ Stub::RunCommand()
           initialize_response->response_error = err_string_offset;
         }
 
-        parent_message_queue_->Push(
-            initialize_response_msg->SharedMemoryOffset());
+        this->SendIPCMessage(initialize_response_msg);
         return true;
       }
-      parent_message_queue_->Push(
-          initialize_response_msg->SharedMemoryOffset());
+
+      this->SendIPCMessage(initialize_response_msg);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
       RequestBatch* request_batch;
@@ -467,16 +436,16 @@ Stub::RunCommand()
           response_batch->error = err_string_offset;
         }
       }
-      parent_message_queue_->Push(execute_response->SharedMemoryOffset());
+      this->SendIPCMessage(execute_response);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
-      parent_message_queue_->Push(ipc_message->SharedMemoryOffset());
+      this->SendIPCMessage(ipc_message);
       return true;
     case PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup:
       Cleanup();
       ipc_message->Command() = PYTHONSTUB_TensorCleanup;
-      parent_message_queue_->Push(ipc_message->SharedMemoryOffset());
+      this->SendIPCMessage(ipc_message);
       break;
     default:
       break;
@@ -510,9 +479,18 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
     throw PythonBackendException(message);
   }
   py::object request_list = py_request_list;
+  py::module asyncio = py::module::import("asyncio");
 
   // Execute Response
-  py::list responses = model_instance_.attr("execute")(request_list);
+  py::object execute_return = model_instance_.attr("execute")(request_list);
+  py::list responses;
+  bool is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+
+  if (is_coroutine) {
+    responses = asyncio.attr("run")(execute_return);
+  } else {
+    responses = execute_return;
+  }
 
   Response* responses_shm;
   off_t responses_shm_offset;
@@ -647,7 +625,11 @@ Stub::Finalize()
 void
 Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
-  parent_message_queue_->Push(ipc_message->SharedMemoryOffset());
+  bool success = false;
+  while (!success) {
+    parent_message_queue_->Push(
+        ipc_message->SharedMemoryOffset(), 1000, success);
+  }
 }
 
 Stub::~Stub()
@@ -656,6 +638,8 @@ Stub::~Stub()
   // Otherwise, the shared memory will be destructed first and lead to
   // segfault.
   stub_lock_.reset();
+  stub_message_queue_.reset();
+  parent_message_queue_.reset();
 }
 
 std::unique_ptr<Stub> Stub::stub_instance_;
@@ -695,6 +679,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
       .def("exec", &InferRequest::Exec)
+      .def("async_exec", &InferRequest::AsyncExec)
       .def("requested_output_names", &InferRequest::RequestedOutputNames);
 
   py::class_<InferResponse>(module, "InferenceResponse")

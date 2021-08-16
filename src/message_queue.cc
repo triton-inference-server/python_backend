@@ -27,7 +27,10 @@
 #include "message_queue.h"
 
 #include <boost/interprocess/sync/scoped_lock.hpp>
+#include <boost/thread/thread_time.hpp>
 #include <iostream>
+#include "ipc_message.h"
+#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 MessageQueue::MessageQueue(
@@ -64,9 +67,53 @@ MessageQueue::MessageQueue(
 }
 
 void
+MessageQueue::Push(off_t message, int const& duration, bool& success)
+{
+  boost::system_time timeout =
+      boost::get_system_time() + boost::posix_time::milliseconds(duration);
+
+  while (true) {
+    try {
+      if (!sem_empty_->timed_wait(timeout)) {
+        success = false;
+        return;
+      } else {
+        break;
+      }
+    }
+    catch (bi::interprocess_exception& ex) {
+    }
+  }
+
+  {
+    timeout =
+        boost::get_system_time() + boost::posix_time::milliseconds(duration);
+    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_, timeout};
+    if (!lock) {
+      sem_empty_->post();
+      success = false;
+      return;
+    }
+    success = true;
+
+    buffer_[*index_] = message;
+    (*index_)++;
+  }
+  sem_full_->post();
+}
+
+void
 MessageQueue::Push(off_t message)
 {
-  sem_empty_->wait();
+  while (true) {
+    try {
+      sem_empty_->wait();
+      break;
+    }
+    catch (bi::interprocess_exception& ex) {
+    }
+  }
+
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_};
     buffer_[*index_] = message;
@@ -78,20 +125,135 @@ MessageQueue::Push(off_t message)
 off_t
 MessageQueue::ShmOffset()
 {
-    return shm_struct_;
+  return shm_struct_;
 }
 
 off_t
 MessageQueue::Pop()
 {
   off_t message;
-  sem_full_->wait();
+
+  while (true) {
+    try {
+      sem_full_->wait();
+      break;
+    }
+    catch (bi::interprocess_exception& ex) {
+    }
+  }
+
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_};
     message = buffer_[*index_ - 1];
     (*index_)--;
   }
   sem_empty_->post();
+
+  return message;
+}
+
+off_t
+MessageQueue::Pop(int const& duration, bool& success)
+{
+  off_t message = 0;
+  boost::system_time timeout =
+      boost::get_system_time() + boost::posix_time::milliseconds(duration);
+
+  while (true) {
+    try {
+      if (!sem_full_->timed_wait(timeout)) {
+        success = false;
+        return message;
+      } else {
+        break;
+      }
+    }
+    catch (bi::interprocess_exception& ex) {
+    }
+  }
+
+  {
+    timeout =
+        boost::get_system_time() + boost::posix_time::milliseconds(duration);
+    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_, timeout};
+    if (!lock) {
+      sem_full_->post();
+      success = false;
+      return message;
+    }
+    success = true;
+
+    message = buffer_[*index_ - 1];
+    (*index_)--;
+  }
+  sem_empty_->post();
+
+  return message;
+}
+
+void
+MessageQueue::ResetSemaphores()
+{
+  new (sem_full_) bi::interprocess_semaphore(0);
+  new (sem_empty_) bi::interprocess_semaphore(*size_);
+  new (mutex_) bi::interprocess_mutex;
+}
+
+off_t
+MessageQueue::PopIf(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t message_id, bool& found,
+    int const& duration, bool& success)
+{
+  off_t message = 0;
+  boost::system_time timeout =
+      boost::get_system_time() + boost::posix_time::milliseconds(duration);
+
+  // Interrupt signals can create exceptions while waiting on the semaphore.
+  // need to wrap the timed_wait in while(true) loop to avoid the exception
+  // in case a interrupt signal is received. This loop is only used when
+  // the program is exiting.
+  while (true) {
+    try {
+      if (!sem_full_->timed_wait(timeout)) {
+        success = false;
+        return message;
+      } else {
+        break;
+      }
+    }
+    catch (bi::interprocess_exception& ex) {
+    }
+  }
+
+  {
+    timeout =
+        boost::get_system_time() + boost::posix_time::milliseconds(duration);
+    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_, timeout};
+    if (!lock) {
+      success = false;
+      return message;
+    }
+
+    success = true;
+    message = buffer_[*index_ - 1];
+    std::unique_ptr<IPCMessage> ipc_message;
+    try {
+      ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool, message);
+    }
+    catch (const PythonBackendException& e) {
+      std::cerr << e.what();
+    }
+
+    if (ipc_message->IsResponse() &&
+        ipc_message->RequestOffset() == message_id) {
+      found = true;
+      (*index_)--;
+      sem_empty_->post();
+    } else {
+      found = false;
+      sem_full_->post();
+    }
+  }
 
   return message;
 }

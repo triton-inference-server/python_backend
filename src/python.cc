@@ -272,14 +272,25 @@ class ModelInstanceState : public BackendModelInstance {
       std::vector<TRITONBACKEND_Response*>& responses);
 
   TRITONSERVER_Error* ProcessRequests(
-      TRITONBACKEND_Request** requests, const uint32_t request_count);
+      TRITONBACKEND_Request** requests, const uint32_t request_count,
+      bool& restart);
 
   // Create the stub process.
   TRITONSERVER_Error* SetupStubProcess();
+  TRITONSERVER_Error* SendMessageToStub(off_t message);
   void CleanupBLSResponses();
 
   // Checks whether the stub process is live
   bool IsStubProcessAlive();
+
+  // Get a message from the stub process
+  TRITONSERVER_Error* ReceiveMessageFromStub(off_t& message);
+
+  // Get a message from the stub process
+  void SendMessageAndReceiveResponse(
+      off_t message, off_t& response, bool& restart,
+      std::vector<TRITONBACKEND_Response*>& responses,
+      TRITONBACKEND_Request** requests, const uint32_t request_count);
 
   // Responds to all the requests with an error message.
   void RespondErrorToAllRequests(
@@ -332,6 +343,106 @@ ModelInstanceState::KillStubProcess()
 }
 
 void
+ModelInstanceState::SendMessageAndReceiveResponse(
+    off_t message, off_t& response, bool& restart,
+    std::vector<TRITONBACKEND_Response*>& responses,
+    TRITONBACKEND_Request** requests, const uint32_t request_count)
+{
+  auto error = SendMessageToStub(message);
+  if (error != nullptr) {
+    restart = true;
+    RespondErrorToAllRequests(
+        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
+
+    return;
+  }
+
+  off_t response_message;
+  error = ReceiveMessageFromStub(response_message);
+  if (error != nullptr) {
+    restart = true;
+    RespondErrorToAllRequests(
+        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
+
+    return;
+  }
+
+  response = response_message;
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::SendMessageToStub(off_t message)
+{
+  bool success = false;
+  while (!success) {
+    uint64_t timeout_miliseconds = 1000;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() +
+          boost::posix_time::milliseconds(timeout_miliseconds);
+
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+      // Check if lock has been acquired.
+      if (lock) {
+        ipc_control_->stub_health = false;
+      } else {
+        // If it failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
+      }
+    }
+
+    stub_message_queue_->Push(
+        message, timeout_miliseconds /* duration ms */, success);
+
+    if (!success && !IsStubProcessAlive()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Stub process is not healthy.");
+    }
+  }
+
+  return nullptr;  // success
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::ReceiveMessageFromStub(off_t& message)
+{
+  bool success = false;
+  while (!success) {
+    uint64_t timeout_miliseconds = 1000;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() +
+          boost::posix_time::milliseconds(timeout_miliseconds);
+
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+      // Check if lock has been acquired.
+      if (lock) {
+        ipc_control_->stub_health = false;
+      } else {
+        // If it failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
+      }
+    }
+
+    message = parent_message_queue_->Pop(
+        timeout_miliseconds /* duration ms */, success);
+
+    if (!success && !IsStubProcessAlive()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Stub process is not healthy.");
+    }
+  }
+
+  return nullptr;  // success
+}
+
+void
 ModelInstanceState::RespondErrorToAllRequests(
     const char* message, std::vector<TRITONBACKEND_Response*>& responses,
     TRITONBACKEND_Request** requests, const uint32_t request_count)
@@ -366,7 +477,8 @@ ModelInstanceState::ResetSharedMemoryOffset()
 
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequests(
-    TRITONBACKEND_Request** requests, const uint32_t request_count)
+    TRITONBACKEND_Request** requests, const uint32_t request_count,
+    bool& restart)
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int max_batch_size = model_state->MaxBatchSize();
@@ -554,11 +666,18 @@ ModelInstanceState::ProcessRequests(
     return nullptr;
   }
 
+  off_t response_message;
+  SendMessageAndReceiveResponse(
+      ipc_message->SharedMemoryOffset(), response_message, restart, responses,
+      requests, request_count);
+  if (restart) {
+    return nullptr;
+  }
 
-  // TODO: Fix restart
-  stub_message_queue_->Push(ipc_message->SharedMemoryOffset());
-  ipc_message =
-      IPCMessage::LoadFromSharedMemory(shm_pool_, parent_message_queue_->Pop());
+  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+      &responses, request_count,
+      ipc_message =
+          IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
 
   // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
   // that inference request exeuction has finished.
@@ -618,10 +737,18 @@ ModelInstanceState::ProcessRequests(
       }
     }
 
-    // TODO: FIX Restart
-    stub_message_queue_->Push(bls_response->SharedMemoryOffset());
-    ipc_message = IPCMessage::LoadFromSharedMemory(
-        shm_pool_, parent_message_queue_->Pop());
+    SendMessageAndReceiveResponse(
+        bls_response->SharedMemoryOffset(), response_message, restart,
+        responses, requests, request_count);
+
+    if (restart) {
+      return nullptr;  // success
+    }
+
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        &responses, request_count,
+        ipc_message =
+            IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
   }
 
   uint64_t compute_end_ns = 0;
@@ -836,9 +963,9 @@ ModelInstanceState::ProcessRequests(
 
   if (response_batch->cleanup) {
     ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup;
-    stub_message_queue_->Push(ipc_message->SharedMemoryOffset());
-    parent_message_queue_->Pop();
-    // TODO: Fix restart
+    SendMessageAndReceiveResponse(
+        ipc_message->SharedMemoryOffset(), response_message, restart, responses,
+        requests, request_count);
   }
 
   return nullptr;
@@ -877,6 +1004,8 @@ TRITONSERVER_Error*
 ModelInstanceState::StartStubProcess()
 {
   new (health_mutex_) bi::interprocess_mutex;
+  stub_message_queue_->ResetSemaphores();
+  parent_message_queue_->ResetSemaphores();
 
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
   std::string shm_region_name =
@@ -969,17 +1098,6 @@ ModelInstanceState::StartStubProcess()
 
   } else {
     stub_pid_ = pid;
-    // Pre initialization step.
-    // if (!WaitForStubNotification()) {
-    //   return TRITONSERVER_ErrorNew(
-    //       TRITONSERVER_ERROR_INTERNAL,
-    //       (std::string("Timed out occurred while waiting for the stub
-    //       process. "
-    //                    "Failed to initialize model instance ") +
-    //        Name())
-    //           .c_str());
-    // }
-
     triton::common::TritonJson::WriteBuffer buffer;
     Model()->ModelConfig().Write(&buffer);
 
@@ -996,21 +1114,12 @@ ModelInstanceState::StartStubProcess()
         std::make_unique<IPCMessage>(shm_pool_);
     initialize_message->Command() = PYTHONSTUB_InitializeRequest;
 
+    // TODO: Fix restart during initialize
     off_t initialize_map_offset;
     RETURN_IF_EXCEPTION(SaveMapToSharedMemory(
         shm_pool_, initialize_map_offset, initialize_map));
     initialize_message->Args() = initialize_map_offset;
     stub_message_queue_->Push(initialize_message->SharedMemoryOffset());
-
-    // bool restart = false;
-    // if (!NotifyStubAndWait(restart)) {
-    //   return TRITONSERVER_ErrorNew(
-    //       TRITONSERVER_ERROR_INTERNAL,
-    //       (std::string("Failed to initialize stub, stub process exited "
-    //                    "unexpectedly: ") +
-    //        name_)
-    //           .c_str());
-    // }
 
     std::unique_ptr<IPCMessage> init_msg_response_mapped =
         IPCMessage::LoadFromSharedMemory(
@@ -1180,10 +1289,11 @@ ModelInstanceState::~ModelInstanceState()
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
       stub_message_queue_->Push(ipc_message->SharedMemoryOffset());
+      parent_message_queue_->Pop();
 
-      // bool restart = false;
-      // if (!NotifyStubAndWait(restart))
-      //   force_kill = true;
+      stub_message_queue_.reset();
+      parent_message_queue_.reset();
+
     } else {
       force_kill = true;
     }
@@ -1636,9 +1746,18 @@ TRITONBACKEND_ModelInstanceExecute(
   ModelInstanceState* instance_state;
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
+
+  // If restart is equal to true, it indicates that the stub process is
+  // unhealthy and needs a restart.
+  bool restart = false;
   TRITONSERVER_Error* err =
-      instance_state->ProcessRequests(requests, request_count);
+      instance_state->ProcessRequests(requests, request_count, restart);
   instance_state->CleanupBLSResponses();
+  if (restart) {
+    LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Stub process is unhealthy and it will be restarted.");
+    instance_state->KillStubProcess();
+    LOG_IF_ERROR(instance_state->StartStubProcess(), "Failed to restart the stub process.");
+  }
 
   // We should return the shared memory offset before returning from this
   // function. Otherwise there will be shared memory leaks if there is an
