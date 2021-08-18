@@ -1231,8 +1231,18 @@ ModelInstanceState::SetupStubProcess()
   const char* model_path = model_state->RepositoryPath().c_str();
 
   std::stringstream ss;
-  // Use <path>/version/model.py as the model location
-  ss << model_path << "/" << model_version << "/model.py";
+  std::string artifact_name;
+  RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
+      "default_model_filename", &artifact_name));
+  ss << model_path << "/" << model_version << "/";
+
+  if (artifact_name.size() > 0) {
+    ss << artifact_name;
+  } else {
+    // Default artifact name.
+    ss << "model.py";
+  }
+
   model_path_ = ss.str();
   struct stat buffer;
 
