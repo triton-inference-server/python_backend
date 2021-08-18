@@ -488,9 +488,21 @@ Stub::Execute(ExecuteArgs* execute_args, ResponseBatch* response_batch)
 void
 Stub::Initialize(InitializeArgs* initialize_args)
 {
-  py::module sys = py::module::import("sys");
+  py::module sys = py::module_::import("sys");
 
-  std::string model_name = model_path_.substr(model_path_.find_last_of("/") + 1);
+  std::string model_name =
+      model_path_.substr(model_path_.find_last_of("/") + 1);
+
+  // Model name without the .py extension
+  auto dotpy_pos = model_name.find_last_of(".py");
+  if (dotpy_pos == std::string::npos || dotpy_pos != model_name.size() - 1) {
+    throw PythonBackendException(
+        "Model name must end with '.py'. Model name is \"" + model_name + "\".");
+  }
+
+  // The position of last character of the string that is searched for is
+  // returned by 'find_last_of'. Need to manually adjust the position.
+  std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
   std::string model_path_parent =
       model_path_.substr(0, model_path_.find_last_of("/"));
   std::string model_path_parent_parent =
@@ -501,9 +513,9 @@ Stub::Initialize(InitializeArgs* initialize_args)
   sys.attr("path").attr("append")(python_backend_folder);
 
   py::module python_backend_utils =
-      py::module::import("triton_python_backend_utils");
+      py::module_::import("triton_python_backend_utils");
   py::module c_python_backend_utils =
-      py::module::import("c_python_backend_utils");
+      py::module_::import("c_python_backend_utils");
   py::setattr(
       python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
   py::setattr(
@@ -520,7 +532,8 @@ Stub::Initialize(InitializeArgs* initialize_args)
       c_python_backend_utils.attr("TritonModelException"));
 
   py::object TritonPythonModel =
-      py::module::import((model_version_ + std::string(".model")).c_str())
+      py::module_::import(
+          (std::string(model_version_) + "." + model_name_trimmed).c_str())
           .attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
