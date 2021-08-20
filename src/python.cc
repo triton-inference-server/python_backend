@@ -43,6 +43,7 @@
 #include <cstring>
 #include <ctime>
 #include <functional>
+#include <future>
 #include <memory>
 #include <numeric>
 #include <sstream>
@@ -235,11 +236,14 @@ class ModelInstanceState : public BackendModelInstance {
   off_t ipc_control_offset_;
   std::string model_path_;
   IPCControl* ipc_control_;
+  std::vector<std::future<void>> bls_futures_;
   std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
+  std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
   std::unique_ptr<RequestExecutor> request_executor_;
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
+  std::vector<std::future<void>> handles_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -279,6 +283,7 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* SetupStubProcess();
   TRITONSERVER_Error* SendMessageToStub(off_t message);
   void CleanupBLSResponses();
+  void WaitForBLSRequestsToFinish();
 
   // Checks whether the stub process is live
   bool IsStubProcessAlive();
@@ -305,6 +310,7 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Reset the shared memory offset
   void ResetSharedMemoryOffset();
+  void ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message);
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -340,6 +346,12 @@ ModelInstanceState::KillStubProcess()
   int status;
   waitpid(stub_pid_, &status, 0);
   stub_pid_ = 0;
+}
+
+void
+ModelInstanceState::WaitForBLSRequestsToFinish()
+{
+  bls_futures_.clear();
 }
 
 void
@@ -473,6 +485,71 @@ void
 ModelInstanceState::ResetSharedMemoryOffset()
 {
   shm_pool_->SetOffset(shm_reset_offset_);
+}
+
+void
+ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
+{
+  bool is_response_batch_set = false;
+  ResponseBatch* response_batch;
+  TRITONSERVER_InferenceResponse* inference_response = nullptr;
+  try {
+    std::unique_ptr<IPCMessage> bls_response =
+        std::make_unique<IPCMessage>(shm_pool_);
+    RequestBatch* request_batch;
+    shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
+
+    bls_response->Command() = PYTHONSTUB_InferExecResponse;
+    ipc_message->RequestOffset() = bls_response->SharedMemoryOffset();
+
+    shm_pool_->Map(
+        (char**)&response_batch, sizeof(ResponseBatch), bls_response->Args());
+    response_batch->batch_size = 1;
+    response_batch->has_error = false;
+    response_batch->is_error_set = false;
+    response_batch->cleanup = false;
+    is_response_batch_set = true;
+
+    if (request_batch->batch_size == 1) {
+      std::unique_ptr<InferRequest> infer_request;
+      infer_request = InferRequest::LoadFromSharedMemory(
+          shm_pool_, request_batch->requests);
+      std::unique_ptr<InferResponse> infer_response;
+      infer_response = request_executor_->Infer(
+          infer_request, shm_pool_, &inference_response);
+
+      if (inference_response != nullptr) {
+        std::lock_guard<std::mutex> lock{bls_responses_mutex_};
+        bls_inference_responses_.push_back(inference_response);
+      }
+
+      Response* response;
+      shm_pool_->Map(
+          (char**)&response, sizeof(Response), response_batch->responses);
+
+      infer_response->SaveToSharedMemory(shm_pool_, response, false /* copy */);
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    if (is_response_batch_set) {
+      response_batch->has_error = true;
+      off_t string_offset = 0;
+      LOG_IF_EXCEPTION(SaveStringToSharedMemory(
+          shm_pool_, string_offset, pb_exception.what()));
+      if (string_offset != 0) {
+        response_batch->is_error_set = true;
+        response_batch->error = string_offset;
+      }
+    } else {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    ipc_message->ResponseCondition()->notify_all();
+  }
 }
 
 TRITONSERVER_Error*
@@ -683,67 +760,13 @@ ModelInstanceState::ProcessRequests(
   // that inference request exeuction has finished.
   while (ipc_message->Command() ==
          PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
-    bool is_response_batch_set = false;
-    ResponseBatch* response_batch;
-    TRITONSERVER_InferenceResponse* inference_response = nullptr;
-    std::unique_ptr<IPCMessage> bls_response =
-        std::make_unique<IPCMessage>(shm_pool_, false);
-    try {
-      RequestBatch* request_batch;
-      shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
+    // Launch the BLS request in a future.
+    bls_futures_.emplace_back(
+        std::async(std::launch::async, [this, response_message]() {
+          this->ExecuteBLSRequest(IPCMessage::LoadFromSharedMemory(
+              this->shm_pool_, response_message));
+        }));
 
-      bls_response->Command() = PYTHONSTUB_InferExecResponse;
-      ipc_message->RequestOffset() = bls_response->SharedMemoryOffset();
-
-      shm_pool_->Map(
-          (char**)&response_batch, sizeof(ResponseBatch), bls_response->Args());
-      response_batch->batch_size = 1;
-      response_batch->has_error = false;
-      response_batch->is_error_set = false;
-      response_batch->cleanup = false;
-      is_response_batch_set = true;
-
-      if (request_batch->batch_size == 1) {
-        std::unique_ptr<InferRequest> infer_request;
-        infer_request = InferRequest::LoadFromSharedMemory(
-            shm_pool_, request_batch->requests);
-        std::unique_ptr<InferResponse> infer_response;
-        infer_response = request_executor_->Infer(
-            infer_request, shm_pool_, &inference_response);
-
-        if (inference_response != nullptr)
-          bls_inference_responses_.push_back(inference_response);
-
-        Response* response;
-        shm_pool_->Map(
-            (char**)&response, sizeof(Response), response_batch->responses);
-
-        infer_response->SaveToSharedMemory(
-            shm_pool_, response, false /* copy */);
-      }
-    }
-    catch (const PythonBackendException& pb_exception) {
-      if (is_response_batch_set) {
-        response_batch->has_error = true;
-        off_t string_offset = 0;
-        LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-            shm_pool_, string_offset, pb_exception.what()));
-        if (string_offset != 0) {
-          response_batch->is_error_set = true;
-          response_batch->error = string_offset;
-        }
-      } else {
-        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
-      }
-    }
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock{
-          *(ipc_message->ResponseMutex())};
-      ipc_message->ResponseCondition()->notify_all();
-    }
-
-    off_t response_message;
     auto error = ReceiveMessageFromStub(response_message);
     if (error != nullptr) {
       restart = true;
@@ -752,9 +775,6 @@ ModelInstanceState::ProcessRequests(
 
       return nullptr;
     }
-    // if (restart) {
-    //   return nullptr;  // success
-    // }
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         &responses, request_count,
@@ -1778,6 +1798,9 @@ TRITONBACKEND_ModelInstanceExecute(
   // function. Otherwise there will be shared memory leaks if there is an
   // error when processing the requests
   instance_state->ResetSharedMemoryOffset();
+
+  // Wait for all the pending BLS requests to be completed.
+  instance_state->WaitForBLSRequestsToFinish();
   if (err != nullptr) {
     return err;
   }

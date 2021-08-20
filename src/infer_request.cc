@@ -160,6 +160,7 @@ InferRequest::Exec()
   std::unique_ptr<SharedMemory>& shm_pool = stub->GetSharedMemory();
 
   try {
+    py::gil_scoped_release release;
     std::unique_ptr<IPCMessage> ipc_message =
         std::make_unique<IPCMessage>(shm_pool, true /* inline_response */);
 
@@ -196,8 +197,8 @@ InferRequest::Exec()
       ipc_message->ResponseCondition()->wait(lock);
 
       // Get the response for the current message.
-      bls_response =
-          IPCMessage::LoadFromSharedMemory(shm_pool, ipc_message->RequestOffset());
+      bls_response = IPCMessage::LoadFromSharedMemory(
+          shm_pool, ipc_message->RequestOffset());
       shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
       responses_is_set = true;
     }
@@ -237,9 +238,11 @@ InferRequest::Exec()
 py::object
 InferRequest::AsyncExec()
 {
-  py::object loop =
-      py::module_::import("asyncio.events").attr("get_event_loop")();
-  py::cpp_function callback = [this]() { return this->Exec(); };
+  py::object loop = py::module_::import("asyncio").attr("get_running_loop")();
+  py::cpp_function callback = [this]() {
+    auto response = this->Exec();
+    return response;
+  };
   py::object f = loop.attr("run_in_executor")(py::none(), callback);
   return f;
 }

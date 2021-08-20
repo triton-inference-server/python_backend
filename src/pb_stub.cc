@@ -244,7 +244,7 @@ Stub::SetErrorForResponseBatch(
 void
 Stub::ProcessResponse(
     Response* response_shm, ResponseBatch* response_batch,
-    InferResponse* response, py::object& serialize_bytes)
+    InferResponse* response)
 {
   // Initialize has_error to false
   response_shm->has_error = false;
@@ -286,9 +286,7 @@ Stub::ProcessResponse(
 }
 
 std::unique_ptr<InferRequest>
-Stub::ProcessRequest(
-    off_t request_offset, ResponseBatch* response_batch,
-    py::object& deserialize_bytes)
+Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
 {
   std::unique_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
@@ -456,7 +454,7 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
   for (size_t i = 0; i < batch_size; i++) {
     off_t request_offset = request_batch->requests + i * sizeof(Request);
     py_request_list.append(
-        ProcessRequest(request_offset, response_batch, deserialize_bytes_));
+        ProcessRequest(request_offset, response_batch));
   }
 
   if (!py::hasattr(model_instance_, "execute")) {
@@ -501,7 +499,7 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
     InferResponse* infer_response = response.cast<InferResponse*>();
     Response* response_shm = &responses_shm[i];
     ProcessResponse(
-        response_shm, response_batch, infer_response, serialize_bytes_);
+        response_shm, response_batch, infer_response);
     i += 1;
   }
 }
@@ -518,7 +516,8 @@ Stub::Initialize(off_t map_offset)
   auto dotpy_pos = model_name.find_last_of(".py");
   if (dotpy_pos == std::string::npos || dotpy_pos != model_name.size() - 1) {
     throw PythonBackendException(
-        "Model name must end with '.py'. Model name is \"" + model_name + "\".");
+        "Model name must end with '.py'. Model name is \"" + model_name +
+        "\".");
   }
 
   // The position of last character of the string that is searched for is

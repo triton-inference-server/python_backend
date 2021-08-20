@@ -68,6 +68,7 @@ class Stub {
   std::vector<std::unique_ptr<IPCMessage>> messages_;
   std::mutex messages_mutex_;
   std::condition_variable messages_cv_;
+  py::object thread_pool_;
   bool require_cleanup_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
@@ -85,6 +86,7 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       off_t ipc_control_offset, const std::string& model_instance_name);
+  py::object GetThreadPool();
   void NotifyParent();
   bool& Health();
   std::unique_ptr<SharedMemory>& GetSharedMemory();
@@ -93,10 +95,9 @@ class Stub {
       ResponseBatch* response_batch, const char* err_message);
   void ProcessResponse(
       Response* response_shm, ResponseBatch* response_batch,
-      InferResponse* response, py::object& serialize_bytes);
+      InferResponse* response);
   std::unique_ptr<InferRequest> ProcessRequest(
-      off_t request_offset, ResponseBatch* response_batch,
-      py::object& deserialize_bytes);
+      off_t request_offset, ResponseBatch* response_batch);
   void SetResponseFromException(
       ResponseBatch* response_batch,
       const PythonBackendException& pb_exception);
