@@ -138,7 +138,6 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 
   *shm_addr = shm_addr_ + *offset_;
   offset = *offset_;
-
   *offset_ += byte_size;
 }
 

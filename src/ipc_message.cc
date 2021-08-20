@@ -37,25 +37,47 @@ IPCMessage::LoadFromSharedMemory(
   std::unique_ptr<IPCMessage> ipc_message = std::make_unique<IPCMessage>();
   ipc_message->shm_offset_ = message_offset;
   shm_pool->MapOffset((char**)&ipc_message->ipc_message_shm_, message_offset);
+
+  if (ipc_message->ipc_message_shm_->inline_response) {
+    shm_pool->MapOffset(
+        (char**)&ipc_message->response_mutex_,
+        ipc_message->ipc_message_shm_->response_mutex);
+    shm_pool->MapOffset(
+        (char**)&ipc_message->response_cond_,
+        ipc_message->ipc_message_shm_->response_cond);
+  }
+
   return ipc_message;
 }
 
 PYTHONSTUB_CommandType&
 IPCMessage::Command()
 {
-  return this->ipc_message_shm_->command;
+  return ipc_message_shm_->command;
 }
 
 off_t&
 IPCMessage::Args()
 {
-  return this->ipc_message_shm_->args;
+  return ipc_message_shm_->args;
 }
 
 bool&
-IPCMessage::IsResponse()
+IPCMessage::InlineResponse()
 {
-  return this->ipc_message_shm_->is_resposne;
+  return ipc_message_shm_->inline_response;
+}
+
+bi::interprocess_condition*
+IPCMessage::ResponseCondition()
+{
+  return response_cond_;
+}
+
+bi::interprocess_mutex*
+IPCMessage::ResponseMutex()
+{
+  return response_mutex_;
 }
 
 off_t&

@@ -107,7 +107,6 @@ class Stub {
   void Execute(RequestBatch* request_batch, ResponseBatch* response_batch);
   void Initialize(off_t map_offset);
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
-  std::unique_ptr<IPCMessage> FindMessageByRequestId(off_t request_id);
   std::unique_ptr<IPCMessage> PopMessage();
   void Fetch();
   void UpdateHealth();

@@ -78,26 +78,7 @@ class MessageQueue {
   /// is a message inside the message queue to return. \return the offset of
   /// the new message.
   off_t Pop();
-
   off_t Pop(int const& duration, bool& success);
-
-  /// Pop a message from the shared memory only if the request id matches.
-  /// \param shm_pool Shared memory pool.
-  /// \param message_id The offset of a message that will be returned from this
-  /// function must match this parameter.
-  /// \param found If a response to that message_id is found, this parameter
-  /// will be set to true. Otherwise, it will be false.
-  /// \return The offset of the message.
-  off_t PopIf(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t message_id, bool& found);
-
-  /// An override for the PopIf function above. The difference is that the locks
-  /// are no longer blocking and will only lock for specified amount of time.
-  /// \param success is set to true if the Pop operation was succesful.
-  /// \param duration specifies the timeout for locking.
-  off_t PopIf(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t message_id, bool& found,
-      int const& duration, bool& success);
 
   off_t ShmOffset();
   static std::unique_ptr<MessageQueue> LoadFromSharedMemory(

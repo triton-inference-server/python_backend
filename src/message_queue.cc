@@ -199,65 +199,6 @@ MessageQueue::ResetSemaphores()
   new (mutex_) bi::interprocess_mutex;
 }
 
-off_t
-MessageQueue::PopIf(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t message_id, bool& found,
-    int const& duration, bool& success)
-{
-  off_t message = 0;
-  boost::system_time timeout =
-      boost::get_system_time() + boost::posix_time::milliseconds(duration);
-
-  // Interrupt signals can create exceptions while waiting on the semaphore.
-  // need to wrap the timed_wait in while(true) loop to avoid the exception
-  // in case a interrupt signal is received. This loop is only used when
-  // the program is exiting.
-  while (true) {
-    try {
-      if (!sem_full_->timed_wait(timeout)) {
-        success = false;
-        return message;
-      } else {
-        break;
-      }
-    }
-    catch (bi::interprocess_exception& ex) {
-    }
-  }
-
-  {
-    timeout =
-        boost::get_system_time() + boost::posix_time::milliseconds(duration);
-    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_, timeout};
-    if (!lock) {
-      success = false;
-      return message;
-    }
-
-    success = true;
-    message = buffer_[*index_ - 1];
-    std::unique_ptr<IPCMessage> ipc_message;
-    try {
-      ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool, message);
-    }
-    catch (const PythonBackendException& e) {
-      std::cerr << e.what();
-    }
-
-    if (ipc_message->IsResponse() &&
-        ipc_message->RequestOffset() == message_id) {
-      found = true;
-      (*index_)--;
-      sem_empty_->post();
-    } else {
-      found = false;
-      sem_full_->post();
-    }
-  }
-
-  return message;
-}
-
 std::unique_ptr<MessageQueue>
 MessageQueue::LoadFromSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t message_queue_offset)

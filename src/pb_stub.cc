@@ -327,20 +327,6 @@ Stub::PopMessage()
   return ipc_message;
 }
 
-std::unique_ptr<IPCMessage>
-Stub::FindMessageByRequestId(off_t request_id)
-{
-  bool found = false;
-  bool success = false;
-  off_t response;
-  while (!found || !success) {
-    response =
-        stub_message_queue_->PopIf(shm_pool_, request_id, found, 1000, success);
-  }
-
-  return IPCMessage::LoadFromSharedMemory(shm_pool_, response);
-}
-
 bool
 Stub::RunCommand()
 {
@@ -352,7 +338,7 @@ Stub::RunCommand()
       std::string error_string;
 
       std::unique_ptr<IPCMessage> initialize_response_msg =
-          std::make_unique<IPCMessage>(shm_pool_);
+          std::make_unique<IPCMessage>(shm_pool_, false);
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
 
       InitializeResponse* initialize_response;

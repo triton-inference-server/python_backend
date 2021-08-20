@@ -687,14 +687,14 @@ ModelInstanceState::ProcessRequests(
     ResponseBatch* response_batch;
     TRITONSERVER_InferenceResponse* inference_response = nullptr;
     std::unique_ptr<IPCMessage> bls_response =
-        std::make_unique<IPCMessage>(shm_pool_);
+        std::make_unique<IPCMessage>(shm_pool_, false);
     try {
       RequestBatch* request_batch;
       shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
 
       bls_response->Command() = PYTHONSTUB_InferExecResponse;
-      bls_response->IsResponse() = true;
-      bls_response->RequestOffset() = ipc_message->SharedMemoryOffset();
+      ipc_message->RequestOffset() = bls_response->SharedMemoryOffset();
+
       shm_pool_->Map(
           (char**)&response_batch, sizeof(ResponseBatch), bls_response->Args());
       response_batch->batch_size = 1;
@@ -737,13 +737,24 @@ ModelInstanceState::ProcessRequests(
       }
     }
 
-    SendMessageAndReceiveResponse(
-        bls_response->SharedMemoryOffset(), response_message, restart,
-        responses, requests, request_count);
-
-    if (restart) {
-      return nullptr;  // success
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      ipc_message->ResponseCondition()->notify_all();
     }
+
+    off_t response_message;
+    auto error = ReceiveMessageFromStub(response_message);
+    if (error != nullptr) {
+      restart = true;
+      RespondErrorToAllRequests(
+          TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
+
+      return nullptr;
+    }
+    // if (restart) {
+    //   return nullptr;  // success
+    // }
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         &responses, request_count,
@@ -1754,9 +1765,13 @@ TRITONBACKEND_ModelInstanceExecute(
       instance_state->ProcessRequests(requests, request_count, restart);
   instance_state->CleanupBLSResponses();
   if (restart) {
-    LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Stub process is unhealthy and it will be restarted.");
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_ERROR,
+        "Stub process is unhealthy and it will be restarted.");
     instance_state->KillStubProcess();
-    LOG_IF_ERROR(instance_state->StartStubProcess(), "Failed to restart the stub process.");
+    LOG_IF_ERROR(
+        instance_state->StartStubProcess(),
+        "Failed to restart the stub process.");
   }
 
   // We should return the shared memory offset before returning from this

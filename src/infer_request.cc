@@ -161,7 +161,7 @@ InferRequest::Exec()
 
   try {
     std::unique_ptr<IPCMessage> ipc_message =
-        std::make_unique<IPCMessage>(shm_pool);
+        std::make_unique<IPCMessage>(shm_pool, true /* inline_response */);
 
     ipc_message->Command() =
         PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
@@ -187,13 +187,20 @@ InferRequest::Exec()
       i += 1;
     }
     this->SaveToSharedMemory(shm_pool, request);
-    stub->SendIPCMessage(ipc_message);
 
-    // Get the response for the current message.
-    std::unique_ptr<IPCMessage> bls_response =
-        stub->FindMessageByRequestId(ipc_message->SharedMemoryOffset());
-    shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
-    responses_is_set = true;
+    std::unique_ptr<IPCMessage> bls_response;
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      stub->SendIPCMessage(ipc_message);
+      ipc_message->ResponseCondition()->wait(lock);
+
+      // Get the response for the current message.
+      bls_response =
+          IPCMessage::LoadFromSharedMemory(shm_pool, ipc_message->RequestOffset());
+      shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
+      responses_is_set = true;
+    }
 
     if (response_batch->has_error) {
       if (response_batch->is_error_set) {
