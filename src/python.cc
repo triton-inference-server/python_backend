@@ -84,7 +84,7 @@
     TRITONSERVER_Error* raarie_err__ = (X);                            \
     if (raarie_err__ != nullptr) {                                     \
       SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__); \
-      return nullptr;                                                  \
+      return;                                                          \
     }                                                                  \
   } while (false)
 
@@ -97,7 +97,7 @@
       TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(            \
           TRITONSERVER_ERROR_INTERNAL, exception.what());                  \
       SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);     \
-      return nullptr;                                                      \
+      return;                                                      \
     }                                                                      \
   } while (false)
 
@@ -120,27 +120,18 @@
     }                                                                   \
   } while (false)
 
-#define RESPOND_AND_RETURN_IF_EXCEPTION(REQUEST, X)                     \
-  do {                                                                  \
-    try {                                                               \
-      (X);                                                              \
-    }                                                                   \
-    catch (const PythonBackendException& exception) {                   \
-      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(          \
-          TRITONSERVER_ERROR_INTERNAL, exception.what());               \
-      TRITONBACKEND_Response* rarie_response__ = nullptr;               \
-      LOG_IF_ERROR(                                                     \
-          TRITONBACKEND_ResponseNew(&rarie_response__, REQUEST),        \
-          "failed to create response");                                 \
-      if (rarie_response__ != nullptr) {                                \
-        LOG_IF_ERROR(                                                   \
-            TRITONBACKEND_ResponseSend(                                 \
-                rarie_response__, TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
-                rarie_err__),                                           \
-            "failed to send error response");                           \
-      }                                                                 \
-      return rarie_err__;                                               \
-    }                                                                   \
+#define RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(                 \
+    REQUESTS, REQUEST_COUNT, X)                                       \
+  do {                                                                \
+    try {                                                             \
+      (X);                                                            \
+    }                                                                 \
+    catch (const PythonBackendException& exception) {                 \
+      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(        \
+          TRITONSERVER_ERROR_INTERNAL, exception.what());             \
+      RequestsRespondWithError(REQUESTS, REQUEST_COUNT, rarie_err__); \
+      return;                                                         \
+    }                                                                 \
   } while (false)
 
 #define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                     \
@@ -241,8 +232,8 @@ class ModelInstanceState : public BackendModelInstance {
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemory> shm_pool_;
   off_t shm_reset_offset_;
-  std::unique_ptr<RequestExecutor> request_executor_;
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
+  std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
   std::vector<std::future<void>> handles_;
 
   // Stub process pid
@@ -275,7 +266,7 @@ class ModelInstanceState : public BackendModelInstance {
       std::shared_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
       std::vector<TRITONBACKEND_Response*>& responses);
 
-  TRITONSERVER_Error* ProcessRequests(
+  void ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       bool& restart);
 
@@ -318,8 +309,6 @@ ModelInstanceState::ModelInstanceState(
     : BackendModelInstance(model_state, triton_model_instance), stub_pid_(0),
       initialized_(false)
 {
-  request_executor_ =
-      std::make_unique<RequestExecutor>(model_state->TritonServer());
 }
 
 TRITONSERVER_Error*
@@ -336,7 +325,7 @@ ModelInstanceState::Create(
         std::string("unexpected nullptr in BackendModelInstanceException"));
     RETURN_IF_ERROR(ex.err_);
   }
-  return nullptr;  // success
+  return nullptr;
 }
 
 void
@@ -490,6 +479,9 @@ ModelInstanceState::ResetSharedMemoryOffset()
 void
 ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
 {
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  auto request_executor =
+      std::make_unique<RequestExecutor>(model_state->TritonServer());
   bool is_response_batch_set = false;
   ResponseBatch* response_batch;
   TRITONSERVER_InferenceResponse* inference_response = nullptr;
@@ -515,7 +507,7 @@ ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
       infer_request = InferRequest::LoadFromSharedMemory(
           shm_pool_, request_batch->requests);
       std::unique_ptr<InferResponse> infer_response;
-      infer_response = request_executor_->Infer(
+      infer_response = request_executor->Infer(
           infer_request, shm_pool_, &inference_response);
 
       if (inference_response != nullptr) {
@@ -550,9 +542,11 @@ ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
         *(ipc_message->ResponseMutex())};
     ipc_message->ResponseCondition()->notify_all();
   }
+
+  request_executors_.emplace_back(std::move(request_executor));
 }
 
-TRITONSERVER_Error*
+void
 ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
     bool& restart)
@@ -577,7 +571,7 @@ ModelInstanceState::ProcessRequests(
               std::string(
                   "null request given to Python backend for '" + name + "'")
                   .c_str()));
-      return nullptr;
+      return;
     }
 
     if (max_batch_size > 0) {
@@ -594,7 +588,7 @@ ModelInstanceState::ProcessRequests(
       }
       if (err != nullptr) {
         RequestsRespondWithError(requests, request_count, err);
-        return nullptr;
+        return;
       }
     } else {
       total_batch_size += 1;
@@ -603,7 +597,7 @@ ModelInstanceState::ProcessRequests(
 
   // If there are no valid payloads then no need to run the inference.
   if (total_batch_size == 0) {
-    return nullptr;
+    return;
   }
 
   // Make sure the maximum batch size is not exceeded. The
@@ -620,7 +614,7 @@ ModelInstanceState::ProcessRequests(
                 "batch size " + std::to_string(total_batch_size) + " for '" +
                 name + "', max allowed is " + std::to_string(max_batch_size))
                 .c_str()));
-    return nullptr;
+    return;
   }
 
   LOG_MESSAGE(
@@ -637,16 +631,20 @@ ModelInstanceState::ProcessRequests(
 
   RequestBatch* request_batch;
   off_t request_batch_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&request_batch, sizeof(RequestBatch), request_batch_offset));
+  RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(
+      requests, request_count,
+      shm_pool_->Map(
+          (char**)&request_batch, sizeof(RequestBatch), request_batch_offset));
   ipc_message->Args() = request_batch_offset;
   request_batch->batch_size = request_count;
 
   Request* requests_shm;
   off_t requests_shm_offset;
-  RETURN_IF_EXCEPTION(shm_pool_->Map(
-      (char**)&requests_shm, sizeof(Request) * request_count,
-      requests_shm_offset));
+  RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(
+      requests, request_count,
+      shm_pool_->Map(
+          (char**)&requests_shm, sizeof(Request) * request_count,
+          requests_shm_offset));
   request_batch->requests = requests_shm_offset;
 
   // We take the responsibilty of the responses.
@@ -740,7 +738,7 @@ ModelInstanceState::ProcessRequests(
     RespondErrorToAllRequests(
         error_message, responses, requests, request_count);
 
-    return nullptr;
+    return;
   }
 
   off_t response_message;
@@ -748,7 +746,7 @@ ModelInstanceState::ProcessRequests(
       ipc_message->SharedMemoryOffset(), response_message, restart, responses,
       requests, request_count);
   if (restart) {
-    return nullptr;
+    return;
   }
 
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
@@ -756,8 +754,8 @@ ModelInstanceState::ProcessRequests(
       ipc_message =
           IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
 
-  // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
-  // that inference request exeuction has finished.
+  // If the stub command is no longer PYTHONSTUB_InferExecRequest, it
+  // indicates that inference request exeuction has finished.
   while (ipc_message->Command() ==
          PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
     // Launch the BLS request in a future.
@@ -773,7 +771,7 @@ ModelInstanceState::ProcessRequests(
       RespondErrorToAllRequests(
           TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
 
-      return nullptr;
+      return;
     }
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
@@ -791,8 +789,9 @@ ModelInstanceState::ProcessRequests(
       &responses, request_count,
       shm_pool_->MapOffset((char**)&response_batch, ipc_message->Args()));
 
-  // If inference fails, release all the requests and send an error response. If
-  // inference fails at this stage, it usually indicates a bug in the model code
+  // If inference fails, release all the requests and send an error response.
+  // If inference fails at this stage, it usually indicates a bug in the model
+  // code
   if (response_batch->has_error) {
     if (response_batch->is_error_set) {
       char* error_message;
@@ -809,7 +808,7 @@ ModelInstanceState::ProcessRequests(
           error_message, responses, requests, request_count);
     }
 
-    return nullptr;
+    return;
   }
 
   Response* responses_shm;
@@ -986,12 +985,6 @@ ModelInstanceState::ProcessRequests(
           compute_start_ns, compute_end_ns, exec_end_ns),
       "failed reporting batch request statistics");
 
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
-       Name() + " released " + std::to_string(request_count) + " requests")
-          .c_str());
-
   if (response_batch->cleanup) {
     ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup;
     SendMessageAndReceiveResponse(
@@ -999,7 +992,7 @@ ModelInstanceState::ProcessRequests(
         requests, request_count);
   }
 
-  return nullptr;
+  return;
 }
 
 void
@@ -1012,6 +1005,7 @@ ModelInstanceState::CleanupBLSResponses()
   }
 
   bls_inference_responses_.clear();
+  request_executors_.clear();
 }
 
 bool
@@ -1781,9 +1775,26 @@ TRITONBACKEND_ModelInstanceExecute(
   // If restart is equal to true, it indicates that the stub process is
   // unhealthy and needs a restart.
   bool restart = false;
-  TRITONSERVER_Error* err =
-      instance_state->ProcessRequests(requests, request_count, restart);
+  instance_state->ProcessRequests(requests, request_count, restart);
+
+  // Wait for all the pending BLS requests to be completed.
+  instance_state->WaitForBLSRequestsToFinish();
   instance_state->CleanupBLSResponses();
+
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* request = requests[r];
+    LOG_IF_ERROR(
+        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
+        "failed releasing request");
+  }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
+       instance_state->Name() + " released " + std::to_string(request_count) +
+       " requests")
+          .c_str());
+
   if (restart) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_ERROR,
@@ -1798,19 +1809,6 @@ TRITONBACKEND_ModelInstanceExecute(
   // function. Otherwise there will be shared memory leaks if there is an
   // error when processing the requests
   instance_state->ResetSharedMemoryOffset();
-
-  // Wait for all the pending BLS requests to be completed.
-  instance_state->WaitForBLSRequestsToFinish();
-  if (err != nullptr) {
-    return err;
-  }
-
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-    LOG_IF_ERROR(
-        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
-        "failed releasing request");
-  }
 
   return nullptr;
 }
