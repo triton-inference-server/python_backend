@@ -31,6 +31,7 @@
 #include <sys/mman.h>
 #include <sys/vfs.h>
 #include <unistd.h>
+#include <boost/interprocess/sync/scoped_lock.hpp>
 #include <string>
 #include "pb_utils.h"
 
@@ -42,6 +43,8 @@ SharedMemory::SharedMemory(
     const std::string& shm_key, int64_t default_byte_size,
     int64_t shm_growth_bytes, bool truncate)
 {
+  // `truncate` variable indicates whether the shared memory region has been
+  // created before the other process starts using it or not.
   if (truncate) {
     shm_obj_ = bi::shared_memory_object(
         bi::open_or_create, shm_key.c_str(), bi::read_write);
@@ -60,8 +63,7 @@ SharedMemory::SharedMemory(
          "' to requested size (" + std::to_string(default_byte_size) +
          " bytes). If you are running Triton inside docker, use '--shm-size' "
          "flag to control the shared memory region size. Each Python backend "
-         "model instance requires at least 64MBs of shared memory. Flag "
-         "'--shm-size=5G' should be sufficient for common usecases. Error: " +
+         "model instance requires at least 64MBs of shared memory. Error: " +
          ex.what());
 
     // Remove the shared memory region if there was an error.
@@ -76,13 +78,24 @@ SharedMemory::SharedMemory(
   *capacity_ = default_byte_size;
   current_capacity_ = *capacity_;
 
+  if (!truncate) {
+    // Create the shared memory mutex.
+    shm_mutex_ = new ((char*)shm_addr_ + sizeof(size_t)) bi::interprocess_mutex;
+  } else {
+    // If the shared memory is already created, just fix the pointer.
+    char* shm_mutex = (char*)shm_addr_ + sizeof(size_t);
+    shm_mutex_ = reinterpret_cast<bi::interprocess_mutex*>(shm_mutex);
+  }
+
   // Set offset address
-  offset_ = (off_t*)((char*)shm_addr_ + sizeof(size_t));
+  offset_ =
+      (off_t*)((char*)shm_addr_ + sizeof(size_t) + sizeof(bi::interprocess_mutex));
 
   if (truncate) {
     *offset_ = 0;
     *offset_ += sizeof(off_t);
     *offset_ += sizeof(size_t);
+    *offset_ += sizeof(bi::interprocess_mutex);
   }
 
   shm_key_ = shm_key;
@@ -96,6 +109,8 @@ SharedMemory::~SharedMemory() noexcept(false)
 void
 SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 {
+  bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+
   size_t shm_bytes_added = 0;
   while (*offset_ + byte_size >= *capacity_) {
     // Increase the shared memory pool size by the amount of bytes available.
@@ -123,7 +138,6 @@ SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
 
   *shm_addr = shm_addr_ + *offset_;
   offset = *offset_;
-
   *offset_ += byte_size;
 }
 
@@ -153,6 +167,7 @@ SharedMemory::UpdateSharedMemory()
 void
 SharedMemory::MapOffset(char** shm_addr, off_t offset)
 {
+  bi::scoped_lock<bi::interprocess_mutex> gaurd(*shm_mutex_);
   // Update shared memory pointer and capacity if necessary.
   UpdateSharedMemory();
   *shm_addr = shm_addr_ + offset;
@@ -162,6 +177,12 @@ void
 SharedMemory::SetOffset(off_t offset)
 {
   *offset_ = offset;
+}
+
+off_t
+SharedMemory::Offset()
+{
+  return *offset_;
 }
 
 }}}  // namespace triton::backend::python

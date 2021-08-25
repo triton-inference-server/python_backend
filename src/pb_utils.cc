@@ -39,6 +39,7 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -340,5 +341,80 @@ FileExists(std::string& path)
   struct stat buffer;
   return stat(path.c_str(), &buffer) == 0;
 }
+
+#ifdef TRITON_ENABLE_GPU
+
+CUDADriverAPI::CUDADriverAPI()
+{
+  dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
+
+  // If libcuda.so is succesfully opened, it must be able to find
+  // "cuPointerGetAttribute" and "cuGetErrorString" symbols.
+  if (dl_open_handle_ != nullptr) {
+    void* cu_pointer_get_attribute_fn =
+        dlsym(dl_open_handle_, "cuPointerGetAttribute");
+    if (cu_pointer_get_attribute_fn == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to dlsym 'cuPointerGetAttribute'. Error: ") +
+          dlerror());
+    }
+    *((void**)&cu_pointer_get_attribute_fn_) = cu_pointer_get_attribute_fn;
+
+    void* cu_get_error_string_fn = dlsym(dl_open_handle_, "cuGetErrorString");
+    if (cu_get_error_string_fn == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to dlsym 'cuGetErrorString'. Error: ") +
+          dlerror());
+    }
+    *((void**)&cu_get_error_string_fn_) = cu_get_error_string_fn;
+  }
+}
+
+void
+CUDADriverAPI::PointerGetAttribute(
+    CUdeviceptr* start_address, CUpointer_attribute attribute,
+    CUdeviceptr dev_ptr)
+{
+  CUresult cuda_err =
+      (*cu_pointer_get_attribute_fn_)(start_address, attribute, dev_ptr);
+  if (cuda_err != CUDA_SUCCESS) {
+    const char* error_string;
+    (*cu_get_error_string_fn_)(cuda_err, &error_string);
+    throw PythonBackendException(
+        std::string(
+            "failed to get cuda pointer device attribute: " +
+            std::string(error_string))
+            .c_str());
+  }
+}
+
+bool
+CUDADriverAPI::IsAvailable()
+{
+  return dl_open_handle_ != nullptr;
+}
+
+CUDADriverAPI::~CUDADriverAPI() noexcept(false)
+{
+  if (dl_open_handle_ != nullptr) {
+    int status = dlclose(dl_open_handle_);
+    if (status != 0) {
+      throw PythonBackendException("Failed to close the libcuda handle.");
+    }
+  }
+}
+#endif
+
+class RunBeforeReturn {
+  std::function<void()> run_before_return_fn_;
+
+ public:
+  RunBeforeReturn(const std::function<void()>& run_before_return_fn)
+      : run_before_return_fn_(run_before_return_fn)
+  {
+  }
+
+  ~RunBeforeReturn() { run_before_return_fn_(); }
+};
 
 }}}  // namespace triton::backend::python

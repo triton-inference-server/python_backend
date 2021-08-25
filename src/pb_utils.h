@@ -73,31 +73,8 @@ namespace bi = boost::interprocess;
     }                                                                     \
   } while (false)
 
-typedef enum PYTHONSTUB_commandtype_enum {
-  PYTHONSTUB_Execute,
-  PYTHONSTUB_Initialize,
-  PYTHONSTUB_Finalize,
-  PYTHONSTUB_TensorCleanup,
-  PYTHONSTUB_InferExecRequest,
-  PYTHONSTUB_InferExecResponse
-} PYTHONSTUB_CommandType;
 
-struct IPCMessage {
-  PYTHONSTUB_CommandType command;
-  PYTHONSTUB_CommandType stub_command;
-  off_t args;
-  off_t stub_args;
-};
-
-struct ExecuteArgs {
-  off_t request_batch;
-  off_t response_batch;
-};
-
-size_t GetDevicePointerOffset(void* d_ptr);
-
-struct InitializeArgs {
-  off_t args;
+struct InitializeResponse {
   // Indicates whether the response has an error or not.
   bool response_has_error;
   // Indicates whether the response error is set or not.
@@ -113,12 +90,9 @@ struct IPCControl {
   bool parent_health;
   bool uses_env;
   off_t parent_health_mutex;
-  off_t stub_mutex;
-  off_t stub_cond;
-  off_t parent_mutex;
-  off_t parent_cond;
   off_t stub_health_mutex;
-  off_t ipc_message;
+  off_t stub_message_queue;
+  off_t parent_message_queue;
 };
 
 //
@@ -224,7 +198,6 @@ struct PythonBackendException : std::exception {
   std::string message_;
 };
 
-
 void SaveMapToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
     const std::unordered_map<std::string, std::string>& map);
@@ -259,5 +232,32 @@ void LoadTensorFromSharedMemory(
 void ExtractTarFile(std::string& archive_path, std::string& dst_path);
 
 bool FileExists(std::string& path);
+
+#ifdef TRITON_ENABLE_GPU
+class CUDADriverAPI {
+ public:
+  static CUDADriverAPI& getInstance()
+  {
+    static CUDADriverAPI instance;
+    return instance;
+  }
+
+ private:
+  void* dl_open_handle_ = nullptr;
+  CUresult (*cu_pointer_get_attribute_fn_)(
+      CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
+  CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
+  CUDADriverAPI();
+  ~CUDADriverAPI() noexcept(false);
+
+ public:
+  CUDADriverAPI(CUDADriverAPI const&) = delete;
+  void operator=(CUDADriverAPI const&) = delete;
+  bool IsAvailable();
+  void PointerGetAttribute(
+      CUdeviceptr* start_address, CUpointer_attribute attr,
+      CUdeviceptr device_ptr);
+};
+#endif  // TRITON_ENABLE_GPU
 
 }}}  // namespace triton::backend::python
