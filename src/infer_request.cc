@@ -24,7 +24,9 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <boost/interprocess/sync/scoped_lock.hpp>
 #include "infer_request.h"
+
 #include "pb_utils.h"
 #ifdef TRITON_PB_STUB
 #include "infer_response.h"
@@ -156,17 +158,18 @@ InferRequest::Exec()
   bool responses_is_set = false;
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<SharedMemory>& shm_pool = stub->GetSharedMemory();
-  IPCMessage* ipc_message = stub->GetIPCMessage();
-  try {
-    ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
 
-    ExecuteArgs* exec_args;
-    shm_pool->Map(
-        (char**)&exec_args, sizeof(ExecuteArgs), ipc_message->stub_args);
+  try {
+    py::gil_scoped_release release;
+    std::unique_ptr<IPCMessage> ipc_message =
+        std::make_unique<IPCMessage>(shm_pool, true /* inline_response */);
+
+    ipc_message->Command() =
+        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
 
     RequestBatch* request_batch;
     shm_pool->Map(
-        (char**)&request_batch, sizeof(RequestBatch), exec_args->request_batch);
+        (char**)&request_batch, sizeof(RequestBatch), ipc_message->Args());
     request_batch->batch_size = 1;
 
     Request* request;
@@ -186,15 +189,19 @@ InferRequest::Exec()
     }
     this->SaveToSharedMemory(shm_pool, request);
 
-    ipc_message->stub_command =
-        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
-    stub->NotifyParent();
-    stub->WaitForNotification();
+    std::unique_ptr<IPCMessage> bls_response;
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      stub->SendIPCMessage(ipc_message);
+      ipc_message->ResponseCondition()->wait(lock);
 
-    ipc_message->stub_command = PYTHONSTUB_CommandType::PYTHONSTUB_Execute;
-
-    shm_pool->MapOffset((char**)&response_batch, exec_args->response_batch);
-    responses_is_set = true;
+      // Get the response for the current message.
+      bls_response = IPCMessage::LoadFromSharedMemory(
+          shm_pool, ipc_message->RequestOffset());
+      shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
+      responses_is_set = true;
+    }
 
     if (response_batch->has_error) {
       if (response_batch->is_error_set) {
@@ -226,6 +233,18 @@ InferRequest::Exec()
         std::make_shared<PbError>(
             "An error occurred while performing BLS request."));
   }
+}
+
+py::object
+InferRequest::AsyncExec()
+{
+  py::object loop = py::module_::import("asyncio").attr("get_running_loop")();
+  py::cpp_function callback = [this]() {
+    auto response = this->Exec();
+    return response;
+  };
+  py::object f = loop.attr("run_in_executor")(py::none(), callback);
+  return f;
 }
 #endif
 

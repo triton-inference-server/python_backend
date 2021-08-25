@@ -97,7 +97,6 @@ InferResponse::LoadFromSharedMemory(
 {
   Response* response;
   shm_pool->MapOffset((char**)&response, response_offset);
-
   uint32_t requested_output_count = response->outputs_size;
 
   std::shared_ptr<PbError> pb_error;
