@@ -1,4 +1,4 @@
-// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,51 +24,66 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "ipc_message.h"
 
-#include <unistd.h>
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
-#include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <memory>
-#include <string>
-#include <utility>
-#include <vector>
-
 
 namespace triton { namespace backend { namespace python {
 
-class SharedMemory {
-  std::string shm_key_;
-  size_t* capacity_;
-  off_t* offset_;
-  char* shm_addr_;
-  boost::interprocess::interprocess_mutex *shm_mutex_;
+std::unique_ptr<IPCMessage>
+IPCMessage::LoadFromSharedMemory(
+    std::unique_ptr<SharedMemory>& shm_pool, off_t message_offset)
+{
+  std::unique_ptr<IPCMessage> ipc_message = std::make_unique<IPCMessage>();
+  ipc_message->shm_offset_ = message_offset;
+  shm_pool->MapOffset((char**)&ipc_message->ipc_message_shm_, message_offset);
 
-  // Current capcity, local to each process.
-  size_t current_capacity_;
+  if (ipc_message->ipc_message_shm_->inline_response) {
+    shm_pool->MapOffset(
+        (char**)&ipc_message->response_mutex_,
+        ipc_message->ipc_message_shm_->response_mutex);
+    shm_pool->MapOffset(
+        (char**)&ipc_message->response_cond_,
+        ipc_message->ipc_message_shm_->response_cond);
+  }
 
-  // Amount of bytes to grow the shared memory when the pool is completely used.
-  int64_t shm_growth_bytes_;
+  return ipc_message;
+}
 
-  // Get the amount of shared memory available.
-  size_t GetAvailableSharedMemory();
-  boost::interprocess::shared_memory_object shm_obj_;
-  std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
-  std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
-      old_shm_maps_;
+PYTHONSTUB_CommandType&
+IPCMessage::Command()
+{
+  return ipc_message_shm_->command;
+}
 
-  void UpdateSharedMemory();
+off_t&
+IPCMessage::Args()
+{
+  return ipc_message_shm_->args;
+}
 
- public:
-  SharedMemory(
-      const std::string& shm_key, int64_t default_byte_size,
-      int64_t shm_growth_bytes, bool truncate = false);
-  void MapOffset(char** shm_addr, off_t offset);
-  void Map(char** shm_addr, size_t byte_size, off_t& offset);
-  off_t Offset();
-  void SetOffset(off_t offset);
-  ~SharedMemory() noexcept(false);
-};
+bool&
+IPCMessage::InlineResponse()
+{
+  return ipc_message_shm_->inline_response;
+}
 
-}}}  // namespace triton::backend::python
+bi::interprocess_condition*
+IPCMessage::ResponseCondition()
+{
+  return response_cond_;
+}
+
+bi::interprocess_mutex*
+IPCMessage::ResponseMutex()
+{
+  return response_mutex_;
+}
+
+off_t&
+IPCMessage::RequestOffset()
+{
+  return this->ipc_message_shm_->request_offset;
+}
+
+}}};  // namespace triton::backend::python

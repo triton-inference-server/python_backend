@@ -40,6 +40,7 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -380,7 +381,18 @@ CUDADriverAPI::~CUDADriverAPI() noexcept(false)
     }
   }
 }
-
 #endif
+
+class RunBeforeReturn {
+  std::function<void()> run_before_return_fn_;
+
+ public:
+  RunBeforeReturn(const std::function<void()>& run_before_return_fn)
+      : run_before_return_fn_(run_before_return_fn)
+  {
+  }
+
+  ~RunBeforeReturn() { run_before_return_fn_(); }
+};
 
 }}}  // namespace triton::backend::python

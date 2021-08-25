@@ -30,9 +30,11 @@
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
+#include <condition_variable>
 #include <memory>
 #include "infer_request.h"
 #include "infer_response.h"
+#include "message_queue.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
 
@@ -55,13 +57,18 @@ class Stub {
   std::string model_version_;
   std::string model_instance_name_;
   std::string triton_install_path_;
-  IPCMessage* ipc_message_;
   IPCControl* ipc_control_;
   std::unique_ptr<SharedMemory> shm_pool_;
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
+  std::unique_ptr<MessageQueue> stub_message_queue_;
+  std::unique_ptr<MessageQueue> parent_message_queue_;
   std::vector<std::shared_ptr<PbTensor>> tensors_to_remove_;
+  std::vector<std::unique_ptr<IPCMessage>> messages_;
+  std::mutex messages_mutex_;
+  std::condition_variable messages_cv_;
+  py::object thread_pool_;
   bool require_cleanup_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
@@ -79,6 +86,7 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       off_t ipc_control_offset, const std::string& model_instance_name);
+  py::object GetThreadPool();
   void NotifyParent();
   bool& Health();
   std::unique_ptr<SharedMemory>& GetSharedMemory();
@@ -87,24 +95,24 @@ class Stub {
       ResponseBatch* response_batch, const char* err_message);
   void ProcessResponse(
       Response* response_shm, ResponseBatch* response_batch,
-      InferResponse* response, py::object& serialize_bytes);
+      InferResponse* response);
   std::unique_ptr<InferRequest> ProcessRequest(
-      off_t request_offset, ResponseBatch* response_batch,
-      py::object& deserialize_bytes);
+      off_t request_offset, ResponseBatch* response_batch);
   void SetResponseFromException(
       ResponseBatch* response_batch,
       const PythonBackendException& pb_exception);
   bool RunCommand();
-  void Execute(ExecuteArgs* execute_args, ResponseBatch* response_batch);
-  void Initialize(InitializeArgs* initialize_args);
+  std::unique_ptr<IPCMessage> Poll();
+  std::unique_ptr<IPCMessage> PollByCommand(PYTHONSTUB_CommandType command);
+  //   std::unique_ptr<IPCMessage> PollByRequestId(off_t );
+  void Execute(RequestBatch* request_batch, ResponseBatch* response_batch);
+  void Initialize(off_t map_offset);
+  void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
+  std::unique_ptr<IPCMessage> PopMessage();
+  void Fetch();
   void UpdateHealth();
   void Cleanup();
   void Finalize();
-  IPCMessage* GetIPCMessage();
-
-  // Wait for notification from the server. Returns true if the parent process
-  // has received a SIGTERM, and false otherwise.
-  bool WaitForNotification();
 
   ~Stub();
 };
