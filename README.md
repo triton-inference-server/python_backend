@@ -540,7 +540,60 @@ class TritonPythonModel:
           # inference resposne too.
 ```
 
-A complete example for BLS in Python backend is included in the
+
+In addition to the `inference_request.exec` function that allows you to
+execute blocking inference requests, `inference_request.async_exec` allows
+you to perform async inference requests. This can be useful when you do not
+need the result of the inference immediately. Using `async_exec` function, it
+is possible to have multiple inflight inference requests and wait for the
+responses only when needed. Example below shows how to use `async_exec`:
+
+```python
+import triton_python_backend_utils as pb_utils
+import asyncio
+
+
+class TritonPythonModel:
+  ...
+
+    # You must add `async` to the beginning of `execute` function if you want to
+    # use `async_exec` function.
+    async def execute(self, requests):
+      ...
+      # Create an InferenceRequest object. `model_name`,
+      # `requested_output_names`, and `inputs` are the required arguments and
+      # must be provided when constructing an InferenceRequest object. Make sure
+      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      inference_request = pb_utils.InferenceRequest(
+          model_name='model_name',
+          requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+          inputs=[<pb_utils.Tensor object>])
+
+      # Execute the inference_request and wait for the response
+      infer_response_aws = []
+      for i in range(4):
+        # async_exec function returns an
+        # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
+        # object.
+        inference_response_aws.append(inference_request.async_exec())
+
+      # Wait for all of the inference requests to complete.
+      infer_responses = await asyncio.gather(*infer_response_aws)
+
+      for infer_response in infer_responses:
+        # Check if the inference response has an error
+        if inference_response.has_error():
+            raise pb_utils.TritonModelException(inference_response.error().message())
+        else:
+            # Extract the output tensors from the inference response.
+            output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
+            output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+
+            # Decide the next steps for model execution based on the received output
+            # tensors.
+```
+
+A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
 ## Limitations

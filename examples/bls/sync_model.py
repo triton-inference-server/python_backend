@@ -29,6 +29,7 @@
 # contains some utility functions for extracting information from model_config
 # and converting Triton input/output types to numpy types.
 import triton_python_backend_utils as pb_utils
+import json
 
 
 class TritonPythonModel:
@@ -104,7 +105,8 @@ class TritonPythonModel:
             infer_response = infer_request.exec()
 
             # Make sure that the inference response doesn't have an error. If
-            # it has an error, raise an exception.
+            # it has an error and you can't proceed with your model execution
+            # you can raise an exception.
             if infer_response.has_error():
                 raise pb_utils.TritonModelException(
                     infer_response.error().message())
