@@ -309,6 +309,7 @@ PbTensor::LoadFromSharedMemory(
 
       cudaError_t err = cudaIpcOpenMemHandle(
           (void**)&data, *cuda_ipc_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+
       if (err != cudaSuccess) {
         throw PythonBackendException(std::string(
                                          "failed to open cuda ipc handle: " +
@@ -324,6 +325,7 @@ PbTensor::LoadFromSharedMemory(
           tensor_shm->dtype, raw_data->memory_type, raw_data->memory_type_id,
           data, raw_data->byte_size, nullptr /* DLManaged Tensor */);
       pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+      pb_tensor->destruct_cuda_ipc_mem_handle_ = true;
     } else {
       pb_tensor = std::make_shared<PbTensor>(
           name, std::vector<int64_t>(dims, dims + dims_count),
