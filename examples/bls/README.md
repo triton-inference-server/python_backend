@@ -31,19 +31,19 @@
 In this section we demonstrate an end-to-end example for
 [BLS](../../README.md#business-logic-scripting-beta) in Python backend. The
 [model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md)
-should contain [PyTorch](../pytorch), [AddSub](../add_sub).  The
-[PyTorch](../pytorch) and [AddSub](../add_sub) models calculate the sum and
+should contain [pytorch](../pytorch), [addsub](../add_sub).  The
+[pytorch](../pytorch) and [addsub](../add_sub) models calculate the sum and
 difference of the `INPUT0` and `INPUT1` and put the results in `OUTPUT0` and
 `OUTPUT1` respectively. This example is broken into two sections. The first
-section demonstrates how to perform synchrnouous BLS requests and the second
-section shows how to execute asynchrnounous BLS requests.
+section demonstrates how to perform synchronous BLS requests and the second
+section shows how to execute asynchronous BLS requests.
 
 ## Synchronous BLS Requests
 
-The goal of sync BLS model is the same as [PyTorch](../pytorch) and
-[AddSub](../add_sub) models but the difference is that the BLS model will not
+The goal of sync BLS model is the same as [pytorch](../pytorch) and
+[addsub](../add_sub) models but the difference is that the BLS model will not
 calculate the sum and difference by itself. The sync BLS model will pass the
-input tensors to the [PyTorch](../pytorch) or [AddSub](../add_sub) models and
+input tensors to the [pytorch](../pytorch) or [addsub](../add_sub) models and
 return the responses of that model as the final response. The additional
 parameter `MODEL_NAME` determines which model will be used for calculating the
 final outputs.
@@ -105,7 +105,7 @@ The [client.py](./sync_client.py) sends three inference requests to the 'bls_syn
 model with different values for the "MODEL_NAME" input. As explained earlier,
 "MODEL_NAME" determines the model name that the "bls" model will use for
 calculating the final outputs. In the first request, it will use the "add_sub"
-model and in the seceond request it will use the "pytorch" model. The third
+model and in the second request it will use the "pytorch" model. The third
 request uses an incorrect model name to demonstrate error handling during
 the inference request execution.
 
@@ -116,9 +116,9 @@ their response. Asynchronous execution of BLS requests will not block your
 model execution and can lead to speedups under certain conditions.
 
 The `bls_async` model will perform two async BLS requests on the
-[PyTorch](../pytorch) and [AddSub](../add_sub) models. Then, it will wait until
+[pytorch](../pytorch) and [addsub](../add_sub) models. Then, it will wait until
 the inference requests on these models is completed. It will extract `OUTPUT0`
-from the [PyTorch](../pytorch) and `OUTPUT1` from the [AddSub](../add_sub) model
+from the [pytorch](../pytorch) and `OUTPUT1` from the [addsub](../add_sub) model
 to construct the final inference response object using these tensors.
 
 1. Create the model repository:

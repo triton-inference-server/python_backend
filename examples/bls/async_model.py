@@ -57,6 +57,8 @@ class TritonPythonModel:
         # You must parse model_config. JSON string is not parsed here
         self.model_config = json.loads(args['model_config'])
 
+    # You must add the Python 'async' keyword to the beginning of `execute`
+    # function if you want to use `async_exec` function.
     async def execute(self, requests):
         """`execute` must be implemented in every Python model. `execute`
         function receives a list of pb_utils.InferenceRequest as the only
@@ -90,7 +92,7 @@ class TritonPythonModel:
             in_1 = pb_utils.get_input_tensor_by_name(request, "INPUT1")
 
             # List of awaitables containing inflight inference responses.
-            inference_response_aws = []
+            inference_response_awaits = []
             for model_name in ['pytorch', 'add_sub']:
                 # Create inference request object
                 infer_request = pb_utils.InferenceRequest(
@@ -101,12 +103,13 @@ class TritonPythonModel:
                 # Store the awaitable inside the array. We don't need
                 # the inference response immediately so we do not `await`
                 # here.
-                inference_response_aws.append(infer_request.async_exec())
+                inference_response_awaits.append(infer_request.async_exec())
 
             # Wait for all the inference requests to finish. The execution
             # of the Python script will be blocked until all the awaitables
             # are resolved.
-            inference_responses = await asyncio.gather(*inference_response_aws)
+            inference_responses = await asyncio.gather(
+                *inference_response_awaits)
 
             for infer_response in inference_responses:
                 # Make sure that the inference response doesn't have an error.

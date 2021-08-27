@@ -363,8 +363,9 @@ above. However, it is important to see `libpython3.6m.so.1.0` in the list of
 linked shared libraries. If you use a different Python version, you should see
 that version instead. You need to copy the `triton_python_backend_stub` to the
 model directory of the models that want to use the custom Python backend
-stub. For example, if you have `model_a` in your [model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md), the folder
-structure should look like below:
+stub. For example, if you have `model_a` in your
+[model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md),
+the folder structure should look like below:
 
 ```
 models
@@ -537,7 +538,7 @@ class TritonPythonModel:
 
           # Decide the next steps for model execution based on the received output
           # tensors. It is possible to use the same output tensors to for the final
-          # inference resposne too.
+          # inference response too.
 ```
 
 
@@ -556,8 +557,8 @@ import asyncio
 class TritonPythonModel:
   ...
 
-    # You must add `async` to the beginning of `execute` function if you want to
-    # use `async_exec` function.
+    # You must add the Python 'async' keyword to the beginning of `execute`
+    # function if you want to use `async_exec` function.
     async def execute(self, requests):
       ...
       # Create an InferenceRequest object. `model_name`,
@@ -569,16 +570,15 @@ class TritonPythonModel:
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
           inputs=[<pb_utils.Tensor object>])
 
-      # Execute the inference_request and wait for the response
-      infer_response_aws = []
+      infer_response_awaits = []
       for i in range(4):
         # async_exec function returns an
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
-        inference_response_aws.append(inference_request.async_exec())
+        inference_response_awaits.append(inference_request.async_exec())
 
       # Wait for all of the inference requests to complete.
-      infer_responses = await asyncio.gather(*infer_response_aws)
+      infer_responses = await asyncio.gather(*infer_response_awaits)
 
       for infer_response in infer_responses:
         # Check if the inference response has an error
@@ -614,7 +614,7 @@ For using the Triton Python client in these examples you need to install
 the [Triton Python Client Library](https://github.com/triton-inference-server/client#getting-the-client-libraries-and-examples).
 The Python client for each of the examples is in the `client.py` file.
 
-## AddSub in Numpy
+## AddSub in NumPy
 
 There is no dependencies required for the AddSub numpy example. Instructions
 on how to use this model is explained in the quick start section. You can
