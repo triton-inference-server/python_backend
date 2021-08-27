@@ -363,8 +363,9 @@ above. However, it is important to see `libpython3.6m.so.1.0` in the list of
 linked shared libraries. If you use a different Python version, you should see
 that version instead. You need to copy the `triton_python_backend_stub` to the
 model directory of the models that want to use the custom Python backend
-stub. For example, if you have `model_a` in your [model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md), the folder
-structure should look like below:
+stub. For example, if you have `model_a` in your
+[model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md),
+the folder structure should look like below:
 
 ```
 models
@@ -537,10 +538,62 @@ class TritonPythonModel:
 
           # Decide the next steps for model execution based on the received output
           # tensors. It is possible to use the same output tensors to for the final
-          # inference resposne too.
+          # inference response too.
 ```
 
-A complete example for BLS in Python backend is included in the
+
+In addition to the `inference_request.exec` function that allows you to
+execute blocking inference requests, `inference_request.async_exec` allows
+you to perform async inference requests. This can be useful when you do not
+need the result of the inference immediately. Using `async_exec` function, it
+is possible to have multiple inflight inference requests and wait for the
+responses only when needed. Example below shows how to use `async_exec`:
+
+```python
+import triton_python_backend_utils as pb_utils
+import asyncio
+
+
+class TritonPythonModel:
+  ...
+
+    # You must add the Python 'async' keyword to the beginning of `execute`
+    # function if you want to use `async_exec` function.
+    async def execute(self, requests):
+      ...
+      # Create an InferenceRequest object. `model_name`,
+      # `requested_output_names`, and `inputs` are the required arguments and
+      # must be provided when constructing an InferenceRequest object. Make sure
+      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      inference_request = pb_utils.InferenceRequest(
+          model_name='model_name',
+          requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+          inputs=[<pb_utils.Tensor object>])
+
+      infer_response_awaits = []
+      for i in range(4):
+        # async_exec function returns an
+        # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
+        # object.
+        inference_response_awaits.append(inference_request.async_exec())
+
+      # Wait for all of the inference requests to complete.
+      infer_responses = await asyncio.gather(*infer_response_awaits)
+
+      for infer_response in infer_responses:
+        # Check if the inference response has an error
+        if inference_response.has_error():
+            raise pb_utils.TritonModelException(inference_response.error().message())
+        else:
+            # Extract the output tensors from the inference response.
+            output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
+            output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+
+            # Decide the next steps for model execution based on the received output
+            # tensors.
+```
+
+A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
 ## Limitations
@@ -561,7 +614,7 @@ For using the Triton Python client in these examples you need to install
 the [Triton Python Client Library](https://github.com/triton-inference-server/client#getting-the-client-libraries-and-examples).
 The Python client for each of the examples is in the `client.py` file.
 
-## AddSub in Numpy
+## AddSub in NumPy
 
 There is no dependencies required for the AddSub numpy example. Instructions
 on how to use this model is explained in the quick start section. You can
