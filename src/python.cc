@@ -97,7 +97,7 @@
       TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(            \
           TRITONSERVER_ERROR_INTERNAL, exception.what());                  \
       SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);     \
-      return;                                                      \
+      return;                                                              \
     }                                                                      \
   } while (false)
 
@@ -191,6 +191,7 @@ struct BackendState {
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
+  int64_t shm_message_queue_size;
   std::unique_ptr<EnvironmentManager> env_manager;
 };
 
@@ -1273,11 +1274,15 @@ ModelInstanceState::SetupStubProcess()
 
   parent_pid_ = getpid();
 
-  // TODO: Change the default
+  auto message_queue_size =
+      model_state->StateForBackend()->shm_message_queue_size;
+
   RETURN_IF_EXCEPTION(
-      stub_message_queue_ = std::make_unique<MessageQueue>(shm_pool_, 1000));
+      stub_message_queue_ =
+          std::make_unique<MessageQueue>(shm_pool_, message_queue_size));
   RETURN_IF_EXCEPTION(
-      parent_message_queue_ = std::make_unique<MessageQueue>(shm_pool_, 1000));
+      parent_message_queue_ =
+          std::make_unique<MessageQueue>(shm_pool_, message_queue_size));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmOffset();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmOffset();
 
@@ -1612,6 +1617,20 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
                " can't be smaller than 4 MiBs")
                   .c_str());
         }
+      }
+      catch (const std::invalid_argument& ia) {
+        return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
+      }
+    }
+
+    triton::common::TritonJson::Value shm_message_queue_size;
+    std::string shm_message_queue_size_str;
+    if (cmdline.Find("shm_message_queue_size", &shm_message_queue_size)) {
+      RETURN_IF_ERROR(
+          shm_message_queue_size.AsString(&shm_message_queue_size_str));
+      try {
+        backend_state->shm_message_queue_size =
+            std::stol(shm_message_queue_size_str);
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
