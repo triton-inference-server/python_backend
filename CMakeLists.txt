@@ -139,6 +139,8 @@ add_library(
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
+  src/tensor_manager.cc
+  src/tensor_manager.h
   src/pb_env.h
   src/pb_error.cc
   src/pb_error.h
@@ -160,6 +162,8 @@ add_executable(
   src/infer_response.h
   src/ipc_message.cc
   src/ipc_message.h
+  src/tensor_manager.cc
+  src/tensor_manager.h
   src/message_queue.cc
   src/message_queue.h
   src/pb_stub.cc
