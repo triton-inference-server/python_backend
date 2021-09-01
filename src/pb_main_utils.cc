@@ -72,11 +72,6 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
-  // TODO: Add support for GPU tensors in BLS. Currently, all the tensors
-  // will be stored in CPU.
-  *actual_memory_type = TRITONSERVER_MEMORY_CPU;
-  *actual_memory_type_id = 0;
-
   SharedMemory* shm_pool = reinterpret_cast<SharedMemory*>(userp);
 
   // If 'byte_size' is zero just return 'buffer' == nullptr, we don't
@@ -87,8 +82,12 @@ ResponseAlloc(
   } else {
     switch (*actual_memory_type) {
       case TRITONSERVER_MEMORY_CPU:
-      case TRITONSERVER_MEMORY_CPU_PINNED:
-      case TRITONSERVER_MEMORY_GPU: {
+#ifndef TRITON_ENABLE_GPU
+      case TRITONSERVER_MEMORY_GPU:
+#endif
+      case TRITONSERVER_MEMORY_CPU_PINNED: {
+        *actual_memory_type = TRITONSERVER_MEMORY_CPU;
+        *actual_memory_type_id = 0;
         off_t tensor_offset;
         try {
           shm_pool->Map((char**)buffer, byte_size, tensor_offset);
@@ -101,6 +100,30 @@ ResponseAlloc(
         // Store the buffer offset in the userp;
         *buffer_userp = new off_t(tensor_offset);
       } break;
+#ifdef TRITON_ENABLE_GPU
+      case TRITONSERVER_MEMORY_GPU: {
+        auto err = cudaSetDevice(*actual_memory_type_id);
+        if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
+            (err != cudaErrorInsufficientDriver)) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "unable to recover current CUDA device: " +
+                  std::string(cudaGetErrorString(err)))
+                  .c_str());
+        }
+
+        err = cudaMalloc(buffer, byte_size);
+        if (err != cudaSuccess) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "cudaMalloc failed: " + std::string(cudaGetErrorString(err)))
+                  .c_str());
+        }
+        break;
+      }
+#endif
     }
   }
 
@@ -113,8 +136,25 @@ ResponseRelease(
     size_t byte_size, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id)
 {
-  off_t* offset = reinterpret_cast<off_t*>(buffer_userp);
-  delete offset;
+  switch (memory_type) {
+    case TRITONSERVER_MEMORY_CPU:
+    case TRITONSERVER_MEMORY_CPU_PINNED: {
+      off_t* offset = reinterpret_cast<off_t*>(buffer_userp);
+      delete offset;
+    } break;
+    case TRITONSERVER_MEMORY_GPU: {
+#ifdef TRITON_ENABLE_GPU
+      auto err = cudaSetDevice(memory_type_id);
+      if (err == cudaSuccess) {
+        err = cudaFree(buffer);
+      }
+      if (err != cudaSuccess) {
+        std::cerr << "error: failed to cudaFree " << buffer << ": "
+                  << cudaGetErrorString(err) << std::endl;
+      }
+#endif  // TRITON_ENABLE_GPU
+    } break;
+  }
 
   return nullptr;  // Success
 }
@@ -222,10 +262,19 @@ RequestExecutor::Infer(
             &byte_size, &memory_type, &memory_type_id, &userp));
         std::string sname = cname;
         std::vector<int64_t> dims_vector{shape, shape + dim_count};
-        output_tensors.push_back(std::make_shared<PbTensor>(
-            sname, dims_vector, datatype, memory_type, memory_type_id,
-            const_cast<void*>(base), byte_size, nullptr /* DLManagedTensor */,
-            *(reinterpret_cast<off_t*>(userp))));
+
+        // userp is only set for the CPU tensors
+        if (memory_type != TRITONSERVER_MEMORY_GPU) {
+          output_tensors.push_back(std::make_shared<PbTensor>(
+              sname, dims_vector, datatype, memory_type, memory_type_id,
+              const_cast<void*>(base), byte_size, nullptr /* DLManagedTensor */,
+              *(reinterpret_cast<off_t*>(userp))));
+        } else {
+          output_tensors.push_back(std::make_shared<PbTensor>(
+              sname, dims_vector, datatype, memory_type, memory_type_id,
+              const_cast<void*>(base), byte_size,
+              nullptr /* DLManagedTensor */));
+        }
       }
 
       std::shared_ptr<PbError> pb_error;
@@ -265,5 +314,4 @@ RequestExecutor::~RequestExecutor()
         "Failed to delete allocator.");
   }
 }
-
 }}};  // namespace triton::backend::python
