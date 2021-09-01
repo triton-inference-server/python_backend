@@ -34,7 +34,7 @@
 
 namespace triton { namespace backend { namespace python {
 
-/// A class responsible for managing the GPU tensors.
+/// A class responsible for managing the reused GPU tensors.
 class TensorManager {
   std::vector<void*> device_ptrs_;
   std::vector<std::array<char, sizeof(cudaIpcMemHandle_t)>> cuda_handles_;

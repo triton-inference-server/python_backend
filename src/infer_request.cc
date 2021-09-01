@@ -187,6 +187,7 @@ InferRequest::Exec()
         stub->AddToTensorsToRemove(input_tensor);
 
       if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
         cudaIpcMemHandle_t* cuda_handle =
             stub->GetTensorManager()->FindDevicePointer(
                 input_tensor->GetGPUStartAddress());
@@ -197,6 +198,7 @@ InferRequest::Exec()
               input_tensor->GetGPUStartAddress(),
               input_tensor->CudaIpcMemHandle());
         }
+#endif  // TRITON_ENABLE_GPU
       }
       input_tensor->SaveToSharedMemory(shm_pool, &tensors[i]);
       i++;
@@ -247,12 +249,14 @@ InferRequest::Exec()
         infer_response->OutputTensors();
     for (auto& output_tensor : output_tensors) {
       if (!output_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
         void* reused_gpu_tensor =
             stub->GetTensorManager()->FindCudaIpcMemHandle(
                 output_tensor->CudaIpcMemHandle());
         if (reused_gpu_tensor != nullptr) {
           output_tensor->SetDataPtr(reused_gpu_tensor);
         }
+#endif  // TRITON_ENABLE_GPU
       }
     }
 

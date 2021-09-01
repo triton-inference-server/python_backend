@@ -59,7 +59,6 @@
 #include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
-#include "tensor_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_input_collector.h"
 #include "triton/backend/backend_memory.h"
@@ -68,6 +67,10 @@
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
+
+#ifdef TRITON_ENABLE_GPU
+#include "tensor_manager.h"
+#endif  // TRITON_ENABLE_GPU
 
 #define LOG_IF_EXCEPTION(X)                                     \
   do {                                                          \
@@ -237,7 +240,10 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
   std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
   std::vector<std::future<void>> handles_;
+
+#ifdef TRITON_ENABLE_GPU
   std::unique_ptr<TensorManager> tensor_manager_;
+#endif  // TRITON_ENABLE_GPU
 
   // Stub process pid
   pid_t stub_pid_;
@@ -507,6 +513,7 @@ ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
 
       for (auto& input_tensor : infer_request->Inputs()) {
         if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
           void* reused_gpu_tensor = tensor_manager_->FindCudaIpcMemHandle(
               input_tensor->CudaIpcMemHandle());
           if (reused_gpu_tensor != nullptr) {
@@ -516,6 +523,7 @@ ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
                 input_tensor->GetGPUStartAddress(),
                 input_tensor->CudaIpcMemHandle());
           }
+#endif  // TRITON_ENABLE_GPU
         }
       }
 
@@ -994,7 +1002,9 @@ ModelInstanceState::ProcessRequests(
     SendMessageAndReceiveResponse(
         ipc_message->SharedMemoryOffset(), response_message, restart, responses,
         requests, request_count);
+#ifdef TRITON_ENABLE_GPU
     tensor_manager_->Clear();
+#endif  // TRITON_ENABLE_GPU
   }
 
   return;
@@ -1289,7 +1299,10 @@ ModelInstanceState::SetupStubProcess()
           std::make_unique<MessageQueue>(shm_pool_, message_queue_size));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmOffset();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmOffset();
+
+#ifdef TRITON_ENABLE_GPU
   tensor_manager_ = std::make_unique<TensorManager>();
+#endif  // TRITON_ENABLE_GPU
 
   // Offset that must be used for resetting the shared memory usage.
   shm_reset_offset_ = shm_pool_->Offset();

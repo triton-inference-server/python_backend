@@ -38,7 +38,10 @@
 #include "message_queue.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
+
+#ifdef TRITON_ENABLE_GPU
 #include "tensor_manager.h"
+#endif  // TRITON_ENABLE_GPU
 
 #pragma once
 
@@ -69,7 +72,11 @@ class Stub {
   std::vector<std::shared_ptr<PbTensor>> tensors_to_remove_;
   std::mutex tensors_to_remove_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
+
+#ifdef TRITON_ENABLE_GPU
   std::unique_ptr<TensorManager> tensor_manager_;
+#endif  // TRITON_ENABLE_GPU
+
   std::mutex messages_mutex_;
   std::condition_variable messages_cv_;
   py::object thread_pool_;
@@ -108,7 +115,10 @@ class Stub {
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
   std::unique_ptr<IPCMessage> PopMessage();
   void AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor);
+
+#ifdef TRITON_ENABLE_GPU
   std::unique_ptr<TensorManager>& GetTensorManager();
+#endif // TRITON_ENABLE_GPU
   void Fetch();
   void UpdateHealth();
   void Cleanup();

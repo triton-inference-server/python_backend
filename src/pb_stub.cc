@@ -138,7 +138,10 @@ Stub::Instantiate(
   model_instance_name_ = model_instance_name;
   health_mutex_ = nullptr;
   initialized_ = false;
+
+#ifdef TRITON_ENABLE_GPU
   tensor_manager_ = std::make_unique<TensorManager>();
+#endif  // TRITON_ENABLE_GPU
 
   try {
     // This boolean indicates whether a cleanup is required or not.
@@ -598,14 +601,16 @@ Stub::Cleanup()
 
 #ifdef TRITON_ENABLE_GPU
   tensor_manager_->Clear();
-#endif
+#endif  // TRITON_ENABLE_GPU
 }
 
+#ifdef TRITON_ENABLE_GPU
 std::unique_ptr<TensorManager>&
 Stub::GetTensorManager()
 {
   return tensor_manager_;
 }
+#endif  // TRITON_ENABLE_GPU
 
 void
 Stub::Finalize()
