@@ -633,7 +633,7 @@ class TritonPythonModel:
 
     # We have converted a Python backend tensor to a PyTorch tensor without
     # making any copies.
-    pytorch_tensor = from_dlapck(input0.to_dlpack())
+    pytorch_tensor = from_dlpack(input0.to_dlpack())
 ```
 
 ## `pb_utils.Tensor.from_dlpack() -> Tensor`
@@ -654,7 +654,7 @@ class TritonPythonModel:
 
     # Create a Python backend tensor from the DLPack encoding of a PyTorch
     # tensor.
-    input0 = pb_utils.Tensor.from_dlapck(to_dlpack(pytorch_tensor))
+    input0 = pb_utils.Tensor.from_dlpack(to_dlpack(pytorch_tensor))
 ```
 
 This method only supports contiguous Tensors that are in C-order. If the tensor
@@ -671,9 +671,9 @@ By default Python backend moves all the input tensors to CPU. Starting from
 let Triton decide the placement of the input tensors. If you let Triton decide
 the placement of input tensors, your Python model must be able to handle tensors
 that are in CPU or GPU. You can control this using the
-`FORCE_CPU_ONLY_INPUT_TENSORS` setting in your Python model configuration. By
-adding the line below to your model config, you are letting Triton decide the
-placement of input Tensors:
+`FORCE_CPU_ONLY_INPUT_TENSORS` setting in your Python model configuration. The
+default value for this parameter is "yes". By adding the line below to your
+model config, you are letting Triton decide the placement of input Tensors:
 
 ```
 parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
