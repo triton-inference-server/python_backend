@@ -34,9 +34,6 @@ project(tritonpythonbackend LANGUAGES C CXX)
 # Must include options required for this project as well as any
 # projects included in this one by FetchContent.
 #
-# GPU support is disabled by default because python backend doesn't
-# because python backend does not need to access CUDA or GPUs
-#
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
 
@@ -125,21 +122,16 @@ find_package(Threads REQUIRED)
 include_directories(${CMAKE_BINARY_DIR})
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
-add_library(
-  triton-python-backend SHARED
-  src/python.cc
-  src/pb_env.cc
+set(
+  COMMON_SRCS
   src/infer_response.cc
   src/infer_response.h
-  src/pb_main_utils.cc
-  src/pb_main_utils.h
   src/infer_request.cc
   src/infer_request.h
   src/message_queue.cc
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
-  src/pb_env.h
   src/pb_error.cc
   src/pb_error.h
   src/pb_tensor.cc
@@ -150,28 +142,50 @@ add_library(
   src/shm_manager.h
 )
 
-add_executable(
-  triton-python-backend-stub
+if(${TRITON_ENABLE_GPU})
+  include_directories(PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+  list(APPEND
+    COMMON_SRCS
+    src/tensor_manager.cc
+    src/tensor_manager.h
+  )
+endif() # TRITON_ENABLE_GPU
+
+set(
+  PYTHNON_BACKEND_SRCS
+  src/python.cc
+  src/pb_env.cc
+  src/pb_env.h
+  src/pb_main_utils.cc
+  src/pb_main_utils.h
+)
+
+list(APPEND
+  PYTHNON_BACKEND_SRCS
+  ${COMMON_SRCS}
+)
+
+add_library(
+  triton-python-backend SHARED
+  ${PYTHNON_BACKEND_SRCS}
+)
+
+set(
+  PYTHNON_BACKEND_STUB_SRCS
   src/pb_stub_utils.cc
   src/pb_stub_utils.h
-  src/infer_request.cc
-  src/infer_request.h
-  src/infer_response.cc
-  src/infer_response.h
-  src/ipc_message.cc
-  src/ipc_message.h
-  src/message_queue.cc
-  src/message_queue.h
   src/pb_stub.cc
   src/pb_stub.h
-  src/pb_error.cc
-  src/pb_error.h
-  src/pb_utils.cc
-  src/pb_utils.h
-  src/pb_tensor.cc
-  src/pb_tensor.h
-  src/shm_manager.cc
-  src/shm_manager.h
+)
+
+list(APPEND
+  PYTHNON_BACKEND_STUB_SRCS
+  ${COMMON_SRCS}
+)
+
+add_executable(
+  triton-python-backend-stub
+  ${PYTHNON_BACKEND_STUB_SRCS}
 )
 
 add_dependencies(triton-python-backend boostorg)
@@ -202,34 +216,26 @@ target_link_libraries(
   triton-python-backend
   PRIVATE
     dlpack
-    triton-core-serverstub  # from repo-core
-    triton-backend-utils    # from repo-backend
+    Threads::Threads
+    triton-backend-utils          # from repo-backend
+    -ldl                          # dlopen
+    -lrt                          # shared memory 
+    triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
-    -larchive               # shared memory 
-    -ldl                    # dlopen
+    -larchive
 )
 
 target_link_libraries(
   triton-python-backend-stub
   PRIVATE
+   dlpack
    Threads::Threads
+   triton-backend-utils           # from repo-backend
    pybind11::embed
    dlpack
-   triton-backend-utils    # from repo-backend
-   -larchive               # libarchive
-   -lrt                    # shared memory 
-   -ldl                    # dlopen
+   -lrt                           # shared memory 
+   -larchive                      # libarchive
 )
-
-if(${TRITON_ENABLE_GPU})
-  target_link_libraries(
-    triton-python-backend-stub
-  )
-
-  target_link_libraries(
-    triton-python-backend
-  )
-endif() # TRITON_ENABLE_GPU
 
 set_target_properties(
   triton-python-backend PROPERTIES
