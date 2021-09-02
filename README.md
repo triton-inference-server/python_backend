@@ -45,6 +45,7 @@ any C++ code.
 * [Managing Shared Memory](#managing-shared-memory)
 * [Building From Source](#building-from-source)
 * [Business Logic Scripting (beta)](#business-logic-scripting-beta)
+* [Interoperability and GPU Support](#interoperability-and-gpu-support)
 
 ## Quick Start
 
@@ -608,6 +609,76 @@ do not create a circular dependency. For example, if model A performs an inferen
 on itself and there are no more model instances ready to execute the inference request, the
 model will block on the inference execution forever.
 
+# Interoperability and GPU Support
+
+Starting from 21.09 release, Python backend supports
+[DLPack](https://github.com/dmlc/dlpack) for zero-copy transfer of Python
+backend tensors to other frameworks. The methods below are added to the
+`pb_utils.Tensor` object to facilitate the same:
+
+## `pb_utils.Tensor.to_dlpack() -> PyCapsule`
+
+This method can be called on existing instantiated tensors to convert
+a Tensor to DLPack. The code snippet below shows how this works with PyTorch:
+
+```python
+from torch.utils.dlpack import from_dlpack
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+
+  def execute(self, requests):
+    ...
+    input0 = pb_utils.get_input_tensor_by_name(request, "INPUT0")
+
+    # We have converted a Python backend tensor to a PyTorch tensor without
+    # making any copies.
+    pytorch_tensor = from_dlpack(input0.to_dlpack())
+```
+
+## `pb_utils.Tensor.from_dlpack() -> Tensor`
+
+This static method can be used for creating a `Tensor` object from the DLPack
+encoding of the tensor. For example:
+
+```python
+from torch.utils.dlpack import to_dlpack
+import torch
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+
+  def execute(self, requests):
+    ...
+    pytorch_tensor = torch.tensor([1, 2, 3], device='cuda')
+
+    # Create a Python backend tensor from the DLPack encoding of a PyTorch
+    # tensor.
+    input0 = pb_utils.Tensor.from_dlpack(to_dlpack(pytorch_tensor))
+```
+
+This method only supports contiguous Tensors that are in C-order. If the tensor
+is not C-order contiguous an exception will be raised.
+
+## `pb_utils.Tensor.is_cpu() -> bool`
+
+This function can be used to check whether a tensor is placed in CPU or not.
+
+## Controlling Input Tensor Device Placement
+
+By default Python backend moves all the input tensors to CPU. Starting from
+21.09 release, you can control whether you want to move input tensors to CPU or
+let Triton decide the placement of the input tensors. If you let Triton decide
+the placement of input tensors, your Python model must be able to handle tensors
+that are in CPU or GPU. You can control this using the
+`FORCE_CPU_ONLY_INPUT_TENSORS` setting in your Python model configuration. The
+default value for this parameter is "yes". By adding the line below to your
+model config, you are letting Triton decide the placement of input Tensors:
+
+```
+parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
+```
+
 # Examples
 
 For using the Triton Python client in these examples you need to install
@@ -616,7 +687,7 @@ The Python client for each of the examples is in the `client.py` file.
 
 ## AddSub in NumPy
 
-There is no dependencies required for the AddSub numpy example. Instructions
+There is no dependencies required for the AddSub NumPy example. Instructions
 on how to use this model is explained in the quick start section. You can
 find the files in [examples/add_sub](examples/add_sub).
 
