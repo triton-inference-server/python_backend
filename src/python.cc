@@ -1086,6 +1086,18 @@ ModelInstanceState::StartStubProcess()
       python_backend_stub = model_python_backend_stub;
     }
 
+    // Give the execute permission to the owner.
+    int error = chmod(python_backend_stub.c_str(), S_IXUSR);
+    if (error != 0) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Failed to give execute permission to "
+                       "triton_python_backend_stub in ") +
+           python_backend_stub + " " + Name() +
+           " Error No.: " + std::to_string(error))
+              .c_str());
+    }
+
     std::string bash_argument;
 
     // This shared memory variable indicates whether the
@@ -1496,6 +1508,14 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
     TRITONSERVER_Error* error =
         GetParameterValue(params, "EXECUTION_ENV_PATH", &python_execution_env_);
     if (error == nullptr) {
+      std::string relative_path_keyword = "$$TRITON_MODEL_DIRECTORY";
+      size_t relative_path_loc =
+          python_execution_env_.find(relative_path_keyword);
+      if (relative_path_loc != std::string::npos) {
+        python_execution_env_.replace(
+            relative_path_loc, relative_path_loc + relative_path_keyword.size(),
+            path);
+      }
       LOG_MESSAGE(
           TRITONSERVER_LOG_INFO,
           (std::string("Using Python execution env ") + python_execution_env_)
