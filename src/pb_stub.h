@@ -32,11 +32,16 @@
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <condition_variable>
 #include <memory>
+#include <mutex>
 #include "infer_request.h"
 #include "infer_response.h"
 #include "message_queue.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
+
+#ifdef TRITON_ENABLE_GPU
+#include "tensor_manager.h"
+#endif  // TRITON_ENABLE_GPU
 
 #pragma once
 
@@ -65,17 +70,19 @@ class Stub {
   std::unique_ptr<MessageQueue> stub_message_queue_;
   std::unique_ptr<MessageQueue> parent_message_queue_;
   std::vector<std::shared_ptr<PbTensor>> tensors_to_remove_;
+  std::mutex tensors_to_remove_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
+
+#ifdef TRITON_ENABLE_GPU
+  std::unique_ptr<TensorManager> tensor_manager_;
+#endif  // TRITON_ENABLE_GPU
+
   std::mutex messages_mutex_;
   std::condition_variable messages_cv_;
   py::object thread_pool_;
   bool require_cleanup_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
-
-#ifdef TRITON_ENABLE_GPU
-  std::unordered_map<void*, cudaIpcMemHandle_t*> gpu_tensors_map_;
-#endif  // TRITON_ENABLE_GPU
 
  public:
   Stub(){};
@@ -103,12 +110,15 @@ class Stub {
       const PythonBackendException& pb_exception);
   bool RunCommand();
   std::unique_ptr<IPCMessage> Poll();
-  std::unique_ptr<IPCMessage> PollByCommand(PYTHONSTUB_CommandType command);
-  //   std::unique_ptr<IPCMessage> PollByRequestId(off_t );
   void Execute(RequestBatch* request_batch, ResponseBatch* response_batch);
   void Initialize(off_t map_offset);
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
   std::unique_ptr<IPCMessage> PopMessage();
+  void AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor);
+
+#ifdef TRITON_ENABLE_GPU
+  std::unique_ptr<TensorManager>& GetTensorManager();
+#endif // TRITON_ENABLE_GPU
   void Fetch();
   void UpdateHealth();
   void Cleanup();

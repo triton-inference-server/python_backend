@@ -68,6 +68,10 @@
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
+#ifdef TRITON_ENABLE_GPU
+#include "tensor_manager.h"
+#endif  // TRITON_ENABLE_GPU
+
 #define LOG_IF_EXCEPTION(X)                                     \
   do {                                                          \
     try {                                                       \
@@ -97,7 +101,7 @@
       TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(            \
           TRITONSERVER_ERROR_INTERNAL, exception.what());                  \
       SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);     \
-      return;                                                      \
+      return;                                                              \
     }                                                                      \
   } while (false)
 
@@ -191,6 +195,7 @@ struct BackendState {
   int64_t shm_default_byte_size;
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
+  int64_t shm_message_queue_size;
   std::unique_ptr<EnvironmentManager> env_manager;
 };
 
@@ -236,6 +241,10 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
   std::vector<std::future<void>> handles_;
 
+#ifdef TRITON_ENABLE_GPU
+  std::unique_ptr<TensorManager> tensor_manager_;
+#endif  // TRITON_ENABLE_GPU
+
   // Stub process pid
   pid_t stub_pid_;
 
@@ -247,12 +256,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::string path_to_libpython_;
   std::string path_to_activate_;
 
-#ifdef TRITON_ENABLE_GPU
-  std::unordered_map<
-      std::array<char, sizeof(cudaIpcMemHandle_t)>, void*,
-      boost::hash<std::array<char, sizeof(cudaIpcMemHandle_t)>>>
-      gpu_tensors_map_;
-#endif  // TRITON_ENABLE_GPU
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -507,6 +510,23 @@ ModelInstanceState::ExecuteBLSRequest(std::unique_ptr<IPCMessage> ipc_message)
       infer_request = InferRequest::LoadFromSharedMemory(
           shm_pool_, request_batch->requests);
       std::unique_ptr<InferResponse> infer_response;
+
+      for (auto& input_tensor : infer_request->Inputs()) {
+        if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+          void* reused_gpu_tensor = tensor_manager_->FindCudaIpcMemHandle(
+              input_tensor->CudaIpcMemHandle());
+          if (reused_gpu_tensor != nullptr) {
+            input_tensor->SetDataPtr(reused_gpu_tensor);
+          } else {
+            tensor_manager_->InsertOpenedMemHandle(
+                input_tensor->GetGPUStartAddress(),
+                input_tensor->CudaIpcMemHandle());
+          }
+#endif  // TRITON_ENABLE_GPU
+        }
+      }
+
       infer_response = request_executor->Infer(
           infer_request, shm_pool_, &inference_response);
 
@@ -896,26 +916,18 @@ ModelInstanceState::ProcessRequests(
 #ifdef TRITON_ENABLE_GPU
       if (actual_memory_type == TRITONSERVER_MEMORY_GPU &&
           output_tensor->IsReused()) {
-        std::array<char, sizeof(cudaIpcMemHandle_t)> cuda_handle;
-        char* cuda_handle_ptr =
-            reinterpret_cast<char*>(output_tensor->CudaIpcMemHandle());
-        std::copy(
-            cuda_handle_ptr, cuda_handle_ptr + cuda_handle.size(),
-            cuda_handle.begin());
-        std::unordered_map<
-            std::array<char, sizeof(cudaIpcMemHandle_t)>, void*>::const_iterator
-            reused_gpu_tensor = gpu_tensors_map_.find(cuda_handle);
-
+        void* reused_gpu_tensor = tensor_manager_->FindCudaIpcMemHandle(
+            output_tensor->CudaIpcMemHandle());
 
         // If the tensor is reused, it must be in the GPU tensors map.
-        if (reused_gpu_tensor == gpu_tensors_map_.end()) {
+        if (reused_gpu_tensor == nullptr) {
           GUARDED_RESPOND_IF_EXCEPTION(
               responses, r,
               TRITONSERVER_ErrorNew(
                   TRITONSERVER_ERROR_INTERNAL,
                   "Tensor is reused but cannot be found."));
         } else {
-          output_tensor->SetDataPtr(reused_gpu_tensor->second);
+          output_tensor->SetDataPtr(reused_gpu_tensor);
         }
       }
 #endif
@@ -990,6 +1002,9 @@ ModelInstanceState::ProcessRequests(
     SendMessageAndReceiveResponse(
         ipc_message->SharedMemoryOffset(), response_message, restart, responses,
         requests, request_count);
+#ifdef TRITON_ENABLE_GPU
+    tensor_manager_->Clear();
+#endif  // TRITON_ENABLE_GPU
   }
 
   return;
@@ -1273,13 +1288,21 @@ ModelInstanceState::SetupStubProcess()
 
   parent_pid_ = getpid();
 
-  // TODO: Change the default
+  auto message_queue_size =
+      model_state->StateForBackend()->shm_message_queue_size;
+
   RETURN_IF_EXCEPTION(
-      stub_message_queue_ = std::make_unique<MessageQueue>(shm_pool_, 1000));
+      stub_message_queue_ =
+          std::make_unique<MessageQueue>(shm_pool_, message_queue_size));
   RETURN_IF_EXCEPTION(
-      parent_message_queue_ = std::make_unique<MessageQueue>(shm_pool_, 1000));
+      parent_message_queue_ =
+          std::make_unique<MessageQueue>(shm_pool_, message_queue_size));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmOffset();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmOffset();
+
+#ifdef TRITON_ENABLE_GPU
+  tensor_manager_ = std::make_unique<TensorManager>();
+#endif  // TRITON_ENABLE_GPU
 
   // Offset that must be used for resetting the shared memory usage.
   shm_reset_offset_ = shm_pool_->Offset();
@@ -1422,15 +1445,8 @@ ModelInstanceState::GetInputTensor(
         nullptr /* DLManagedTensor */);
     RETURN_IF_EXCEPTION(
         input_tensor->SaveToSharedMemory(shm_pool_, input_tensor_shm));
-    std::array<char, CUDA_IPC_HANDLE_SIZE> cuda_mem_handle_array;
-    char* cuda_handle =
-        reinterpret_cast<char*>(input_tensor->CudaIpcMemHandle());
-    std::copy(
-        cuda_handle, cuda_handle + cuda_mem_handle_array.size(),
-        cuda_mem_handle_array.begin());
-    gpu_tensors_map_.insert(
-        {cuda_mem_handle_array,
-         reinterpret_cast<void*>(input_tensor->GetGPUStartAddress())});
+    tensor_manager_->InsertOpenedMemHandle(
+        input_tensor->GetGPUStartAddress(), input_tensor->CudaIpcMemHandle());
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
@@ -1577,6 +1593,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
   backend_state->stub_timeout_seconds = 30;
+  backend_state->shm_message_queue_size = 1000;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value shm_growth_size;
@@ -1612,6 +1629,20 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
                " can't be smaller than 4 MiBs")
                   .c_str());
         }
+      }
+      catch (const std::invalid_argument& ia) {
+        return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
+      }
+    }
+
+    triton::common::TritonJson::Value shm_message_queue_size;
+    std::string shm_message_queue_size_str;
+    if (cmdline.Find("shm_message_queue_size", &shm_message_queue_size)) {
+      RETURN_IF_ERROR(
+          shm_message_queue_size.AsString(&shm_message_queue_size_str));
+      try {
+        backend_state->shm_message_queue_size =
+            std::stol(shm_message_queue_size_str);
       }
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());

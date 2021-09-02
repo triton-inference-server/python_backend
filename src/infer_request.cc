@@ -181,11 +181,27 @@ InferRequest::Exec()
         (char**)&tensors, sizeof(Tensor) * request->requested_input_count,
         request->inputs);
 
-    // TODO: Custom handling for GPU
     size_t i = 0;
     for (auto& input_tensor : this->Inputs()) {
+      if (input_tensor->TensorType() == PYTHONBACKEND_DLPACK)
+        stub->AddToTensorsToRemove(input_tensor);
+
+      if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+        cudaIpcMemHandle_t* cuda_handle =
+            stub->GetTensorManager()->FindDevicePointer(
+                input_tensor->GetGPUStartAddress());
+        if (cuda_handle != nullptr) {
+          input_tensor->SetReusedIpcHandle(cuda_handle);
+        } else {
+          stub->GetTensorManager()->InsertOpenedMemHandle(
+              input_tensor->GetGPUStartAddress(),
+              input_tensor->CudaIpcMemHandle());
+        }
+#endif  // TRITON_ENABLE_GPU
+      }
       input_tensor->SaveToSharedMemory(shm_pool, &tensors[i]);
-      i += 1;
+      i++;
     }
     this->SaveToSharedMemory(shm_pool, request);
 
@@ -225,8 +241,26 @@ InferRequest::Exec()
   }
 
   if (responses_is_set) {
-    return InferResponse::LoadFromSharedMemory(
-        shm_pool, response_batch->responses);
+    std::unique_ptr<InferResponse> infer_response =
+        InferResponse::LoadFromSharedMemory(
+            shm_pool, response_batch->responses);
+
+    std::vector<std::shared_ptr<PbTensor>>& output_tensors =
+        infer_response->OutputTensors();
+    for (auto& output_tensor : output_tensors) {
+      if (!output_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+        void* reused_gpu_tensor =
+            stub->GetTensorManager()->FindCudaIpcMemHandle(
+                output_tensor->CudaIpcMemHandle());
+        if (reused_gpu_tensor != nullptr) {
+          output_tensor->SetDataPtr(reused_gpu_tensor);
+        }
+#endif  // TRITON_ENABLE_GPU
+      }
+    }
+
+    return infer_response;
   } else {
     return std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
@@ -247,5 +281,4 @@ InferRequest::AsyncExec()
   return f;
 }
 #endif
-
 }}}  // namespace triton::backend::python
