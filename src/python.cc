@@ -1086,18 +1086,6 @@ ModelInstanceState::StartStubProcess()
       python_backend_stub = model_python_backend_stub;
     }
 
-    // Give the execute permission to the owner.
-    int error = chmod(python_backend_stub.c_str(), S_IXUSR);
-    if (error != 0) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Failed to give execute permission to "
-                       "triton_python_backend_stub in ") +
-           python_backend_stub + " " + Name() +
-           " Error No.: " + std::to_string(error))
-              .c_str());
-    }
-
     std::string bash_argument;
 
     // This shared memory variable indicates whether the
@@ -1132,7 +1120,29 @@ ModelInstanceState::StartStubProcess()
             .c_str());
 
     stub_args[2] = bash_argument.c_str();
-    if (execvp("bash", (char**)stub_args) == -1) {
+
+    int stub_status_code =
+        system((python_backend_stub + "> /dev/null 2>&1").c_str());
+
+    // If running stub process without any arguments returns any status code,
+    // other than 1, it can indicate a permission issue as a result of
+    // downloading the stub process from a cloud object storage service.
+    if (stub_status_code != 1) {
+      // Give the execute permission for the triton_python_backend_stub to the
+      // owner.
+      int error = chmod(python_backend_stub.c_str(), S_IXUSR);
+      if (error != 0) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            (std::string("Failed to give execute permission to "
+                         "triton_python_backend_stub in ") +
+             python_backend_stub + " " + Name() +
+             " Error No.: " + std::to_string(error))
+                .c_str());
+      }
+    }
+
+    if (execvp("bash", (char**)stub_args) != 0) {
       std::stringstream ss;
       ss << "Failed to run python backend stub. Errno = " << errno << '\n'
          << "Python backend stub path: " << python_backend_stub << '\n'
