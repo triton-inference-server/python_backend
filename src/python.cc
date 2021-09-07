@@ -1120,7 +1120,29 @@ ModelInstanceState::StartStubProcess()
             .c_str());
 
     stub_args[2] = bash_argument.c_str();
-    if (execvp("bash", (char**)stub_args) == -1) {
+
+    int stub_status_code =
+        system((python_backend_stub + "> /dev/null 2>&1").c_str());
+
+    // If running stub process without any arguments returns any status code,
+    // other than 1, it can indicate a permission issue as a result of
+    // downloading the stub process from a cloud object storage service.
+    if (stub_status_code != 1) {
+      // Give the execute permission for the triton_python_backend_stub to the
+      // owner.
+      int error = chmod(python_backend_stub.c_str(), S_IXUSR);
+      if (error != 0) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            (std::string("Failed to give execute permission to "
+                         "triton_python_backend_stub in ") +
+             python_backend_stub + " " + Name() +
+             " Error No.: " + std::to_string(error))
+                .c_str());
+      }
+    }
+
+    if (execvp("bash", (char**)stub_args) != 0) {
       std::stringstream ss;
       ss << "Failed to run python backend stub. Errno = " << errno << '\n'
          << "Python backend stub path: " << python_backend_stub << '\n'
@@ -1496,6 +1518,14 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
     TRITONSERVER_Error* error =
         GetParameterValue(params, "EXECUTION_ENV_PATH", &python_execution_env_);
     if (error == nullptr) {
+      std::string relative_path_keyword = "$$TRITON_MODEL_DIRECTORY";
+      size_t relative_path_loc =
+          python_execution_env_.find(relative_path_keyword);
+      if (relative_path_loc != std::string::npos) {
+        python_execution_env_.replace(
+            relative_path_loc, relative_path_loc + relative_path_keyword.size(),
+            path);
+      }
       LOG_MESSAGE(
           TRITONSERVER_LOG_INFO,
           (std::string("Using Python execution env ") + python_execution_env_)
