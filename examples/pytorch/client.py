@@ -1,4 +1,4 @@
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -25,9 +25,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from tritonclient.utils import *
-import tritonclient.grpc as grpcclient
 import tritonclient.http as httpclient
-
+import sys
 import numpy as np
 
 model_name = "pytorch"
@@ -57,7 +56,21 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
                             outputs=outputs)
 
     result = response.get_response()
+    output0_data = response.as_numpy("OUTPUT0")
+    output1_data = response.as_numpy("OUTPUT1")
+
     print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
-        input0_data, input1_data, response.as_numpy("OUTPUT0")))
+        input0_data, input1_data, output0_data))
     print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(
-        input0_data, input1_data, response.as_numpy("OUTPUT1")))
+        input0_data, input1_data, output1_data))
+
+    if not np.allclose(input0_data + input1_data, output0_data):
+        print("pytorch example error: incorrect sum")
+        sys.exit(1)
+
+    if not np.allclose(input0_data - input1_data, output1_data):
+        print("pytorch example error: incorrect difference")
+        sys.exit(1)
+
+    print('PASS: pytorch')
+    sys.exit(0)
