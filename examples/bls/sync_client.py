@@ -27,6 +27,7 @@
 from tritonclient.utils import *
 import tritonclient.http as httpclient
 import numpy as np
+import sys
 
 model_name = "bls_sync"
 shape = [4]
@@ -59,11 +60,20 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
                             outputs=outputs)
 
     result = response.get_response()
+    output0_data = response.as_numpy("OUTPUT0")
+    output1_data = response.as_numpy("OUTPUT1")
     print("=========='add_sub' model result==========")
     print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
-        input0_data, input1_data, response.as_numpy("OUTPUT0")))
+        input0_data, input1_data, output0_data))
     print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
-        input0_data, input1_data, response.as_numpy("OUTPUT1")))
+        input0_data, input1_data, output1_data))
+    if not np.allclose(input0_data + input1_data, output0_data):
+        print("BLS async example error: incorrect sum")
+        sys.exit(1)
+
+    if not np.allclose(input0_data - input1_data, output1_data):
+        print("BLS async example error: incorrect difference")
+        sys.exit(1)
 
     # Will perform the inference request on the pytorch model:
     inputs[2].set_data_from_numpy(np.array(['pytorch'], dtype=np.object_))
@@ -73,12 +83,21 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
                             outputs=outputs)
 
     result = response.get_response()
+    output0_data = response.as_numpy("OUTPUT0")
+    output1_data = response.as_numpy("OUTPUT1")
     print("\n")
     print("=========='pytorch' model result==========")
     print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
-        input0_data, input1_data, response.as_numpy("OUTPUT0")))
+        input0_data, input1_data, output0_data))
     print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
-        input0_data, input1_data, response.as_numpy("OUTPUT1")))
+        input0_data, input1_data, output1_data))
+    if not np.allclose(input0_data + input1_data, output0_data):
+        print("BLS async example error: incorrect sum")
+        sys.exit(1)
+
+    if not np.allclose(input0_data - input1_data, output1_data):
+        print("BLS async example error: incorrect difference")
+        sys.exit(1)
 
     # Will perform the same inference request on an undefined model. This leads
     # to an exception:
@@ -92,3 +111,6 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
                                 outputs=outputs)
     except InferenceServerException as e:
         print(e.message())
+
+    print('PASS: BLS Sync')
+    sys.exit(0)
