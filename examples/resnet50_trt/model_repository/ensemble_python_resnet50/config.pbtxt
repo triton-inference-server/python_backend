@@ -1,0 +1,66 @@
+# The MIT License (MIT)
+#
+# Copyright (c) 2021 NVIDIA CORPORATION
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+name: "ensemble_python_resnet50"
+platform: "ensemble"
+max_batch_size: 256
+input [
+  {
+    name: "INPUT"
+    data_type: TYPE_UINT8
+    dims: [ -1 ]
+  }
+]
+output [
+  {
+    name: "OUTPUT"
+    data_type: TYPE_FP32
+    dims: [ 1000 ]
+  }
+]
+ensemble_scheduling {
+  step [
+    {
+      model_name: "preprocess"
+      model_version: -1
+      input_map {
+        key: "INPUT_0"
+        value: "INPUT"
+      }
+      output_map {
+        key: "OUTPUT_0"
+        value: "preprocessed_image"
+      }
+    },
+    {
+      model_name: "resnet50_trt"
+      model_version: -1
+      input_map {
+        key: "input"
+        value: "preprocessed_image"
+      }
+      output_map {
+        key: "output"
+        value: "OUTPUT"
+      }
+    }
+  ]
+}
