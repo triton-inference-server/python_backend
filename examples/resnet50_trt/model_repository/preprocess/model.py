@@ -1,4 +1,4 @@
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -38,8 +38,6 @@ import triton_python_backend_utils as pb_utils
 from PIL import Image
 import torchvision.transforms as transforms
 import os
-
-#jpeg = TurboJPEG(/usr/local/lib/python3.8/dist-packages/)
 
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
@@ -97,7 +95,6 @@ class TritonPythonModel:
         """
 
         output0_dtype = self.output0_dtype
-        #output1_dtype = self.output1_dtype
 
         responses = []
 
@@ -118,13 +115,12 @@ class TritonPythonModel:
                                         transforms.ToTensor(),
                                         normalize
                               ])
-
             
             def image_loader(image_name):
                 image = loader(image_name)
+                #expand the dimension to nchw
                 image = image.unsqueeze(0)
                 return image
-
             
             img = in_0.as_numpy()
 
