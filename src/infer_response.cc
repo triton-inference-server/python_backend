@@ -66,21 +66,8 @@ InferResponse::SaveToSharedMemory(
   response_shm->has_error = false;
   response_shm->is_error_set = false;
 
-  Tensor* output_tensors_shm;
-  off_t output_tensors_offset;
-  shm_pool->Map(
-      (char**)&output_tensors_shm, sizeof(Tensor) * output_tensor_length,
-      output_tensors_offset);
-  response_shm->outputs = output_tensors_offset;
-  response_shm->outputs_size = output_tensor_length;
-
-  size_t j = 0;
-  for (auto& output_tensor : output_tensors_) {
-    Tensor* output_tensor_shm = &output_tensors_shm[j];
-    output_tensor->SaveToSharedMemory(shm_pool, output_tensor_shm, copy);
-    j++;
-  }
-
+  // Only save the output tensors to shared memory when the inference response
+  // doesn't have error.
   if (this->HasError()) {
     response_shm->has_error = true;
     off_t error_offset;
@@ -88,6 +75,22 @@ InferResponse::SaveToSharedMemory(
         shm_pool, error_offset, this->Error()->Message().c_str());
     response_shm->is_error_set = true;
     response_shm->error = error_offset;
+    response_shm->outputs_size = 0;
+  } else {
+    Tensor* output_tensors_shm;
+    off_t output_tensors_offset;
+    shm_pool->Map(
+        (char**)&output_tensors_shm, sizeof(Tensor) * output_tensor_length,
+        output_tensors_offset);
+    response_shm->outputs = output_tensors_offset;
+    response_shm->outputs_size = output_tensor_length;
+
+    size_t j = 0;
+    for (auto& output_tensor : output_tensors_) {
+      Tensor* output_tensor_shm = &output_tensors_shm[j];
+      output_tensor->SaveToSharedMemory(shm_pool, output_tensor_shm, copy);
+      j++;
+    }
   }
 }
 
@@ -100,6 +103,9 @@ InferResponse::LoadFromSharedMemory(
   uint32_t requested_output_count = response->outputs_size;
 
   std::shared_ptr<PbError> pb_error;
+  std::vector<std::shared_ptr<PbTensor>> py_output_tensors;
+
+  // If the error field is set, do not load output tensors from shared memory.
   if (response->has_error) {
     pb_error = std::make_shared<PbError>("");
 
@@ -108,20 +114,19 @@ InferResponse::LoadFromSharedMemory(
       LoadStringFromSharedMemory(shm_pool, response->error, error_string);
       pb_error = std::make_shared<PbError>(error_string);
     }
-  }
-
-  std::vector<std::shared_ptr<PbTensor>> py_output_tensors;
-  for (size_t idx = 0; idx < requested_output_count; ++idx) {
-    std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
-        shm_pool, response->outputs + sizeof(Tensor) * idx);
-    py_output_tensors.emplace_back(std::move(pb_tensor));
+  } else {
+    for (size_t idx = 0; idx < requested_output_count; ++idx) {
+      std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
+          shm_pool, response->outputs + sizeof(Tensor) * idx);
+      py_output_tensors.emplace_back(std::move(pb_tensor));
+    }
   }
 
   std::unique_ptr<InferResponse> infer_response =
       std::make_unique<InferResponse>(py_output_tensors, pb_error);
   if (response->is_error_set)
     infer_response->is_message_set_ = true;
-  
+
   return infer_response;
 }
 
