@@ -76,9 +76,7 @@ FetchContent_MakeAvailable(repo-common repo-core repo-backend)
 
 FetchContent_Declare(
   pybind11
-  GIT_REPOSITORY "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-master.nvidia.com/oss/backend/pybind11.git"
-  GIT_TAG "v2.6"
-  GIT_SHALLOW ON
+  URL ${TRITON_REPOS_DIRECTORY}/pybind11
 )
 FetchContent_MakeAvailable(pybind11)
 
@@ -87,9 +85,7 @@ FetchContent_MakeAvailable(pybind11)
 #
 FetchContent_Declare(
   dlpack
-  GIT_REPOSITORY "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-master.nvidia.com/oss/backend/dlpack.git"
-  GIT_TAG "v0.5"
-  GIT_SHALLOW ON
+  URL ${TRITON_REPOS_DIRECTORY}/dlpack
 )
 FetchContent_MakeAvailable(dlpack)
 
