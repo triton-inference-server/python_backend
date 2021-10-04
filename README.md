@@ -698,7 +698,7 @@ is not C-order contiguous an exception will be raised.
 
 This function can be used to check whether a tensor is placed in CPU or not.
 
-## Controlling Input Tensor Device Placement
+## Input Tensor Device Placement
 
 By default Python backend moves all the input tensors to CPU. Starting from
 21.09 release, you can control whether you want to move input tensors to CPU or
@@ -712,6 +712,9 @@ model config, you are letting Triton decide the placement of input Tensors:
 ```
 parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
 ```
+
+Using this configuration parameter, you **cannot** force your input tensors to
+be in GPU.
 
 # Examples
 
