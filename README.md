@@ -698,16 +698,17 @@ is not C-order contiguous an exception will be raised.
 
 This function can be used to check whether a tensor is placed in CPU or not.
 
-## Controlling Input Tensor Device Placement
+## Input Tensor Device Placement
 
-By default Python backend moves all the input tensors to CPU. Starting from
-21.09 release, you can control whether you want to move input tensors to CPU or
-let Triton decide the placement of the input tensors. If you let Triton decide
-the placement of input tensors, your Python model must be able to handle tensors
-that are in CPU or GPU. You can control this using the
-`FORCE_CPU_ONLY_INPUT_TENSORS` setting in your Python model configuration. The
-default value for this parameter is "yes". By adding the line below to your
-model config, you are letting Triton decide the placement of input Tensors:
+By default, the Python backend moves all input tensors to CPU before providing
+them to the Python model. Starting from 21.09, you can change this default
+behavior. By setting `FORCE_CPU_ONLY_INPUT_TENSORS` to "no", Triton will not
+move input tensors to CPU for the Python model. Instead, Triton will provide the
+input tensors to the Python model in either CPU or GPU memory, depending on how
+those tensors were last used. You cannot predict which memory will be used for
+each input tensor so your Python model must be able to handle tensors in both
+CPU and GPU memory. To enable this setting, you need to add this setting to the
+`parameters` section of model configuration:
 
 ```
 parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
