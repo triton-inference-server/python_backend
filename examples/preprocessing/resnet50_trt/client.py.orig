@@ -29,14 +29,13 @@ import numpy as np
 import json
 import tritongrpcclient
 import argparse
-import time
 
 
 def load_image(img_path: str):
-    """
-    Loads an encoded image as an array of bytes.
+"""
+Loads an encoded image as an array of bytes.
 
-    """
+"""
     return np.fromfile(img_path, dtype='uint8')
 
 
@@ -86,15 +85,12 @@ if __name__ == "__main__":
     outputs.append(tritongrpcclient.InferRequestedOutput(output_name))
 
     inputs[0].set_data_from_numpy(image_data)
-    start_time = time.time()
-    # Test with outputs
     results = triton_client.infer(model_name=args.model_name,
                                   inputs=inputs,
                                   outputs=outputs)
-    latency = time.time() - start_time
 
     output0_data = results.as_numpy(output_name)
 
     maxs = np.argmax(output0_data, axis=1)
 
-    print("{}ms class: {}".format(latency, labels_dict[maxs[0]]))
+    print("Result is class: {}".format(labels_dict[maxs[0]]))
