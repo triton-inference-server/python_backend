@@ -16,7 +16,7 @@ Run onnx_exporter.py to convert ResNet50 PyTorch model to ONNX format. Width and
     $ mkdir -p model_repository/resnet50_trt/1
     
     # Copy the Python model
-    $cp model.py model_repository/preprocess/1
+    $ cp model.py model_repository/preprocess/1
 
 **3. Build a TensorRT engine for the ONNX model**
 
