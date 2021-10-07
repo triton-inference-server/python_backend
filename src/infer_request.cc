@@ -177,47 +177,53 @@ InferRequest::Exec()
 
     request->requested_input_count = this->Inputs().size();
     Tensor* tensors;
+    bool has_gpu_tensor = false;
     shm_pool->Map(
         (char**)&tensors, sizeof(Tensor) * request->requested_input_count,
         request->inputs);
 
     size_t i = 0;
     for (auto& input_tensor : this->Inputs()) {
-      if (input_tensor->TensorType() == PYTHONBACKEND_DLPACK)
-        stub->AddToTensorsToRemove(input_tensor);
-
       if (!input_tensor->IsCPU()) {
-#ifdef TRITON_ENABLE_GPU
-        cudaIpcMemHandle_t* cuda_handle =
-            stub->GetTensorManager()->FindDevicePointer(
-                input_tensor->GetGPUStartAddress());
-        if (cuda_handle != nullptr) {
-          input_tensor->SetReusedIpcHandle(cuda_handle);
-        } else {
-          stub->GetTensorManager()->InsertOpenedMemHandle(
-              input_tensor->GetGPUStartAddress(),
-              input_tensor->CudaIpcMemHandle());
-        }
-#endif  // TRITON_ENABLE_GPU
+        has_gpu_tensor = true;
       }
-      input_tensor->SaveToSharedMemory(shm_pool, &tensors[i]);
-      i++;
+      input_tensor->SaveToSharedMemory(
+          shm_pool, &tensors[i], true /* copy_cpu */, false /* copy_gpu */);
+      ++i;
     }
-    this->SaveToSharedMemory(shm_pool, request);
 
+    this->SaveToSharedMemory(shm_pool, request);
     std::unique_ptr<IPCMessage> bls_response;
     {
       bi::scoped_lock<bi::interprocess_mutex> lock{
           *(ipc_message->ResponseMutex())};
       stub->SendIPCMessage(ipc_message);
       ipc_message->ResponseCondition()->wait(lock);
-
-      // Get the response for the current message.
-      bls_response = IPCMessage::LoadFromSharedMemory(
-          shm_pool, ipc_message->RequestOffset());
-      shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
-      responses_is_set = true;
     }
+
+    if (has_gpu_tensor) {
+      for (auto& input_tensor : this->Inputs()) {
+        if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+          std::cout << "Load GPU data called for BLS" << std::endl;
+          input_tensor->LoadGPUData(shm_pool, stub->GPULoadMutex());
+#endif  // TRITON_ENABLE_GPU
+        }
+      }
+
+      {
+        bi::scoped_lock<bi::interprocess_mutex> lock{
+            *(ipc_message->ResponseMutex())};
+        ipc_message->ResponseCondition()->notify_all();
+        ipc_message->ResponseCondition()->wait(lock);
+      }
+    }
+
+    // Get the response for the current message.
+    bls_response = IPCMessage::LoadFromSharedMemory(
+        shm_pool, ipc_message->RequestOffset());
+    shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
+    responses_is_set = true;
 
     if (response_batch->has_error) {
       if (response_batch->is_error_set) {
@@ -244,21 +250,6 @@ InferRequest::Exec()
     std::unique_ptr<InferResponse> infer_response =
         InferResponse::LoadFromSharedMemory(
             shm_pool, response_batch->responses);
-
-    std::vector<std::shared_ptr<PbTensor>>& output_tensors =
-        infer_response->OutputTensors();
-    for (auto& output_tensor : output_tensors) {
-      if (!output_tensor->IsCPU()) {
-#ifdef TRITON_ENABLE_GPU
-        void* reused_gpu_tensor =
-            stub->GetTensorManager()->FindCudaIpcMemHandle(
-                output_tensor->CudaIpcMemHandle());
-        if (reused_gpu_tensor != nullptr) {
-          output_tensor->SetDataPtr(reused_gpu_tensor);
-        }
-#endif  // TRITON_ENABLE_GPU
-      }
-    }
 
     return infer_response;
   } else {

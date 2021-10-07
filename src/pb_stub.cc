@@ -139,14 +139,7 @@ Stub::Instantiate(
   health_mutex_ = nullptr;
   initialized_ = false;
 
-#ifdef TRITON_ENABLE_GPU
-  tensor_manager_ = std::make_unique<TensorManager>();
-#endif  // TRITON_ENABLE_GPU
-
   try {
-    // This boolean indicates whether a cleanup is required or not.
-    require_cleanup_ = false;
-
     shm_pool_ = std::make_unique<SharedMemory>(
         shm_region_name, shm_default_size, shm_growth_size);
 
@@ -268,24 +261,16 @@ Stub::ProcessResponse(
   std::vector<std::shared_ptr<PbTensor>>& output_tensors =
       response->OutputTensors();
   for (auto& output_tensor : output_tensors) {
-    if (output_tensor->TensorType() == PYTHONBACKEND_DLPACK) {
-      response_batch->cleanup = true;
-      AddToTensorsToRemove(output_tensor);
-    }
-
     if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-      cudaIpcMemHandle_t* cuda_handle = tensor_manager_->FindDevicePointer(
-          output_tensor->GetGPUStartAddress());
-      if (cuda_handle != nullptr) {
-        output_tensor->SetReusedIpcHandle(cuda_handle);
-      }
+      AddToTensorsToRemove(output_tensor);
 #else
       throw PythonBackendException("GPU tensors is not supported.");
 #endif
     }
   }
-  response->SaveToSharedMemory(shm_pool_, response_shm, true /* copy */);
+  response->SaveToSharedMemory(
+      shm_pool_, response_shm, true /* copy_cpu */, false /* copy_gpu */);
 }
 
 void
@@ -300,15 +285,11 @@ Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
 {
   std::unique_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
-#ifdef TRITON_ENABLE_GPU
-  for (auto& input_tensor : infer_request->Inputs()) {
-    if (!input_tensor->IsCPU()) {
-      response_batch->cleanup = true;
-      tensor_manager_->InsertOpenedMemHandle(
-          input_tensor->GetGPUStartAddress(), input_tensor->CudaIpcMemHandle());
-    }
+
+  for (auto& tensor : infer_request->Inputs()) {
+    if (!tensor->IsCPU())
+      tensors_to_keep_.push_back(tensor);
   }
-#endif  // TRITON_ENABLE_GPU
 
   return infer_request;
 }
@@ -450,9 +431,6 @@ Stub::RunCommand()
 void
 Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
 {
-  response_batch->cleanup = false;
-  require_cleanup_ = false;
-
   uint32_t batch_size = request_batch->batch_size;
 
   if (batch_size == 0) {
@@ -592,25 +570,19 @@ Stub::UpdateHealth()
 void
 Stub::Cleanup()
 {
-  {
-    std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-
-    // Deleting the tensors should automatically trigger the destructor.
-    tensors_to_remove_.clear();
+  std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
+  for (auto& tensor : tensors_to_remove_) {
+    if (tensor->RawDataShm()->memory_type ==
+        TRITONSERVER_MEMORY_GPU) {
+      tensor->LoadGPUData(shm_pool_, gpu_load_mutex_);
+    } else {
+      tensor->CopyToCPU(shm_pool_);
+    }
   }
 
-#ifdef TRITON_ENABLE_GPU
-  tensor_manager_->Clear();
-#endif  // TRITON_ENABLE_GPU
+  tensors_to_remove_.clear();
+  tensors_to_keep_.clear();
 }
-
-#ifdef TRITON_ENABLE_GPU
-std::unique_ptr<TensorManager>&
-Stub::GetTensorManager()
-{
-  return tensor_manager_;
-}
-#endif  // TRITON_ENABLE_GPU
 
 void
 Stub::Finalize()

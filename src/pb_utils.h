@@ -122,7 +122,7 @@ struct Tensor {
   // Shared memory offset for the dimensions.
   off_t dims;
   size_t dims_count;
-  bool is_reused;
+  bool is_cuda_handle_set;
 };
 
 struct String {
@@ -263,4 +263,7 @@ class CUDADriverAPI {
 };
 #endif  // TRITON_ENABLE_GPU
 
+void print_gpu_data(void* d_ptr, size_t byte_size, const char* message);
+
+void print_cuda_ipc_handle(cudaIpcMemHandle_t* cuda_ipc, const char* message);
 }}}  // namespace triton::backend::python

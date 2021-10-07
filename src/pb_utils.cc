@@ -86,6 +86,40 @@ SaveStringToSharedMemory(
 }
 
 void
+print_gpu_data(void* d_ptr, size_t byte_size, const char* message)
+{
+  size_t test_size = byte_size / sizeof(float) + 1;
+  float test_data[test_size];
+
+  cudaError_t err =
+      cudaMemcpy(test_data, d_ptr, byte_size, cudaMemcpyDeviceToHost);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string(
+            "failed to copy data: " + std::string(cudaGetErrorString(err)))
+            .c_str());
+  }
+
+  std::cout << message << std::endl;
+  for (size_t i = 0; i < test_size; ++i) {
+    std::cout << test_data[i] << " ";
+  }
+  std::cout << std::endl;
+}
+
+void
+print_cuda_ipc_handle(cudaIpcMemHandle_t* cuda_ipc, const char* message)
+{
+  std::cout << message << std::endl;
+  char* cuda_handle = (char*)cuda_ipc;
+  for (size_t i = 0; i < sizeof(cudaIpcMemHandle_t); ++i) {
+    std::cout << unsigned(cuda_handle[i]) << " ";
+  }
+
+  std::cout << std::endl;
+}
+
+void
 SaveRawDataToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
     char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
@@ -118,6 +152,7 @@ SaveRawDataToSharedMemory(
     shm_pool->Map(
         (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
     raw_data->memory_ptr = buffer_offset;
+
 #else
     throw PythonBackendException(
         "Python backend does not support GPU tensors.");
