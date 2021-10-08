@@ -741,7 +741,7 @@ You can find the complete example instructions in [examples/bls](examples/bls/RE
 ## Preprocessing
 
 The Preprocessing example shows how to use Python Backend to do model preprocessing.
-You can find the complete example instructions in [examples/preprocessing/resnet50_trt](examples/preprocessing/resnet50_trt/README.md).
+You can find the complete example instructions in [examples/preprocessing](examples/preprocessing/README.md).
 
 # Reporting problems, asking questions
 
