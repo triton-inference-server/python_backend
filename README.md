@@ -739,6 +739,11 @@ You can find the files for this example in [examples/pytorch](examples/pytorch).
 The BLS example needs the dependencies required for both of the above examples.
 You can find the complete example instructions in [examples/bls](examples/bls/README.md).
 
+## Preprocessing
+
+The Preprocessing example shows how to use Python Backend to do model preprocessing.
+You can find the complete example instructions in [examples/preprocessing](examples/preprocessing/README.md).
+
 # Reporting problems, asking questions
 
 We appreciate any feedback, questions or bug reporting regarding this
