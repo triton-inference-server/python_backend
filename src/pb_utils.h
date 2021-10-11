@@ -263,7 +263,4 @@ class CUDADriverAPI {
 };
 #endif  // TRITON_ENABLE_GPU
 
-void print_gpu_data(void* d_ptr, size_t byte_size, const char* message);
-
-void print_cuda_ipc_handle(cudaIpcMemHandle_t* cuda_ipc, const char* message);
 }}}  // namespace triton::backend::python
