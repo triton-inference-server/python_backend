@@ -280,10 +280,10 @@ Stub::AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor)
   tensors_to_remove_.push_back(tensor);
 }
 
-std::unique_ptr<InferRequest>
+std::shared_ptr<InferRequest>
 Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
 {
-  std::unique_ptr<InferRequest> infer_request =
+  std::shared_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
 
   for (auto& tensor : infer_request->Inputs()) {
@@ -372,7 +372,7 @@ Stub::RunCommand()
       std::string error_string;
 
       std::unique_ptr<IPCMessage> execute_response =
-          std::make_unique<IPCMessage>(shm_pool_);
+          std::make_unique<IPCMessage>(shm_pool_, false /* Inline response */);
       execute_response->Command() = PYTHONSTUB_ExecuteResposne;
 
       shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
@@ -572,8 +572,7 @@ Stub::Cleanup()
 {
   std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
   for (auto& tensor : tensors_to_remove_) {
-    if (tensor->RawDataShm()->memory_type ==
-        TRITONSERVER_MEMORY_GPU) {
+    if (tensor->RawDataShm()->memory_type == TRITONSERVER_MEMORY_GPU) {
       tensor->LoadGPUData(shm_pool_, gpu_load_mutex_);
     } else {
       tensor->CopyToCPU(shm_pool_);
@@ -641,22 +640,44 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("is_cpu", &PbTensor::IsCPU)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
-  py::class_<InferRequest>(module, "InferenceRequest")
+  py::class_<InferRequest, std::shared_ptr<InferRequest>>(
+      module, "InferenceRequest")
       .def(
           py::init<
               const std::string&, uint64_t,
               const std::vector<std::shared_ptr<PbTensor>>&,
               const std::vector<std::string>&, const std::string&,
               const int64_t>(),
-          py::arg("request_id") = "", py::arg("correlation_id") = 0,
-          py::arg("inputs"), py::arg("requested_output_names"),
-          py::arg("model_name"), py::arg("model_version") = -1)
-      .def("inputs", &InferRequest::Inputs)
-      .def("request_id", &InferRequest::RequestId)
-      .def("correlation_id", &InferRequest::CorrelationId)
+          py::keep_alive<1, 3>(), py::arg("request_id") = "",
+          py::arg("correlation_id") = 0, py::arg("inputs"),
+          py::arg("requested_output_names"), py::arg("model_name"),
+          py::arg("model_version") = -1)
+      .def(
+          "inputs", &InferRequest::Inputs,
+          py::return_value_policy::reference_internal)
+      .def(
+          "request_id", &InferRequest::RequestId,
+          py::return_value_policy::reference_internal)
+      .def(
+          "correlation_id", &InferRequest::CorrelationId,
+          py::return_value_policy::reference_internal)
       .def("exec", &InferRequest::Exec)
-      .def("async_exec", &InferRequest::AsyncExec)
-      .def("requested_output_names", &InferRequest::RequestedOutputNames);
+      .def(
+          "async_exec",
+          [](std::shared_ptr<InferRequest>& infer_request) {
+            py::object loop =
+                py::module_::import("asyncio").attr("get_running_loop")();
+            py::cpp_function callback = [infer_request]() {
+              auto response = infer_request->Exec();
+              return response;
+            };
+            py::object future =
+                loop.attr("run_in_executor")(py::none(), callback);
+            return future;
+          })
+      .def(
+          "requested_output_names", &InferRequest::RequestedOutputNames,
+          py::return_value_policy::reference_internal);
 
   py::class_<InferResponse>(module, "InferenceResponse")
       .def(

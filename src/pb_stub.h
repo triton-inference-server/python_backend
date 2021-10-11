@@ -96,7 +96,7 @@ class Stub {
   void ProcessResponse(
       Response* response_shm, ResponseBatch* response_batch,
       InferResponse* response);
-  std::unique_ptr<InferRequest> ProcessRequest(
+  std::shared_ptr<InferRequest> ProcessRequest(
       off_t request_offset, ResponseBatch* response_batch);
   void SetResponseFromException(
       ResponseBatch* response_batch,

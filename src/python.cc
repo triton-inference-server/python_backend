@@ -306,7 +306,8 @@ class ModelInstanceState : public BackendModelInstance {
   // Reset the shared memory offset
   void ResetSharedMemoryOffset();
   void ExecuteBLSRequest(
-      std::unique_ptr<IPCMessage> ipc_message, std::atomic<bool>& cleanup);
+      std::unique_ptr<SharedMemory>& shm_pool, off_t message_offset,
+      std::atomic<bool>& cleanup);
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -483,17 +484,20 @@ ModelInstanceState::ResetSharedMemoryOffset()
 
 void
 ModelInstanceState::ExecuteBLSRequest(
-    std::unique_ptr<IPCMessage> ipc_message, std::atomic<bool>& cleanup)
+    std::unique_ptr<SharedMemory>& shm_pool, off_t message_offset,
+    std::atomic<bool>& cleanup)
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   auto request_executor =
       std::make_unique<RequestExecutor>(model_state->TritonServer());
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::LoadFromSharedMemory(shm_pool, message_offset);
   bool is_response_batch_set = false;
   ResponseBatch* response_batch;
   TRITONSERVER_InferenceResponse* inference_response = nullptr;
   try {
     std::unique_ptr<IPCMessage> bls_response =
-        std::make_unique<IPCMessage>(shm_pool_);
+        std::make_unique<IPCMessage>(shm_pool_, false /* inline_response */);
     RequestBatch* request_batch;
     shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
 
@@ -536,23 +540,13 @@ ModelInstanceState::ExecuteBLSRequest(
         }
       }
 
-      // Wait for the extra round trip. The stub process will fill in the data
-      // for the GPU tensors.
+      // Wait for the extra round trip to complete. The stub process will fill
+      // in the data for the GPU tensors.
       if (has_gpu_tensor) {
         bi::scoped_lock<bi::interprocess_mutex> lock{
             *(ipc_message->ResponseMutex())};
         ipc_message->ResponseCondition()->notify_all();
         ipc_message->ResponseCondition()->wait(lock);
-      }
-
-      for (auto& input_tensor : infer_request->Inputs()) {
-        if (!input_tensor->IsCPU()) {
-#ifdef TRITON_ENABLE_GPU
-          print_gpu_data(
-              input_tensor->GetDataPtr(), input_tensor->ByteSize(),
-              ("BLS inputs " + input_tensor->Name()).c_str());
-#endif  // TRITON_ENABLE_GPU
-        }
       }
 
       infer_response = request_executor->Infer(
@@ -674,7 +668,7 @@ ModelInstanceState::ProcessRequests(
   SET_TIMESTAMP(exec_start_ns);
 
   std::unique_ptr<IPCMessage> ipc_message =
-      std::make_unique<IPCMessage>(shm_pool_);
+      std::make_unique<IPCMessage>(shm_pool_, false /*inline_resposne*/);
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
 
   RequestBatch* request_batch;
@@ -806,13 +800,11 @@ ModelInstanceState::ProcessRequests(
   // indicates that inference request exeuction has finished.
   while (ipc_message->Command() ==
          PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+    off_t current_message = response_message;
     // Launch the BLS request in a future.
     bls_futures_.emplace_back(
-        std::async(std::launch::async, [this, response_message, &cleanup]() {
-          this->ExecuteBLSRequest(
-              IPCMessage::LoadFromSharedMemory(
-                  this->shm_pool_, response_message),
-              cleanup);
+        std::async(std::launch::async, [this, current_message, &cleanup]() {
+          this->ExecuteBLSRequest(this->shm_pool_, current_message, cleanup);
         }));
 
     auto error = ReceiveMessageFromStub(response_message);
@@ -1031,12 +1023,6 @@ ModelInstanceState::ProcessRequests(
     SendMessageAndReceiveResponse(
         ipc_message->SharedMemoryOffset(), response_message, restart, responses,
         requests, 0);
-
-    for (auto& output_tensor : gpu_tensors) {
-      print_gpu_data(
-          output_tensor.first->GetDataPtr(), output_tensor.first->ByteSize(),
-          output_tensor.first->Name().c_str());
-    }
 
     bool cuda_copy = false;
     for (auto& tensor_buffer_pair : tensor_buffer_pairs) {
@@ -1267,7 +1253,7 @@ ModelInstanceState::StartStubProcess()
         {"model_name", model_state->Name()}};
 
     std::unique_ptr<IPCMessage> initialize_message =
-        std::make_unique<IPCMessage>(shm_pool_);
+        std::make_unique<IPCMessage>(shm_pool_, false /* inline_response */);
     initialize_message->Command() = PYTHONSTUB_InitializeRequest;
 
     // TODO: Fix restart during initialize
@@ -1446,7 +1432,7 @@ ModelInstanceState::~ModelInstanceState()
     if (healthy) {
       // Finalize command does not have any arguments.
       std::unique_ptr<IPCMessage> ipc_message =
-          std::make_unique<IPCMessage>(shm_pool_);
+          std::make_unique<IPCMessage>(shm_pool_, false /* inline_response */);
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
       stub_message_queue_->Push(ipc_message->SharedMemoryOffset());

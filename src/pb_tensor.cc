@@ -133,7 +133,7 @@ PbTensor::PbTensor(
   memory_type_id_ = memory_type_id;
   dtype_ = dtype;
   dims_ = dims;
-  shm_offset_ = shm_offset;
+  raw_shm_offset_ = shm_offset;
 
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
@@ -194,9 +194,9 @@ PbTensor::MemoryTypeId() const
 }
 
 off_t
-PbTensor::ShmOffset()
+PbTensor::RawShmOffset()
 {
-  return shm_offset_;
+  return raw_shm_offset_;
 }
 
 uint64_t
@@ -330,7 +330,6 @@ PbTensor::LoadFromSharedMemory(
           name, std::vector<int64_t>(dims, dims + dims_count),
           tensor_shm->dtype, raw_data->memory_type, raw_data->memory_type_id,
           data, raw_data->byte_size, nullptr /* DLManaged Tensor */);
-      pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
       pb_tensor->destruct_cuda_ipc_mem_handle_ = true;
     } else {
       pb_tensor = std::make_shared<PbTensor>(
@@ -338,16 +337,16 @@ PbTensor::LoadFromSharedMemory(
           tensor_shm->dtype, raw_data->memory_type, raw_data->memory_type_id,
           data, raw_data->byte_size, nullptr /* DLManaged Tensor */);
       pb_tensor->destruct_cuda_ipc_mem_handle_ = false;
-      pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
       pb_tensor->is_cuda_handle_set_ = false;
     }
+    pb_tensor->cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
 #else
     throw PythonBackendException("GPU Tensor is not supported.");
 #endif  // TRITON_ENABLE_GPU
   }
-  pb_tensor->shm_offset_ = tensor_offset;
   pb_tensor->tensor_shm_ = tensor_shm;
   pb_tensor->raw_data_shm_ = raw_data;
+  pb_tensor->shm_offset_ = tensor_offset;
 
   return pb_tensor;
 }
@@ -536,7 +535,7 @@ PbTensor::SaveToSharedMemory(
     SaveTensorToSharedMemory(
         shm_pool, tensor_shm, data_in_shm, memory_type, memory_type_id,
         byte_size_, tensor_name.c_str(), dims_.data(), dims_count, dtype_triton,
-        &ptr_offset, shm_offset_);
+        &ptr_offset, raw_shm_offset_);
     *ptr_offset = 0;
 
     if (copy_cpu) {
@@ -552,7 +551,7 @@ PbTensor::SaveToSharedMemory(
         shm_pool, tensor_shm, cuda_handle, this->MemoryType(),
         this->MemoryTypeId(), this->ByteSize(), tensor_name.c_str(),
         this->Dims().data(), this->Dims().size(), dtype_triton, &ptr_offset,
-        shm_offset_);
+        raw_shm_offset_);
     cuda_ipc_mem_handle_ = reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle);
 
     if (copy_gpu) {
@@ -579,21 +578,20 @@ PbTensor::SaveToSharedMemory(
 
 #ifdef TRITON_ENABLE_GPU
 void
-PbTensor::LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool, std::mutex& gpu_load_mutex)
+PbTensor::LoadGPUData(
+    std::unique_ptr<SharedMemory>& shm_pool, std::mutex& gpu_load_mutex)
 {
   std::lock_guard<std::mutex> lock{gpu_load_mutex};
   if (!this->IsCPU()) {
     char* d_buffer;
     cudaSetDevice(this->MemoryTypeId());
-
-    print_cuda_ipc_handle(cuda_ipc_mem_handle_, "LoadGPUData()");
+    shm_pool->MapOffset(
+        (char**)&cuda_ipc_mem_handle_, raw_data_shm_->memory_ptr);
 
     cudaError_t err = cudaIpcOpenMemHandle(
         (void**)&d_buffer, *cuda_ipc_mem_handle_,
         cudaIpcMemLazyEnablePeerAccess);
     if (err != cudaSuccess) {
-      std::cout << "Failed to open ipc handle when loading GPU data "
-                << std::endl;
       throw PythonBackendException(std::string(
                                        "failed to open ipc handle: " +
                                        std::string(cudaGetErrorString(err)))
@@ -610,14 +608,6 @@ PbTensor::LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool, std::mutex& gpu_l
               "failed to copy data: " + std::string(cudaGetErrorString(err)))
               .c_str());
     }
-    std::cout << "Offset (LoadGPUData) for " << Name() << " is " << raw_data_shm_->offset << std::endl;
-
-    print_gpu_data(
-        buffer_start, this->ByteSize(),
-        (std::string("Buffer Start Data is:") + Name()).c_str());
-    print_gpu_data(
-        memory_ptr_, this->ByteSize(),
-        (std::string("Memory ptr Data is:") + Name()).c_str());
 
     err = cudaIpcCloseMemHandle(d_buffer);
     if (err != cudaSuccess) {
@@ -678,10 +668,6 @@ PbTensor::SetBackendMemory(
   cudaSetDevice(this->MemoryTypeId());
   cudaError_t err =
       cudaIpcGetMemHandle(cuda_ipc_mem_handle_, backend_memory->MemoryPtr());
-
-  print_cuda_ipc_handle(
-      cuda_ipc_mem_handle_, (Name() + "SetBackendMemory()").c_str());
-
   if (err != cudaSuccess) {
     throw PythonBackendException(std::string(
                                      "failed to get cuda ipc handle: " +
@@ -692,7 +678,6 @@ PbTensor::SetBackendMemory(
   memory_ptr_ = backend_memory->MemoryPtr();
   backend_memory_ = std::move(backend_memory);
   raw_data_shm_->offset = this->GetGPUPointerOffset();
-  std::cout << "Offset for " << Name() << " is " << raw_data_shm_->offset << std::endl;
 }
 #endif
 #endif

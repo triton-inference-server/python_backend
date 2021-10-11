@@ -75,7 +75,7 @@ class IPCMessage {
   IPCMessage() {}
   IPCMessage(
       const std::unique_ptr<SharedMemory>& shm_pool,
-      bool inline_response = false)
+      bool inline_response)
   {
     shm_pool->Map(
         (char**)&ipc_message_shm_, sizeof(IPCMessageShm), shm_offset_);

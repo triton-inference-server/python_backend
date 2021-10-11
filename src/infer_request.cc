@@ -183,17 +183,16 @@ InferRequest::Exec()
         request->inputs);
 
     size_t i = 0;
-    for (auto& input_tensor : this->Inputs()) {
+    for (auto& input_tensor : inputs_) {
+      input_tensor->SaveToSharedMemory(
+          shm_pool, &tensors[i], true /* copy_cpu */, false /* copy_gpu */);
       if (!input_tensor->IsCPU()) {
         has_gpu_tensor = true;
       }
-      input_tensor->SaveToSharedMemory(
-          shm_pool, &tensors[i], true /* copy_cpu */, false /* copy_gpu */);
       ++i;
     }
 
-    this->SaveToSharedMemory(shm_pool, request);
-    std::unique_ptr<IPCMessage> bls_response;
+    SaveToSharedMemory(shm_pool, request);
     {
       bi::scoped_lock<bi::interprocess_mutex> lock{
           *(ipc_message->ResponseMutex())};
@@ -205,7 +204,6 @@ InferRequest::Exec()
       for (auto& input_tensor : this->Inputs()) {
         if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-          std::cout << "Load GPU data called for BLS" << std::endl;
           input_tensor->LoadGPUData(shm_pool, stub->GPULoadMutex());
 #endif  // TRITON_ENABLE_GPU
         }
@@ -220,7 +218,7 @@ InferRequest::Exec()
     }
 
     // Get the response for the current message.
-    bls_response = IPCMessage::LoadFromSharedMemory(
+    std::unique_ptr<IPCMessage> bls_response = IPCMessage::LoadFromSharedMemory(
         shm_pool, ipc_message->RequestOffset());
     shm_pool->MapOffset((char**)&response_batch, bls_response->Args());
     responses_is_set = true;
@@ -260,16 +258,5 @@ InferRequest::Exec()
   }
 }
 
-py::object
-InferRequest::AsyncExec()
-{
-  py::object loop = py::module_::import("asyncio").attr("get_running_loop")();
-  py::cpp_function callback = [this]() {
-    auto response = this->Exec();
-    return response;
-  };
-  py::object f = loop.attr("run_in_executor")(py::none(), callback);
-  return f;
-}
 #endif
 }}}  // namespace triton::backend::python

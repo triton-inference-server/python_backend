@@ -85,6 +85,7 @@ class PbTensor {
   // bool is_reused_ = false;
   uint64_t device_ptr_offset_ = 0;
   bool destruct_cuda_ipc_mem_handle_ = false;
+  off_t raw_shm_offset_ = 0;
   off_t shm_offset_ = 0;
 
  public:
@@ -202,8 +203,13 @@ class PbTensor {
   /// no longer required.
   void DeleteDLPack();
 
-  /// Shared memory offset.
-  off_t ShmOffset();
+  /// Shared memory offset of the raw pointer.
+  off_t RawShmOffset();
+
+  /// Shared memory offset of the tensor.
+  off_t ShmOffset() {
+    return shm_offset_;
+  }
 
   /// Get the type of the tensor
   /// \return Type of the tensor.
