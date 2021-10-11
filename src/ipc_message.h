@@ -42,7 +42,7 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_InitializeResponse,
   PYTHONSTUB_FinalizeRequest,
   PYTHONSTUB_FinalizeResponse,
-  PYTHONSTUB_TensorCleanup,
+  PYTHONSTUB_LoadGPUBuffers,
   PYTHONSTUB_InferExecRequest,
   PYTHONSTUB_InferExecResponse
 } PYTHONSTUB_CommandType;

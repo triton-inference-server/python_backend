@@ -163,6 +163,8 @@ InferRequest::Exec()
     py::gil_scoped_release release;
     std::unique_ptr<IPCMessage> ipc_message =
         std::make_unique<IPCMessage>(shm_pool, true /* inline_response */);
+    bool has_exception = false;
+    PythonBackendException pb_exception(std::string{});
 
     ipc_message->Command() =
         PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
@@ -201,12 +203,20 @@ InferRequest::Exec()
     }
 
     if (has_gpu_tensor) {
-      for (auto& input_tensor : this->Inputs()) {
-        if (!input_tensor->IsCPU()) {
+      try {
+        for (auto& input_tensor : this->Inputs()) {
+          if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-          input_tensor->LoadGPUData(shm_pool, stub->GPULoadMutex());
+            input_tensor->LoadGPUData(shm_pool, stub->GPULoadMutex());
 #endif  // TRITON_ENABLE_GPU
+          }
         }
+      }
+      catch (const PythonBackendException& exception) {
+        // We need to catch the exception here. Otherwise, we will not notify
+        // the main process and it will wait for the resposne forever.
+        pb_exception = exception;
+        has_exception = true;
       }
 
       {
@@ -215,6 +225,12 @@ InferRequest::Exec()
         ipc_message->ResponseCondition()->notify_all();
         ipc_message->ResponseCondition()->wait(lock);
       }
+    }
+
+    // The exception will be thrown after the message was sent to the main
+    // process.
+    if (has_exception) {
+      throw pb_exception;
     }
 
     // Get the response for the current message.

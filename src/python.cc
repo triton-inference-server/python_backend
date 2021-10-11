@@ -237,10 +237,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
   std::vector<std::future<void>> handles_;
 
-#ifdef TRITON_ENABLE_GPU
-  // std::unique_ptr<TensorManager> tensor_manager_;
-#endif  // TRITON_ENABLE_GPU
-
   // Stub process pid
   pid_t stub_pid_;
 
@@ -264,11 +260,6 @@ class ModelInstanceState : public BackendModelInstance {
       const uint32_t input_idx, Tensor* input_tensor_shm,
       std::shared_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
       std::vector<TRITONBACKEND_Response*>& responses);
-
-#ifdef TRITON_ENABLE_GPU
-  // std::unique_ptr<TensorManager>& GetTensorManager() { return
-  // tensor_manager_; }
-#endif  // TRITON_ENABLE_GPU
 
   void ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -512,6 +503,7 @@ ModelInstanceState::ExecuteBLSRequest(
     response_batch->cleanup = false;
     is_response_batch_set = true;
     bool has_gpu_tensor = false;
+    PythonBackendException pb_exception(std::string{});
 
     if (request_batch->batch_size == 1) {
       std::unique_ptr<InferRequest> infer_request;
@@ -519,29 +511,37 @@ ModelInstanceState::ExecuteBLSRequest(
           shm_pool_, request_batch->requests);
       std::unique_ptr<InferResponse> infer_response;
 
-      // If the BLS inputs are in GPU an additional round trip between the stub
-      // process and the main process is required. The reason is that we need to
-      // first allocate the GPU memory from the memory pool and then ask the
-      // stub process to fill in those allocated buffers.
-      for (auto& input_tensor : infer_request->Inputs()) {
-        if (!input_tensor->IsCPU()) {
+      try {
+        // If the BLS inputs are in GPU an additional round trip between the
+        // stub process and the main process is required. The reason is that we
+        // need to first allocate the GPU memory from the memory pool and then
+        // ask the stub process to fill in those allocated buffers.
+        for (auto& input_tensor : infer_request->Inputs()) {
+          if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-          BackendMemory* backend_memory;
-          std::unique_ptr<BackendMemory> lbackend_memory;
-          has_gpu_tensor = true;
-          THROW_IF_TRITON_ERROR(BackendMemory::Create(
-              Model()->TritonMemoryManager(),
-              {BackendMemory::AllocationType::GPU_POOL},
-              input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
-              &backend_memory));
-          lbackend_memory.reset(backend_memory);
-          input_tensor->SetBackendMemory(std::move(lbackend_memory), shm_pool_);
+            BackendMemory* backend_memory;
+            std::unique_ptr<BackendMemory> lbackend_memory;
+            has_gpu_tensor = true;
+            THROW_IF_TRITON_ERROR(BackendMemory::Create(
+                Model()->TritonMemoryManager(),
+                {BackendMemory::AllocationType::GPU_POOL},
+                input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
+                &backend_memory));
+            lbackend_memory.reset(backend_memory);
+            input_tensor->SetBackendMemory(
+                std::move(lbackend_memory), shm_pool_);
 #endif  // TRITON_ENABLE_GPU
+          }
         }
+      }
+      catch (const PythonBackendException& exception) {
+        pb_exception = exception;
       }
 
       // Wait for the extra round trip to complete. The stub process will fill
-      // in the data for the GPU tensors.
+      // in the data for the GPU tensors. If there is an error, the extra round
+      // trip must be still completed, otherwise the stub process will always be
+      // waiting for a message from the parent process.
       if (has_gpu_tensor) {
         bi::scoped_lock<bi::interprocess_mutex> lock{
             *(ipc_message->ResponseMutex())};
@@ -549,20 +549,23 @@ ModelInstanceState::ExecuteBLSRequest(
         ipc_message->ResponseCondition()->wait(lock);
       }
 
-      infer_response = request_executor->Infer(
-          infer_request, shm_pool_, &inference_response);
+      if (pb_exception.what() != nullptr) {
+        infer_response = request_executor->Infer(
+            infer_request, shm_pool_, &inference_response);
 
-      if (inference_response != nullptr) {
-        std::lock_guard<std::mutex> lock{bls_responses_mutex_};
-        bls_inference_responses_.push_back(inference_response);
+        if (inference_response != nullptr) {
+          std::lock_guard<std::mutex> lock{bls_responses_mutex_};
+          bls_inference_responses_.push_back(inference_response);
+        }
+
+        Response* response;
+        shm_pool_->Map(
+            (char**)&response, sizeof(Response), response_batch->responses);
+        infer_response->SaveToSharedMemory(
+            shm_pool_, response, false /* copy_cpu */, true /* copy_gpu */);
+      } else {
+        throw pb_exception;
       }
-
-      Response* response;
-      shm_pool_->Map(
-          (char**)&response, sizeof(Response), response_batch->responses);
-
-      infer_response->SaveToSharedMemory(
-          shm_pool_, response, false /* copy_cpu */, true /* copy_gpu */);
     }
   }
   catch (const PythonBackendException& pb_exception) {
@@ -865,7 +868,6 @@ ModelInstanceState::ProcessRequests(
   std::vector<std::pair<std::shared_ptr<PbTensor>, std::pair<void*, uint32_t>>>
       tensor_buffer_pairs;
 
-  std::vector<std::pair<std::shared_ptr<PbTensor>, void*>> gpu_tensors;
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
     TRITONBACKEND_Request* request = requests[r];
@@ -970,21 +972,22 @@ ModelInstanceState::ProcessRequests(
             reinterpret_cast<cudaIpcMemHandle_t*>(
                 output_tensor->CudaIpcMemHandle()),
             buffer);
-        if (err != cudaSuccess) {
-          throw PythonBackendException(std::string(
-                                           "failed to get cuda ipc handle: " +
-                                           std::string(cudaGetErrorString(err)))
-                                           .c_str());
-        }
-        output_tensor->SetDataPtr(buffer);
-        output_tensor->RawDataShm()->offset =
-            output_tensor->GetGPUPointerOffset();
-#endif
-      }
 
-      if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
-          actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-        gpu_tensors.push_back({output_tensor, buffer});
+        if (err != cudaSuccess) {
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r,
+              TRITONSERVER_ErrorNew(
+                  TRITONSERVER_ERROR_INTERNAL,
+                  std::string(
+                      "failed to get cuda ipc handle: " +
+                      std::string(cudaGetErrorString(err)))
+                      .c_str()));
+        } else {
+          output_tensor->SetDataPtr(buffer);
+          output_tensor->RawDataShm()->offset =
+              output_tensor->GetGPUPointerOffset();
+        }
+#endif
       }
 
       if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
@@ -1019,7 +1022,7 @@ ModelInstanceState::ProcessRequests(
   // If the output tensor is in GPU, there will be a second round trip
   // required for filling the GPU buffers provided by the main process.
   if (has_gpu_output) {
-    ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup;
+    ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
     SendMessageAndReceiveResponse(
         ipc_message->SharedMemoryOffset(), response_message, restart, responses,
         requests, 0);

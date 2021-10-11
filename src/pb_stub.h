@@ -65,8 +65,8 @@ class Stub {
   py::object serialize_bytes_;
   std::unique_ptr<MessageQueue> stub_message_queue_;
   std::unique_ptr<MessageQueue> parent_message_queue_;
-  std::vector<std::shared_ptr<PbTensor>> tensors_to_remove_;
-  std::vector<std::shared_ptr<PbTensor>> tensors_to_keep_;
+  std::vector<std::shared_ptr<PbTensor>> output_gpu_tensors_;
+  std::vector<std::shared_ptr<PbTensor>> input_gpu_tensors_;
   std::mutex tensors_to_remove_mutex_;
   std::mutex gpu_load_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
@@ -111,7 +111,7 @@ class Stub {
 
   void Fetch();
   void UpdateHealth();
-  void Cleanup();
+  void LoadGPUBuffers();
   void Finalize();
   std::mutex& GPULoadMutex() { return gpu_load_mutex_; }
 

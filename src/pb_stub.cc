@@ -277,7 +277,7 @@ void
 Stub::AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor)
 {
   std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-  tensors_to_remove_.push_back(tensor);
+  output_gpu_tensors_.push_back(tensor);
 }
 
 std::shared_ptr<InferRequest>
@@ -288,7 +288,7 @@ Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
 
   for (auto& tensor : infer_request->Inputs()) {
     if (!tensor->IsCPU())
-      tensors_to_keep_.push_back(tensor);
+      input_gpu_tensors_.push_back(tensor);
   }
 
   return infer_request;
@@ -416,9 +416,17 @@ Stub::RunCommand()
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
       this->SendIPCMessage(ipc_message);
       return true;
-    case PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup:
-      Cleanup();
-      ipc_message->Command() = PYTHONSTUB_TensorCleanup;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers:
+      try {
+        LoadGPUBuffers();
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_INFO << "An error occurred while trying to load GPU buffers in the "
+                    "Python backend stub: "
+                 << pb_exception.what() << std::endl;
+      }
+
+      ipc_message->Command() = PYTHONSTUB_LoadGPUBuffers;
       this->SendIPCMessage(ipc_message);
       break;
     default:
@@ -568,19 +576,21 @@ Stub::UpdateHealth()
 }
 
 void
-Stub::Cleanup()
+Stub::LoadGPUBuffers()
 {
   std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-  for (auto& tensor : tensors_to_remove_) {
+#ifdef TRITON_ENABLE_GPU
+  for (auto& tensor : output_gpu_tensors_) {
     if (tensor->RawDataShm()->memory_type == TRITONSERVER_MEMORY_GPU) {
       tensor->LoadGPUData(shm_pool_, gpu_load_mutex_);
     } else {
       tensor->CopyToCPU(shm_pool_);
     }
   }
+#endif  // TRITON_ENABLE_GPU
 
-  tensors_to_remove_.clear();
-  tensors_to_keep_.clear();
+  output_gpu_tensors_.clear();
+  input_gpu_tensors_.clear();
 }
 
 void
