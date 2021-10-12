@@ -118,6 +118,7 @@ SaveRawDataToSharedMemory(
     shm_pool->Map(
         (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
     raw_data->memory_ptr = buffer_offset;
+
 #else
     throw PythonBackendException(
         "Python backend does not support GPU tensors.");
@@ -382,17 +383,5 @@ CUDADriverAPI::~CUDADriverAPI() noexcept(false)
   }
 }
 #endif
-
-class RunBeforeReturn {
-  std::function<void()> run_before_return_fn_;
-
- public:
-  RunBeforeReturn(const std::function<void()>& run_before_return_fn)
-      : run_before_return_fn_(run_before_return_fn)
-  {
-  }
-
-  ~RunBeforeReturn() { run_before_return_fn_(); }
-};
 
 }}}  // namespace triton::backend::python
