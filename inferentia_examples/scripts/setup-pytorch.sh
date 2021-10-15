@@ -1,5 +1,5 @@
 set -x 
-export INFRENTIA_PATH=/home/ubuntu
+export INFRENTIA_PATH=${INFRENTIA_PATH:=/home/ubuntu}
 export CONDA_PATH=${INFRENTIA_PATH}/miniconda
 # Get latest conda required https://repo.anaconda.com/miniconda/
 cd ${INFRENTIA_PATH}
@@ -12,7 +12,7 @@ export PATH=${CONDA_PATH}/bin:${PATH}
 conda info
 source ~/.bashrc
 
-# install python_backend_stub installing dependencies
+# Install python_backend_stub installing dependencies
 apt-get update && \
     apt-get install -y --no-install-recommends \
               zlib1g-dev \
@@ -23,25 +23,16 @@ apt-get update && \
               rapidjson-dev
 
 # CMake
-export CMAKE_UBUNTU_VERSION=20.04
 wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
       gpg --dearmor - |  \
       tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null && \
-    if [ "$CMAKE_UBUNTU_VERSION" = "20.04" ]; then \
-      apt-add-repository 'deb https://apt.kitware.com/ubuntu/ focal main' && \
-      apt-get update && \
-      apt-get install -y --no-install-recommends \
-        cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1; \
-    elif [ "$CMAKE_UBUNTU_VERSION" = "18.04" ]; then \
-      apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main' && \
-      apt-get update && \
-      apt-get install -y --no-install-recommends \
-        cmake-data=3.18.4-0kitware1 cmake=3.18.4-0kitware1; \
-    else \
-      echo "ERROR: Only support CMAKE_UBUNTU_VERSION to be 18.04 or 20.04" && false; \
-    fi && \
-    cmake --version
+apt-add-repository 'deb https://apt.kitware.com/ubuntu/ focal main' && \
+apt-get update && \
+apt-get install -y --no-install-recommends \
+cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1 && \
+cmake --version
 
+# Create Conda Enviroment
 conda create -q -y -n test_conda_env python=3.7
 source ${CONDA_PATH}/bin/activate test_conda_env
 
@@ -79,9 +70,9 @@ conda install torch-neuron -y
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 pip install --upgrade torch-neuron torchvision "transformers==4.6.0"
 
+# Upgrade the python backend stub, rules and sockets
+cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub /opt/tritonserver/backends/python/triton_python_backend_stub
 cp /mylib/udev/rules.d/* /lib/udev/rules.d/
 ln -s /myrun/neuron.sock /run/neuron.sock
-# Upgrade the python backend stub
-cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub /opt/tritonserver/backends/python/triton_python_backend_stub
 export LD_LIBRARY_PATH=${CONDA_PATH}/envs/test_conda_env/lib:$LD_LIBRARY_PATH
 set +x 
