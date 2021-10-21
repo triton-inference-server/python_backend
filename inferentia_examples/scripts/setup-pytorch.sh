@@ -1,8 +1,77 @@
-set -x 
-export INFRENTIA_PATH=${INFRENTIA_PATH:=/home/ubuntu}
-export CONDA_PATH=${INFRENTIA_PATH}/miniconda
+#!/bin/bash
+# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+USAGE="
+usage: test_script.sh [options]
+
+Sets up enviroment for neuron-pytorch
+-h|--help                  Shows usage
+-p|--python-backend-path   Python backend path, default is: /home/ubuntu/python_backend
+-v|--python-version        Python version, default is 3.7
+-i|--inferentia-path       Inferentia path, default is: /home/ubuntu
+"
+
+# Get all options:
+OPTS=$(getopt -o hp:v:i: --long help,python-backend-path:,python-version:,inferentia-path: -- "$@")
+
+
+export INFRENTIA_PATH="/home/ubuntu"
+export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
+export PYTHON_VERSION=3.7
+
+for OPTS; do
+    case "$OPTS" in
+        -h|--help)
+        printf "%s\\n" "$USAGE"
+        exit 2
+        ;;
+        -p|--python-backend-path)
+        PYTHON_BACKEND_PATH=$2
+        shift 2
+        ;;
+        -v|--python-version)
+        PYTHON_VERSION=$2
+        shift 2
+        ;;
+        -i|--inferentia-path)
+        INFRENTIA_PATH=$2
+        shift 2
+        ;;
+    esac
+done
+
+echo $INFRENTIA_PATH
+echo $PYTHON_BACKEND_PATH
+echo $PYTHON_VERSION
+
+set -x
 # Get latest conda required https://repo.anaconda.com/miniconda/
 cd ${INFRENTIA_PATH}
+export CONDA_PATH=${INFRENTIA_PATH}/miniconda
 wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-py37_4.10.3-Linux-x86_64.sh \
          -O ${PWD}/miniconda.sh --no-check-certificate && \
     /bin/bash ${PWD}/miniconda.sh -b -p ${CONDA_PATH} && \
@@ -33,13 +102,11 @@ cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1 && 
 cmake --version
 
 # Create Conda Enviroment
-conda create -q -y -n test_conda_env python=3.7
+conda create -q -y -n test_conda_env python=${PYTHON_VERSION}
 source ${CONDA_PATH}/bin/activate test_conda_env
 
 # First compile correct python stub
-export PYTHON_BACKEND_BRANCH_NAME="main"
-git clone https://github.com/triton-inference-server/python_backend -b $PYTHON_BACKEND_BRANCH_NAME
-cd python_backend
+cd ${PYTHON_BACKEND_PATH}
 mkdir build && cd build
 cmake -DTRITON_ENABLE_GPU=OFF -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 make triton-python-backend-stub -j16
