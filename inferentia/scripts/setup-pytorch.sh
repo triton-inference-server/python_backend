@@ -51,14 +51,17 @@ for OPTS; do
         ;;
         -p|--python-backend-path)
         PYTHON_BACKEND_PATH=$2
+        echo "Python backend path set to ${PYTHON_BACKEND_PATH}"
         shift 2
         ;;
         -v|--python-version)
         PYTHON_VERSION=$2
         shift 2
+        echo "Python version set to ${PYTHON_VERSION}"
         ;;
         -i|--inferentia-path)
         INFRENTIA_PATH=$2
+        echo "Inferentia path set to ${INFRENTIA_PATH}"
         shift 2
         ;;
     esac
@@ -99,7 +102,7 @@ source ${CONDA_PATH}/bin/activate test_conda_env
 
 # First compile correct python stub
 cd ${PYTHON_BACKEND_PATH}
-mkdir build && cd build
+rm -rf build && mkdir build && cd build
 cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 make triton-python-backend-stub -j16
 

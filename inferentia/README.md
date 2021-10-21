@@ -34,7 +34,8 @@ Starting from 21.11 release, Triton supports [AWS Inferentia](https://aws.amazon
 
 First step of running Triton with Inferentia is to create an AWS Inferentia instance with Deep Learning AMI (tested with Ubuntu 18.04).
 `ssh -i <private-key-name>.pem ubuntu@<instance address>`
-Note: It is recommended to set your storage space to greater than default value of 110 GiB.
+Note: It is recommended to set your storage space to greater than default value of 110 GiB. The current version of Trtion has been tested
+with storage of 500 GiB.
 
 After logging into the inf1* instance, you will need to clone [this current Github repo](https://github.com/triton-inference-server/python_backend). Follow [steps on Github to set up ssh access](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) or simply clone with https.
 Clone this repo with Github to home repo `/home/ubuntu`.
@@ -48,13 +49,13 @@ where `/mylib/udev` and `myrun` are used for Neuron parameter passing. For Trito
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
-source /home/ubuntu/python_backend/inferentia_examples/scripts/setup-pytorch.sh
+source /home/ubuntu/python_backend/inferentia/scripts/setup-pytorch.sh
 ```
 This script will:
 1. Setup miniconda enviroment
 2. Install necessary dependencies
 3. Create a [Custom Python Execution Enviroment](https://github.com/triton-inference-server/python_backend#using-custom-python-execution-environments), `python_backend_stub` to use for Inferentia
 4. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html), the Neuron compiler and [neuron-rtd](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-runtime/overview.html) the Neuron Runtime
-You can use the -h or --help options to learn more about configurable options. 
+You can use the -h or --help options to learn more about configurable options.
 
 To control the location of the installation, the user can set up the installation path by exporting `INFRENTIA_PATH` to specific path. e.g `export INFRENTIA_PATH=/root`. Default location is `/home/ubuntu`.
