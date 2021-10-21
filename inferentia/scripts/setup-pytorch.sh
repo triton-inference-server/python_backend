@@ -63,12 +63,6 @@ for OPTS; do
         ;;
     esac
 done
-
-echo $INFRENTIA_PATH
-echo $PYTHON_BACKEND_PATH
-echo $PYTHON_VERSION
-
-set -x
 # Get latest conda required https://repo.anaconda.com/miniconda/
 cd ${INFRENTIA_PATH}
 export CONDA_PATH=${INFRENTIA_PATH}/miniconda
@@ -79,14 +73,12 @@ wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-py37_4.10.3-Linux-x8
     $(eval echo "${CONDA_PATH}/bin/conda clean -ya")
 export PATH=${CONDA_PATH}/bin:${PATH}
 conda info
-source ~/.bashrc
 
 # Install python_backend_stub installing dependencies
 apt-get update && \
     apt-get install -y --no-install-recommends \
               zlib1g-dev \
               wget \
-              python3.7        \
               python3-pip      \
               libarchive-dev   \
               rapidjson-dev
@@ -108,7 +100,7 @@ source ${CONDA_PATH}/bin/activate test_conda_env
 # First compile correct python stub
 cd ${PYTHON_BACKEND_PATH}
 mkdir build && cd build
-cmake -DTRITON_ENABLE_GPU=OFF -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 make triton-python-backend-stub -j16
 
 # Install Neuron Pytorch
@@ -142,4 +134,3 @@ cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub /opt/triton
 cp /mylib/udev/rules.d/* /lib/udev/rules.d/
 ln -s /myrun/neuron.sock /run/neuron.sock
 export LD_LIBRARY_PATH=${CONDA_PATH}/envs/test_conda_env/lib:$LD_LIBRARY_PATH
-set +x 

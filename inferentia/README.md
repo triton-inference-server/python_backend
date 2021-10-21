@@ -41,7 +41,7 @@ Clone this repo with Github to home repo `/home/ubuntu`.
 
 Then, start the Trtion instance with:
 ``` 
-docker run -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev -v /run:/myrun --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:r<xx.yy>-py3
+docker run -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev -v /run:/myrun --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
 
 where `/mylib/udev` and `myrun` are used for Neuron parameter passing. For Triton container version xx.yy, please refer to [Triton Inference Server Container Release Notes](https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/index.html). The current build script has been tested with container version `21.09`. 
