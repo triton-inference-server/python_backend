@@ -36,16 +36,35 @@ any C++ code.
 
 ## User Documentation
 
-* [Quick Start](#quick-start)
-* [Usage](#usage)
-* [Examples](#examples)
-* [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
-* [Model Config File](#model-config-file)
-* [Error Handling](#error-handling)
-* [Managing Shared Memory](#managing-shared-memory)
-* [Building From Source](#building-from-source)
-* [Business Logic Scripting (beta)](#business-logic-scripting-beta)
-* [Interoperability and GPU Support](#interoperability-and-gpu-support)
+- [Python Backend](#python-backend)
+  - [User Documentation](#user-documentation)
+  - [Quick Start](#quick-start)
+  - [Building from Source](#building-from-source)
+  - [Usage](#usage)
+    - [`initialize`](#initialize)
+    - [`execute`](#execute)
+    - [`finalize`](#finalize)
+  - [Model Config File](#model-config-file)
+  - [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
+    - [1. Building Custom Python Backend Stub](#1-building-custom-python-backend-stub)
+    - [2. Packaging the Conda Environment](#2-packaging-the-conda-environment)
+    - [Important Notes](#important-notes)
+  - [Error Handling](#error-handling)
+  - [Managing Shared Memory](#managing-shared-memory)
+- [Business Logic Scripting (beta)](#business-logic-scripting-beta)
+  - [Limitations](#limitations)
+- [Interoperability and GPU Support](#interoperability-and-gpu-support)
+  - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
+  - [`pb_utils.Tensor.from_dlpack() -> Tensor`](#pb_utilstensorfrom_dlpack---tensor)
+  - [`pb_utils.Tensor.is_cpu() -> bool`](#pb_utilstensoris_cpu---bool)
+  - [Input Tensor Device Placement](#input-tensor-device-placement)
+- [Examples](#examples)
+  - [AddSub in NumPy](#addsub-in-numpy)
+  - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
+  - [Business Logic Scripting](#business-logic-scripting)
+  - [Preprocessing](#preprocessing)
+- [Running with Inferentia](#running-with-inferentia)
+- [Reporting problems, asking questions](#reporting-problems-asking-questions)
 
 ## Quick Start
 
@@ -743,6 +762,10 @@ You can find the complete example instructions in [examples/bls](examples/bls/RE
 
 The Preprocessing example shows how to use Python Backend to do model preprocessing.
 You can find the complete example instructions in [examples/preprocessing](examples/preprocessing/README.md).
+
+# Running with Inferentia
+
+Please see the [README.md](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/README.md) located in the python_backend/inferentia sub folder.
 
 # Reporting problems, asking questions
 
