@@ -128,12 +128,14 @@ conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 conda install torch-neuron -y
 
 # Upgrade torch-neuron and install transformers
-# need to use pip to update: https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
+# need to use pip to update: 
+# https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 pip install --upgrade torch-neuron torchvision "transformers==4.6.0"
 
 # Upgrade the python backend stub, rules and sockets
-cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub /opt/tritonserver/backends/python/triton_python_backend_stub
+cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub \
+        /opt/tritonserver/backends/python/triton_python_backend_stub
 cp /mylib/udev/rules.d/* /lib/udev/rules.d/
 ln -s /myrun/neuron.sock /run/neuron.sock
 export LD_LIBRARY_PATH=${CONDA_PATH}/envs/test_conda_env/lib:$LD_LIBRARY_PATH
