@@ -102,40 +102,6 @@ def get_model_license():
     '''
     return lic
 
-def get_utils_impl():
-    utils = '''
-def triton_to_np_dtype(dtype):
-    if dtype == "TYPE_BOOL":
-        return bool
-    elif dtype == "TYPE_INT8":
-        return np.int8
-    elif dtype == "TYPE_INT16":
-        return np.int16
-    elif dtype == "TYPE_INT32":
-        return np.int32
-    elif dtype == "TYPE_INT64":
-        return np.int64
-    elif dtype == "TYPE_UINT8":
-        return np.uint8
-    elif dtype == "TYPE_UINT16":
-        return np.uint16
-    elif dtype == "TYPE_UINT32":
-        return np.uint32
-    elif dtype == "TYPE_UINT64":
-        return np.uint64
-    elif dtype == "TYPE_FP16":
-        return np.float16
-    elif dtype == "TYPE_FP32":
-        return np.float32
-    elif dtype == "TYPE_FP64":
-        return np.float64
-    elif dtype == "TYPE_BYTES":
-        return np.object_
-    return None
-
-    '''
-    return utils
-
 def get_neuron_simple_data_parallel_impl():
     neuron_sdpi = '''\n
 class NeuronSimpleDataParallel():
@@ -309,7 +275,7 @@ def get_execute_impl():
                 merged_result = np.concatenate(result_shards, axis=0)
                 dt, shape = self.triton_outputs[name]
                 output_tensor = pb_utils.Tensor(name,
-                                           merged_result.astype(triton_to_np_dtype(dt)))
+                                           merged_result.astype(pb_utils.triton_string_to_numpy(dt)))
 
                 output_tensors.append(output_tensor)
 
@@ -359,7 +325,6 @@ import torch.neuron
 import triton_python_backend_utils as pb_utils
     '''
 
-    triton_model += get_utils_impl()
     triton_model += get_neuron_simple_data_parallel_impl()
     triton_model += get_triton_python_model_impl()
 
