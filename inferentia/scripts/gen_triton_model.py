@@ -49,23 +49,25 @@ def create_modelconfig(model_name, max_batch_size, inputs, outputs,
     config += "backend: \"python\"\n"
     config += "max_batch_size: {}\n".format(max_batch_size)
     for input_name in inputs.keys():
-        config += "input [\n"
-        config += "\t{\n"
-        config += "\t\tname:\"{}\"\n".format(input_name)
         data_type, shape = inputs[input_name]
-        config += "\t\tdata_type:{}\n".format("TYPE_" + data_type)
-        config += "\t\tdims: {}\n".format(shape)
-        config += "\t}\n"
-        config += "]\n"
+        config +='''
+input [
+  {{
+    name: \"{}\"
+    data_type: {}
+    dims: {}
+  }}
+]\n'''.format(input_name, "TYPE_" + data_type, shape)
     for output_name in outputs.keys():
-        config += "output [\n"
-        config += "\t{\n"
-        config += "\t\tname:\"{}\"\n".format(output_name)
         data_type, shape = outputs[output_name]
-        config += "\t\tdata_type:{}\n".format("TYPE_" + data_type)
-        config += "\t\tdims: {}\n".format(shape)
-        config += "\t}\n"
-        config += "]\n"
+        config +='''
+output [
+  {{
+    name: \"{}\"
+    data_type: {}
+    dims: {}
+  }}
+]\n'''.format(output_name, "TYPE_" + data_type, shape)
     config += "instance_group [ { kind: KIND_MODEL }]\n"
     config += get_parameter_spec("COMPILED_MODEL", compiled_model_path)
     config += get_parameter_spec("AVAIL_NEURONCORES", avbl_neuron_cores_count)
