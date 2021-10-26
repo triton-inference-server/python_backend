@@ -66,7 +66,7 @@ def create_modelconfig(model_name, max_batch_size, inputs, outputs,
         config += "\t\tdims: {}\n".format(shape)
         config += "\t}\n"
         config += "]\n"
-    config += "instance_group [ { kind: KIND_CPU }]\n"
+    config += "instance_group [ { kind: KIND_MODEL }]\n"
     config += get_parameter_spec("COMPILED_MODEL", compiled_model_path)
     config += get_parameter_spec("AVAIL_NEURONCORES", avbl_neuron_cores_count)
     config += get_parameter_spec("NUM_THREADS_PER_PREDICTOR", threads_per_core)
