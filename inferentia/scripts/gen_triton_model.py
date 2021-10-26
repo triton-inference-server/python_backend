@@ -31,7 +31,7 @@ def parse_io_tensors(tensors):
     tensors_dict = {}
     for t in [t for tensor in tensors for t in tensor]:
         name, datatype, shape_str = t.split(",")
-        shape = shape_str.split("x")
+        shape = [int(i) for i in shape_str.split("x")]
         tensors_dict[name] = [datatype, shape]
 
     return tensors_dict
@@ -48,24 +48,24 @@ def create_modelconfig(model_name, max_batch_size, inputs, outputs,
     config = "name: \"{}\"\n".format(model_name)
     config += "backend: \"python\"\n"
     config += "max_batch_size: {}\n".format(max_batch_size)
-    config += "input [\n"
     for input_name in inputs.keys():
+        config += "input [\n"
         config += "\t{\n"
         config += "\t\tname:\"{}\"\n".format(input_name)
         data_type, shape = inputs[input_name]
-        config += "\t\tdata_type:\"{}\"\n".format("TYPE_" + data_type)
+        config += "\t\tdata_type:{}\n".format("TYPE_" + data_type)
         config += "\t\tdims: {}\n".format(shape)
-        config += "\t},\n"
-    config += "]\n"
-    config += "output [\n"
+        config += "\t}\n"
+        config += "]\n"
     for output_name in outputs.keys():
+        config += "output [\n"
         config += "\t{\n"
         config += "\t\tname:\"{}\"\n".format(output_name)
         data_type, shape = outputs[output_name]
-        config += "\t\tdata_type:\"{}\"\n".format("TYPE_" + data_type)
+        config += "\t\tdata_type:{}\n".format("TYPE_" + data_type)
         config += "\t\tdims: {}\n".format(shape)
-        config += "\t},\n"
-    config += "]\n"
+        config += "\t}\n"
+        config += "]\n"
     config += "instance_group [ { kind: KIND_CPU }]\n"
     config += get_parameter_spec("COMPILED_MODEL", compiled_model_path)
     config += get_parameter_spec("AVAIL_NEURONCORES", avbl_neuron_cores_count)
@@ -204,15 +204,15 @@ def get_initialize_impl():
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
 
-        self.triton_inputs = {}
+        self.input_dict = {}
         for config_input in model_config['input']:
-            self.triton_inputs[config_input['name']] = [
+            self.input_dict[config_input['name']] = [
                 config_input['data_type'], config_input['dims']
             ]
 
-        self.triton_outputs = {}
+        self.output_dict = {}
         for config_output in model_config['output']:
-            self.triton_outputs[config_output['name']] = [
+            self.output_dict[config_output['name']] = [
                 config_output['data_type'], config_output['dims']
             ]
 
@@ -261,19 +261,19 @@ def get_execute_impl():
         for request in requests:
             num_threads = self.num_threads
             inputs = []
-            for name in self.triton_inputs.keys():
+            for name in self.input_dict.keys():
                 tensor = pb_utils.get_input_tensor_by_name(request,
                                                            name).as_numpy()
                 inputs.append(torch.LongTensor(tensor))
             results = self.model_neuron(inputs)
 
             output_tensors = []
-            for name in self.triton_outputs.keys():
+            for name in self.output_dict.keys():
                 result_shards = []
                 for i in range(num_threads):
                     result_shards.append(results[i][len(output_tensors)])
                 merged_result = np.concatenate(result_shards, axis=0)
-                dt, shape = self.triton_outputs[name]
+                dt, shape = self.output_dict[name]
                 output_tensor = pb_utils.Tensor(name,
                                            merged_result.astype(pb_utils.triton_string_to_numpy(dt)))
 
