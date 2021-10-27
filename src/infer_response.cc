@@ -60,7 +60,7 @@ InferResponse::IsErrorMessageSet()
 
 void
 InferResponse::SaveToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm, bool copy)
+    std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm, bool copy_cpu, bool copy_gpu)
 {
   size_t output_tensor_length = output_tensors_.size();
   response_shm->has_error = false;
@@ -88,7 +88,7 @@ InferResponse::SaveToSharedMemory(
     size_t j = 0;
     for (auto& output_tensor : output_tensors_) {
       Tensor* output_tensor_shm = &output_tensors_shm[j];
-      output_tensor->SaveToSharedMemory(shm_pool, output_tensor_shm, copy);
+      output_tensor->SaveToSharedMemory(shm_pool, output_tensor_shm, copy_cpu, copy_gpu);
       j++;
     }
   }
