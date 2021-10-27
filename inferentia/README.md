@@ -75,4 +75,44 @@ you can run:
 ```
 source /home/ubuntu/python_backend/inferentia/scripts/setup-pytorch.sh -v 3.6
 ```
-Please use the `-h` or `--help` options to learn about more configurable options. 
+Please use the `-h` or `--help` options to learn about more configurable options.
+
+## Setting up the Inferentia model
+
+Currently, we only support TorchScript models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html) for execution on Inferentia.
+Once the TorchScript model supporting Inferentia is obtained, use the [gen_triton_model.py](https://github.com/triton-inference-server/python_backend/blob/main/inferentia/scripts/gen_triton_model.py) script to generate triton python model directory.
+
+An example invocation for the `gen_triton_model.py` can look like:
+
+```
+ $python3 inferentia/scripts/gen_triton_model.py --triton_input INPUT0,FP16,4x384 INPUT1,FP16,4x384 INPUT2,FP16,4x384 --triton_output OUTPUT0,FP16,4x384 OUTPUT1,FP16,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --triton_model_dir bert-large-mlperf-bs1x4
+```
+
+The invocation should create a triton model directory with following
+structutre:
+
+```
+bert-large-mlperf-bs1x4
+ |
+ |- 1
+ |  |- model.py
+ |
+ |- config.pbtxt
+```
+
+Look at the usage message of the script to understand each option.
+
+The script will generate a model directory with the user-provided
+name. Move that model directory to Triton's model repository.
+Ensure the compiled model path provided to the script points to
+a valid torchscript file.
+
+Now, the server can be launched with the model as below:
+
+```
+tritonserver --model-repository <path_to_model_repository>
+```
+
+Note: The `config.pbtxt` and `model.py` should be treated as
+starting point. The users can customize these files as per
+their need.
