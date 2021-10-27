@@ -139,14 +139,7 @@ Stub::Instantiate(
   health_mutex_ = nullptr;
   initialized_ = false;
 
-#ifdef TRITON_ENABLE_GPU
-  tensor_manager_ = std::make_unique<TensorManager>();
-#endif  // TRITON_ENABLE_GPU
-
   try {
-    // This boolean indicates whether a cleanup is required or not.
-    require_cleanup_ = false;
-
     shm_pool_ = std::make_unique<SharedMemory>(
         shm_region_name, shm_default_size, shm_growth_size);
 
@@ -268,47 +261,35 @@ Stub::ProcessResponse(
   std::vector<std::shared_ptr<PbTensor>>& output_tensors =
       response->OutputTensors();
   for (auto& output_tensor : output_tensors) {
-    if (output_tensor->TensorType() == PYTHONBACKEND_DLPACK) {
-      response_batch->cleanup = true;
-      AddToTensorsToRemove(output_tensor);
-    }
-
     if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-      cudaIpcMemHandle_t* cuda_handle = tensor_manager_->FindDevicePointer(
-          output_tensor->GetGPUStartAddress());
-      if (cuda_handle != nullptr) {
-        output_tensor->SetReusedIpcHandle(cuda_handle);
-      }
+      AddToTensorsToRemove(output_tensor);
 #else
       throw PythonBackendException("GPU tensors is not supported.");
 #endif
     }
   }
-  response->SaveToSharedMemory(shm_pool_, response_shm, true /* copy */);
+  response->SaveToSharedMemory(
+      shm_pool_, response_shm, true /* copy_cpu */, false /* copy_gpu */);
 }
 
 void
 Stub::AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor)
 {
   std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-  tensors_to_remove_.push_back(tensor);
+  output_gpu_tensors_.push_back(tensor);
 }
 
-std::unique_ptr<InferRequest>
+std::shared_ptr<InferRequest>
 Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
 {
-  std::unique_ptr<InferRequest> infer_request =
+  std::shared_ptr<InferRequest> infer_request =
       InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
-#ifdef TRITON_ENABLE_GPU
-  for (auto& input_tensor : infer_request->Inputs()) {
-    if (!input_tensor->IsCPU()) {
-      response_batch->cleanup = true;
-      tensor_manager_->InsertOpenedMemHandle(
-          input_tensor->GetGPUStartAddress(), input_tensor->CudaIpcMemHandle());
-    }
+
+  for (auto& tensor : infer_request->Inputs()) {
+    if (!tensor->IsCPU())
+      input_gpu_tensors_.push_back(tensor);
   }
-#endif  // TRITON_ENABLE_GPU
 
   return infer_request;
 }
@@ -391,7 +372,7 @@ Stub::RunCommand()
       std::string error_string;
 
       std::unique_ptr<IPCMessage> execute_response =
-          std::make_unique<IPCMessage>(shm_pool_);
+          std::make_unique<IPCMessage>(shm_pool_, false /* Inline response */);
       execute_response->Command() = PYTHONSTUB_ExecuteResposne;
 
       shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
@@ -435,9 +416,17 @@ Stub::RunCommand()
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
       this->SendIPCMessage(ipc_message);
       return true;
-    case PYTHONSTUB_CommandType::PYTHONSTUB_TensorCleanup:
-      Cleanup();
-      ipc_message->Command() = PYTHONSTUB_TensorCleanup;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers:
+      try {
+        LoadGPUBuffers();
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_INFO << "An error occurred while trying to load GPU buffers in the "
+                    "Python backend stub: "
+                 << pb_exception.what() << std::endl;
+      }
+
+      ipc_message->Command() = PYTHONSTUB_LoadGPUBuffers;
       this->SendIPCMessage(ipc_message);
       break;
     default:
@@ -450,9 +439,6 @@ Stub::RunCommand()
 void
 Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
 {
-  response_batch->cleanup = false;
-  require_cleanup_ = false;
-
   uint32_t batch_size = request_batch->batch_size;
 
   if (batch_size == 0) {
@@ -590,27 +576,22 @@ Stub::UpdateHealth()
 }
 
 void
-Stub::Cleanup()
+Stub::LoadGPUBuffers()
 {
-  {
-    std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-
-    // Deleting the tensors should automatically trigger the destructor.
-    tensors_to_remove_.clear();
+  std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
+#ifdef TRITON_ENABLE_GPU
+  for (auto& tensor : output_gpu_tensors_) {
+    if (tensor->RawDataShm()->memory_type == TRITONSERVER_MEMORY_GPU) {
+      tensor->LoadGPUData(shm_pool_, gpu_load_mutex_);
+    } else {
+      tensor->CopyToCPU(shm_pool_);
+    }
   }
-
-#ifdef TRITON_ENABLE_GPU
-  tensor_manager_->Clear();
 #endif  // TRITON_ENABLE_GPU
-}
 
-#ifdef TRITON_ENABLE_GPU
-std::unique_ptr<TensorManager>&
-Stub::GetTensorManager()
-{
-  return tensor_manager_;
+  output_gpu_tensors_.clear();
+  input_gpu_tensors_.clear();
 }
-#endif  // TRITON_ENABLE_GPU
 
 void
 Stub::Finalize()
@@ -669,7 +650,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("is_cpu", &PbTensor::IsCPU)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
-  py::class_<InferRequest>(module, "InferenceRequest")
+  py::class_<InferRequest, std::shared_ptr<InferRequest>>(
+      module, "InferenceRequest")
       .def(
           py::init<
               const std::string&, uint64_t,
@@ -679,12 +661,28 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("request_id") = "", py::arg("correlation_id") = 0,
           py::arg("inputs"), py::arg("requested_output_names"),
           py::arg("model_name"), py::arg("model_version") = -1)
-      .def("inputs", &InferRequest::Inputs)
+      .def(
+          "inputs", &InferRequest::Inputs,
+          py::return_value_policy::reference_internal)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
       .def("exec", &InferRequest::Exec)
-      .def("async_exec", &InferRequest::AsyncExec)
-      .def("requested_output_names", &InferRequest::RequestedOutputNames);
+      .def(
+          "async_exec",
+          [](std::shared_ptr<InferRequest>& infer_request) {
+            py::object loop =
+                py::module_::import("asyncio").attr("get_running_loop")();
+            py::cpp_function callback = [infer_request]() {
+              auto response = infer_request->Exec();
+              return response;
+            };
+            py::object future =
+                loop.attr("run_in_executor")(py::none(), callback);
+            return future;
+          })
+      .def(
+          "requested_output_names", &InferRequest::RequestedOutputNames,
+          py::return_value_policy::reference_internal);
 
   py::class_<InferResponse>(module, "InferenceResponse")
       .def(

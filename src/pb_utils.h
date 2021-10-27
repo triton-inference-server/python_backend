@@ -122,7 +122,7 @@ struct Tensor {
   // Shared memory offset for the dimensions.
   off_t dims;
   size_t dims_count;
-  bool is_reused;
+  bool is_cuda_handle_set;
 };
 
 struct String {

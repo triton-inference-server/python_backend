@@ -42,7 +42,7 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_InitializeResponse,
   PYTHONSTUB_FinalizeRequest,
   PYTHONSTUB_FinalizeResponse,
-  PYTHONSTUB_TensorCleanup,
+  PYTHONSTUB_LoadGPUBuffers,
   PYTHONSTUB_InferExecRequest,
   PYTHONSTUB_InferExecResponse
 } PYTHONSTUB_CommandType;
@@ -75,7 +75,7 @@ class IPCMessage {
   IPCMessage() {}
   IPCMessage(
       const std::unique_ptr<SharedMemory>& shm_pool,
-      bool inline_response = false)
+      bool inline_response)
   {
     shm_pool->Map(
         (char**)&ipc_message_shm_, sizeof(IPCMessageShm), shm_offset_);

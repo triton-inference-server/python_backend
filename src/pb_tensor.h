@@ -43,6 +43,7 @@ namespace py = pybind11;
 #include <string>
 #include "pb_utils.h"
 #include "triton/backend/backend_common.h"
+#include "triton/backend/backend_memory.h"
 #include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
@@ -71,12 +72,20 @@ class PbTensor {
   PYTHONBACKEND_TensorType tensor_type_;
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
+  Tensor* tensor_shm_;
+  RawData* raw_data_shm_;
+
 #ifdef TRITON_ENABLE_GPU
+  bool is_cuda_handle_set_;
   cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
+#ifndef TRITON_PB_STUB
+  std::unique_ptr<BackendMemory> backend_memory_;
+#endif  // TRITON_PB_STUB
 #endif  // TRITON_ENABLE_GPU
-  bool is_reused_ = false;
-  uint64_t reused_tensor_offset_ = 0;
+  // bool is_reused_ = false;
+  uint64_t device_ptr_offset_ = 0;
   bool destruct_cuda_ipc_mem_handle_ = false;
+  off_t raw_shm_offset_ = 0;
   off_t shm_offset_ = 0;
 
  public:
@@ -143,9 +152,6 @@ class PbTensor {
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
 #ifdef TRITON_ENABLE_GPU
-  /// Set the cudaIpcMemHandle for the tensors that are reused.
-  /// \param cuda_ipc_mem_handle reusued tensor cudaIpcMemHandle
-  void SetReusedIpcHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle);
 
   /// Get the GPU start address.
   /// \return The start address of a device pointer.
@@ -155,6 +161,13 @@ class PbTensor {
   /// Get the cuda IPC handle corresponding to this tensor.
   /// \return The cudaIpcMemHandle
   cudaIpcMemHandle_t* CudaIpcMemHandle();
+
+  /// Set the cuda IPC handle corresponding to this tensor.
+  /// \param cuda_ipc_mem_handle CUDA ipc mem handle.
+  void SetCudaIpcMemHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
+  {
+    cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+  }
 
   /// Get the GPU pointer offset.
   /// \return The offset of a device pointer.
@@ -169,10 +182,18 @@ class PbTensor {
   const py::array& AsNumpy() const;
 #endif
 
+#ifndef TRITON_PB_STUB
+  /// Set the backend memory object that holds the data for GPU tensors.
+  /// \param backend_memory Backend memory.
+  void SetBackendMemory(
+      std::unique_ptr<BackendMemory> backend_memory,
+      std::unique_ptr<SharedMemory>& shm_pool);
+#endif
+
   /// Save tensor inside shared memory.
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm,
-      bool copy = true);
+      bool copy_cpu, bool copy_gpu);
 
   /// Get the triton dtype
   /// \return Triton dtype
@@ -182,6 +203,14 @@ class PbTensor {
   /// no longer required.
   void DeleteDLPack();
 
+  /// Shared memory offset of the raw pointer.
+  off_t RawShmOffset();
+
+  /// Shared memory offset of the tensor.
+  off_t ShmOffset() {
+    return shm_offset_;
+  }
+
   /// Get the type of the tensor
   /// \return Type of the tensor.
   PYTHONBACKEND_TensorType TensorType() const;
@@ -190,8 +219,6 @@ class PbTensor {
   /// \return A boolean value indicating whether the tensor is stored in CPU
   /// or not.
   bool IsCPU() const;
-
-  bool IsReused();
 
   /// Get the total byte size of the tensor.
   uint64_t ByteSize() const;
@@ -211,6 +238,16 @@ class PbTensor {
   /// Set the underlying pointer to use. This must be only used when the tensor
   /// is being reused.
   void SetDataPtr(void* ptr);
+
+  /// After the GPU tensor buffer is provided, copy the data to the output
+  /// buffers.
+  void LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool, std::mutex& gpu_load_mutex);
+  void CopyToCPU(std::unique_ptr<SharedMemory>& shm_pool);
+
+  Tensor* SharedMemoryObject() { return tensor_shm_; }
+
+
+  RawData* RawDataShm() { return raw_data_shm_; }
 
   /// Get the memory type id.
   /// \return The memory type id of the tensor.

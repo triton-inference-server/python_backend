@@ -142,15 +142,6 @@ set(
   src/shm_manager.h
 )
 
-if(${TRITON_ENABLE_GPU})
-  include_directories(PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-  list(APPEND
-    COMMON_SRCS
-    src/tensor_manager.cc
-    src/tensor_manager.h
-  )
-endif() # TRITON_ENABLE_GPU
-
 set(
   PYTHNON_BACKEND_SRCS
   src/python.cc

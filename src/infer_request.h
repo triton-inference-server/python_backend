@@ -67,7 +67,6 @@ class InferRequest {
       std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset);
 #ifdef TRITON_PB_STUB
   std::unique_ptr<InferResponse> Exec();
-  py::object AsyncExec();
 #endif
 };
 }}};  // namespace triton::backend::python
