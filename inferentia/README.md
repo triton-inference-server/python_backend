@@ -70,7 +70,7 @@ Note 3: For Triton container version xx.yy, please refer to
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup-pytorch.sh
+source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
 ```
 This script will:
 1. Setup miniconda enviroment
@@ -84,7 +84,7 @@ There are user configurable options available for the script as well.
 For example, to control the python version for the python environment to 3.6, 
 you can run:
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup-pytorch.sh -v 3.6
+source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
 ```
 Please use the `-h` or `--help` options to learn about more configurable options.
 
