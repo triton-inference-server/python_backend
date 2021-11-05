@@ -50,12 +50,13 @@ Clone this repo with Github to home repo `/home/ubuntu`.
 Ensure that the neuron runtime 1.0 demon (neuron-rtd) is not running and set up
 and install neuron 2.X runtime builds with
 ```
- sudo ./python_backend/setup-pre-container.sh
+chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
 ```
 
 Then, start the Triton instance with:
 ``` 
-docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g -e "AWS_NEURON_VISIBLE_DEVICES=ALL" --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
+docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
 Note 1: The user would need to list any neuron device to run during container initialization.
 For example, to use 4 neuron devices on an instance, the user would need to run with:
@@ -70,7 +71,7 @@ Note 3: For Triton container version xx.yy, please refer to
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup .sh
+source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
 ```
 This script will:
 1. Setup miniconda enviroment
@@ -87,6 +88,18 @@ you can run:
 source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
 ```
 Please use the `-h` or `--help` options to learn about more configurable options.
+## Compile Inferentia Model
+
+The user is required to create their own `*.pt` or `*.pb` models. This is 
+a critical step since Inferentia will need the underlying `.NEFF` graph to execute
+the inference request. Please refer to: 
+- [Neuron compiler CLI Reference Guide](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/command-line-reference.html)
+- [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
+- [PyTorch Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/tutorials/index.html) 
+- [TensorFlow Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html)
+  
+for guidance on how to compile models.
+
 
 ## Setting up the Inferentia model
 
