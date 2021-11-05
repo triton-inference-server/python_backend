@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 # Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -28,7 +28,7 @@
 USAGE="
 usage: test_script.sh [options]
 
-Sets up enviroment for Inferentia-neuron
+Sets up python execution environment for AWS Neuron SDK for execution on Inferentia chips.
 -h|--help                  Shows usage
 -b|--python-backend-path   Python backend path, default is: /home/ubuntu/python_backend
 -v|--python-version        Python version, default is 3.7
@@ -44,8 +44,8 @@ OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,infe
 export INFRENTIA_PATH="/home/ubuntu"
 export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
-export USE_PYTORCH=1
-export USE_TENSORFLOW=1
+export USE_PYTORCH=0
+export USE_TENSORFLOW=0
 for OPTS; do
     case "$OPTS" in
         -h|--help)
@@ -68,19 +68,19 @@ for OPTS; do
         shift 2
         ;;
         -t|--use-tensorflow)
-        USE_TENSORFLOW=0
+        USE_TENSORFLOW=1
         echo "Installing tensorflow-neuron"
         shift 1
         ;;
         -p|--use-pytorch)
-        USE_PYTORCH=0
+        USE_PYTORCH=1
         echo "Installing pytorch-neuron"
         shift 1
         ;;
     esac
 done
 
-if [ $USE_TENSORFLOW -ne 0 ] && [ $USE_PYTORCH -ne 0 ]
+if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]
 then
     echo "Need to specify either -p (use pytorch) or -t (use tensorflow)."
     printf "%s\\n" "$USAGE"
@@ -133,7 +133,7 @@ make triton-python-backend-stub -j16
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 
-if [ $USE_TENSORFLOW -eq 0 ]
+if [ $USE_TENSORFLOW -eq 1 ]
 then
     conda install tensorflow-neuron pillow -y
     #Update Neuron TensorFlow
@@ -142,7 +142,7 @@ then
     pip install --upgrade tensorboard-plugin-neuron
 fi
 
-if [ $USE_PYTORCH -eq 0 ]
+if [ $USE_PYTORCH -eq 1 ]
 then
     conda install torch-neuron torchvision -y
     # Upgrade torch-neuron and install transformers

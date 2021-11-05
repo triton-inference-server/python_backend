@@ -57,7 +57,7 @@ Then, start the Triton instance with:
 ``` 
 docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g -e "AWS_NEURON_VISIBLE_DEVICES=ALL" --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
-Note 1: The user would need to list any new neuron device to run during container initialization.
+Note 1: The user would need to list any neuron device to run during container initialization.
 For example, to use 4 neuron devices on an instance, the user would need to run with:
 ```
 docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
@@ -70,7 +70,7 @@ Note 3: For Triton container version xx.yy, please refer to
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
+source /home/ubuntu/python_backend/inferentia/scripts/setup .sh
 ```
 This script will:
 1. Setup miniconda enviroment
@@ -128,4 +128,4 @@ Note:
 1. The `config.pbtxt` and `model.py` should be treated as
 starting point. The users can customize these files as per
 their need.
-2. Triton Inferentia currently only works with **single** models. 
+2. Triton Inferentia currently only works with **single** model. 
