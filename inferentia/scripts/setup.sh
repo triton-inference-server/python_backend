@@ -28,28 +28,31 @@
 USAGE="
 usage: test_script.sh [options]
 
-Sets up enviroment for neuron-pytorch
+Sets up python execution environment for AWS Neuron SDK for execution on Inferentia chips.
 -h|--help                  Shows usage
--p|--python-backend-path   Python backend path, default is: /home/ubuntu/python_backend
+-b|--python-backend-path   Python backend path, default is: /home/ubuntu/python_backend
 -v|--python-version        Python version, default is 3.7
 -i|--inferentia-path       Inferentia path, default is: /home/ubuntu
+-p|--use-pytorch           Install pytorch-neuron if specified
+-t|--use-tensorflow        Install tensorflow-neuron if specified
 "
 
 # Get all options:
-OPTS=$(getopt -o hp:v:i: --long help,python-backend-path:,python-version:,inferentia-path: -- "$@")
+OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch -- "$@")
 
 
 export INFRENTIA_PATH="/home/ubuntu"
 export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
-
+export USE_PYTORCH=0
+export USE_TENSORFLOW=0
 for OPTS; do
     case "$OPTS" in
         -h|--help)
         printf "%s\\n" "$USAGE"
-        exit 2
+        return 0
         ;;
-        -p|--python-backend-path)
+        -b|--python-backend-path)
         PYTHON_BACKEND_PATH=$2
         echo "Python backend path set to ${PYTHON_BACKEND_PATH}"
         shift 2
@@ -64,11 +67,30 @@ for OPTS; do
         echo "Inferentia path set to ${INFRENTIA_PATH}"
         shift 2
         ;;
+        -t|--use-tensorflow)
+        USE_TENSORFLOW=1
+        echo "Installing tensorflow-neuron"
+        shift 1
+        ;;
+        -p|--use-pytorch)
+        USE_PYTORCH=1
+        echo "Installing pytorch-neuron"
+        shift 1
+        ;;
     esac
 done
+
+if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]
+then
+    echo "Need to specify either -p (use pytorch) or -t (use tensorflow)."
+    printf "%s\\n" "$USAGE"
+    return 1
+fi
+
 # Get latest conda required https://repo.anaconda.com/miniconda/
 cd ${INFRENTIA_PATH}
 export CONDA_PATH=${INFRENTIA_PATH}/miniconda
+rm -rf $CONDA_PATH
 wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-py37_4.10.3-Linux-x86_64.sh \
          -O ${PWD}/miniconda.sh --no-check-certificate && \
     /bin/bash ${PWD}/miniconda.sh -b -p ${CONDA_PATH} && \
@@ -82,7 +104,6 @@ apt-get update && \
     apt-get install -y --no-install-recommends \
               zlib1g-dev \
               wget \
-              python3-pip      \
               libarchive-dev   \
               rapidjson-dev
 
@@ -106,36 +127,32 @@ rm -rf build && mkdir build && cd build
 cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 make triton-python-backend-stub -j16
 
-# Install Neuron Pytorch
-# https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-intro/install-pytorch.html
-cd ${INFRENTIA_PATH}
-. /etc/os-release
-tee /etc/apt/sources.list.d/neuron.list > /dev/null <<EOF
-deb https://apt.repos.neuron.amazonaws.com ${VERSION_CODENAME} main
-EOF
-wget -qO - https://apt.repos.neuron.amazonaws.com/GPG-PUB-KEY-AMAZON-AWS-NEURON.PUB |  apt-key add -
-apt-get update && \ 
-    apt-get install -y       \
-        linux-headers-$(uname -r) \
-        aws-neuron-dkms           \
-        aws-neuron-runtime-base   \
-        aws-neuron-runtime        \
-        aws-neuron-tools 
-export PATH=/opt/aws/neuron/bin:$PATH
-
-# Install Neuron-pytorch (neuron-cc)
-conda config --env --add channels https://conda.repos.neuron.amazonaws.com
-conda install torch-neuron -y
-
-# Upgrade torch-neuron and install transformers
-# need to use pip to update: 
-# https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
+# Set Pip repository  to point to the Neuron repository
+# since we need to use pip to update: 
+#  https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
-pip install --upgrade torch-neuron torchvision "transformers==4.6.0"
+conda config --env --add channels https://conda.repos.neuron.amazonaws.com
+
+if [ $USE_TENSORFLOW -eq 1 ]
+then
+    conda install tensorflow-neuron pillow -y
+    #Update Neuron TensorFlow
+    pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
+    # Update Neuron TensorBoard
+    pip install --upgrade tensorboard-plugin-neuron
+fi
+
+if [ $USE_PYTORCH -eq 1 ]
+then
+    conda install torch-neuron torchvision -y
+    # Upgrade torch-neuron and install transformers
+    pip install --upgrade torch-neuron neuron-cc[tensorflow] torchvision "transformers==4.6.0"
+fi
 
 # Upgrade the python backend stub, rules and sockets
 cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub \
         /opt/tritonserver/backends/python/triton_python_backend_stub
 cp /mylib/udev/rules.d/* /lib/udev/rules.d/
-ln -s /myrun/neuron.sock /run/neuron.sock
 export LD_LIBRARY_PATH=${CONDA_PATH}/envs/test_conda_env/lib:$LD_LIBRARY_PATH
+
+cd ${INFRENTIA_PATH}
