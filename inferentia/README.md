@@ -47,33 +47,44 @@ After logging into the inf1* instance, you will need to clone
 or simply clone with https.
 Clone this repo with Github to home repo `/home/ubuntu`.
 
-Then, start the Triton instance with:
-``` 
-docker run -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev -v /run:/myrun --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
+Ensure that the neuron runtime 1.0 demon (neuron-rtd) is not running and set up
+and install neuron 2.X runtime builds with
+```
+ sudo ./python_backend/setup-pre-container.sh
 ```
 
-Where `/mylib/udev` and `/myrun` are used for Neuron parameter passing. 
-For Triton container version xx.yy, please refer to 
+Then, start the Triton instance with:
+``` 
+docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g -e "AWS_NEURON_VISIBLE_DEVICES=ALL" --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
+```
+Note 1: The user would need to list any neuron device to run during container initialization.
+For example, to use 4 neuron devices on an instance, the user would need to run with:
+```
+docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
+```
+Note 2: `/mylib/udev` is used for Neuron parameter passing. 
+
+Note 3: For Triton container version xx.yy, please refer to 
 [Triton Inference Server Container Release Notes](https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/index.html).
- The current build script has been tested with container version `21.09`. 
+ The current build script has been tested with container version `21.10`. 
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup-pytorch.sh
+source /home/ubuntu/python_backend/inferentia/scripts/setup .sh
 ```
 This script will:
 1. Setup miniconda enviroment
 2. Install necessary dependencies
 3. Create a [Custom Python Execution Environment](https://github.com/triton-inference-server/python_backend#using-custom-python-execution-environments), 
    `python_backend_stub` to use for Inferentia
-5. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html),
+4. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html),
     the Neuron compiler and [neuron-rtd](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-runtime/overview.html) the Neuron Runtime
 
 There are user configurable options available for the script as well. 
 For example, to control the python version for the python environment to 3.6, 
 you can run:
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup-pytorch.sh -v 3.6
+source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
 ```
 Please use the `-h` or `--help` options to learn about more configurable options.
 
@@ -113,6 +124,8 @@ Now, the server can be launched with the model as below:
 tritonserver --model-repository <path_to_model_repository>
 ```
 
-Note: The `config.pbtxt` and `model.py` should be treated as
+Note: 
+1. The `config.pbtxt` and `model.py` should be treated as
 starting point. The users can customize these files as per
 their need.
+2. Triton Inferentia currently only works with **single** model. 
