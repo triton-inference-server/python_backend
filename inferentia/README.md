@@ -96,8 +96,17 @@ Once the TorchScript model supporting Inferentia is obtained, use the [gen_trito
 An example invocation for the `gen_triton_model.py` can look like:
 
 ```
- $python3 inferentia/scripts/gen_triton_model.py --triton_input INPUT0,FP16,4x384 INPUT1,FP16,4x384 INPUT2,FP16,4x384 --triton_output OUTPUT0,FP16,4x384 OUTPUT1,FP16,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --triton_model_dir bert-large-mlperf-bs1x4
+ $python3 inferentia/scripts/gen_triton_model.py --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
 ```
+
+NOTE: As the compiled torch script model does not carry sufficient
+model metadata, user is expected to follow naming convention of
+`<name>__<index>`. The index will let triton write/read data
+to/from the model in correct order irrespective of how they are
+specified in `config.pbtxt`. The indices should be consecutive
+integers starting from 0. Additionally, `--neuron-core-range`
+provides the neuron cores to be used while serving these models.
+Currently, only `torch.neuron.DataParallel()` mode is supported.
 
 The invocation should create a triton model directory with following
 structutre:
