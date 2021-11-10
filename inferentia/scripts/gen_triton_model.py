@@ -160,7 +160,7 @@ def get_initialize_impl():
                 config_input['name'], config_input['data_type'],
                 config_input['dims']
             ]
-            expected_input_count = expected_input_count + 1
+            expected_input_count += 1
         self._validate_input_dict(expected_input_count)
 
         self.output_dict = {}
