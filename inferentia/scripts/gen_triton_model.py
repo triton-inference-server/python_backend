@@ -209,6 +209,10 @@ def get_initialize_impl():
         num_threads = (nc_end_idx - nc_start_idx + 1) * threads_per_core
 
         total_core_count = nc_end_idx - nc_start_idx + 1
+        if (instance_count > total_core_count):
+            raise pb_utils.TritonModelException(
+                    "can not distribute {} triton model instances to {} neuron cores"
+                    .format(instance_count, total_core_count))
         cores_per_instance = total_core_count // instance_count
         adjusted_nc_start_idx = (instance_idx *
                                  cores_per_instance) + nc_start_idx
