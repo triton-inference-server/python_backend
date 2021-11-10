@@ -111,7 +111,9 @@ INPUT__1 refers to the second input, etc.
 
 Additionally, `--neuron-core-range` specifies the neuron cores to
 be used while serving this models. Currently, only
-`torch.neuron.DataParallel()` mode is supported.
+`torch.neuron.DataParallel()` mode is supported. See
+[Data Parallel Inference](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/torch-neuron-dataparallel-app-note.html)
+for more information.
 
 The invocation should create a triton model directory with following
 structutre:
