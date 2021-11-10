@@ -99,14 +99,19 @@ An example invocation for the `gen_triton_model.py` can look like:
  $python3 inferentia/scripts/gen_triton_model.py --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
 ```
 
-NOTE: As the compiled torch script model does not carry sufficient
-model metadata, user is expected to follow naming convention of
-`<name>__<index>`. The index will let triton write/read data
-to/from the model in correct order irrespective of how they are
-specified in `config.pbtxt`. The indices should be consecutive
-integers starting from 0. Additionally, `--neuron-core-range`
-provides the neuron cores to be used while serving these models.
-Currently, only `torch.neuron.DataParallel()` mode is supported.
+NOTE: Due to the absence of names for inputs and outputs in a
+TorchScript model, the name of tensor of both the inputs and
+outputs provided to the above script must follow a specific naming
+convention i.e. `<name>__<index>`. Where `<name>` can be any
+string and `<index>` refers to the position of the corresponding
+input/output. This means if there are two inputs and two outputs
+they must be named as: "INPUT__0", "INPUT__1" and "OUTPUT__0",
+"OUTPUT__1" such that "INPUT__0" refers to first input and
+INPUT__1 refers to the second input, etc.
+
+Additionally, `--neuron-core-range` specifies the neuron cores to
+be used while serving this models. Currently, only
+`torch.neuron.DataParallel()` mode is supported.
 
 The invocation should create a triton model directory with following
 structutre:

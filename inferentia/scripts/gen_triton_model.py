@@ -122,15 +122,15 @@ def get_initialize_impl():
 
     def _validate_input_dict(self, expected_count):
         for i in range(expected_count):
-            if not (i in self.input_dict):
+            if i not in self.input_dict:
                 raise pb_utils.TritonModelException(
-                    "index {} not found in input names".format(i))
+                    "input corresponding to index {} not found".format(i))
 
     def _validate_output_dict(self, expected_count):
         for i in range(expected_count):
-            if not (i in self.output_dict):
+            if i not in self.output_dict:
                 raise pb_utils.TritonModelException(
-                    "index {} not found in output names".format(i))
+                    "output corresponding to index {} not found".format(i))
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
@@ -153,17 +153,16 @@ def get_initialize_impl():
         self.model_config = model_config = json.loads(args['model_config'])
 
         self.input_dict = {}
-        expected_count = 0
+        expected_input_count = 0
         for config_input in model_config['input']:
             index = self._validate_and_get_index(config_input['name'])
             self.input_dict[index] = [
                 config_input['name'], config_input['data_type'],
                 config_input['dims']
             ]
-            expected_count = expected_count + 1
-        self._validate_input_dict(expected_count)
+            expected_input_count = expected_input_count + 1
+        self._validate_input_dict(expected_input_count)
 
-        expected_count = 0
         self.output_dict = {}
         for config_output in model_config['output']:
             index = self._validate_and_get_index(config_output['name'])
@@ -171,14 +170,19 @@ def get_initialize_impl():
                 config_output['name'], config_output['data_type'],
                 config_output['dims']
             ]
-            expected_count = expected_count + 1
-        self._validate_output_dict(expected_count)
 
         params = model_config['parameters']
         compiled_model = params['COMPILED_MODEL']['string_value']
         nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
         nc_end_idx = int(params['NEURON_CORE_END_INDEX']['string_value'])
+        if nc_end_idx < nc_start_idx:
+            raise pb_utils.TritonModelException(
+                "the neuron core end index should be greater than or equal to the start index")
+
         threads_per_core = int(params['NUM_THREADS_PER_CORE']['string_value'])
+        if threads_per_core < 1:
+            raise pb_utils.TritonModelException(
+                "the number of threads per core should be greater than or equal to 1")
         num_threads = (nc_end_idx - nc_start_idx + 1) * threads_per_core
 
         # FIXME: Should distribute equally for multiple instance case
@@ -230,7 +234,7 @@ def get_execute_impl():
             results = self.model_neuron(*inputs)
 
             output_tensors = []
-            for i in range(len(self.output_dict)):
+            for i in self.output_dict.keys():
                 name, dt, shape = self.output_dict[i]
                 output_tensor = pb_utils.Tensor(
                     name, results[i].numpy().astype(
