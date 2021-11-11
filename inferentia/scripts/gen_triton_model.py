@@ -43,8 +43,8 @@ def get_parameter_spec(key1, value):
     return param_spec
 
 def create_modelconfig(model_name, max_batch_size, inputs, outputs,
-                       compiled_model_path, avbl_neuron_cores_count,
-                       threads_per_core, batch_per_thread):
+                       compiled_model_path, nc_start_idx, nc_end_idx,
+                       threads_per_core):
     config = "name: \"{}\"\n".format(model_name)
     config += "backend: \"python\"\n"
     config += "max_batch_size: {}\n".format(max_batch_size)
@@ -70,9 +70,9 @@ output [
 ]\n'''.format(output_name, "TYPE_" + data_type, shape)
     config += "instance_group [ { kind: KIND_MODEL }]\n"
     config += get_parameter_spec("COMPILED_MODEL", compiled_model_path)
-    config += get_parameter_spec("AVAIL_NEURONCORES", avbl_neuron_cores_count)
-    config += get_parameter_spec("NUM_THREADS_PER_PREDICTOR", threads_per_core)
-    config += get_parameter_spec("BATCH_PER_THREAD", batch_per_thread)
+    config += get_parameter_spec("NEURON_CORE_START_INDEX", nc_start_idx)
+    config += get_parameter_spec("NEURON_CORE_END_INDEX", nc_end_idx)
+    config += get_parameter_spec("NUM_THREADS_PER_CORE", threads_per_core)
     return config
 
 def get_model_license():
@@ -104,88 +104,34 @@ def get_model_license():
     '''
     return lic
 
-def get_neuron_simple_data_parallel_impl():
-    neuron_sdpi = '''\n
-class NeuronSimpleDataParallel():
-
-    def __init__(self, model_file, num_neuron_cores, num_threads, batch_size):
-        # Construct a list of models
-        self.num_neuron_cores = num_neuron_cores
-        self.batch_size = batch_size
-        self.num_threads = num_threads
-
-        class SimpleWrapper():
-
-            def __init__(self, model):
-                self.model = model
-
-            def eval(self):
-                self.model.eval()
-
-            def train(self):
-                self.model.train()
-
-            def __call__(self, *inputs):
-                results = self.model(*inputs)
-                # Make the output iterable - if it is not already a tuple or list
-                if not isinstance(results, tuple) or isinstance(results, list):
-                    results = [results]
-
-                return results
-
-        self.models = [
-            SimpleWrapper(torch.jit.load(model_file))
-            for i in range(self.num_threads)
-        ]
-        nc_env = ','.join(['1'] * num_neuron_cores)
-        os.environ['NEURONCORE_GROUP_SIZES'] = nc_env
-
-        self.executor = futures.ThreadPoolExecutor(max_workers=self.num_threads)
-
-    def eval(self):
-        for m in self.models:
-            m.eval()
-
-    def train(self):
-        for m in self.models:
-            m.train()
-
-    def __call__(self, *args):
-
-        args_per_core = [None for i in range(self.num_threads)]
-        # Split args
-        for a in args:
-
-            # Based on batch size for arg
-            step_size = self.batch_size
-            for i in range(self.num_threads):
-                # Append a slice of a view
-                start = i * step_size
-                end = (i + 1) * step_size
-
-                # Slice
-                args_per_core[i] = []
-                for input in a:
-                    args_per_core[i].append(input[start:end])
-        # Call each core with their split and wait to complete
-        running = {
-            self.executor.submit(self.models[idx], *args_per_core[idx]): idx
-            for idx in range(self.num_threads)
-        }
-
-        results = [None] * self.num_threads
-
-        for future in futures.as_completed(running):
-            idx = running[future]
-            results[idx] = future.result()
-
-        return results
-    
-    '''
-    return neuron_sdpi
-
 def get_initialize_impl():
     init_impl = '''
+    def _validate_and_get_index(self, name):
+        parts = name.split('__')
+        if len(parts) != 2:
+            raise pb_utils.TritonModelException(
+                "tensor names are expected to be in format <name>__<index>, got {}"
+                .format(name))
+
+        if not parts[1].isnumeric():
+            raise pb_utils.TritonModelException(
+                "tensor names are expected to be in format <name>__<index> where <index> should be numeric, got {}"
+                .format(name))
+
+        return int(parts[1])
+
+    def _validate_input_dict(self, expected_count):
+        for i in range(expected_count):
+            if i not in self.input_dict:
+                raise pb_utils.TritonModelException(
+                    "input corresponding to index {} not found".format(i))
+
+    def _validate_output_dict(self, expected_count):
+        for i in range(expected_count):
+            if i not in self.output_dict:
+                raise pb_utils.TritonModelException(
+                    "output corresponding to index {} not found".format(i))
+
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
@@ -207,29 +153,46 @@ def get_initialize_impl():
         self.model_config = model_config = json.loads(args['model_config'])
 
         self.input_dict = {}
+        expected_input_count = 0
         for config_input in model_config['input']:
-            self.input_dict[config_input['name']] = [
-                config_input['data_type'], config_input['dims']
+            index = self._validate_and_get_index(config_input['name'])
+            self.input_dict[index] = [
+                config_input['name'], config_input['data_type'],
+                config_input['dims']
             ]
+            expected_input_count += 1
+        self._validate_input_dict(expected_input_count)
 
         self.output_dict = {}
         for config_output in model_config['output']:
-            self.output_dict[config_output['name']] = [
-                config_output['data_type'], config_output['dims']
+            index = self._validate_and_get_index(config_output['name'])
+            self.output_dict[index] = [
+                config_output['name'], config_output['data_type'],
+                config_output['dims']
             ]
 
         params = model_config['parameters']
         compiled_model = params['COMPILED_MODEL']['string_value']
-        avbl_neuron_cores_count = int(
-            params['AVAIL_NEURONCORES']['string_value'])
-        threads_per_core = int(
-            params['NUM_THREADS_PER_PREDICTOR']['string_value'])
-        batch_per_thread = int(params['BATCH_PER_THREAD']['string_value'])
-        self.num_threads = avbl_neuron_cores_count * threads_per_core
-        self.model_neuron = NeuronSimpleDataParallel(compiled_model,
-                                                     avbl_neuron_cores_count,
-                                                     self.num_threads,
-                                                     batch_per_thread)
+        nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
+        nc_end_idx = int(params['NEURON_CORE_END_INDEX']['string_value'])
+        if nc_end_idx < nc_start_idx:
+            raise pb_utils.TritonModelException(
+                "the neuron core end index should be greater than or equal to the start index")
+
+        threads_per_core = int(params['NUM_THREADS_PER_CORE']['string_value'])
+        if threads_per_core < 1:
+            raise pb_utils.TritonModelException(
+                "the number of threads per core should be greater than or equal to 1")
+        num_threads = (nc_end_idx - nc_start_idx + 1) * threads_per_core
+
+        # FIXME: Should distribute equally for multiple instance case
+        consumed_cores_list = []
+        for i in range(nc_start_idx, (nc_end_idx + 1)):
+            consumed_cores_list.append(i)
+
+        self.model_neuron = torch.neuron.DataParallel(
+            torch.jit.load(compiled_model), device_ids=consumed_cores_list)
+        self.model_neuron.num_workers = num_threads
 
 '''
     return init_impl
@@ -261,29 +224,28 @@ def get_execute_impl():
         responses = []
 
         for request in requests:
-            num_threads = self.num_threads
             inputs = []
-            for name in self.input_dict.keys():
+            for i in range(len(self.input_dict)):
+                name, dt, shape = self.input_dict[i]
                 tensor = pb_utils.get_input_tensor_by_name(request,
                                                            name).as_numpy()
-                inputs.append(torch.LongTensor(tensor))
-            results = self.model_neuron(inputs)
+                inputs.append(torch.as_tensor(tensor))
+
+            results = self.model_neuron(*inputs)
 
             output_tensors = []
-            for name in self.output_dict.keys():
-                result_shards = []
-                for i in range(num_threads):
-                    result_shards.append(results[i][len(output_tensors)])
-                merged_result = np.concatenate(result_shards, axis=0)
-                dt, shape = self.output_dict[name]
-                output_tensor = pb_utils.Tensor(name,
-                                           merged_result.astype(pb_utils.triton_string_to_numpy(dt)))
+            for i in self.output_dict.keys():
+                name, dt, shape = self.output_dict[i]
+                output_tensor = pb_utils.Tensor(
+                    name, results[i].numpy().astype(
+                        pb_utils.triton_string_to_numpy(dt)))
 
                 output_tensors.append(output_tensor)
 
             inference_response = pb_utils.InferenceResponse(
                 output_tensors=output_tensors)
             responses.append(inference_response)
+
         return responses
 '''
     return exec_impl
@@ -327,7 +289,6 @@ import torch.neuron
 import triton_python_backend_utils as pb_utils
     '''
 
-    triton_model += get_neuron_simple_data_parallel_impl()
     triton_model += get_triton_python_model_impl()
 
     return triton_model
@@ -369,18 +330,19 @@ if __name__ == '__main__':
                         type=str,
                         required=True,
                         help='Fullpath to the compiled model')
-    parser.add_argument('--avbl_neuron_cores_count',
-                        type=int,
-                        default=4,
-                        help='The number of available neuron cores')
+    parser.add_argument('--neuron_core_range',
+                        type=str,
+                        required=True,
+                        help='''The range of neuron core indices
+                        where the model needs to be loaded. The
+                        range should be specified in format
+                        <start_idx>:<end_idx>. For example to
+                        load model on neuron cores (0-7), specify
+                        the following: 0:7''')
     parser.add_argument('--threads_per_core',
                         type=int,
                         default=1,
                         help='The number of threads per neuron core')
-    parser.add_argument('--batch_per_thread',
-                        type=int,
-                        default=1,
-                        help='The batch size per threads')
     parser.add_argument('--triton_model_dir',
                         type=str,
                         required=True,
@@ -392,6 +354,8 @@ if __name__ == '__main__':
     inputs = parse_io_tensors(FLAGS.triton_input)
     outputs = parse_io_tensors(FLAGS.triton_output)
 
+    nc_start_idx, nc_end_idx = [int(i) for i in FLAGS.neuron_core_range.split(":")]
+
     model_version_dir = FLAGS.triton_model_dir + "/" + str(FLAGS.model_version)
     try:
         os.makedirs(model_version_dir)
@@ -400,8 +364,8 @@ if __name__ == '__main__':
 
     model_name = os.path.basename(FLAGS.triton_model_dir)
     mc = create_modelconfig(model_name, FLAGS.max_batch_size, inputs, outputs,
-                            FLAGS.compiled_model, FLAGS.avbl_neuron_cores_count,
-                            FLAGS.threads_per_core, FLAGS.batch_per_thread)
+                            FLAGS.compiled_model, nc_start_idx, nc_end_idx,
+                            FLAGS.threads_per_core)
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 
