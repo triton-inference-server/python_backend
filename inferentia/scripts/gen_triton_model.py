@@ -44,7 +44,7 @@ def get_parameter_spec(key1, value):
 
 def create_modelconfig(model_name, max_batch_size, inputs, outputs,
                        compiled_model_path, nc_start_idx, nc_end_idx,
-                       threads_per_core):
+                       threads_per_core, instance_count):
     config = "name: \"{}\"\n".format(model_name)
     config += "backend: \"python\"\n"
     config += "max_batch_size: {}\n".format(max_batch_size)
@@ -68,7 +68,13 @@ output [
     dims: {}
   }}
 ]\n'''.format(output_name, "TYPE_" + data_type, shape)
-    config += "instance_group [ { kind: KIND_MODEL }]\n"
+    config += '''
+instance_group [
+    {{
+        kind: KIND_MODEL
+        count: {}
+    }}
+]\n'''.format(instance_count)
     config += get_parameter_spec("COMPILED_MODEL", compiled_model_path)
     config += get_parameter_spec("NEURON_CORE_START_INDEX", nc_start_idx)
     config += get_parameter_spec("NEURON_CORE_END_INDEX", nc_end_idx)
@@ -152,6 +158,23 @@ def get_initialize_impl():
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
 
+        if (len(model_config['instance_group']) != 1):
+            raise pb_utils.TritonModelException(
+                "this model supports only a single instance group, got {}".
+                format(len(model_config['instance_group'])))
+
+        instance_group_config = model_config['instance_group'][0]
+        instance_count = instance_group_config['count']
+
+        instance_idx = 0
+        if instance_count > 1:
+            instance_name_parts = args['model_instance_name'].split("_")
+            if not instance_name_parts[-1].isnumeric():
+                raise pb_utils.TritonModelException(
+                    "internal error: the model instance name should end with \'_<instance_idx>\', got {}"
+                    .format(args['model_instance_name']))
+            instance_idx = int(instance_name_parts[-1])
+
         self.input_dict = {}
         expected_input_count = 0
         for config_input in model_config['input']:
@@ -185,10 +208,20 @@ def get_initialize_impl():
                 "the number of threads per core should be greater than or equal to 1")
         num_threads = (nc_end_idx - nc_start_idx + 1) * threads_per_core
 
-        # FIXME: Should distribute equally for multiple instance case
-        consumed_cores_list = []
-        for i in range(nc_start_idx, (nc_end_idx + 1)):
-            consumed_cores_list.append(i)
+        total_core_count = nc_end_idx - nc_start_idx + 1
+        if (instance_count > total_core_count):
+            raise pb_utils.TritonModelException(
+                    "can not distribute {} triton model instances to {} neuron cores"
+                    .format(instance_count, total_core_count))
+        cores_per_instance = total_core_count // instance_count
+        adjusted_nc_start_idx = (instance_idx *
+                                 cores_per_instance) + nc_start_idx
+        cores_range = '{}-{}'.format(
+            adjusted_nc_start_idx,
+            (adjusted_nc_start_idx + cores_per_instance - 1))
+        os.environ["NEURON_RT_VISIBLE_CORES"] = cores_range
+
+        consumed_cores_list = [i for i in range(cores_per_instance)]
 
         self.model_neuron = torch.neuron.DataParallel(
             torch.jit.load(compiled_model), device_ids=consumed_cores_list)
@@ -338,11 +371,22 @@ if __name__ == '__main__':
                         range should be specified in format
                         <start_idx>:<end_idx>. For example to
                         load model on neuron cores (0-7), specify
-                        the following: 0:7''')
+                        the following: 0:7. NOTE: when using
+                        multiple triton model instances the neuron
+                        cores will get equally distributed. Assuming
+                        the instance count is 4, Instance0 will get
+                        loaded on cores 0:1, Instance1 will get loaded
+                        on cores 2:3, Instance2 will get loaded on
+                        cores 4:5 and Instance 3 will get loaded on
+                        cores 6:7''')
     parser.add_argument('--threads_per_core',
                         type=int,
                         default=1,
-                        help='The number of threads per neuron core')
+                        help='The number of threads per neuron core.')
+    parser.add_argument('--triton_model_instance_count',
+                        type=int,
+                        default=1,
+                        help='The number of triton model instances.')
     parser.add_argument('--triton_model_dir',
                         type=str,
                         required=True,
@@ -365,7 +409,7 @@ if __name__ == '__main__':
     model_name = os.path.basename(FLAGS.triton_model_dir)
     mc = create_modelconfig(model_name, FLAGS.max_batch_size, inputs, outputs,
                             FLAGS.compiled_model, nc_start_idx, nc_end_idx,
-                            FLAGS.threads_per_core)
+                            FLAGS.threads_per_core, FLAGS.triton_model_instance_count)
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 
