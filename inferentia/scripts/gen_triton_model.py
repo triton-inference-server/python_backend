@@ -69,7 +69,7 @@ output [
   }}
 ]\n'''.format(output_name, "TYPE_" + data_type, shape)
     config += '''
-instance_group [ 
+instance_group [
     {{
         kind: KIND_MODEL
         count: {}
