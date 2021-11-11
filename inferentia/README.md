@@ -109,11 +109,18 @@ they must be named as: "INPUT__0", "INPUT__1" and "OUTPUT__0",
 "OUTPUT__1" such that "INPUT__0" refers to first input and
 INPUT__1 refers to the second input, etc.
 
-Additionally, `--neuron-core-range` specifies the neuron cores to
+Additionally, `--neuron_core_range` specifies the neuron cores to
 be used while serving this models. Currently, only
 `torch.neuron.DataParallel()` mode is supported. See
 [Data Parallel Inference](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/torch-neuron-dataparallel-app-note.html)
-for more information.
+for more information. Triton model instance count can be specified
+by using  `--triton_model_instance_count` option. The neuron
+cores will be equally distributed among all instances. For example,
+in case of two triton model instances and 4 neuron cores, the first
+instance will be loaded on on cores 0-1 and second instance will be
+loaded on cores 2-3. To best engage inferentia device, try setting
+the number of neuron cores to be a proper multiple of the instance
+count.
 
 The invocation should create a triton model directory with following
 structutre:
