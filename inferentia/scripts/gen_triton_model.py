@@ -165,7 +165,7 @@ def get_model_license():
     '''
     return lic
 
-def get_tensorflow_initialize_impl():
+def get_common_initialize_impl():
     init_impl = '''
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
@@ -204,20 +204,6 @@ def get_tensorflow_initialize_impl():
                     .format(args['model_instance_name']))
             instance_idx = int(instance_name_parts[-1])
 
-        self.input_list = []
-        for config_input in model_config['input']:
-            self.input_list.append(
-                (config_input['name'], config_input['data_type'],
-                 config_input['dims']))
-
-        self.output_list = []
-        for config_output in model_config['output']:
-            self.output_list.append(
-                (config_output['name'], config_output['data_type'],
-                 config_output['dims']))
-
-        # TODO: Validate input/output from the model
-
         params = model_config['parameters']
         compiled_model = params['COMPILED_MODEL']['string_value']
         nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
@@ -240,6 +226,25 @@ def get_tensorflow_initialize_impl():
                 "can not distribute {} triton model instances to {} neuron cores"
                 .format(instance_count, total_core_count))
         cores_per_instance = total_core_count // instance_count
+'''
+    return init_impl
+
+def get_tensorflow_initialize_impl():
+    init_impl = get_common_initialize_impl()
+    init_impl += '''
+        self.input_list = []
+        for config_input in model_config['input']:
+            self.input_list.append(
+                (config_input['name'], config_input['data_type'],
+                 config_input['dims']))
+
+        self.output_list = []
+        for config_output in model_config['output']:
+            self.output_list.append(
+                (config_output['name'], config_output['data_type'],
+                 config_output['dims']))
+
+        # TODO: Validate input/output from the model
 
         # TODO: NEURONCORE_GROUP_SIZES is deprecated by AWS Neuron
         group_sizes = [str(1)] * cores_per_instance
@@ -282,44 +287,9 @@ def get_pytorch_initialize_impl():
             if i not in self.output_dict:
                 raise pb_utils.TritonModelException(
                     "output corresponding to index {} not found".format(i))
-
-    def initialize(self, args):
-        """`initialize` is called only once when the model is being loaded.
-        Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
-
-        Parameters
-        ----------
-        args : dict
-          Both keys and values are strings. The dictionary keys and values are:
-          * model_config: A JSON string containing the model configuration
-          * model_instance_kind: A string containing model instance kind
-          * model_instance_device_id: A string containing model instance device ID
-          * model_repository: Model repository path
-          * model_version: Model version
-          * model_name: Model name
-        """
-
-        # You must parse model_config. JSON string is not parsed here
-        self.model_config = model_config = json.loads(args['model_config'])
-
-        if (len(model_config['instance_group']) != 1):
-            raise pb_utils.TritonModelException(
-                "this model supports only a single instance group, got {}".
-                format(len(model_config['instance_group'])))
-
-        instance_group_config = model_config['instance_group'][0]
-        instance_count = instance_group_config['count']
-
-        instance_idx = 0
-        if instance_count > 1:
-            instance_name_parts = args['model_instance_name'].split("_")
-            if not instance_name_parts[-1].isnumeric():
-                raise pb_utils.TritonModelException(
-                    "internal error: the model instance name should end with \'_<instance_idx>\', got {}"
-                    .format(args['model_instance_name']))
-            instance_idx = int(instance_name_parts[-1])
-
+'''
+    init_impl += get_common_initialize_impl()
+    init_impl += '''
         self.input_dict = {}
         expected_input_count = 0
         for config_input in model_config['input']:
@@ -339,26 +309,6 @@ def get_pytorch_initialize_impl():
                 config_output['dims']
             ]
 
-        params = model_config['parameters']
-        compiled_model = params['COMPILED_MODEL']['string_value']
-        nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
-        nc_end_idx = int(params['NEURON_CORE_END_INDEX']['string_value'])
-        if nc_end_idx < nc_start_idx:
-            raise pb_utils.TritonModelException(
-                "the neuron core end index should be greater than or equal to the start index")
-
-        threads_per_core = int(params['NUM_THREADS_PER_CORE']['string_value'])
-        if threads_per_core < 1:
-            raise pb_utils.TritonModelException(
-                "the number of threads per core should be greater than or equal to 1")
-        num_threads = (nc_end_idx - nc_start_idx + 1) * threads_per_core
-
-        total_core_count = nc_end_idx - nc_start_idx + 1
-        if (instance_count > total_core_count):
-            raise pb_utils.TritonModelException(
-                    "can not distribute {} triton model instances to {} neuron cores"
-                    .format(instance_count, total_core_count))
-        cores_per_instance = total_core_count // instance_count
         adjusted_nc_start_idx = (instance_idx *
                                  cores_per_instance) + nc_start_idx
         cores_range = '{}-{}'.format(
