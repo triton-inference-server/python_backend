@@ -27,6 +27,7 @@
 import argparse
 import os
 
+
 def tf_to_triton_dtype(dtype):
     import tensorflow as tf
     if dtype == tf.float16:
@@ -55,15 +56,18 @@ def tf_to_triton_dtype(dtype):
         return "BOOL"
     elif dtype == tf.string:
         return "STRING"
-    
+
     raise Exception("The data type in the TF model is not supported")
+
 
 def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
     from tensorflow.python.tools import saved_model_utils
-    meta_graph_def = saved_model_utils.get_meta_graph_def(saved_model_dir, tag_set)
+    meta_graph_def = saved_model_utils.get_meta_graph_def(
+        saved_model_dir, tag_set)
 
     input_dict = {}
-    input_signatures = list(meta_graph_def.signature_def[signature_def_key].inputs.values())
+    input_signatures = list(
+        meta_graph_def.signature_def[signature_def_key].inputs.values())
     for input_signature in input_signatures:
         datatype = tf_to_triton_dtype(input_signature.dtype)
         shape = []
@@ -72,15 +76,17 @@ def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
         input_dict[input_signature.name] = [datatype, shape]
 
     output_dict = {}
-    output_signatures = list(meta_graph_def.signature_def[signature_def_key].outputs.values())
+    output_signatures = list(
+        meta_graph_def.signature_def[signature_def_key].outputs.values())
     for output_signature in output_signatures:
         datatype = tf_to_triton_dtype(output_signature.dtype)
         shape = []
         for dim in output_signature.tensor_shape.dim:
             shape.append(dim.size)
         output_dict[output_signature.name] = [datatype, shape]
-    
+
     return input_dict, output_dict
+
 
 def parse_io_tensors(tensors):
     tensors_dict = {}
@@ -91,11 +97,13 @@ def parse_io_tensors(tensors):
 
     return tensors_dict
 
+
 def get_parameter_spec(key1, value):
     param_spec = "parameters: {{key: \"{}\", value: {{string_value: \"{}\"}}}} \n".format(
         key1, value)
 
     return param_spec
+
 
 def create_modelconfig(model_name, max_batch_size, inputs, outputs,
                        compiled_model_path, nc_start_idx, nc_end_idx,
@@ -105,7 +113,7 @@ def create_modelconfig(model_name, max_batch_size, inputs, outputs,
     config += "max_batch_size: {}\n".format(max_batch_size)
     for input_name in inputs.keys():
         data_type, shape = inputs[input_name]
-        config +='''
+        config += '''
 input [
   {{
     name: \"{}\"
@@ -115,7 +123,7 @@ input [
 ]\n'''.format(input_name, "TYPE_" + data_type, shape)
     for output_name in outputs.keys():
         data_type, shape = outputs[output_name]
-        config +='''
+        config += '''
 output [
   {{
     name: \"{}\"
@@ -135,6 +143,7 @@ instance_group [
     config += get_parameter_spec("NEURON_CORE_END_INDEX", nc_end_idx)
     config += get_parameter_spec("NUM_THREADS_PER_CORE", threads_per_core)
     return config
+
 
 def get_model_license():
     lic = '''# Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
@@ -164,6 +173,7 @@ def get_model_license():
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     '''
     return lic
+
 
 def get_common_initialize_impl():
     init_impl = '''
@@ -229,6 +239,7 @@ def get_common_initialize_impl():
 '''
     return init_impl
 
+
 def get_tensorflow_initialize_impl():
     init_impl = get_common_initialize_impl()
     init_impl += '''
@@ -257,7 +268,6 @@ def get_tensorflow_initialize_impl():
 
 '''
     return init_impl
-
 
 
 def get_pytorch_initialize_impl():
@@ -324,6 +334,7 @@ def get_pytorch_initialize_impl():
 
 '''
     return init_impl
+
 
 def get_tensorflow_execute_impl():
     exec_impl = '''
@@ -406,6 +417,7 @@ def get_tensorflow_execute_impl():
 '''
     return exec_impl
 
+
 def get_pytorch_execute_impl():
     exec_impl = '''
     def execute(self, requests):
@@ -459,6 +471,7 @@ def get_pytorch_execute_impl():
 '''
     return exec_impl
 
+
 def get_finalize_impl():
     finalize_impl = '''
     def finalize(self):
@@ -470,6 +483,7 @@ def get_finalize_impl():
 
 '''
     return finalize_impl
+
 
 def get_triton_python_model_impl(using_tensorflow_model):
     triton_pmi = '''
@@ -489,6 +503,7 @@ class TritonPythonModel:
     triton_pmi += get_finalize_impl()
 
     return triton_pmi
+
 
 def create_model_file(using_tensorflow_model):
     triton_model = get_model_license()
@@ -510,10 +525,9 @@ from concurrent import futures
 import torch
 import torch.neuron
     '''
-
     triton_model += get_triton_python_model_impl(using_tensorflow_model)
-
     return triton_model
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -528,11 +542,9 @@ if __name__ == '__main__':
         help='The maximum batch size for the model being generated')
     parser.add_argument('--model_type',
                         type=str,
-                        default="pytorch",
-                        required=False,
+                        required=True,
                         help='''The type of the compiled model. Currently,
-                        only supports \"pytorch\" and \"tensorflow\". The
-                        default value is \"pytorch\"''')
+                        only supports \"pytorch\" and \"tensorflow\".''')
     parser.add_argument('--tag_set',
                         type=str,
                         default="serve",
@@ -611,15 +623,20 @@ if __name__ == '__main__':
     elif FLAGS.model_type.lower() == 'pytorch':
         is_tensorflow_model = False
     else:
-        raise Exception("This script only supports following model_types: \"pytorch\", \"tensorflow\"")
+        raise Exception(
+            "This script only supports following model_types: \"pytorch\", \"tensorflow\""
+        )
 
     if is_tensorflow_model:
-        inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set, FLAGS.signature_def_key)
+        inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
+                                           FLAGS.signature_def_key)
     else:
         inputs = parse_io_tensors(FLAGS.triton_input)
         outputs = parse_io_tensors(FLAGS.triton_output)
 
-    nc_start_idx, nc_end_idx = [int(i) for i in FLAGS.neuron_core_range.split(":")]
+    nc_start_idx, nc_end_idx = [
+        int(i) for i in FLAGS.neuron_core_range.split(":")
+    ]
 
     model_version_dir = FLAGS.triton_model_dir + "/" + str(FLAGS.model_version)
     try:
@@ -630,7 +647,8 @@ if __name__ == '__main__':
     model_name = os.path.basename(FLAGS.triton_model_dir)
     mc = create_modelconfig(model_name, FLAGS.max_batch_size, inputs, outputs,
                             FLAGS.compiled_model, nc_start_idx, nc_end_idx,
-                            FLAGS.threads_per_core, FLAGS.triton_model_instance_count)
+                            FLAGS.threads_per_core,
+                            FLAGS.triton_model_instance_count)
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 

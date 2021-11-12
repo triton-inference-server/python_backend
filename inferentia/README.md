@@ -105,8 +105,11 @@ triton python model directory.
 An example invocation for the `gen_triton_model.py` for PyTorch model can look like:
 
 ```
- $python3 inferentia/scripts/gen_triton_model.py --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
+ $python3 inferentia/scripts/gen_triton_model.py --model_type pytorch --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
 ```
+
+In order for the script to treat the compiled model as TorchScript
+model, `--model_type pytorch` needs to be provided.
 
 NOTE: Due to the absence of metadata for inputs and outputs in a
 TorchScript model - name, datatype and shape of tensor of
@@ -157,13 +160,16 @@ must have [`tensorflow`](https://www.tensorflow.org/install/pip) python
 module installed in order to use this script for tensorflow models.
 
 Similar to PyTorch, `--neuron_core_range` and `--triton_model_instance_count`
-can be used to specify the neuron core range and number of tritom model
+can be used to specify the neuron core range and number of triton model
 instances. However, the neuron core indices don't point to a specific
 neuron core in the chip. For TensorFlow, we use deprecated feature of 
 `NEURONCORE_GROUP_SIZES` to load model. The model in this case will be loaded on
 next available Neuron cores and not specific ones. See
 [Parallel Execution using NEURONCORE_GROUP_SIZES](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/parallel-ncgs.html?highlight=NEURONCORE_GROUP_SIZES)
 for more information.
+
+Please use the `-h` or `--help` options in `gen_triton_model.py` to
+learn about more configurable options.
 
 ## Serving Inferentia model in Triton
 
@@ -196,4 +202,4 @@ Note:
 1. The `config.pbtxt` and `model.py` should be treated as
 starting point. The users can customize these files as per
 their need.
-2. Triton Inferentia currently only works with **single** model. 
+2. Triton Inferentia is currently tested with a **single** model. 
