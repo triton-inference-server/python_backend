@@ -543,6 +543,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_type',
                         type=str,
                         required=True,
+                        choices=['pytorch', 'tensorflow'],
                         help='''The type of the compiled model. Currently,
                         only supports \"pytorch\" and \"tensorflow\".''')
     parser.add_argument('--tag_set',
@@ -622,10 +623,6 @@ if __name__ == '__main__':
         is_tensorflow_model = True
     elif FLAGS.model_type.lower() == 'pytorch':
         is_tensorflow_model = False
-    else:
-        raise Exception(
-            "This script only supports following model_types: \"pytorch\", \"tensorflow\""
-        )
 
     if is_tensorflow_model:
         inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
