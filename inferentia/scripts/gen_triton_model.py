@@ -26,10 +26,9 @@
 
 import argparse
 import os
-from tensorflow.python.tools import saved_model_utils
-import tensorflow as tf
 
 def tf_to_triton_dtype(dtype):
+    import tensorflow as tf
     if dtype == tf.float16:
         return "FP16"
     elif dtype == tf.float32:
@@ -56,10 +55,11 @@ def tf_to_triton_dtype(dtype):
         return "BOOL"
     elif dtype == tf.string:
         return "STRING"
-    else:
-        raise Exception("The data type in the TF model is not supported")
+    
+    raise Exception("The data type in the TF model is not supported")
 
 def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
+    from tensorflow.python.tools import saved_model_utils
     meta_graph_def = saved_model_utils.get_meta_graph_def(saved_model_dir, tag_set)
 
     input_dict = {}
@@ -526,23 +526,25 @@ if __name__ == '__main__':
         type=int,
         default=0,
         help='The maximum batch size for the model being generated')
-    parser.add_argument('--is_tensorflow_model',
-                        action="store_true",
+    parser.add_argument('--model_type',
+                        type=str,
+                        default="pytorch",
                         required=False,
-                        help='''Whether the compiled model is a
-                        tensorflow model''')
+                        help='''The type of the compiled model. Currently,
+                        only supports \"pytorch\" and \"tensorflow\". The
+                        default value is \"pytorch\"''')
     parser.add_argument('--tag_set',
                         type=str,
                         default="serve",
                         help='''The tag set to use for the TF model.
-                        This option is ignored if `--is_tensorflow_model`
-                        is false. Default value is \'serve\'.''')
+                        This option is ignored if `--model_type` is
+                        not \"tensorflow\". Default value is \'serve\'.''')
     parser.add_argument('--signature_def_key',
                         type=str,
                         default="serving_default",
                         help='''The signature def key to use for the TF
-                        model. This option is ignored if
-                        `--is_tensorflow_model` is false. Default value
+                        model. This option is ignored if `--model_type`
+                        is not \"tensorflow\". Default value
                         is \'serving_default\'.''')
     parser.add_argument('--compiled_model',
                         type=str,
@@ -601,8 +603,17 @@ if __name__ == '__main__':
                         directory where script will generate
                         config.pbtxt and model.py''')
     FLAGS, unparsed = parser.parse_known_args()
+    if len(unparsed) > 0:
+        raise Exception("Unrecognized options: {}".format(unparsed))
 
-    if FLAGS.is_tensorflow_model:
+    if FLAGS.model_type.lower() == 'tensorflow':
+        is_tensorflow_model = True
+    elif FLAGS.model_type.lower() == 'pytorch':
+        is_tensorflow_model = False
+    else:
+        raise Exception("This script only supports following model_types: \"pytorch\", \"tensorflow\"")
+
+    if is_tensorflow_model:
         inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set, FLAGS.signature_def_key)
     else:
         inputs = parse_io_tensors(FLAGS.triton_input)
@@ -623,6 +634,6 @@ if __name__ == '__main__':
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 
-    mf = create_model_file(FLAGS.is_tensorflow_model)
+    mf = create_model_file(is_tensorflow_model)
     with open(FLAGS.triton_model_dir + "/1/model.py", "w") as model_file:
         model_file.write(mf)

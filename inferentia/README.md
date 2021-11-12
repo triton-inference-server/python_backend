@@ -98,8 +98,9 @@ workflows for execution on inferentia.
 
 For PyTorch, we support models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
 for execution on Inferentia.
-Once the TorchScript model supporting Inferentia is obtained, use the [gen_triton_model.py](https://github.com/triton-inference-server/python_backend/blob/main/inferentia/scripts/gen_triton_model.py)
-script to generate triton python model directory.
+Once the TorchScript model supporting Inferentia is obtained, use the
+[gen_triton_model.py](scripts/gen_triton_model.py) script to generate
+triton python model directory.
 
 An example invocation for the `gen_triton_model.py` for PyTorch model can look like:
 
@@ -137,23 +138,23 @@ For TensorFlow, the model must be compiled for AWS Neuron. See
 tutorials to learn how to get a compiled model that uses Neuron
 cores. Currently, the code is tested only on `tensorflow==1.15`.
 
-Once the compiled model is obtained use [gen_triton_model.py](https://github.com/triton-inference-server/python_backend/blob/main/inferentia/scripts/gen_triton_model.py)
+Once the compiled model is obtained use [gen_triton_model.py](scripts/gen_triton_model.py)
 script to generate triton python model directory.
 
 An example invocation for the `gen_triton_model.py` for TensorFlow model can look like:
 
 ```
- $python3 gen_triton_model.py --is_tensorflow_model --compiled_model /home/ubuntu/inferentia-poc-2.0/scripts-rn50-tf-native/resnet50_mlperf_opt_fp16_compiled_b5_nc1/1 --neuron_core_range 0:3  --triton_model_dir rn50-1neuroncores-bs1x1
+ $python3 gen_triton_model.py --model_type tensorflow --compiled_model /home/ubuntu/inferentia-poc-2.0/scripts-rn50-tf-native/resnet50_mlperf_opt_fp16_compiled_b5_nc1/1 --neuron_core_range 0:3  --triton_model_dir rn50-1neuroncores-bs1x1
 ```
 
 NOTE: Unlike TorchScript model, TensorFlow SavedModel stores sufficient
 metadata to detect the name, datatype and shape of the input and output
 tensors for the model. By default, the script will assume the compiled
 model to be torchscript. In order for it to treat the compiled model
-as TF savedmodel, `--is_tensorflow_model` flag needs to be provided.
+as TF savedmodel, `--model_type tensorflow` needs to be provided.
 The input and output details are read from the model itself. The user
 must have [`tensorflow`](https://www.tensorflow.org/install/pip) python
-module installed in order to use this script.
+module installed in order to use this script for tensorflow models.
 
 Similar to PyTorch, `--neuron_core_range` and `--triton_model_instance_count`
 can be used to specify the neuron core range and number of tritom model
@@ -183,7 +184,7 @@ Look at the usage message of the script to understand each option.
 The script will generate a model directory with the user-provided
 name. Move that model directory to Triton's model repository.
 Ensure the compiled model path provided to the script points to
-a valid torchscript file or tensorflow saved model.
+a valid torchscript file or tensorflow savedmodel.
 
 Now, the server can be launched with the model as below:
 
