@@ -619,9 +619,9 @@ if __name__ == '__main__':
     if len(unparsed) > 0:
         raise Exception("Unrecognized options: {}".format(unparsed))
 
-    if FLAGS.model_type.lower() == 'tensorflow':
+    if FLAGS.model_type == 'tensorflow':
         is_tensorflow_model = True
-    elif FLAGS.model_type.lower() == 'pytorch':
+    elif FLAGS.model_type == 'pytorch':
         is_tensorflow_model = False
 
     if is_tensorflow_model:
