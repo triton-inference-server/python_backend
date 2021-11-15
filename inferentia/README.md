@@ -90,24 +90,37 @@ Please use the `-h` or `--help` options to learn about more configurable options
 
 ## Setting up the Inferentia model
 
-Currently, we only support TorchScript models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html) for execution on Inferentia.
-Once the TorchScript model supporting Inferentia is obtained, use the [gen_triton_model.py](https://github.com/triton-inference-server/python_backend/blob/main/inferentia/scripts/gen_triton_model.py) script to generate triton python model directory.
+Currently, we only support [PyTorch](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/index.html)
+and [TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/index.html)
+workflows for execution on inferentia. 
 
-An example invocation for the `gen_triton_model.py` can look like:
+### PyTorch
+
+For PyTorch, we support models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
+for execution on Inferentia.
+Once the TorchScript model supporting Inferentia is obtained, use the
+[gen_triton_model.py](scripts/gen_triton_model.py) script to generate
+triton python model directory.
+
+An example invocation for the `gen_triton_model.py` for PyTorch model can look like:
 
 ```
- $python3 inferentia/scripts/gen_triton_model.py --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
+ $python3 inferentia/scripts/gen_triton_model.py --model_type pytorch --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
 ```
 
-NOTE: Due to the absence of names for inputs and outputs in a
-TorchScript model, the name of tensor of both the inputs and
-outputs provided to the above script must follow a specific naming
-convention i.e. `<name>__<index>`. Where `<name>` can be any
-string and `<index>` refers to the position of the corresponding
-input/output. This means if there are two inputs and two outputs
-they must be named as: "INPUT__0", "INPUT__1" and "OUTPUT__0",
-"OUTPUT__1" such that "INPUT__0" refers to first input and
-INPUT__1 refers to the second input, etc.
+In order for the script to treat the compiled model as TorchScript
+model, `--model_type pytorch` needs to be provided.
+
+NOTE: Due to the absence of metadata for inputs and outputs in a
+TorchScript model - name, datatype and shape of tensor of
+both the inputs and outputs must be provided to the above script
+and the name must follow a specific naming convention i.e.
+`<name>__<index>`. Where `<name>` can be any string and `<index>`
+refers to the position of the corresponding input/output. This
+means if there are two inputs and two outputs they must be named
+as: "INPUT__0", "INPUT__1" and "OUTPUT__0", "OUTPUT__1" such
+that "INPUT__0" refers to first input and INPUT__1 refers to the
+second input, etc.
 
 Additionally, `--neuron_core_range` specifies the neuron cores to
 be used while serving this models. Currently, only
@@ -122,7 +135,45 @@ loaded on cores 2-3. To best engage inferentia device, try setting
 the number of neuron cores to be a proper multiple of the instance
 count.
 
-The invocation should create a triton model directory with following
+### TensorFlow
+For TensorFlow, the model must be compiled for AWS Neuron. See
+[AWS Neuron TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html
+tutorials to learn how to get a compiled model that uses Neuron
+cores. Currently, the code is tested only on `tensorflow==1.15`.
+
+Once the compiled model is obtained use [gen_triton_model.py](scripts/gen_triton_model.py)
+script to generate triton python model directory.
+
+An example invocation for the `gen_triton_model.py` for TensorFlow model can look like:
+
+```
+ $python3 gen_triton_model.py --model_type tensorflow --compiled_model /home/ubuntu/inferentia-poc-2.0/scripts-rn50-tf-native/resnet50_mlperf_opt_fp16_compiled_b5_nc1/1 --neuron_core_range 0:3  --triton_model_dir rn50-1neuroncores-bs1x1
+```
+
+NOTE: Unlike TorchScript model, TensorFlow SavedModel stores sufficient
+metadata to detect the name, datatype and shape of the input and output
+tensors for the model. By default, the script will assume the compiled
+model to be torchscript. In order for it to treat the compiled model
+as TF savedmodel, `--model_type tensorflow` needs to be provided.
+The input and output details are read from the model itself. The user
+must have [`tensorflow`](https://www.tensorflow.org/install/pip) python
+module installed in order to use this script for tensorflow models.
+
+Similar to PyTorch, `--neuron_core_range` and `--triton_model_instance_count`
+can be used to specify the neuron core range and number of triton model
+instances. However, the neuron core indices don't point to a specific
+neuron core in the chip. For TensorFlow, we use deprecated feature of 
+`NEURONCORE_GROUP_SIZES` to load model. The model in this case will be loaded on
+next available Neuron cores and not specific ones. See
+[Parallel Execution using NEURONCORE_GROUP_SIZES](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/parallel-ncgs.html?highlight=NEURONCORE_GROUP_SIZES)
+for more information.
+
+Please use the `-h` or `--help` options in `gen_triton_model.py` to
+learn about more configurable options.
+
+## Serving Inferentia model in Triton
+
+The `gen_triton_model.py` should create a triton model directory with following
 structutre:
 
 ```
@@ -139,7 +190,7 @@ Look at the usage message of the script to understand each option.
 The script will generate a model directory with the user-provided
 name. Move that model directory to Triton's model repository.
 Ensure the compiled model path provided to the script points to
-a valid torchscript file.
+a valid torchscript file or tensorflow savedmodel.
 
 Now, the server can be launched with the model as below:
 
@@ -151,4 +202,4 @@ Note:
 1. The `config.pbtxt` and `model.py` should be treated as
 starting point. The users can customize these files as per
 their need.
-2. Triton Inferentia currently only works with **single** model. 
+2. Triton Inferentia is currently tested with a **single** model. 
