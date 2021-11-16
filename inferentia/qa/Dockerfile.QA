@@ -29,6 +29,7 @@
 # Multistage build.
 #
 ARG BASE_IMAGE=tritonserver
+ARG BUILD_IMAGE=tritonserver_build
 ARG SDK_IMAGE=tritonserver_sdk
 ARG TRITON_PATH=/home/ubuntu
 
@@ -51,16 +52,10 @@ RUN if [ $(cat /etc/os-release | grep 'VERSION_ID="20.04"' | wc -l) -ne 0 ]; the
     fi
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-                              curl \
-                              libopencv-dev \
-                              libopencv-core-dev \
-                              libzmq3-dev \
-                              python3-protobuf \
-                              python3-setuptools \
-                              swig \
-                              nginx \
-                              protobuf-compiler \
-                              maven && \
+                              python3-dev \
+                              python3-pip \
+                              build-essential \
+                              wget && \
     rm -rf /var/lib/apt/lists/*
 
 # CI/QA expects "python" executable (not python3).
@@ -70,8 +65,18 @@ RUN rm -f /usr/bin/python && \
 RUN pip3 install --upgrade wheel setuptools && \
     pip3 install --upgrade numpy pillow attrdict future grpcio requests gsutil awscli six grpcio-channelz
 
-WORKDIR /opt/tritonserver/clients
-COPY --chown=1000:1000 --from=sdk /workspace/install install/
+WORKDIR /opt/tritonserver
+# Copy the entire qa repo to the /opt/tritonserver/qa repo
+COPY --from=tritonserver_build /workspace/qa qa
+COPY --chown=1000:1000 --from=sdk /workspace/install client_tmp
+RUN mkdir -p qa/clients && mkdir -p qa/pkgs && \
+    cp -a client_tmp/bin/* qa/clients/. && \
+    cp client_tmp/lib/libgrpcclient.so qa/clients/. && \
+    cp client_tmp/lib/libhttpclient.so qa/clients/. && \
+    cp client_tmp/python/*.py qa/clients/. && \
+    cp client_tmp/python/triton*.whl qa/pkgs/. && \
+    cp client_tmp/java/examples/*.jar qa/clients/. && \
+    rm -rf client_tmp
 
 ENV TRITON_PATH ${TRITON_PATH}
 ENV LD_LIBRARY_PATH /opt/tritonserver/qa/clients:${LD_LIBRARY_PATH}
