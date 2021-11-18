@@ -77,6 +77,8 @@ RUN mkdir -p qa/clients && mkdir -p qa/pkgs && \
     cp client_tmp/python/triton*.whl qa/pkgs/. && \
     cp client_tmp/java/examples/*.jar qa/clients/. && \
     rm -rf client_tmp
+# Create mount paths for lib
+RUN mkdir /mylib && mkdir /home/ubuntu
 
 ENV TRITON_PATH ${TRITON_PATH}
 ENV LD_LIBRARY_PATH /opt/tritonserver/qa/clients:${LD_LIBRARY_PATH}

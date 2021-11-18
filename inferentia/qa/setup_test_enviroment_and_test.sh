@@ -45,10 +45,6 @@ export SDK_IMAGE=tritonserver_sdk
 export BUILD_IMAGE=tritonserver_build
 export QA_IMAGE=tritonserver_qa
 
-export TEST_JSON_REPO=${TRITON_PATH}/server/qa/common/inferentia_perf_analyzer_input_data_json
-export TEST_REPO=${TRITON_PATH}/server/qa/L0_inferentia_perf_analyzer
-export TEST_SCRIPT="test.sh"
-
 cd ${TRITON_PATH}
 # Clone necessary branches
 rm -rf ${TRITON_PATH}/server
@@ -99,9 +95,18 @@ docker build -t ${QA_IMAGE} \
                    --build-arg "SDK_IMAGE=${SDK_IMAGE}"     .
 
 # log into the docker
-docker run --device /dev/neuron0                   \
-            -v /home/ubuntu:$TRITON_PATH           \
-            -v /lib/udev:/mylib/udev               \
+
+export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input_data_json
+export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
+export TEST_SCRIPT="test.sh"
+export TEST_REPO_MULTIPLE=/opt/tritonserver/qa/L0_inferentia_perf_analyzer_multiple_instance
+
+
+CONTAINER_NAME="qa_container"
+docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
+docker create --name ${CONTAINER_NAME}             \
+            --device /dev/neuron0                  \
+            --device /dev/neuron1                  \
             --shm-size=1g --ulimit memlock=-1      \
             -p 8000:8000 -p 8001:8001 -p 8002:8002 \
             --ulimit stack=67108864                \
@@ -109,4 +114,29 @@ docker run --device /dev/neuron0                   \
             -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
             -e TRITON_PATH=${TRITON_PATH}          \
             --net host -ti ${QA_IMAGE}             \
-            /bin/bash -c "bash cd ${TEST_REPO} && bash -ex ${TEST_REPO}/${TEST_SCRIPT}"
+            /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
+            docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
+            docker cp /home/ubuntu/python_backend  ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
+            docker start -a ${CONTAINER_NAME} || RV=$?;
+
+
+# Run multiple instances
+docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
+docker create --name ${CONTAINER_NAME}             \
+            --device /dev/neuron0                  \
+            --device /dev/neuron1                  \
+            --device /dev/neuron2                  \
+            --device /dev/neuron3                  \
+            --device /dev/neuron4                  \
+            --device /dev/neuron5                  \
+            --shm-size=1g --ulimit memlock=-1      \
+            -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+            --ulimit stack=67108864                \
+            -e TEST_REPO=${TEST_REPO}              \
+            -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
+            -e TRITON_PATH=${TRITON_PATH}          \
+            --net host -ti ${QA_IMAGE}             \
+            /bin/bash -c "bash -ex ${TEST_REPO_MULTIPLE}/${TEST_SCRIPT}" && \
+            docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
+            docker cp /home/ubuntu/python_backend  ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
+            docker start -a ${CONTAINER_NAME} || RV=$?;
