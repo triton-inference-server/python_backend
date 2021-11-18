@@ -25,7 +25,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-export TRITON_SERVER_BRANCH_NAME=kyang-add-inferentia-test
 export TRITON_PATH="/home/ubuntu"
 export DEFAULT_REPO_TAG="main"
 export TRITON_COMMON_REPO_TAG=${DEFAULT_REPO_TAG}
@@ -59,7 +58,7 @@ git clone --single-branch --depth=1 -b ${TRITON_CLIENT_REPO_TAG} \
 cd ${TRITON_PATH}/python_backend
 chmod 777 ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
 sudo ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
-       #     --image=base,"nvcr.io/nvidia/tritonserver:${TRITON_UPSTREAM_CONTAINER_VERSION}-py3" \
+
 # Build container with only python backend 
 cd ${TRITON_PATH}/server
 pip3 install docker
@@ -94,14 +93,12 @@ docker build -t ${QA_IMAGE} \
                    --build-arg "BUILD_IMAGE=${BUILD_IMAGE}" \
                    --build-arg "SDK_IMAGE=${SDK_IMAGE}"     .
 
-# log into the docker
-
 export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input_data_json
 export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
 export TEST_SCRIPT="test.sh"
 export TEST_REPO_MULTIPLE=/opt/tritonserver/qa/L0_inferentia_perf_analyzer_multiple_instance
 
-
+# Run single instance test
 CONTAINER_NAME="qa_container"
 docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
 docker create --name ${CONTAINER_NAME}             \
@@ -116,19 +113,14 @@ docker create --name ${CONTAINER_NAME}             \
             --net host -ti ${QA_IMAGE}             \
             /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
             docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
-            docker cp /home/ubuntu/python_backend  ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
+            docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
             docker start -a ${CONTAINER_NAME} || RV=$?;
 
-
-# Run multiple instances
+# Run multiple instance test
 docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
 docker create --name ${CONTAINER_NAME}             \
             --device /dev/neuron0                  \
             --device /dev/neuron1                  \
-            --device /dev/neuron2                  \
-            --device /dev/neuron3                  \
-            --device /dev/neuron4                  \
-            --device /dev/neuron5                  \
             --shm-size=1g --ulimit memlock=-1      \
             -p 8000:8000 -p 8001:8001 -p 8002:8002 \
             --ulimit stack=67108864                \
@@ -138,5 +130,5 @@ docker create --name ${CONTAINER_NAME}             \
             --net host -ti ${QA_IMAGE}             \
             /bin/bash -c "bash -ex ${TEST_REPO_MULTIPLE}/${TEST_SCRIPT}" && \
             docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
-            docker cp /home/ubuntu/python_backend  ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
+            docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
             docker start -a ${CONTAINER_NAME} || RV=$?;

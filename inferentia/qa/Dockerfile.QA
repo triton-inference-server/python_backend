@@ -58,7 +58,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
                               wget && \
     rm -rf /var/lib/apt/lists/*
 
-# CI/QA expects "python" executable (not python3).
 RUN rm -f /usr/bin/python && \
     ln -s /usr/bin/python3 /usr/bin/python
 

@@ -32,6 +32,18 @@ Starting from 21.11 release, Triton supports
 [AWS Inferentia](https://aws.amazon.com/machine-learning/inferentia/) 
 and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-intro/get-started.html).
 
+## Table of Contents
+
+- [Using Triton with Inferentia](#using-triton-with-inferentia)
+  - [Table of Contents](#table-of-contents)
+  - [Inferentia setup](#inferentia-setup)
+  - [Compile Inferentia Model](#compile-inferentia-model)
+  - [Setting up the Inferentia model](#setting-up-the-inferentia-model)
+    - [PyTorch](#pytorch)
+    - [TensorFlow](#tensorflow)
+  - [Serving Inferentia model in Triton](#serving-inferentia-model-in-triton)
+  - [Testing Inferentia Setup for Accuracy](#testing-inferentia-setup-for-accuracy)
+
 ## Inferentia setup
 
 First step of running Triton with Inferentia is to create an AWS Inferentia
@@ -216,3 +228,21 @@ Note:
 starting point. The users can customize these files as per
 their need.
 2. Triton Inferentia is currently tested with a **single** model. 
+
+## Testing Inferentia Setup for Accuracy
+The [qa folder](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/qa)
+contains the necessary files to set up testing with a simple add_sub model. The test
+requires an instance with more than 8 inferentia cores to run, eg:`inf1.6xlarge`.
+start the test, run 
+```
+source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
+``` 
+where `<triton path>` is usually `/home/ubuntu`/.
+This script will pull the corresponding [server](https://github.com/triton-inference-server/server)
+that contains the tests for inferentia. It will then build the most recent 
+Triton Server and Triton SDK. 
+
+Note: If you would need to change some of the tests in the server repo,
+you would need to  `export TRITON_SERVER_BRANCH_NAME=<your branch name>` before
+running the script. 
+
