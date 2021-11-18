@@ -37,7 +37,6 @@ and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest
 - [Using Triton with Inferentia](#using-triton-with-inferentia)
   - [Table of Contents](#table-of-contents)
   - [Inferentia setup](#inferentia-setup)
-  - [Compile Inferentia Model](#compile-inferentia-model)
   - [Setting up the Inferentia model](#setting-up-the-inferentia-model)
     - [PyTorch](#pytorch)
     - [TensorFlow](#tensorflow)
@@ -100,9 +99,14 @@ you can run:
  $source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
 ```
 Please use the `-h` or `--help` options to learn about more configurable options.
-## Compile Inferentia Model
 
-The user is required to create their own `*.pt` or `*.pb` models. This is 
+## Setting up the Inferentia model
+
+Currently, we only support [PyTorch](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/index.html)
+and [TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/index.html)
+workflows for execution on inferentia. 
+
+The user is required to create their own `*.pt` (for pytorch) or `*.savedmodels` (for tensorflow) models. This is 
 a critical step since Inferentia will need the underlying `.NEFF` graph to execute
 the inference request. Please refer to: 
 - [Neuron compiler CLI Reference Guide](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/command-line-reference.html)
@@ -111,14 +115,6 @@ the inference request. Please refer to:
 - [TensorFlow Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html)
   
 for guidance on how to compile models.
-
-
-## Setting up the Inferentia model
-
-Currently, we only support [PyTorch](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/index.html)
-and [TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/index.html)
-workflows for execution on inferentia. 
-
 ### PyTorch
 
 For PyTorch, we support models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
@@ -238,7 +234,7 @@ start the test, run
  $source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
 ``` 
 where `<triton path>` is usually `/home/ubuntu`/.
-This script will pull the corresponding [server](https://github.com/triton-inference-server/server)
+This script will pull the [server repo](https://github.com/triton-inference-server/server)
 that contains the tests for inferentia. It will then build the most recent 
 Triton Server and Triton SDK. 
 
