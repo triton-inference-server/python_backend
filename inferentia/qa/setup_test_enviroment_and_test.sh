@@ -96,7 +96,6 @@ docker build -t ${QA_IMAGE} \
 export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input_data_json
 export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
 export TEST_SCRIPT="test.sh"
-export TEST_REPO_MULTIPLE=/opt/tritonserver/qa/L0_inferentia_perf_analyzer_multiple_instance
 
 # Run single instance test
 CONTAINER_NAME="qa_container"
@@ -112,23 +111,6 @@ docker create --name ${CONTAINER_NAME}             \
             -e TRITON_PATH=${TRITON_PATH}          \
             --net host -ti ${QA_IMAGE}             \
             /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
-            docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
-            docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
-            docker start -a ${CONTAINER_NAME} || RV=$?;
-
-# Run multiple instance test
-docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
-docker create --name ${CONTAINER_NAME}             \
-            --device /dev/neuron0                  \
-            --device /dev/neuron1                  \
-            --shm-size=1g --ulimit memlock=-1      \
-            -p 8000:8000 -p 8001:8001 -p 8002:8002 \
-            --ulimit stack=67108864                \
-            -e TEST_REPO=${TEST_REPO}              \
-            -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
-            -e TRITON_PATH=${TRITON_PATH}          \
-            --net host -ti ${QA_IMAGE}             \
-            /bin/bash -c "bash -ex ${TEST_REPO_MULTIPLE}/${TEST_SCRIPT}" && \
             docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
             docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
             docker start -a ${CONTAINER_NAME} || RV=$?;
