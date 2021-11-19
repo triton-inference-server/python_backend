@@ -41,7 +41,7 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch -- "$@")
 
 
-export INFRENTIA_PATH="/home/ubuntu"
+export INFRENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
 export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
