@@ -707,7 +707,7 @@ class TritonPythonModel:
 
     # Create a Python backend tensor from the DLPack encoding of a PyTorch
     # tensor.
-    input0 = pb_utils.Tensor.from_dlpack(to_dlpack(pytorch_tensor))
+    input0 = pb_utils.Tensor.from_dlpack("INPUT0", to_dlpack(pytorch_tensor))
 ```
 
 This method only supports contiguous Tensors that are in C-order. If the tensor
