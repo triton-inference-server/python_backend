@@ -32,6 +32,17 @@ Starting from 21.11 release, Triton supports
 [AWS Inferentia](https://aws.amazon.com/machine-learning/inferentia/) 
 and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-intro/get-started.html).
 
+## Table of Contents
+
+- [Using Triton with Inferentia](#using-triton-with-inferentia)
+  - [Table of Contents](#table-of-contents)
+  - [Inferentia setup](#inferentia-setup)
+  - [Setting up the Inferentia model](#setting-up-the-inferentia-model)
+    - [PyTorch](#pytorch)
+    - [TensorFlow](#tensorflow)
+  - [Serving Inferentia model in Triton](#serving-inferentia-model-in-triton)
+  - [Testing Inferentia Setup for Accuracy](#testing-inferentia-setup-for-accuracy)
+
 ## Inferentia setup
 
 First step of running Triton with Inferentia is to create an AWS Inferentia
@@ -50,17 +61,18 @@ Clone this repo with Github to home repo `/home/ubuntu`.
 Ensure that the neuron runtime 1.0 demon (neuron-rtd) is not running and set up
 and install neuron 2.X runtime builds with
 ```
- sudo ./python_backend/setup-pre-container.sh
+ $chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+ $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
 ```
 
 Then, start the Triton instance with:
 ``` 
-docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g -e "AWS_NEURON_VISIBLE_DEVICES=ALL" --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
+ $docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
 Note 1: The user would need to list any neuron device to run during container initialization.
 For example, to use 4 neuron devices on an instance, the user would need to run with:
 ```
-docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
+ $docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
 ```
 Note 2: `/mylib/udev` is used for Neuron parameter passing. 
 
@@ -70,7 +82,7 @@ Note 3: For Triton container version xx.yy, please refer to
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup .sh
+ $source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
 ```
 This script will:
 1. Setup miniconda enviroment
@@ -84,7 +96,7 @@ There are user configurable options available for the script as well.
 For example, to control the python version for the python environment to 3.6, 
 you can run:
 ```
-source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
+ $source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
 ```
 Please use the `-h` or `--help` options to learn about more configurable options.
 
@@ -94,6 +106,15 @@ Currently, we only support [PyTorch](https://awsdocs-neuron.readthedocs-hosted.c
 and [TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/index.html)
 workflows for execution on inferentia. 
 
+The user is required to create their own `*.pt` (for pytorch) or `*.savedmodels` (for tensorflow) models. This is 
+a critical step since Inferentia will need the underlying `.NEFF` graph to execute
+the inference request. Please refer to: 
+- [Neuron compiler CLI Reference Guide](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/command-line-reference.html)
+- [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
+- [PyTorch Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/tutorials/index.html) 
+- [TensorFlow Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html)
+  
+for guidance on how to compile models.
 ### PyTorch
 
 For PyTorch, we support models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
@@ -195,7 +216,7 @@ a valid torchscript file or tensorflow savedmodel.
 Now, the server can be launched with the model as below:
 
 ```
-tritonserver --model-repository <path_to_model_repository>
+ $tritonserver --model-repository <path_to_model_repository>
 ```
 
 Note: 
@@ -203,3 +224,24 @@ Note:
 starting point. The users can customize these files as per
 their need.
 2. Triton Inferentia is currently tested with a **single** model. 
+
+## Testing Inferentia Setup for Accuracy
+The [qa folder](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/qa)
+contains the necessary files to set up testing with a simple add_sub model. The test
+requires an instance with more than 8 inferentia cores to run, eg:`inf1.6xlarge`.
+start the test, run 
+```
+ $source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
+``` 
+where `<triton path>` is usually `/home/ubuntu`/.
+This script will pull the [server repo](https://github.com/triton-inference-server/server)
+that contains the tests for inferentia. It will then build the most recent 
+Triton Server and Triton SDK. 
+
+Note: If you would need to change some of the tests in the server repo,
+you would need to run 
+```
+ $export TRITON_SERVER_BRANCH_NAME=<your branch name>
+``` 
+before running the script. 
+
