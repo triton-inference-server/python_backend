@@ -34,11 +34,11 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 -v|--python-version        Python version, default is 3.7
 -i|--inferentia-path       Inferentia path, default is: /home/ubuntu
 -p|--use-pytorch           Install pytorch-neuron if specified
--t|--use-tensorflow        Install tensorflow-neuron if specified
+-t|--use-tensorflow        Install tensorflow-neuron of specified version (1 or 2)
 "
 
 # Get all options:
-OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch -- "$@")
+OPTS=$(getopt -o hb:v:i:t:p --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow:,use-pytorch -- "$@")
 
 
 export INFRENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
@@ -68,9 +68,9 @@ for OPTS; do
         shift 2
         ;;
         -t|--use-tensorflow)
-        USE_TENSORFLOW=1
-        echo "Installing tensorflow-neuron"
-        shift 1
+        USE_TENSORFLOW=$2
+        echo "Installing tensorflow-neuron version ${USE_TENSORFLOW}"
+        shift 2
         ;;
         -p|--use-pytorch)
         USE_PYTORCH=1
@@ -80,7 +80,7 @@ for OPTS; do
     esac
 done
 
-if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]
+if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_TENSORFLOW -ne 2 ] && [ $USE_PYTORCH -ne 1 ]
 then
     echo "Need to specify either -p (use pytorch) or -t (use tensorflow)."
     printf "%s\\n" "$USAGE"
@@ -133,13 +133,16 @@ make triton-python-backend-stub -j16
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 
-if [ $USE_TENSORFLOW -eq 1 ]
-then
+if [ $USE_TENSORFLOW -eq 1 ] || [ $USE_TENSORFLOW -eq 2 ]; then
     conda install tensorflow-neuron pillow -y
-    #Update Neuron TensorFlow
-    pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
     # Update Neuron TensorBoard
     pip install --upgrade tensorboard-plugin-neuron
+    #Update Neuron TensorFlow
+    if [ $USE_TENSORFLOW -eq 1 ]; then
+        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
+    else
+        pip install --upgrade tensorflow-neuron[cc]
+    fi
 fi
 
 if [ $USE_PYTORCH -eq 1 ]

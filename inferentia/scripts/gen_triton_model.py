@@ -574,7 +574,7 @@ if __name__ == '__main__':
         option can be provided multiple times for multiple
         inputs. For example, to provide a FP16 input with
         shape [1,384] specify the following: INPUT0,FP16,1x384.
-        This option is ignored when using tensorflow model''')
+        This option is not required when using tensorflow model''')
     parser.add_argument(
         '--triton_output',
         type=str,
@@ -585,7 +585,7 @@ if __name__ == '__main__':
         option can be provided multiple times for multiple
         outputs. For example, to provide a FP16 output with
         shape [1,384] specify the following: OUTPUT0,FP16,1x384.
-        This option is ignored when using tensorflow model''')
+        This option is not required when using tensorflow model''')
     parser.add_argument('--neuron_core_range',
                         type=str,
                         required=True,
@@ -625,12 +625,13 @@ if __name__ == '__main__':
     elif FLAGS.model_type == 'pytorch':
         is_tensorflow_model = False
 
-    if is_tensorflow_model:
-        inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
-                                           FLAGS.signature_def_key)
-    else:
+    if not is_tensorflow_model or (FLAGS.triton_input != None and FLAGS.triton_output != None):
         inputs = parse_io_tensors(FLAGS.triton_input)
         outputs = parse_io_tensors(FLAGS.triton_output)
+    else:
+        inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
+                                           FLAGS.signature_def_key)
+        
 
     nc_start_idx, nc_end_idx = [
         int(i) for i in FLAGS.neuron_core_range.split(":")
