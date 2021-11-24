@@ -51,7 +51,7 @@ any C++ code.
     - [Important Notes](#important-notes)
   - [Error Handling](#error-handling)
   - [Managing Shared Memory](#managing-shared-memory)
-- [Business Logic Scripting (beta)](#business-logic-scripting-beta)
+- [Business Logic Scripting](#business-logic-scripting)
   - [Limitations](#limitations)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
@@ -142,7 +142,7 @@ $ make install
 
 The following required Triton repositories will be pulled and used in
 the build. If the CMake variables below are not specified, "main" branch
-of those repositories will be used. \<GIT\_BRANCH\_NAME\> should be the same 
+of those repositories will be used. \<GIT\_BRANCH\_NAME\> should be the same
 as the Python backend repository branch that you are trying to compile.
 
 * triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=\<GIT\_BRANCH\_NAME\>
@@ -537,7 +537,7 @@ properly set the `--shm-size` flag depending on the size of your inputs and
 outputs. The default value for docker run command is `64MB` which is very
 small.
 
-# Business Logic Scripting (beta)
+# Business Logic Scripting
 
 Triton's
 [ensemble](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#ensemble-models)
@@ -547,7 +547,7 @@ many other use cases that are not supported because as part of the model
 pipeline they require loops, conditionals (if-then-else), data-dependent
 control-flow and other custom logic to be intermixed with model execution. We
 call this combination of custom logic and model executions *Business Logic
-Scripting (BLS)*. 
+Scripting (BLS)*.
 
 Starting from 21.08, you can implement BLS in your Python model. A new set of
 utility functions allows you to execute inference requests on other models being

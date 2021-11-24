@@ -29,7 +29,7 @@
 # BLS Example
 
 In this section we demonstrate an end-to-end example for
-[BLS](../../README.md#business-logic-scripting-beta) in Python backend. The
+[BLS](../../README.md#business-logic-scripting) in Python backend. The
 [model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md)
 should contain [pytorch](../pytorch), [addsub](../add_sub).  The
 [pytorch](../pytorch) and [addsub](../add_sub) models calculate the sum and
