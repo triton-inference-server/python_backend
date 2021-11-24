@@ -232,6 +232,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemory> shm_pool_;
+  std::string shm_region_name_;
   off_t shm_reset_offset_;
   std::vector<std::unique_ptr<InferResponse>> infer_responses_;
   std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
@@ -1131,8 +1132,6 @@ ModelInstanceState::StartStubProcess()
   parent_message_queue_->ResetSemaphores();
 
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
-  std::string shm_region_name =
-      std::string("/") + Name() + "_" + kind + "_" + std::to_string(device_id_);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_growth_size =
@@ -1180,7 +1179,7 @@ ModelInstanceState::StartStubProcess()
       ss << "source " << path_to_activate_
          << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
          << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
-         << " " << shm_region_name << " " << shm_default_size << " "
+         << " " << shm_region_name_ << " " << shm_default_size << " "
          << shm_growth_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
          << ipc_control_offset_ << " " << Name();
@@ -1191,7 +1190,7 @@ ModelInstanceState::StartStubProcess()
     } else {
       std::stringstream ss;
       ss << " exec " << python_backend_stub << " " << model_path_ << " "
-         << shm_region_name << " " << shm_default_size << " " << shm_growth_size
+         << shm_region_name_ << " " << shm_default_size << " " << shm_growth_size
          << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
          << ipc_control_offset_ << " " << Name();
@@ -1229,7 +1228,7 @@ ModelInstanceState::StartStubProcess()
       std::stringstream ss;
       ss << "Failed to run python backend stub. Errno = " << errno << '\n'
          << "Python backend stub path: " << python_backend_stub << '\n'
-         << "Shared Memory Region Name: " << shm_region_name << '\n'
+         << "Shared Memory Region Name: " << shm_region_name_ << '\n'
          << "Shared Memory Default Byte Size: " << shm_default_size << '\n'
          << "Shared Memory Growth Byte Size: " << shm_growth_size << '\n';
       std::string log_message = ss.str();
@@ -1307,8 +1306,8 @@ TRITONSERVER_Error*
 ModelInstanceState::SetupStubProcess()
 {
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
-  std::string shm_region_name =
-      std::string("/") + Name() + "_" + kind + "_" + std::to_string(device_id_);
+  shm_region_name_ =
+      std::string("/") + Name() + "_" + std::to_string(Model()->Version()) + "_" + kind + "_" + std::to_string(device_id_);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_growth_size =
@@ -1318,7 +1317,7 @@ ModelInstanceState::SetupStubProcess()
 
   try {
     shm_pool_ = std::make_unique<SharedMemory>(
-        shm_region_name, shm_default_size, shm_growth_size,
+        shm_region_name_, shm_default_size, shm_growth_size,
         true /* truncate */);
   }
   catch (const PythonBackendException& pb_exception) {
