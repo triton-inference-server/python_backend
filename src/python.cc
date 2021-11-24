@@ -1132,7 +1132,7 @@ ModelInstanceState::StartStubProcess()
 
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
   std::string shm_region_name =
-      std::string("/") + Name() + "_" + kind + "_" + std::to_string(device_id_);
+      std::string("/") + Name() + "_" + std::to_string(Model()->Version()) + "_" + kind + "_" + std::to_string(device_id_);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_growth_size =
