@@ -310,6 +310,7 @@ Stub::PopMessage()
   while (!success) {
     message = stub_message_queue_->Pop(1000, success);
   }
+
   ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
   return ipc_message;
@@ -409,6 +410,7 @@ Stub::RunCommand()
           response_batch->is_error_set = true;
           response_batch->error = err_string_offset;
         }
+
       }
       this->SendIPCMessage(execute_response);
     } break;

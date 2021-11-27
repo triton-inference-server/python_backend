@@ -1919,8 +1919,6 @@ TRITONBACKEND_ModelInstanceExecute(
 
   // Wait for all the pending BLS requests to be completed.
   instance_state->WaitForBLSRequestsToFinish();
-
-
   instance_state->CleanupBLSResponses();
 
   for (uint32_t r = 0; r < request_count; ++r) {

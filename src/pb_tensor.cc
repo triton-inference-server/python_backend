@@ -224,7 +224,7 @@ delete_unused_dltensor(PyObject* dlp)
   if (PyCapsule_IsValid(dlp, "dltensor")) {
     DLManagedTensor* dl_managed_tensor =
         static_cast<DLManagedTensor*>(PyCapsule_GetPointer(dlp, "dltensor"));
-    free(dl_managed_tensor);
+    dl_managed_tensor->deleter(dl_managed_tensor);
   }
 }
 
@@ -248,8 +248,28 @@ PbTensor::ToDLPack()
   dlpack_tensor->dl_tensor.data = memory_ptr_;
   dlpack_tensor->dl_tensor.shape = &dims_[0];
   dlpack_tensor->dl_tensor.strides = nullptr;
-  dlpack_tensor->deleter = [](DLManagedTensor* m) {};
-  dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
+  dlpack_tensor->manager_ctx = this;
+  dlpack_tensor->deleter = [](DLManagedTensor* m) {
+    if (m->manager_ctx == nullptr) {
+      return;
+    }
+
+    PbTensor* tensor = reinterpret_cast<PbTensor*>(m->manager_ctx);
+    py::handle tensor_handle = py::cast(tensor);
+    tensor_handle.dec_ref();
+    free(m);
+  };
+
+  PbTensor* tensor = reinterpret_cast<PbTensor*>(this);
+  py::handle tensor_handle = py::cast(tensor);
+
+  // Increase the reference count by one to make sure that the DLPack
+  // represenation doesn't become invalid when the tensor object goes out of
+  // scope.
+  tensor_handle.inc_ref();
+
+  dlpack_tensor->dl_tensor.device.device_id =
+      memory_type_id_;
   dlpack_tensor->dl_tensor.dtype = triton_to_dlpack_type(dtype_);
 
   switch (memory_type_) {
