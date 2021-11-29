@@ -74,8 +74,7 @@ class IPCMessage {
  public:
   IPCMessage() {}
   IPCMessage(
-      const std::unique_ptr<SharedMemory>& shm_pool,
-      bool inline_response)
+      const std::unique_ptr<SharedMemory>& shm_pool, bool inline_response)
   {
     shm_pool->Map(
         (char**)&ipc_message_shm_, sizeof(IPCMessageShm), shm_offset_);
@@ -91,10 +90,11 @@ class IPCMessage {
 
       void* ptr_a = reinterpret_cast<void*>(
           ((uintptr_t)response_cond_ + 15) & ~(uintptr_t)0x0F);
-      ipc_message_shm_->response_cond += ((char *) ptr_a - (char*) response_cond_);
+      ipc_message_shm_->response_cond += ((char*)ptr_a - (char*)response_cond_);
       void* ptr_b = reinterpret_cast<void*>(
           ((uintptr_t)response_mutex_ + 15) & ~(uintptr_t)0x0F);
-      ipc_message_shm_->response_mutex += ((char *) ptr_b - (char*) response_mutex_);
+      ipc_message_shm_->response_mutex +=
+          ((char*)ptr_b - (char*)response_mutex_);
       response_cond_ = reinterpret_cast<bi::interprocess_condition*>(ptr_a);
       response_mutex_ = reinterpret_cast<bi::interprocess_mutex*>(ptr_b);
 

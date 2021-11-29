@@ -160,13 +160,14 @@ class PbTensor {
 
   /// Get the cuda IPC handle corresponding to this tensor.
   /// \return The cudaIpcMemHandle
-  cudaIpcMemHandle_t* CudaIpcMemHandle();
+  const cudaIpcMemHandle_t* CudaIpcMemHandle();
 
   /// Set the cuda IPC handle corresponding to this tensor.
   /// \param cuda_ipc_mem_handle CUDA ipc mem handle.
   void SetCudaIpcMemHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
   {
-    cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+    tensor_shm_->is_cuda_handle_set = true;
+    *cuda_ipc_mem_handle_ = *cuda_ipc_mem_handle;
   }
 
   /// Get the GPU pointer offset.
@@ -207,9 +208,7 @@ class PbTensor {
   off_t RawShmOffset();
 
   /// Shared memory offset of the tensor.
-  off_t ShmOffset() {
-    return shm_offset_;
-  }
+  off_t ShmOffset() { return shm_offset_; }
 
   /// Get the type of the tensor
   /// \return Type of the tensor.
@@ -241,13 +240,12 @@ class PbTensor {
 
   /// After the GPU tensor buffer is provided, copy the data to the output
   /// buffers.
-  void LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool, std::mutex& gpu_load_mutex);
+  void LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool);
   void CopyToCPU(std::unique_ptr<SharedMemory>& shm_pool);
 
   Tensor* SharedMemoryObject() { return tensor_shm_; }
-
-
   RawData* RawDataShm() { return raw_data_shm_; }
+
 
   /// Get the memory type id.
   /// \return The memory type id of the tensor.

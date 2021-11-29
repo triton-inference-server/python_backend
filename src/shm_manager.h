@@ -43,7 +43,7 @@ class SharedMemory {
   size_t* capacity_;
   off_t* offset_;
   char* shm_addr_;
-  boost::interprocess::interprocess_mutex *shm_mutex_;
+  boost::interprocess::interprocess_mutex* shm_mutex_;
 
   // Current capcity, local to each process.
   size_t current_capacity_;

@@ -410,7 +410,6 @@ Stub::RunCommand()
           response_batch->is_error_set = true;
           response_batch->error = err_string_offset;
         }
-
       }
       this->SendIPCMessage(execute_response);
     } break;
@@ -584,7 +583,7 @@ Stub::LoadGPUBuffers()
 #ifdef TRITON_ENABLE_GPU
   for (auto& tensor : output_gpu_tensors_) {
     if (tensor->RawDataShm()->memory_type == TRITONSERVER_MEMORY_GPU) {
-      tensor->LoadGPUData(shm_pool_, gpu_load_mutex_);
+      tensor->LoadGPUData(shm_pool_);
     } else {
       tensor->CopyToCPU(shm_pool_);
     }

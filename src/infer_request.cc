@@ -24,8 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <boost/interprocess/sync/scoped_lock.hpp>
 #include "infer_request.h"
+#include <boost/interprocess/sync/scoped_lock.hpp>
 
 #include "pb_utils.h"
 #ifdef TRITON_PB_STUB
@@ -207,7 +207,7 @@ InferRequest::Exec()
         for (auto& input_tensor : this->Inputs()) {
           if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-            input_tensor->LoadGPUData(shm_pool, stub->GPULoadMutex());
+            input_tensor->LoadGPUData(shm_pool);
 #endif  // TRITON_ENABLE_GPU
           }
         }
