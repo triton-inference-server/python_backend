@@ -457,8 +457,9 @@ def get_pytorch_execute_impl():
             output_tensors = []
             for i in self.output_dict.keys():
                 name, dt, shape = self.output_dict[i]
+                result = results[i] if isinstance(results, tuple) else results
                 output_tensor = pb_utils.Tensor(
-                    name, results[i].numpy().astype(
+                    name, result.numpy().astype(
                         pb_utils.triton_string_to_numpy(dt)))
 
                 output_tensors.append(output_tensor)
