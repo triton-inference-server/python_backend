@@ -78,6 +78,8 @@ class PbTensor {
 #ifdef TRITON_ENABLE_GPU
   bool is_cuda_handle_set_;
   cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
+  std::shared_ptr<std::mutex> cuda_ipc_open_mutex_;
+  std::shared_ptr<std::mutex> cuda_ipc_close_mutex_;
 #ifndef TRITON_PB_STUB
   std::unique_ptr<BackendMemory> backend_memory_;
 #endif  // TRITON_PB_STUB
@@ -150,7 +152,9 @@ class PbTensor {
   /// \return name of the tensor.
   const std::string& Name() const;
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
+      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset,
+      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
 #ifdef TRITON_ENABLE_GPU
 
   /// Get the GPU start address.
@@ -160,13 +164,20 @@ class PbTensor {
 
   /// Get the cuda IPC handle corresponding to this tensor.
   /// \return The cudaIpcMemHandle
-  cudaIpcMemHandle_t* CudaIpcMemHandle();
+  const cudaIpcMemHandle_t* CudaIpcMemHandle();
+
+  /// Set cuda IPC open mutex. This mutex will be used for cudaIpcOpenMemHandle
+  /// and cudaIpcCloseMemHandle calls.
+  void SetCudaIpcMutexes(
+      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
 
   /// Set the cuda IPC handle corresponding to this tensor.
   /// \param cuda_ipc_mem_handle CUDA ipc mem handle.
   void SetCudaIpcMemHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
   {
-    cuda_ipc_mem_handle_ = cuda_ipc_mem_handle;
+    tensor_shm_->is_cuda_handle_set = true;
+    *cuda_ipc_mem_handle_ = *cuda_ipc_mem_handle;
   }
 
   /// Get the GPU pointer offset.
@@ -207,9 +218,7 @@ class PbTensor {
   off_t RawShmOffset();
 
   /// Shared memory offset of the tensor.
-  off_t ShmOffset() {
-    return shm_offset_;
-  }
+  off_t ShmOffset() { return shm_offset_; }
 
   /// Get the type of the tensor
   /// \return Type of the tensor.
@@ -241,13 +250,12 @@ class PbTensor {
 
   /// After the GPU tensor buffer is provided, copy the data to the output
   /// buffers.
-  void LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool, std::mutex& gpu_load_mutex);
+  void LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool);
   void CopyToCPU(std::unique_ptr<SharedMemory>& shm_pool);
 
   Tensor* SharedMemoryObject() { return tensor_shm_; }
-
-
   RawData* RawDataShm() { return raw_data_shm_; }
+
 
   /// Get the memory type id.
   /// \return The memory type id of the tensor.

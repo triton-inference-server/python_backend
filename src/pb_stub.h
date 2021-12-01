@@ -68,9 +68,10 @@ class Stub {
   std::vector<std::shared_ptr<PbTensor>> output_gpu_tensors_;
   std::vector<std::shared_ptr<PbTensor>> input_gpu_tensors_;
   std::mutex tensors_to_remove_mutex_;
-  std::mutex gpu_load_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
   std::mutex messages_mutex_;
+  std::shared_ptr<std::mutex> cuda_ipc_open_mutex_;
+  std::shared_ptr<std::mutex> cuda_ipc_close_mutex_;
   std::condition_variable messages_cv_;
   py::object thread_pool_;
   bool require_cleanup_;
@@ -108,12 +109,13 @@ class Stub {
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
   std::unique_ptr<IPCMessage> PopMessage();
   void AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor);
+  std::shared_ptr<std::mutex>& CudaIpcOpenMutex();
+  std::shared_ptr<std::mutex>& CudaIpcCloseMutex();
 
   void Fetch();
   void UpdateHealth();
   void LoadGPUBuffers();
   void Finalize();
-  std::mutex& GPULoadMutex() { return gpu_load_mutex_; }
 
   ~Stub();
 };

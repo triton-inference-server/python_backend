@@ -508,35 +508,37 @@ ModelInstanceState::ExecuteBLSRequest(
 
     if (request_batch->batch_size == 1) {
       std::unique_ptr<InferRequest> infer_request;
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       infer_request = InferRequest::LoadFromSharedMemory(
-          shm_pool_, request_batch->requests);
+          shm_pool_, request_batch->requests, cuda_ipc_mutex,
+          cuda_ipc_mutex);
       std::unique_ptr<InferResponse> infer_response;
 
-      try {
-        // If the BLS inputs are in GPU an additional round trip between the
-        // stub process and the main process is required. The reason is that we
-        // need to first allocate the GPU memory from the memory pool and then
-        // ask the stub process to fill in those allocated buffers.
-        for (auto& input_tensor : infer_request->Inputs()) {
-          if (!input_tensor->IsCPU()) {
+      // If the BLS inputs are in GPU an additional round trip between the
+      // stub process and the main process is required. The reason is that we
+      // need to first allocate the GPU memory from the memory pool and then
+      // ask the stub process to fill in those allocated buffers.
+      for (auto& input_tensor : infer_request->Inputs()) {
+        if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-            BackendMemory* backend_memory;
-            std::unique_ptr<BackendMemory> lbackend_memory;
-            has_gpu_tensor = true;
-            THROW_IF_TRITON_ERROR(BackendMemory::Create(
-                Model()->TritonMemoryManager(),
-                {BackendMemory::AllocationType::GPU_POOL},
-                input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
-                &backend_memory));
-            lbackend_memory.reset(backend_memory);
-            input_tensor->SetBackendMemory(
-                std::move(lbackend_memory), shm_pool_);
-#endif  // TRITON_ENABLE_GPU
+          BackendMemory* backend_memory;
+          std::unique_ptr<BackendMemory> lbackend_memory;
+          has_gpu_tensor = true;
+          TRITONSERVER_Error* error = BackendMemory::Create(
+              Model()->TritonMemoryManager(),
+              {BackendMemory::AllocationType::GPU_POOL,
+               BackendMemory::AllocationType::GPU},
+              input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
+              &backend_memory);
+          if (error != nullptr) {
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(error));
+            break;
           }
+          lbackend_memory.reset(backend_memory);
+          input_tensor->SetBackendMemory(std::move(lbackend_memory), shm_pool_);
+#endif  // TRITON_ENABLE_GPU
         }
-      }
-      catch (const PythonBackendException& exception) {
-        pb_exception = exception;
       }
 
       // Wait for the extra round trip to complete. The stub process will fill
@@ -876,8 +878,11 @@ ModelInstanceState::ProcessRequests(
 
     std::unique_ptr<InferResponse> infer_response;
     try {
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       infer_response = InferResponse::LoadFromSharedMemory(
-          shm_pool_, response_batch->responses + sizeof(Response) * r);
+          shm_pool_, response_batch->responses + sizeof(Response) * r,
+          cuda_ipc_mutex /* cuda_ipc_open_mutex */,
+          cuda_ipc_mutex /* cuda_ipc_close_mutex */);
       if (infer_response->HasError()) {
         if (infer_response->IsErrorMessageSet()) {
           TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
@@ -969,10 +974,9 @@ ModelInstanceState::ProcessRequests(
           actual_memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
         cudaSetDevice(output_tensor->MemoryTypeId());
-        cudaError_t err = cudaIpcGetMemHandle(
-            reinterpret_cast<cudaIpcMemHandle_t*>(
-                output_tensor->CudaIpcMemHandle()),
-            buffer);
+        cudaIpcMemHandle_t cuda_ipc_mem_handle;
+        cudaError_t err = cudaIpcGetMemHandle(&cuda_ipc_mem_handle, buffer);
+        output_tensor->SetCudaIpcMemHandle(&cuda_ipc_mem_handle);
 
         if (err != cudaSuccess) {
           GUARDED_RESPOND_IF_ERROR(
@@ -1035,8 +1039,12 @@ ModelInstanceState::ProcessRequests(
 
       // Reload the tensor from shared memory so that the memory data is
       // updated.
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       std::shared_ptr<PbTensor> reloaded_tensor =
-          PbTensor::LoadFromSharedMemory(shm_pool_, tensor->ShmOffset());
+          PbTensor::LoadFromSharedMemory(
+              shm_pool_, tensor->ShmOffset(),
+              cuda_ipc_mutex /* cuda_ipc_open_mutex */,
+              cuda_ipc_mutex /* cuda_ipc_close_mutex */);
       auto& buffer = tensor_buffer_pair.second.first;
       auto& response_index = tensor_buffer_pair.second.second;
       GUARDED_RESPOND_IF_ERROR(
@@ -1190,8 +1198,8 @@ ModelInstanceState::StartStubProcess()
     } else {
       std::stringstream ss;
       ss << " exec " << python_backend_stub << " " << model_path_ << " "
-         << shm_region_name_ << " " << shm_default_size << " " << shm_growth_size
-         << " " << parent_pid_ << " "
+         << shm_region_name_ << " " << shm_default_size << " "
+         << shm_growth_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
          << ipc_control_offset_ << " " << Name();
       bash_argument = ss.str();
@@ -1306,8 +1314,9 @@ TRITONSERVER_Error*
 ModelInstanceState::SetupStubProcess()
 {
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
-  shm_region_name_ =
-      std::string("/") + Name() + "_" + std::to_string(Model()->Version()) + "_" + kind + "_" + std::to_string(device_id_);
+  shm_region_name_ = std::string("/") + Name() + "_" +
+                     std::to_string(Model()->Version()) + "_" + kind + "_" +
+                     std::to_string(device_id_);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_growth_size =
@@ -1919,8 +1928,6 @@ TRITONBACKEND_ModelInstanceExecute(
 
   // Wait for all the pending BLS requests to be completed.
   instance_state->WaitForBLSRequestsToFinish();
-
-
   instance_state->CleanupBLSResponses();
 
   for (uint32_t r = 0; r < request_count; ++r) {
