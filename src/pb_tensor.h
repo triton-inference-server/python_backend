@@ -78,6 +78,8 @@ class PbTensor {
 #ifdef TRITON_ENABLE_GPU
   bool is_cuda_handle_set_;
   cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
+  std::shared_ptr<std::mutex> cuda_ipc_open_mutex_;
+  std::shared_ptr<std::mutex> cuda_ipc_close_mutex_;
 #ifndef TRITON_PB_STUB
   std::unique_ptr<BackendMemory> backend_memory_;
 #endif  // TRITON_PB_STUB
@@ -150,7 +152,9 @@ class PbTensor {
   /// \return name of the tensor.
   const std::string& Name() const;
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset);
+      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset,
+      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
 #ifdef TRITON_ENABLE_GPU
 
   /// Get the GPU start address.
@@ -161,6 +165,12 @@ class PbTensor {
   /// Get the cuda IPC handle corresponding to this tensor.
   /// \return The cudaIpcMemHandle
   const cudaIpcMemHandle_t* CudaIpcMemHandle();
+
+  /// Set cuda IPC open mutex. This mutex will be used for cudaIpcOpenMemHandle
+  /// and cudaIpcCloseMemHandle calls.
+  void SetCudaIpcMutexes(
+      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
 
   /// Set the cuda IPC handle corresponding to this tensor.
   /// \param cuda_ipc_mem_handle CUDA ipc mem handle.

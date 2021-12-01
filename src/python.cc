@@ -508,8 +508,10 @@ ModelInstanceState::ExecuteBLSRequest(
 
     if (request_batch->batch_size == 1) {
       std::unique_ptr<InferRequest> infer_request;
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       infer_request = InferRequest::LoadFromSharedMemory(
-          shm_pool_, request_batch->requests);
+          shm_pool_, request_batch->requests, cuda_ipc_mutex,
+          cuda_ipc_mutex);
       std::unique_ptr<InferResponse> infer_response;
 
       // If the BLS inputs are in GPU an additional round trip between the
@@ -876,8 +878,11 @@ ModelInstanceState::ProcessRequests(
 
     std::unique_ptr<InferResponse> infer_response;
     try {
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       infer_response = InferResponse::LoadFromSharedMemory(
-          shm_pool_, response_batch->responses + sizeof(Response) * r);
+          shm_pool_, response_batch->responses + sizeof(Response) * r,
+          cuda_ipc_mutex /* cuda_ipc_open_mutex */,
+          cuda_ipc_mutex /* cuda_ipc_close_mutex */);
       if (infer_response->HasError()) {
         if (infer_response->IsErrorMessageSet()) {
           TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
@@ -1034,8 +1039,12 @@ ModelInstanceState::ProcessRequests(
 
       // Reload the tensor from shared memory so that the memory data is
       // updated.
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       std::shared_ptr<PbTensor> reloaded_tensor =
-          PbTensor::LoadFromSharedMemory(shm_pool_, tensor->ShmOffset());
+          PbTensor::LoadFromSharedMemory(
+              shm_pool_, tensor->ShmOffset(),
+              cuda_ipc_mutex /* cuda_ipc_open_mutex */,
+              cuda_ipc_mutex /* cuda_ipc_close_mutex */);
       auto& buffer = tensor_buffer_pair.second.first;
       auto& response_index = tensor_buffer_pair.second.second;
       GUARDED_RESPOND_IF_ERROR(

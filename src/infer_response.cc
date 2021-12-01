@@ -98,7 +98,9 @@ InferResponse::SaveToSharedMemory(
 
 std::unique_ptr<InferResponse>
 InferResponse::LoadFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset)
+    std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset,
+    std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+    std::shared_ptr<std::mutex>& cuda_ipc_close_mutex)
 {
   Response* response;
   shm_pool->MapOffset((char**)&response, response_offset);
@@ -119,7 +121,8 @@ InferResponse::LoadFromSharedMemory(
   } else {
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
       std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
-          shm_pool, response->outputs + sizeof(Tensor) * idx);
+          shm_pool, response->outputs + sizeof(Tensor) * idx,
+          cuda_ipc_open_mutex, cuda_ipc_close_mutex);
       py_output_tensors.emplace_back(std::move(pb_tensor));
     }
   }
