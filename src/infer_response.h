@@ -47,7 +47,9 @@ class InferResponse {
       std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm,
       bool copy_cpu, bool copy_gpu);
   static std::unique_ptr<InferResponse> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset);
+      std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset,
+      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
   bool HasError();
   std::shared_ptr<PbError>& Error();
 

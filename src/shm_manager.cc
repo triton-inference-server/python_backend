@@ -78,7 +78,7 @@ SharedMemory::SharedMemory(
   *capacity_ = default_byte_size;
   current_capacity_ = *capacity_;
 
-  if (!truncate) {
+  if (truncate) {
     // Create the shared memory mutex.
     shm_mutex_ = new ((char*)shm_addr_ + sizeof(size_t)) bi::interprocess_mutex;
   } else {

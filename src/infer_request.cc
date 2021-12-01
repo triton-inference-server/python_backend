@@ -114,7 +114,9 @@ InferRequest::SaveToSharedMemory(
 
 std::unique_ptr<InferRequest>
 InferRequest::LoadFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset)
+    std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset,
+    std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+    std::shared_ptr<std::mutex>& cuda_ipc_close_mutex)
 {
   Request* request;
   shm_pool->MapOffset((char**)&request, request_offset);
@@ -127,7 +129,8 @@ InferRequest::LoadFromSharedMemory(
   std::vector<std::shared_ptr<PbTensor>> py_input_tensors;
   for (size_t input_idx = 0; input_idx < requested_input_count; ++input_idx) {
     std::shared_ptr<PbTensor> pb_input_tensor = PbTensor::LoadFromSharedMemory(
-        shm_pool, request->inputs + sizeof(Tensor) * input_idx);
+        shm_pool, request->inputs + sizeof(Tensor) * input_idx,
+        cuda_ipc_open_mutex, cuda_ipc_close_mutex);
     py_input_tensors.emplace_back(std::move(pb_input_tensor));
   }
 
@@ -207,7 +210,9 @@ InferRequest::Exec()
         for (auto& input_tensor : this->Inputs()) {
           if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-            input_tensor->LoadGPUData(shm_pool, stub->GPULoadMutex());
+            input_tensor->SetCudaIpcMutexes(
+                stub->CudaIpcOpenMutex(), stub->CudaIpcCloseMutex());
+            input_tensor->LoadGPUData(shm_pool);
 #endif  // TRITON_ENABLE_GPU
           }
         }
@@ -263,7 +268,8 @@ InferRequest::Exec()
   if (responses_is_set) {
     std::unique_ptr<InferResponse> infer_response =
         InferResponse::LoadFromSharedMemory(
-            shm_pool, response_batch->responses);
+            shm_pool, response_batch->responses, stub->CudaIpcOpenMutex(),
+            stub->CudaIpcCloseMutex());
 
     return infer_response;
   } else {

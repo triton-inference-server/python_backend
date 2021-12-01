@@ -138,6 +138,8 @@ Stub::Instantiate(
   model_instance_name_ = model_instance_name;
   health_mutex_ = nullptr;
   initialized_ = false;
+  cuda_ipc_open_mutex_ = std::make_shared<std::mutex>();
+  cuda_ipc_close_mutex_ = std::make_shared<std::mutex>();
 
   try {
     shm_pool_ = std::make_unique<SharedMemory>(
@@ -284,7 +286,9 @@ std::shared_ptr<InferRequest>
 Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
 {
   std::shared_ptr<InferRequest> infer_request =
-      InferRequest::LoadFromSharedMemory(shm_pool_, request_offset);
+      InferRequest::LoadFromSharedMemory(
+          shm_pool_, request_offset, cuda_ipc_open_mutex_,
+          cuda_ipc_close_mutex_);
 
   for (auto& tensor : infer_request->Inputs()) {
     if (!tensor->IsCPU())
@@ -310,9 +314,22 @@ Stub::PopMessage()
   while (!success) {
     message = stub_message_queue_->Pop(1000, success);
   }
+
   ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
   return ipc_message;
+}
+
+std::shared_ptr<std::mutex>&
+Stub::CudaIpcCloseMutex()
+{
+  return cuda_ipc_close_mutex_;
+}
+
+std::shared_ptr<std::mutex>&
+Stub::CudaIpcOpenMutex()
+{
+  return cuda_ipc_open_mutex_;
 }
 
 bool
@@ -582,7 +599,8 @@ Stub::LoadGPUBuffers()
 #ifdef TRITON_ENABLE_GPU
   for (auto& tensor : output_gpu_tensors_) {
     if (tensor->RawDataShm()->memory_type == TRITONSERVER_MEMORY_GPU) {
-      tensor->LoadGPUData(shm_pool_, gpu_load_mutex_);
+      tensor->SetCudaIpcMutexes(CudaIpcOpenMutex(), CudaIpcCloseMutex());
+      tensor->LoadGPUData(shm_pool_);
     } else {
       tensor->CopyToCPU(shm_pool_);
     }

@@ -64,7 +64,9 @@ class InferRequest {
   /// \param shm_pool Shared memory pool
   /// \param request_offset Shared memory offset of the request.
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset);
+      std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset,
+      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
+      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
 #ifdef TRITON_PB_STUB
   std::unique_ptr<InferResponse> Exec();
 #endif
