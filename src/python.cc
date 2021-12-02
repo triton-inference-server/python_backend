@@ -192,6 +192,8 @@ struct BackendState {
   int64_t shm_growth_byte_size;
   int64_t stub_timeout_seconds;
   int64_t shm_message_queue_size;
+  std::atomic<int> number_of_instance_inits;
+  std::string shared_memory_region_prefix;
   std::unique_ptr<EnvironmentManager> env_manager;
 };
 
@@ -510,8 +512,7 @@ ModelInstanceState::ExecuteBLSRequest(
       std::unique_ptr<InferRequest> infer_request;
       std::shared_ptr<std::mutex> cuda_ipc_mutex;
       infer_request = InferRequest::LoadFromSharedMemory(
-          shm_pool_, request_batch->requests, cuda_ipc_mutex,
-          cuda_ipc_mutex);
+          shm_pool_, request_batch->requests, cuda_ipc_mutex, cuda_ipc_mutex);
       std::unique_ptr<InferResponse> infer_response;
 
       // If the BLS inputs are in GPU an additional round trip between the
@@ -1314,11 +1315,14 @@ TRITONSERVER_Error*
 ModelInstanceState::SetupStubProcess()
 {
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
-  shm_region_name_ = std::string("/") + Name() + "_" +
-                     std::to_string(Model()->Version()) + "_" + kind + "_" +
-                     std::to_string(device_id_);
-
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+
+  // Increase the stub process count to avoid shared memory region name
+  // collision
+  model_state->StateForBackend()->number_of_instance_inits++;
+  shm_region_name_ =
+      model_state->StateForBackend()->shared_memory_region_prefix +
+      std::to_string(model_state->StateForBackend()->number_of_instance_inits);
   int64_t shm_growth_size =
       model_state->StateForBackend()->shm_growth_byte_size;
   int64_t shm_default_size =
@@ -1711,6 +1715,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
   backend_state->stub_timeout_seconds = 30;
   backend_state->shm_message_queue_size = 1000;
+  backend_state->number_of_instance_inits = 0;
+  backend_state->shared_memory_region_prefix =
+      "triton_python_backend_shm_region_";
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value shm_growth_size;
@@ -1750,6 +1757,21 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       catch (const std::invalid_argument& ia) {
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
       }
+    }
+
+    triton::common::TritonJson::Value shm_region_prefix;
+    std::string shm_region_prefix_str;
+    if (cmdline.Find("shm-region-prefix-name", &shm_region_prefix)) {
+      RETURN_IF_ERROR(shm_region_prefix.AsString(&shm_region_prefix_str));
+      // Shared memory default byte size can't be less than 4 MBs.
+      if (shm_region_prefix_str.size() == 0) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INVALID_ARG,
+            (std::string("shm-region-prefix-name") +
+             " must at least contain one character.")
+                .c_str());
+      }
+      backend_state->shared_memory_region_prefix = shm_region_prefix_str;
     }
 
     triton::common::TritonJson::Value shm_message_queue_size;
