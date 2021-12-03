@@ -145,9 +145,9 @@ the build. If the CMake variables below are not specified, "main" branch
 of those repositories will be used. \<GIT\_BRANCH\_NAME\> should be the same
 as the Python backend repository branch that you are trying to compile.
 
-* triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=\<GIT\_BRANCH\_NAME\>
-* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
-* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/backend: -DTRITON\_BACKEND\_REPO\_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/common: -DTRITON\_COMMON\_REPO\_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/common: -DTRITON\_COMMON\_REPO\_TAG=\<GIT\_BRANCH\_NAME\>
 
 Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
 this location is `/opt/tritonserver`.
@@ -495,11 +495,11 @@ default version of the stub is Python 3.8.
 provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
 `config.pbtxt` of all the models that want to use the execution environment.
 
-4. If you need to compile the Python backend stub, it is recommended that you compile 
-it in the official Triton NGC containers. Otherwise, your compiled stub may use
-dependencies that are not available in the Triton container that you are using for
-deployment. For example, compiling the Python backend stub in Ubuntu 16.04 while
-the Triton server is using Ubuntu 20.04 can lead to unexpected errors.
+4. If you need to compile the Python backend stub, it is recommended that you
+compile it in the official Triton NGC containers. Otherwise, your compiled stub
+may use dependencies that are not available in the Triton container that you are
+using for deployment. For example, compiling the Python backend stub on an OS
+other than Ubuntu 20.04 can lead to unexpected errors.
 
 ## Error Handling
 
