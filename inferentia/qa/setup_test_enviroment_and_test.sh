@@ -117,7 +117,6 @@ docker create --name ${CONTAINER_NAME}             \
             docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
             docker start -a ${CONTAINER_NAME} || RV=$?;
 
-
 # Run tensorflow instance tests
 docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
 docker create --name ${CONTAINER_NAME}             \
@@ -130,23 +129,6 @@ docker create --name ${CONTAINER_NAME}             \
             -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
             -e TRITON_PATH=${TRITON_PATH}          \
             -e USE_TENSORFLOW="1"                  \
-            --net host -ti ${QA_IMAGE}             \
-            /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
-            docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
-            docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
-            docker start -a ${CONTAINER_NAME} || RV=$?;
-
-docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
-docker create --name ${CONTAINER_NAME}             \
-            --device /dev/neuron0                  \
-            --device /dev/neuron1                  \
-            --shm-size=1g --ulimit memlock=-1      \
-            -p 8000:8000 -p 8001:8001 -p 8002:8002 \
-            --ulimit stack=67108864                \
-            -e TEST_REPO=${TEST_REPO}              \
-            -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
-            -e TRITON_PATH=${TRITON_PATH}          \
-            -e USE_TENSORFLOW="2"                  \
             --net host -ti ${QA_IMAGE}             \
             /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
             docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
