@@ -36,9 +36,6 @@ export PYTHON_BACKEND_REPO_TAG=${DEFAULT_REPO_TAG}
 export CHECKSUM_REPOAGENT_REPO_TAG=${DEFAULT_REPO_TAG}
 export TRITON_SERVER_REPO_TAG=${TRITON_SERVER_REPO_TAG:=${DEFAULT_REPO_TAG}}
 export TRITON_CLIENT_REPO_TAG=${TRITON_CLIENT_REPO_TAG:=${DEFAULT_REPO_TAG}}
-export TRITON_VERSION="2.17.0dev"
-export TRITON_CONTAINER_VERSION="21.12dev"
-export TRITON_UPSTREAM_CONTAINER_VERSION="21.10"
 export BASE_IMAGE=tritonserver
 export SDK_IMAGE=tritonserver_sdk
 export BUILD_IMAGE=tritonserver_build
@@ -55,7 +52,6 @@ echo $TRITON_SERVER_REPO_TAG
 rm -rf ${TRITON_PATH}/server
 git clone --single-branch --depth=1 -b ${TRITON_SERVER_REPO_TAG} \
           https://github.com/triton-inference-server/server.git
-echo ${TRITON_VERSION} > server/TRITON_VERSION
 cd ${TRITON_PATH}/server
 git clone --single-branch --depth=1 -b ${TRITON_CLIENT_REPO_TAG} \
           https://github.com/triton-inference-server/client.git clientrepo
@@ -70,8 +66,6 @@ cd ${TRITON_PATH}/server
 pip3 install docker
 ./build.py --build-dir=/tmp/tritonbuild \
            --cmake-dir=${TRITON_PATH}/server/build \
-           --version=${TRITON_VERSION} \
-           --container-version=${TRITON_CONTAINER_VERSION} \
            --enable-logging --enable-stats --enable-tracing \
            --enable-metrics --enable-gpu-metrics --enable-gpu \
            --filesystem=gcs --filesystem=azure_storage --filesystem=s3 \
