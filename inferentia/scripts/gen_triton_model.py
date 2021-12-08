@@ -460,9 +460,8 @@ def get_pytorch_execute_impl():
             output_tensors = []
             for i in self.output_dict.keys():
                 name, dt, shape = self.output_dict[i]
-                result = results[i] if isinstance(results, tuple) else results
                 output_tensor = pb_utils.Tensor(
-                    name, result.numpy().astype(
+                    name, results[i].numpy().astype(
                         pb_utils.triton_string_to_numpy(dt)))
 
                 output_tensors.append(output_tensor)
@@ -628,13 +627,13 @@ if __name__ == '__main__':
     elif FLAGS.model_type == 'pytorch':
         is_tensorflow_model = False
 
-    if not is_tensorflow_model or (FLAGS.triton_input != None and FLAGS.triton_output != None):
+    if not is_tensorflow_model or (FLAGS.triton_input != None and
+                                   FLAGS.triton_output != None):
         inputs = parse_io_tensors(FLAGS.triton_input)
         outputs = parse_io_tensors(FLAGS.triton_output)
     else:
         inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
                                            FLAGS.signature_def_key)
-        
 
     nc_start_idx, nc_end_idx = [
         int(i) for i in FLAGS.neuron_core_range.split(":")
