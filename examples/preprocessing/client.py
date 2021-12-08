@@ -42,7 +42,8 @@ def load_image(img_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name",
-                        type=str, required=False,
+                        type=str,
+                        required=False,
                         default="ensemble_python_resnet50",
                         help="Model name")
     parser.add_argument("--image",
@@ -54,19 +55,22 @@ if __name__ == "__main__":
                         required=False,
                         default="localhost:8001",
                         help="Inference server URL. Default is localhost:8001.")
-    parser.add_argument('-v', "--verbose",
+    parser.add_argument('-v',
+                        "--verbose",
                         action="store_true",
                         required=False,
                         default=False,
                         help='Enable verbose output')
-    parser.add_argument("--label_file",
-                        type=str,
-                        default="./model_repository/resnet50_trt/labels.txt",
-                        help="Path to the file with text representation of available labels")
+    parser.add_argument(
+        "--label_file",
+        type=str,
+        default="./model_repository/resnet50_trt/labels.txt",
+        help="Path to the file with text representation of available labels")
     args = parser.parse_args()
 
     try:
-        triton_client = tritongrpcclient.InferenceServerClient(url=args.url, verbose=args.verbose)
+        triton_client = tritongrpcclient.InferenceServerClient(
+            url=args.url, verbose=args.verbose)
     except Exception as e:
         print("channel creation failed: " + str(e))
         sys.exit(1)
@@ -81,7 +85,8 @@ if __name__ == "__main__":
     image_data = load_image(args.image)
     image_data = np.expand_dims(image_data, axis=0)
 
-    inputs.append(tritongrpcclient.InferInput(input_name, image_data.shape, "UINT8"))
+    inputs.append(
+        tritongrpcclient.InferInput(input_name, image_data.shape, "UINT8"))
     outputs.append(tritongrpcclient.InferRequestedOutput(output_name))
 
     inputs[0].set_data_from_numpy(image_data)

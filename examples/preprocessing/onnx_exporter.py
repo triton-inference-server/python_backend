@@ -46,7 +46,15 @@ if __name__ == "__main__":
                       do_constant_folding=True,
                       input_names=['input'],
                       output_names=['output'],
-                      dynamic_axes={'input': {0: 'batch_size', 2: "height", 3: 'width'},
-                                    'output': {0: 'batch_size'}})
+                      dynamic_axes={
+                          'input': {
+                              0: 'batch_size',
+                              2: "height",
+                              3: 'width'
+                          },
+                          'output': {
+                              0: 'batch_size'
+                          }
+                      })
 
     print("Saved {}".format(args.save))
