@@ -24,8 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <boost/interprocess/sync/scoped_lock.hpp>
 #include "infer_request.h"
+#include <boost/interprocess/sync/scoped_lock.hpp>
 
 #include "pb_utils.h"
 #ifdef TRITON_PB_STUB

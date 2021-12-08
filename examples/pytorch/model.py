@@ -39,6 +39,7 @@ class AddSubNet(nn.Module):
     Simple AddSub network in PyTorch. This network outputs the sum and
     subtraction of the inputs.
     """
+
     def __init__(self):
         super(AddSubNet, self).__init__()
 
@@ -50,6 +51,7 @@ class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
     """
+
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows

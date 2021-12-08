@@ -104,7 +104,8 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     print("\n")
     print("=========='undefined' model result==========")
     try:
-        inputs[2].set_data_from_numpy(np.array(['undefined_model'], dtype=np.object_))
+        inputs[2].set_data_from_numpy(
+            np.array(['undefined_model'], dtype=np.object_))
         response = client.infer(model_name,
                                 inputs,
                                 request_id=str(1),

@@ -39,6 +39,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 import os
 
+
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
@@ -71,7 +72,7 @@ class TritonPythonModel:
         # Convert Triton types to numpy types
         self.output0_dtype = pb_utils.triton_string_to_numpy(
             output0_config['data_type'])
-        
+
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
         function receives a list of pb_utils.InferenceRequest as the only
@@ -103,25 +104,22 @@ class TritonPythonModel:
         for request in requests:
             # Get INPUT0
             in_0 = pb_utils.get_input_tensor_by_name(request, "INPUT_0")
-                                 
-            normalize = transforms.Normalize(
-                                        mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225]
-                        )
-            
+
+            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                             std=[0.229, 0.224, 0.225])
+
             loader = transforms.Compose([
-                                        transforms.Resize([224, 224]),
-                                        transforms.CenterCrop(224),
-                                        transforms.ToTensor(),
-                                        normalize
-                              ])
-            
+                transforms.Resize([224, 224]),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(), normalize
+            ])
+
             def image_loader(image_name):
                 image = loader(image_name)
                 #expand the dimension to nchw
                 image = image.unsqueeze(0)
                 return image
-            
+
             img = in_0.as_numpy()
 
             image = Image.open(io.BytesIO(img.tobytes()))
