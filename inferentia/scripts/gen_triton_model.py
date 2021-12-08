@@ -375,6 +375,9 @@ def get_tensorflow_execute_impl():
                 tensor = pb_utils.get_input_tensor_by_name(request,
                                                            name).as_numpy()
                 split_tensor = [None] * num_threads
+                # TODO: This will force split the first dimension of the input
+                #  into however num_threads, and will report error if the dimension
+                #  is not divisible by the amount of neuron cores. Fix this behavior
                 for split_index in range(num_threads):
                     model_feed_dict_list[split_index][name] = np.split(
                         tensor, num_threads, axis=0)[split_index]
