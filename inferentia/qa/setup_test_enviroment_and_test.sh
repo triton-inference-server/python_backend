@@ -104,7 +104,7 @@ docker create --name ${CONTAINER_NAME}             \
             -e TEST_REPO=${TEST_REPO}              \
             -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
             -e TRITON_PATH=${TRITON_PATH}          \
-            -e USE_TENSORFLOW="0"                  \
+            -e USE_PYTORCH="1"                     \
             --net host -ti ${QA_IMAGE}             \
             /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
             docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
