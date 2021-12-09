@@ -47,7 +47,7 @@ export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
 export USE_TENSORFLOW=0
-export TENSORFLOW_VERSION="1"
+export TENSORFLOW_VERSION=1
 for OPTS; do
     case "$OPTS" in
         -h|--help)
@@ -100,7 +100,7 @@ if [ $USE_TENSORFLOW -eq 1 ] && [ $USE_PYTORCH -eq 1 ]; then
 fi
 
 if [ $USE_TENSORFLOW -eq 1 ]; then
-    if [ $TENSORFLOW_VERSION != "1" ] || [ $TENSORFLOW_VERSION != "2" ]; then
+    if [ $TENSORFLOW_VERSION -ne 1 ] || [ $TENSORFLOW_VERSION -ne 2 ]; then
         echo "Need to specify --tensorflow-version to be 1 or 2. TENSORFLOW_VERSION currently is: $TENSORFLOW_VERSION"
         printf "%s\\n" "$USAGE"
         return 1
@@ -157,7 +157,7 @@ if [ $USE_TENSORFLOW -eq 1]; then
     conda install tensorflow-neuron pillow -y
     # Update Neuron TensorBoard
     pip install --upgrade tensorboard-plugin-neuron
-    #Update Neuron TensorFlow
+    # Update Neuron TensorFlow
     if [ $TENSORFLOW_VERSION -eq "1" ]; then
         pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
     else

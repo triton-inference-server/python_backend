@@ -47,7 +47,7 @@ CONTAINER_NAME="qa_container"
 
 
 cd ${TRITON_PATH}
-echo $TRITON_SERVER_REPO_TAG
+echo "Using server repo tag: $TRITON_SERVER_REPO_TAG"
 # Clone necessary branches
 rm -rf ${TRITON_PATH}/server
 git clone --single-branch --depth=1 -b ${TRITON_SERVER_REPO_TAG} \
