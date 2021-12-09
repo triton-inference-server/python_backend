@@ -458,23 +458,30 @@ def get_pytorch_execute_impl():
 
         responses = []
 
-        for request in requests:
-            inputs = []
+        inputs = []
+        num_requests = len(requests)
+        if (num_requests > 0):
             for i in range(len(self.input_dict)):
                 name, dt, shape = self.input_dict[i]
-                tensor = pb_utils.get_input_tensor_by_name(request,
-                                                           name).as_numpy()
-                inputs.append(torch.as_tensor(tensor))
+                batched_tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[0],
+                                                                name).as_numpy())
+                for j in range(1, num_requests):
+                    tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[j],
+                                                                name).as_numpy())
+                    torch.cat((tensor, batched_tensor), dim=0, out=batched_tensor)
+                inputs.append(batched_tensor)
 
-            results = self.model_neuron(*inputs)
+            batched_results = self.model_neuron(*inputs)
 
             output_tensors = []
             for i in self.output_dict.keys():
                 name, dt, shape = self.output_dict[i]
-                result = results[i] if isinstance(results, tuple) else results
-                output_tensor = pb_utils.Tensor(
-                    name, result.numpy().astype(
-                        pb_utils.triton_string_to_numpy(dt)))
+                batch = batched_results[i] if isinstance(batched_results, tuple) else batched_results
+                results = torch.chunk(batch, num_requests, dim=0)
+                for result in results:
+                    output_tensor = pb_utils.Tensor(
+                        name, result.numpy().astype(
+                            pb_utils.triton_string_to_numpy(dt)))
 
                 output_tensors.append(output_tensor)
 
