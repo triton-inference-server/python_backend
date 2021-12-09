@@ -35,7 +35,7 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 -i|--inferentia-path       Inferentia path, default is: /home/ubuntu
 -p|--use-pytorch           Install pytorch-neuron if specified
 -t|--use-tensorflow        Install tensorflow-neuron is specified
---tensorflow-version       Version of Tensorflow used. Ignored if installing pytorch-neuron
+--tensorflow-version       Version of Tensorflow used. Default is 1. Ignored if installing pytorch-neuron
 "
 
 # Get all options:
@@ -47,7 +47,7 @@ export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
 export USE_TENSORFLOW=0
-export TENSORFLOW_VERSION="0"
+export TENSORFLOW_VERSION="1"
 for OPTS; do
     case "$OPTS" in
         -h|--help)
@@ -87,22 +87,20 @@ for OPTS; do
     esac
 done
 
-if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ] 
-then
+if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]; then
     echo "Need to specify either -p (use pytorch) or -t (use tensorflow)."
     printf "%s\\n" "$USAGE"
     return 1
 fi
 
-if [ $USE_TENSORFLOW -eq 1 ] && [ $USE_PYTORCH -eq 1 ]
-then
+if [ $USE_TENSORFLOW -eq 1 ] && [ $USE_PYTORCH -eq 1 ]; then
     echo "Can specify only one of -p (use pytorch) or -t (use tensorflow)."
     printf "%s\\n" "$USAGE"
     return 1
 fi
 
-if [ $USE_TENSORFLOW -eq 1 ];then
-    if [ $TENSORFLOW_VERSION != "1" ] || [ $TENSORFLOW_VERSION != "2" ]
+if [ $USE_TENSORFLOW -eq 1 ]; then
+    if [ $TENSORFLOW_VERSION != "1" ] || [ $TENSORFLOW_VERSION != "2" ]; then
         echo "Need to specify --tensorflow-version to be 1 or 2. TENSORFLOW_VERSION currently is: $TENSORFLOW_VERSION"
         printf "%s\\n" "$USAGE"
         return 1
