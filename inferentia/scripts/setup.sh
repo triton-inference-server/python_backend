@@ -153,12 +153,12 @@ make triton-python-backend-stub -j16
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 
-if [ $USE_TENSORFLOW -eq 1]; then
+if [ $USE_TENSORFLOW -eq 1 ]; then
     conda install tensorflow-neuron pillow -y
     # Update Neuron TensorBoard
     pip install --upgrade tensorboard-plugin-neuron
     # Update Neuron TensorFlow
-    if [ $TENSORFLOW_VERSION -eq "1" ]; then
+    if [ $TENSORFLOW_VERSION -eq 1 ]; then
         pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
     else
         pip install --upgrade tensorflow-neuron[cc]
