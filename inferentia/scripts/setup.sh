@@ -100,7 +100,7 @@ if [ $USE_TENSORFLOW -eq 1 ] && [ $USE_PYTORCH -eq 1 ]; then
 fi
 
 if [ $USE_TENSORFLOW -eq 1 ]; then
-    if [ $TENSORFLOW_VERSION -ne 1 ] || [ $TENSORFLOW_VERSION -ne 2 ]; then
+    if [ $TENSORFLOW_VERSION -ne 1 ] && [ $TENSORFLOW_VERSION -ne 2 ]; then
         echo "Need to specify --tensorflow-version to be 1 or 2. TENSORFLOW_VERSION currently is: $TENSORFLOW_VERSION"
         printf "%s\\n" "$USAGE"
         return 1
