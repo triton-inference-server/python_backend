@@ -60,7 +60,8 @@ def tf_to_triton_dtype(dtype):
     raise Exception("The data type in the TF model is not supported")
 
 
-def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
+def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key,
+                     enable_batching):
     from tensorflow.python.tools import saved_model_utils
     meta_graph_def = saved_model_utils.get_meta_graph_def(
         saved_model_dir, tag_set)
@@ -73,7 +74,9 @@ def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
         shape = []
         for dim in input_signature.tensor_shape.dim:
             shape.append(dim.size)
-        input_dict[input_signature.name] = [datatype, shape]
+        input_dict[input_signature.name] = [
+            datatype, shape
+        ] if enable_batching else [-1, datatype, shape]
 
     output_dict = {}
     output_signatures = list(
@@ -83,17 +86,19 @@ def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
         shape = []
         for dim in output_signature.tensor_shape.dim:
             shape.append(dim.size)
-        output_dict[output_signature.name] = [datatype, shape]
-
+        output_dict[output_signature.name] = [
+            datatype, shape
+        ] if enable_batching else [-1, datatype, shape]
     return input_dict, output_dict
 
 
-def parse_io_tensors(tensors):
+def parse_io_tensors(tensors, enable_batching):
     tensors_dict = {}
     for t in [t for tensor in tensors for t in tensor]:
         name, datatype, shape_str = t.split(",")
         shape = [int(i) for i in shape_str.split("x")]
-        tensors_dict[name] = [datatype, shape]
+        tensors_dict[name] = [datatype, shape
+                             ] if enable_batching else [-1, datatype, shape]
 
     return tensors_dict
 
@@ -107,10 +112,16 @@ def get_parameter_spec(key1, value):
 
 def create_modelconfig(model_name, max_batch_size, inputs, outputs,
                        compiled_model_path, nc_start_idx, nc_end_idx,
-                       threads_per_core, instance_count):
+                       threads_per_core, instance_count, enable_batching,
+                       preferred_batch_size):
     config = "name: \"{}\"\n".format(model_name)
     config += "backend: \"python\"\n"
     config += "max_batch_size: {}\n".format(max_batch_size)
+    if enable_batching:
+        config += '''
+dynamic_batching {
+preferred_batch_size: {}
+}\n'''.format(preferred_batch_size)
     for input_name in inputs.keys():
         data_type, shape = inputs[input_name]
         config += '''
@@ -544,12 +555,12 @@ if __name__ == '__main__':
         type=int,
         default=0,
         help='The maximum batch size for the model being generated')
-    parser.add_argument('--model_type',
-                        type=str,
-                        required=True,
-                        choices=['pytorch', 'tensorflow'],
-                        help='''The type of the compiled model. Currently,
-                        only supports \"pytorch\" and \"tensorflow\".''')
+    parser.add_argument('--preferred-batch-size',
+                        type=int,
+                        default=0,
+                        help='''The preferred batch size. Should be multiples
+                         of cores available to ensure proper utilization of
+                         neuron cores. Default value is 0''')
     parser.add_argument('--tag_set',
                         type=str,
                         default="serve",
@@ -627,14 +638,15 @@ if __name__ == '__main__':
         is_tensorflow_model = True
     elif FLAGS.model_type == 'pytorch':
         is_tensorflow_model = False
+    enable_batching = FLAGS.preferred_batch_size != None and FLAGS.preferred_batch_size > 0
 
     if not is_tensorflow_model or (FLAGS.triton_input != None and
                                    FLAGS.triton_output != None):
-        inputs = parse_io_tensors(FLAGS.triton_input)
-        outputs = parse_io_tensors(FLAGS.triton_output)
+        inputs = parse_io_tensors(FLAGS.triton_input, enable_batching)
+        outputs = parse_io_tensors(FLAGS.triton_output, enable_batching)
     else:
         inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
-                                           FLAGS.signature_def_key)
+                                           FLAGS.signature_def_key, enable_batching)
 
     nc_start_idx, nc_end_idx = [
         int(i) for i in FLAGS.neuron_core_range.split(":")
@@ -650,7 +662,8 @@ if __name__ == '__main__':
     mc = create_modelconfig(model_name, FLAGS.max_batch_size, inputs, outputs,
                             FLAGS.compiled_model, nc_start_idx, nc_end_idx,
                             FLAGS.threads_per_core,
-                            FLAGS.triton_model_instance_count)
+                            FLAGS.triton_model_instance_count, enable_batching,
+                            FLAGS.preferred_batch_size)
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 
