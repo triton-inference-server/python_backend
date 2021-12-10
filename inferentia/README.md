@@ -241,7 +241,7 @@ Triton Server and Triton SDK.
 Note: If you would need to change some of the tests in the server repo,
 you would need to run 
 ```
- $export TRITON_SERVER_BRANCH_NAME=<your branch name>
+ $export TRITON_SERVER_REPO_TAG=<your branch name>
 ``` 
 before running the script. 
 

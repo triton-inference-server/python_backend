@@ -34,11 +34,12 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 -v|--python-version        Python version, default is 3.7
 -i|--inferentia-path       Inferentia path, default is: /home/ubuntu
 -p|--use-pytorch           Install pytorch-neuron if specified
--t|--use-tensorflow        Install tensorflow-neuron if specified
+-t|--use-tensorflow        Install tensorflow-neuron is specified
+--tensorflow-version       Version of Tensorflow used. Default is 1. Ignored if installing pytorch-neuron
 "
 
 # Get all options:
-OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch -- "$@")
+OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch,tensorflow-version: -- "$@")
 
 
 export INFRENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
@@ -46,6 +47,7 @@ export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
 export USE_TENSORFLOW=0
+export TENSORFLOW_VERSION=1
 for OPTS; do
     case "$OPTS" in
         -h|--help)
@@ -77,14 +79,32 @@ for OPTS; do
         echo "Installing pytorch-neuron"
         shift 1
         ;;
+        --use-tensorflow-version)
+        TENSORFLOW_VERSION=$2
+        echo "Tensorflow version: $TENSORFLOW_VERSION"
+        shift 2
+        ;;
     esac
 done
 
-if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]
-then
+if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]; then
     echo "Need to specify either -p (use pytorch) or -t (use tensorflow)."
     printf "%s\\n" "$USAGE"
     return 1
+fi
+
+if [ $USE_TENSORFLOW -eq 1 ] && [ $USE_PYTORCH -eq 1 ]; then
+    echo "Can specify only one of -p (use pytorch) or -t (use tensorflow)."
+    printf "%s\\n" "$USAGE"
+    return 1
+fi
+
+if [ $USE_TENSORFLOW -eq 1 ]; then
+    if [ $TENSORFLOW_VERSION -ne 1 ] && [ $TENSORFLOW_VERSION -ne 2 ]; then
+        echo "Need to specify --tensorflow-version to be 1 or 2. TENSORFLOW_VERSION currently is: $TENSORFLOW_VERSION"
+        printf "%s\\n" "$USAGE"
+        return 1
+    fi
 fi
 
 # Get latest conda required https://repo.anaconda.com/miniconda/
@@ -133,13 +153,16 @@ make triton-python-backend-stub -j16
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 
-if [ $USE_TENSORFLOW -eq 1 ]
-then
+if [ $USE_TENSORFLOW -eq 1 ]; then
     conda install tensorflow-neuron pillow -y
-    #Update Neuron TensorFlow
-    pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
     # Update Neuron TensorBoard
     pip install --upgrade tensorboard-plugin-neuron
+    # Update Neuron TensorFlow
+    if [ $TENSORFLOW_VERSION -eq 1 ]; then
+        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
+    else
+        pip install --upgrade tensorflow-neuron[cc]
+    fi
 fi
 
 if [ $USE_PYTORCH -eq 1 ]

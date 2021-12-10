@@ -34,22 +34,24 @@ export TRITON_THIRD_PARTY_REPO_TAG=${DEFAULT_REPO_TAG}
 export IDENTITY_BACKEND_REPO_TAG=${DEFAULT_REPO_TAG}
 export PYTHON_BACKEND_REPO_TAG=${DEFAULT_REPO_TAG}
 export CHECKSUM_REPOAGENT_REPO_TAG=${DEFAULT_REPO_TAG}
-export TRITON_SERVER_BRANCH_NAME=${TRITON_SERVER_BRANCH_NAME:=${DEFAULT_REPO_TAG}}
+export TRITON_SERVER_REPO_TAG=${TRITON_SERVER_REPO_TAG:=${DEFAULT_REPO_TAG}}
 export TRITON_CLIENT_REPO_TAG=${TRITON_CLIENT_REPO_TAG:=${DEFAULT_REPO_TAG}}
-export TRITON_VERSION="2.17.0dev"
-export TRITON_CONTAINER_VERSION="21.12dev"
-export TRITON_UPSTREAM_CONTAINER_VERSION="21.10"
 export BASE_IMAGE=tritonserver
 export SDK_IMAGE=tritonserver_sdk
 export BUILD_IMAGE=tritonserver_build
 export QA_IMAGE=tritonserver_qa
+export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input_data_json
+export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
+export TEST_SCRIPT="test.sh"
+CONTAINER_NAME="qa_container"
+
 
 cd ${TRITON_PATH}
+echo "Using server repo tag: $TRITON_SERVER_REPO_TAG"
 # Clone necessary branches
 rm -rf ${TRITON_PATH}/server
-git clone --single-branch --depth=1 -b ${TRITON_SERVER_BRANCH_NAME} \
+git clone --single-branch --depth=1 -b ${TRITON_SERVER_REPO_TAG} \
           https://github.com/triton-inference-server/server.git
-echo ${TRITON_VERSION} > server/TRITON_VERSION
 cd ${TRITON_PATH}/server
 git clone --single-branch --depth=1 -b ${TRITON_CLIENT_REPO_TAG} \
           https://github.com/triton-inference-server/client.git clientrepo
@@ -64,8 +66,6 @@ cd ${TRITON_PATH}/server
 pip3 install docker
 ./build.py --build-dir=/tmp/tritonbuild \
            --cmake-dir=${TRITON_PATH}/server/build \
-           --version=${TRITON_VERSION} \
-           --container-version=${TRITON_CONTAINER_VERSION} \
            --enable-logging --enable-stats --enable-tracing \
            --enable-metrics --enable-gpu-metrics --enable-gpu \
            --filesystem=gcs --filesystem=azure_storage --filesystem=s3 \
@@ -93,12 +93,7 @@ docker build -t ${QA_IMAGE} \
                    --build-arg "BUILD_IMAGE=${BUILD_IMAGE}" \
                    --build-arg "SDK_IMAGE=${SDK_IMAGE}"     .
 
-export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input_data_json
-export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
-export TEST_SCRIPT="test.sh"
-
-# Run single instance test
-CONTAINER_NAME="qa_container"
+# Run pytorch instance test
 docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
 docker create --name ${CONTAINER_NAME}             \
             --device /dev/neuron0                  \
@@ -109,6 +104,25 @@ docker create --name ${CONTAINER_NAME}             \
             -e TEST_REPO=${TEST_REPO}              \
             -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
             -e TRITON_PATH=${TRITON_PATH}          \
+            -e USE_PYTORCH="1"                     \
+            --net host -ti ${QA_IMAGE}             \
+            /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
+            docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
+            docker cp /home/ubuntu/python_backend ${CONTAINER_NAME}:${TRITON_PATH}/python_backend && \
+            docker start -a ${CONTAINER_NAME} || RV=$?;
+
+# Run tensorflow instance tests
+docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
+docker create --name ${CONTAINER_NAME}             \
+            --device /dev/neuron0                  \
+            --device /dev/neuron1                  \
+            --shm-size=1g --ulimit memlock=-1      \
+            -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+            --ulimit stack=67108864                \
+            -e TEST_REPO=${TEST_REPO}              \
+            -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
+            -e TRITON_PATH=${TRITON_PATH}          \
+            -e USE_TENSORFLOW="1"                  \
             --net host -ti ${QA_IMAGE}             \
             /bin/bash -c "bash -ex ${TEST_REPO}/${TEST_SCRIPT}" && \
             docker cp /lib/udev ${CONTAINER_NAME}:/mylib/udev && \
