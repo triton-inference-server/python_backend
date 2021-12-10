@@ -496,7 +496,7 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
   if (response_size != batch_size) {
     throw PythonBackendException(
         "Number of InferenceResponse objects do not match the number of "
-        "InferenceRequest objects.");
+        "InferenceRequest objects. Response size is {} and response size is {}".format(response_size, batch_size));
   }
 
   shm_pool_->Map(
