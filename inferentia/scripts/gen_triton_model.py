@@ -74,19 +74,17 @@ def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key,
         shape = []
         for dim in input_signature.tensor_shape.dim:
             shape.append(dim.size)
-        input_dict[input_signature.name] = [
-            datatype, shape
-        ] if enable_batching else [-1, datatype, shape]
+        input_dict[input_signature.name] = [datatype, shape]
 
     output_dict = {}
     output_signatures = list(
         meta_graph_def.signature_def[signature_def_key].outputs.values())
     for output_signature in output_signatures:
         datatype = tf_to_triton_dtype(output_signature.dtype)
-        shape = [] if enable_batching else [-1]
+        shape = []
         for dim in output_signature.tensor_shape.dim:
             shape.append(dim.size)
-        output_dict[output_signature.name] = [datatype, shape] 
+        output_dict[output_signature.name] = [datatype, shape]
     return input_dict, output_dict
 
 
@@ -95,8 +93,7 @@ def parse_io_tensors(tensors, enable_batching):
     for t in [t for tensor in tensors for t in tensor]:
         name, datatype, shape_str = t.split(",")
         shape = [int(i) for i in shape_str.split("x")]
-        shape = shape if enable_batching else [-1] + shape
-        tensors_dict[name] = [datatype, shape] 
+        tensors_dict[name] = [datatype, shape]
 
     return tensors_dict
 
@@ -118,7 +115,7 @@ def create_modelconfig(model_name, max_batch_size, inputs, outputs,
     if enable_batching:
         config += '''
 dynamic_batching {{
-preferred_batch_size: {}
+    preferred_batch_size: {}
 }}\n'''.format(preferred_batch_size)
     for input_name in inputs.keys():
         data_type, shape = inputs[input_name]
@@ -462,31 +459,31 @@ def get_pytorch_execute_impl():
 
         inputs = []
         num_requests = len(requests)
-        if (num_requests > 0):
-            for i in range(len(self.input_dict)):
-                name, dt, shape = self.input_dict[i]
-                batched_tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[0],
-                                                                name).as_numpy())
-                for j in range(1, num_requests):
-                    tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[j],
-                                                                name).as_numpy())
-                    torch.cat((tensor, batched_tensor), dim=0, out=batched_tensor)
-                inputs.append(batched_tensor)
+        for i in self.input_dict.keys():
+            name, dt, shape = self.input_dict[i]
+            batched_tensor = torch.squeeze(torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[0],
+                                                            name).as_numpy()), 0)
+            for j in range(1, num_requests):
+                tensor = torch.squeeze(torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[j],
+                                                            name).as_numpy()),0)
+                batched_tensor = torch.cat((batched_tensor, tensor), dim=0)
+            inputs.append(batched_tensor)
 
-            batched_results = self.model_neuron(*inputs)
+        batched_results = self.model_neuron(*inputs)
 
+        chunky_batched_results = []
+        for i in self.output_dict.keys():
+            batch = batched_results[i] if isinstance(batched_results, tuple) else batched_results
+            chunky_batched_results.append(torch.chunk(batch, num_requests, dim=0))
+        for i in range(num_requests):
             output_tensors = []
-            for i in self.output_dict.keys():
-                name, dt, shape = self.output_dict[i]
-                batch = batched_results[i] if isinstance(batched_results, tuple) else batched_results
-                results = torch.chunk(batch, num_requests, dim=0)
-                for result in results:
-                    output_tensor = pb_utils.Tensor(
-                        name, result.numpy().astype(
-                            pb_utils.triton_string_to_numpy(dt)))
-
+            for j in self.output_dict.keys():
+                name, dt, shape = self.output_dict[j]
+                result = chunky_batched_results[j][i]
+                output_tensor = pb_utils.Tensor(
+                    name, torch.unsqueeze(result, dim=0).numpy().astype(
+                        pb_utils.triton_string_to_numpy(dt)))
                 output_tensors.append(output_tensor)
-
             inference_response = pb_utils.InferenceResponse(
                 output_tensors=output_tensors)
             responses.append(inference_response)
@@ -556,10 +553,10 @@ import torch.neuron
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_type',
-                    type=str,
-                    required=True,
-                    choices=['pytorch', 'tensorflow'],
-                    help='''The type of the compiled model. Currently,
+                        type=str,
+                        required=True,
+                        choices=['pytorch', 'tensorflow'],
+                        help='''The type of the compiled model. Currently,
                     only supports \"pytorch\" and \"tensorflow\".''')
     parser.add_argument('--model_version',
                         type=int,
@@ -575,7 +572,8 @@ if __name__ == '__main__':
                         default=0,
                         help='''The preferred batch size. Should be multiples
                          of cores available to ensure proper utilization of
-                         neuron cores. Default value is 0. Ignored if max_batch_size is 0''')
+                         neuron cores. Default value is 0. Ignored if max_batch_size is 0'''
+                       )
     parser.add_argument('--tag_set',
                         type=str,
                         default="serve",
@@ -655,7 +653,10 @@ if __name__ == '__main__':
         is_tensorflow_model = False
 
     enable_batching = FLAGS.max_batch_size > 0
-    print("Batching is enabled: {}, preferred-batch-size: {} and max-batch-size: {}".format(enable_batching, FLAGS.preferred_batch_size, FLAGS.max_batch_size))
+    print(
+        "Batching is enabled: {}, preferred-batch-size: {} and max-batch-size: {}"
+        .format(enable_batching, FLAGS.preferred_batch_size,
+                FLAGS.max_batch_size))
 
     if not is_tensorflow_model or (FLAGS.triton_input != None and
                                    FLAGS.triton_output != None):
@@ -663,7 +664,8 @@ if __name__ == '__main__':
         outputs = parse_io_tensors(FLAGS.triton_output, enable_batching)
     else:
         inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
-                                           FLAGS.signature_def_key, enable_batching)
+                                           FLAGS.signature_def_key,
+                                           enable_batching)
 
     nc_start_idx, nc_end_idx = [
         int(i) for i in FLAGS.neuron_core_range.split(":")
