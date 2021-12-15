@@ -39,7 +39,9 @@ and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest
   - [Inferentia setup](#inferentia-setup)
   - [Setting up the Inferentia model](#setting-up-the-inferentia-model)
     - [PyTorch](#pytorch)
+      - [Batching with Pytorch](#batching-with-pytorch)
     - [TensorFlow](#tensorflow)
+      - [Batching with Tensorflow](#batching-with-tensorflow)
   - [Serving Inferentia model in Triton](#serving-inferentia-model-in-triton)
   - [Testing Inferentia Setup for Accuracy](#testing-inferentia-setup-for-accuracy)
 
@@ -156,6 +158,24 @@ loaded on cores 2-3. To best engage inferentia device, try setting
 the number of neuron cores to be a proper multiple of the instance
 count.
 
+#### Batching with Pytorch
+
+There are three flags related to batched inputs:
+
+1. `--max_batch_size`: If set to 0, then Triton server will send no batched
+   requests. Otherwise, Triton will send batched requests up to specified
+   `max_batch_size`.
+2. `--preferred_batch_size`: The preferred number of batches. To optimize
+   performance, this is recommended to be multiples of engaged neuron cores.
+   For example, if each instance is using 2 neuron cores, `preferred_batch_size`
+   could be 2, 4 or 6.
+3. `--disable_batch_requests_to_neuron`: Enable the non-default way for Triton to
+   handle batched requests. Triton backend will send each request to neuron
+   separately, irrespective of if the Triton server requests are batched.
+   This flag can be set with `max_batch_size` > 0, and is recommended when users
+   want to optimize performance with models that do not perform well with batching
+   without the flag.
+
 ### TensorFlow
 For TensorFlow, the model must be compiled for AWS Neuron. See
 [AWS Neuron TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html
@@ -188,6 +208,10 @@ neuron core in the chip. For TensorFlow, we use deprecated feature of
 next available Neuron cores and not specific ones. See
 [Parallel Execution using NEURONCORE_GROUP_SIZES](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/parallel-ncgs.html?highlight=NEURONCORE_GROUP_SIZES)
 for more information.
+
+#### Batching with Tensorflow
+
+The batching flags have the same functionality for Tensorflow
 
 Please use the `-h` or `--help` options in `gen_triton_model.py` to
 learn about more configurable options.

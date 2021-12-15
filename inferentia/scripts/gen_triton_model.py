@@ -342,7 +342,7 @@ def get_pytorch_initialize_impl():
     return init_impl
 
 
-def get_tensorflow_execute_impl():
+def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuron):
     exec_impl = '''
     def _one_thread(self, pred, model_feed_dict):
         result = pred(model_feed_dict)
@@ -369,7 +369,65 @@ def get_tensorflow_execute_impl():
           A list of pb_utils.InferenceResponse. The length of this list must
           be the same as `requests`
         """
-
+'''
+    if disable_batch_requests_to_neuron:
+        exec_impl += '''
+        responses = []
+        num_threads = len(self.pred_list)
+        model_feed_dict_list = [{} for _ in range(num_threads)]
+        for request in requests:
+            inputs = []
+            for i in range(len(self.input_list)):
+                name, dt, shape = self.input_list[i]
+                tensor = pb_utils.get_input_tensor_by_name(request,
+                                                           name).as_numpy()
+'''
+        if enable_batching:
+            exec_impl += '''
+                tensor = np.squeeze(tensor, dim=0)
+'''
+        exec_impl += '''
+                split_tensor = [None] * num_threads
+                for split_index in range(num_threads):
+                    model_feed_dict_list[split_index][name] = np.array_split(
+                        tensor, num_threads, axis=0)[split_index]
+            executor = futures.ThreadPoolExecutor(max_workers=num_threads)
+            running = {
+                executor.submit(self._one_thread, self.pred_list[idx],
+                                model_feed_dict_list[idx]): idx
+                for idx in range(num_threads)
+            }
+            results = [None] * num_threads
+            for future in futures.as_completed(running):
+                idx = running[future]
+                results[idx] = future.result()
+            output_tensors = []
+            for i in range(len(self.output_list)):
+                name, dt, shape = self.output_list[i]
+                out_list = [None] * num_threads
+                for idx in range(num_threads):
+                    out_list[idx] = results[idx][name]
+                full_tensor = out_list[0]
+                for idx in range(num_threads - 1):
+                    full_tensor = np.concatenate(
+                        (full_tensor, out_list[idx + 1]), axis=0)
+'''
+        if enable_batching:
+            exec_impl += '''
+                full_tensor = np.expand_dims(full_tensor, dim=0)
+'''
+        exec_impl += '''
+                output_tensor = pb_utils.Tensor(
+                    name,
+                    full_tensor.astype(pb_utils.triton_string_to_numpy(dt)))
+                output_tensors.append(output_tensor)
+            inference_response = pb_utils.InferenceResponse(
+                output_tensors=output_tensors)
+            responses.append(inference_response)
+        return responses
+'''
+    else:
+        exec_impl += '''
         responses = []
 
         num_threads = len(self.pred_list)
@@ -379,16 +437,27 @@ def get_tensorflow_execute_impl():
         inputs = []
         for i in range(len(self.input_list)):
             name, dt, shape = self.input_list[i]
-            batched_tensor = pb_utils.get_input_tensor_by_name(requests[0], name).as_numpy()
+            first_tensor = pb_utils.get_input_tensor_by_name(requests[0], name).as_numpy()
+'''
+        if enable_batching:
+            exec_impl += '''
+            first_tensor = np.squeeze(first_tensor, dim=0)
+'''
+        exec_impl += '''
+            batched_tensor = first_tensor
             for j in range(1, num_requests):
-                batched_tensor = np.concatenate((pb_utils.get_input_tensor_by_name(request,
-                                                            name).as_numpy(), batched_tensor), axis=0)
-            # TODO: This will force split the first dimension of the input
-            #  into however num_threads, and will report error if the dimension
-            #  is not divisible by the amount of neuron cores. Fix this behavior
+                tensor = pb_utils.get_input_tensor_by_name(requests[j],
+                                                            name).as_numpy()
+'''
+        if enable_batching:
+            exec_impl += '''
+                tensor = np.squeeze(tensor, dim=0)
+'''
+        exec_impl += '''
+                batched_tensor = np.concatenate((tensor, batched_tensor), axis=0)
             split_tensor = [None] * num_threads
             for split_index in range(num_threads):
-                model_feed_dict_list[split_index][name] = np.split(
+                model_feed_dict_list[split_index][name] = np.array_split(
                     batched_tensor, num_threads, axis=0)[split_index]
 
         executor = futures.ThreadPoolExecutor(max_workers=num_threads)
@@ -403,10 +472,9 @@ def get_tensorflow_execute_impl():
             idx = running[future]
             results[idx] = future.result()
 
-        output_tensors = []
+        chuncky_tensors = []
         for i in range(len(self.output_list)):
             name, dt, shape = self.output_list[i]
-
             out_list = [None] * num_threads
             for idx in range(num_threads):
                 out_list[idx] = results[idx][name]
@@ -414,24 +482,32 @@ def get_tensorflow_execute_impl():
             for idx in range(num_threads - 1):
                 full_tensor = np.concatenate(
                     (full_tensor, out_list[idx + 1]), axis=0)
-            tensors = np.split(full_tensor, num_requests, axis=0)
-            for tensor in tensors:
+            chuncky_tensors.append(np.split(full_tensor, num_requests, axis=0))
+        
+        for i in range(num_requests):
+            output_tensors = []
+            for j in range(len(self.output_list)):
+                name, dt, shape = self.output_list[j]
                 output_tensor = pb_utils.Tensor(
                     name,
-                    tensor.astype(pb_utils.triton_string_to_numpy(dt)))
-
+                    chuncky_tensors[j][i].astype(pb_utils.triton_string_to_numpy(dt)))
+'''
+        if enable_batching:
+            exec_impl += '''
+                output_tensor = np.expand_dims(output_tensor, dim=0)
+'''
+        exec_impl += '''
                 output_tensors.append(output_tensor)
 
-        inference_response = pb_utils.InferenceResponse(
-            output_tensors=output_tensors)
-        responses.append(inference_response)
+            inference_response = pb_utils.InferenceResponse(output_tensors=output_tensors)
+            responses.append(inference_response)
 
         return responses
 '''
     return exec_impl
 
 
-def get_pytorch_execute_impl():
+def get_pytorch_execute_impl(enable_batching, disable_batch_requests_to_neuron):
     exec_impl = '''
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -454,18 +530,68 @@ def get_pytorch_execute_impl():
           A list of pb_utils.InferenceResponse. The length of this list must
           be the same as `requests`
         """
-
+'''
+    if disable_batch_requests_to_neuron:
+        exec_impl += '''
         responses = []
-
+        for request in requests:
+            inputs = []
+            for i in range(len(self.input_dict)):
+                name, dt, shape = self.input_dict[i]
+                tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(request,
+                                                           name).as_numpy())
+'''
+        if enable_batching:
+            exec_impl += '''
+                tensor = torch.squeeze(tensor, 0))
+'''
+        exec_impl += '''
+            inputs.append(tensor)
+            results = self.model_neuron(*inputs)
+            output_tensors = []
+            for i in self.output_dict.keys():
+                name, dt, shape = self.output_dict[i]
+                result = results[i] if isinstance(results, tuple) else results
+'''
+        if enable_batching:
+            exec_impl += '''
+                result = torch.unsqueeze(result, dim=0)
+'''
+        exec_impl += '''
+                output_tensor = pb_utils.Tensor(
+                    name, result.numpy().astype(
+                        pb_utils.triton_string_to_numpy(dt)))
+                output_tensors.append(output_tensor)
+            inference_response = pb_utils.InferenceResponse(
+                output_tensors=output_tensors)
+            responses.append(inference_response)
+        return responses
+'''
+    else:
+        exec_impl += '''
+        responses = []
         inputs = []
         num_requests = len(requests)
         for i in self.input_dict.keys():
             name, dt, shape = self.input_dict[i]
-            batched_tensor = torch.squeeze(torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[0],
-                                                            name).as_numpy()), 0)
+            first_tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[0],
+                                                            name).as_numpy())
+'''
+        if enable_batching:
+            exec_impl += '''
+            first_tensor = torch.squeeze(first_tensor, 0)
+'''
+        exec_impl += '''
+            batched_tensor = first_tensor
             for j in range(1, num_requests):
-                tensor = torch.squeeze(torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[j],
-                                                            name).as_numpy()),0)
+                tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[j],
+                                                            name).as_numpy())
+'''
+        if enable_batching:
+            exec_impl += '''
+                tensor = torch.squeeze(tensor, 0))
+'''
+        exec_impl += '''
                 batched_tensor = torch.cat((batched_tensor, tensor), dim=0)
             inputs.append(batched_tensor)
 
@@ -480,8 +606,14 @@ def get_pytorch_execute_impl():
             for j in self.output_dict.keys():
                 name, dt, shape = self.output_dict[j]
                 result = chunky_batched_results[j][i]
+'''
+        if enable_batching:
+            exec_impl += '''
+                result = torch.unsqueeze(result, dim=0)
+'''
+        exec_impl += '''
                 output_tensor = pb_utils.Tensor(
-                    name, torch.unsqueeze(result, dim=0).numpy().astype(
+                    name, result.numpy().astype(
                         pb_utils.triton_string_to_numpy(dt)))
                 output_tensors.append(output_tensor)
             inference_response = pb_utils.InferenceResponse(
@@ -506,7 +638,8 @@ def get_finalize_impl():
     return finalize_impl
 
 
-def get_triton_python_model_impl(using_tensorflow_model):
+def get_triton_python_model_impl(using_tensorflow_model, enable_batching,
+                                 disable_batch_requests_to_neuron):
     triton_pmi = '''
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
@@ -516,17 +649,20 @@ class TritonPythonModel:
 
     if using_tensorflow_model:
         triton_pmi += get_tensorflow_initialize_impl()
-        triton_pmi += get_tensorflow_execute_impl()
+        triton_pmi += get_tensorflow_execute_impl(
+            enable_batching, disable_batch_requests_to_neuron)
     else:
         triton_pmi += get_pytorch_initialize_impl()
-        triton_pmi += get_pytorch_execute_impl()
+        triton_pmi += get_pytorch_execute_impl(
+            enable_batching, disable_batch_requests_to_neuron)
 
     triton_pmi += get_finalize_impl()
 
     return triton_pmi
 
 
-def create_model_file(using_tensorflow_model):
+def create_model_file(using_tensorflow_model, enable_batching,
+                      disable_batch_requests_to_neuron):
     triton_model = get_model_license()
     triton_model += '''
 import json
@@ -546,7 +682,9 @@ from concurrent import futures
 import torch
 import torch.neuron
     '''
-    triton_model += get_triton_python_model_impl(using_tensorflow_model)
+    triton_model += get_triton_python_model_impl(
+        using_tensorflow_model, enable_batching,
+        disable_batch_requests_to_neuron)
     return triton_model
 
 
@@ -574,6 +712,12 @@ if __name__ == '__main__':
                          of cores available to ensure proper utilization of
                          neuron cores. Default value is 0. Ignored if max_batch_size is 0'''
                        )
+    parser.add_argument(
+        '--disable_batch_requests_to_neuron',
+        action="store_true",
+        help='''Send each request separately to neuron if enabled.
+                         If not specified, then requests are combined and sent to 
+                         neuron as a single batch''')
     parser.add_argument('--tag_set',
                         type=str,
                         default="serve",
@@ -654,9 +798,9 @@ if __name__ == '__main__':
 
     enable_batching = FLAGS.max_batch_size > 0
     print(
-        "Batching is enabled: {}, preferred-batch-size: {} and max-batch-size: {}"
+        "Batching is enabled: {}, preferred-batch-size: {} and max-batch-size: {}. Batch requests to neruon are disabled: {}"
         .format(enable_batching, FLAGS.preferred_batch_size,
-                FLAGS.max_batch_size))
+                FLAGS.max_batch_size, FLAGS.disable_batch_requests_to_neuron))
 
     if not is_tensorflow_model or (FLAGS.triton_input != None and
                                    FLAGS.triton_output != None):
@@ -686,6 +830,7 @@ if __name__ == '__main__':
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 
-    mf = create_model_file(is_tensorflow_model)
+    mf = create_model_file(is_tensorflow_model, enable_batching,
+                           FLAGS.disable_batch_requests_to_neuron)
     with open(FLAGS.triton_model_dir + "/1/model.py", "w") as model_file:
         model_file.write(mf)
