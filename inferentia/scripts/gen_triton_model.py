@@ -342,7 +342,8 @@ def get_pytorch_initialize_impl():
     return init_impl
 
 
-def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuron):
+def get_tensorflow_execute_impl(enable_batching,
+                                disable_batch_requests_to_neuron):
     exec_impl = '''
     def _one_thread(self, pred, model_feed_dict):
         result = pred(model_feed_dict)
@@ -384,7 +385,7 @@ def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuro
 '''
         if enable_batching:
             exec_impl += '''
-                tensor = np.squeeze(tensor, dim=0)
+                tensor = np.squeeze(tensor, axis=0)
 '''
         exec_impl += '''
                 split_tensor = [None] * num_threads
@@ -414,7 +415,7 @@ def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuro
 '''
         if enable_batching:
             exec_impl += '''
-                full_tensor = np.expand_dims(full_tensor, dim=0)
+                full_tensor = np.expand_dims(full_tensor, axis=0)
 '''
         exec_impl += '''
                 output_tensor = pb_utils.Tensor(
@@ -429,11 +430,9 @@ def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuro
     else:
         exec_impl += '''
         responses = []
-
         num_threads = len(self.pred_list)
         model_feed_dict_list = [{} for _ in range(num_threads)]
         num_requests = len(requests)
-        
         inputs = []
         for i in range(len(self.input_list)):
             name, dt, shape = self.input_list[i]
@@ -441,7 +440,7 @@ def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuro
 '''
         if enable_batching:
             exec_impl += '''
-            first_tensor = np.squeeze(first_tensor, dim=0)
+            first_tensor = np.squeeze(first_tensor, axis=0)
 '''
         exec_impl += '''
             batched_tensor = first_tensor
@@ -451,10 +450,10 @@ def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuro
 '''
         if enable_batching:
             exec_impl += '''
-                tensor = np.squeeze(tensor, dim=0)
+                tensor = np.squeeze(tensor, axis=0)
 '''
         exec_impl += '''
-                batched_tensor = np.concatenate((tensor, batched_tensor), axis=0)
+                batched_tensor = np.concatenate((batched_tensor, tensor), axis=0)
             split_tensor = [None] * num_threads
             for split_index in range(num_threads):
                 model_feed_dict_list[split_index][name] = np.array_split(
@@ -488,15 +487,16 @@ def get_tensorflow_execute_impl(enable_batching, disable_batch_requests_to_neuro
             output_tensors = []
             for j in range(len(self.output_list)):
                 name, dt, shape = self.output_list[j]
-                output_tensor = pb_utils.Tensor(
-                    name,
-                    chuncky_tensors[j][i].astype(pb_utils.triton_string_to_numpy(dt)))
+                tensor = chuncky_tensors[j][i]
 '''
         if enable_batching:
             exec_impl += '''
-                output_tensor = np.expand_dims(output_tensor, dim=0)
+                tensor = np.expand_dims(tensor, axis=0)
 '''
         exec_impl += '''
+                output_tensor = pb_utils.Tensor(
+                    name,
+                    tensor.astype(pb_utils.triton_string_to_numpy(dt)))
                 output_tensors.append(output_tensor)
 
             inference_response = pb_utils.InferenceResponse(output_tensors=output_tensors)
@@ -543,10 +543,10 @@ def get_pytorch_execute_impl(enable_batching, disable_batch_requests_to_neuron):
 '''
         if enable_batching:
             exec_impl += '''
-                tensor = torch.squeeze(tensor, 0))
+                tensor = torch.squeeze(tensor, 0)
 '''
         exec_impl += '''
-            inputs.append(tensor)
+                inputs.append(tensor)
             results = self.model_neuron(*inputs)
             output_tensors = []
             for i in self.output_dict.keys():
@@ -589,7 +589,7 @@ def get_pytorch_execute_impl(enable_batching, disable_batch_requests_to_neuron):
 '''
         if enable_batching:
             exec_impl += '''
-                tensor = torch.squeeze(tensor, 0))
+                tensor = torch.squeeze(tensor, 0)
 '''
         exec_impl += '''
                 batched_tensor = torch.cat((batched_tensor, tensor), dim=0)
