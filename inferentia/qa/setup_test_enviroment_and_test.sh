@@ -44,17 +44,6 @@ export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input
 export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
 export TEST_SCRIPT="test.sh"
 CONTAINER_NAME="qa_container"
-TRITON_SERVER_REPO_TAG=kyang-enable-batching
-
-docker run \
-    --shm-size=1g --ulimit memlock=-1 \
-    --net host -it \
-    -e TEST_JSON_REPO=/home/ubuntu/server/qa/common/inferentia_perf_analyzer_input_data_json \
-    -e PERF_ANALYZER=/workspace/install/bin/perf_analyzer \
-    -e OUTPUT_JSONDATAFILE=/home/ubuntu/server/qa/common/inferentia_perf_analyzer_input_data_json/validation.json \
-    -v /home/ubuntu:/home/ubuntu \
-    nvcr.io/nvidia/tritonserver:21.11-py3-sdk \
-    /bin/bash
 
 cd ${TRITON_PATH}
 echo "Using server repo tag: $TRITON_SERVER_REPO_TAG"
@@ -105,21 +94,6 @@ docker build -t ${QA_IMAGE} \
 
 # Run pytorch instance test
 docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
-docker run --name ${CONTAINER_NAME} \
-                 --device /dev/neuron0 \
-                 --device /dev/neuron1 \
-                 --shm-size=1g --ulimit memlock=-1 \
-                -p 8000:8000 -p 8001:8001 -p 8002:8002 \
-                --ulimit stack=67108864 \
-                -v /lib/udev:/mylib/udev  \
-                -v /home/ubuntu/python_backend:/home/ubuntu/python_backend \
-            -e TEST_REPO=${TEST_REPO}              \
-            -e TEST_JSON_REPO=${TEST_JSON_REPO}    \
-            -e TRITON_PATH=${TRITON_PATH}          \
-            -e USE_PYTORCH="1"                     \
-                --net host -ti ${QA_IMAGE} \
-                 /bin/bash
-
 docker create --name ${CONTAINER_NAME}             \
             --device /dev/neuron0                  \
             --device /dev/neuron1                  \
