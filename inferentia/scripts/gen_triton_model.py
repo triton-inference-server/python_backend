@@ -60,8 +60,7 @@ def tf_to_triton_dtype(dtype):
     raise Exception("The data type in the TF model is not supported")
 
 
-def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key,
-                     enable_dynamic_batching):
+def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
     from tensorflow.python.tools import saved_model_utils
     meta_graph_def = saved_model_utils.get_meta_graph_def(
         saved_model_dir, tag_set)
@@ -88,7 +87,7 @@ def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key,
     return input_dict, output_dict
 
 
-def parse_io_tensors(tensors, enable_dynamic_batching):
+def parse_io_tensors(tensors):
     tensors_dict = {}
     for t in [t for tensor in tensors for t in tensor]:
         name, datatype, shape_str = t.split(",")
@@ -714,9 +713,10 @@ if __name__ == '__main__':
                         help='The version of the model')
     parser.add_argument(
         '--enable_dynamic_batching',
-        action="store_false",
-        help=
-        'Enable dynamic batching. Please see model configuration documentation for details: https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#dynamic-batcher'
+        action="store_true",
+        help='''Enable dynamic batching. Please see model configuration 
+        documentation for details: 
+        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#dynamic-batcher'''
     )
     parser.add_argument(
         '--max_batch_size',
@@ -726,15 +726,20 @@ if __name__ == '__main__':
     parser.add_argument('--preferred_batch_size',
                         type=int,
                         help='''The preferred batch size. Should be multiples
-                         of cores available to ensure proper utilization of
-                         neuron cores. This flag is ignored if --enable_dynamic_batching is not specified. Please see model configuration documentation for details: https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#preferred-batch-sizes'''
+        of cores available to ensure proper utilization of
+        neuron cores. 
+        This flag is ignored if --enable_dynamic_batching is 
+        not specified. Please see model configuration 
+        documentation for details: 
+        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#preferred-batch-sizes'''
                        )
-    parser.add_argument(
-        '--max_queue_delay_microseconds',
-        type=int,
-        help=
-        '''Max queue delay time(ms) for dynamic batching. This flag is ignored if --enable_dynamic_batching is not specified. Please see model configuration documentation for details: https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#delayed-batching'''
-    )
+    parser.add_argument('--max_queue_delay_microseconds',
+                        type=int,
+                        help='''Max queue delay time(ms) for dynamic batching. 
+        This flag is ignored if --enable_dynamic_batching is not specified. 
+        Please see model configuration documentation for details: 
+        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#delayed-batching'''
+                       )
     parser.add_argument(
         '--disable_batch_requests_to_neuron',
         action="store_true",
@@ -819,22 +824,21 @@ if __name__ == '__main__':
     elif FLAGS.model_type == 'pytorch':
         is_tensorflow_model = False
 
-    print(
-        "Triton Dynamic Batching is enabled: {}, preferred_batch_size: {} and max_batch_size: {} with max_queue_delay_microseconds: {}. Batch requests to neruon are disabled: {}"
-        .format(FLAGS.enable_dynamic_batching, FLAGS.preferred_batch_size,
-                FLAGS.max_batch_size, FLAGS.max_queue_delay_microseconds,
-                FLAGS.disable_batch_requests_to_neuron))
+    print('''Triton Dynamic Batching is enabled: {},
+        preferred_batch_size: {} and max_batch_size: {} 
+        with max_queue_delay_microseconds: {}. 
+        Batch requests to neruon are disabled: {}'''.format(
+        FLAGS.enable_dynamic_batching, FLAGS.preferred_batch_size,
+        FLAGS.max_batch_size, FLAGS.max_queue_delay_microseconds,
+        FLAGS.disable_batch_requests_to_neuron))
 
     if not is_tensorflow_model or (FLAGS.triton_input != None and
                                    FLAGS.triton_output != None):
-        inputs = parse_io_tensors(FLAGS.triton_input,
-                                  FLAGS.enable_dynamic_batching)
-        outputs = parse_io_tensors(FLAGS.triton_output,
-                                   FLAGS.enable_dynamic_batching)
+        inputs = parse_io_tensors(FLAGS.triton_input)
+        outputs = parse_io_tensors(FLAGS.triton_output)
     else:
         inputs, outputs = parse_tf_tensors(FLAGS.compiled_model, FLAGS.tag_set,
-                                           FLAGS.signature_def_key,
-                                           FLAGS.enable_dynamic_batching)
+                                           FLAGS.signature_def_key)
 
     nc_start_idx, nc_end_idx = [
         int(i) for i in FLAGS.neuron_core_range.split(":")
