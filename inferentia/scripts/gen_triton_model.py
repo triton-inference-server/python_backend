@@ -125,7 +125,7 @@ dynamic_batching {
     max_queue_delay_microseconds: {}
 '''.format(max_queue_delay_microseconds)
         config += '''
-}\n'''.format(preferred_batch_size, max_queue_delay_microseconds)
+}\n'''
     for input_name in inputs.keys():
         data_type, shape = inputs[input_name]
         config += '''
@@ -722,7 +722,10 @@ if __name__ == '__main__':
         '--max_batch_size',
         type=int,
         default=0,
-        help='The maximum batch size for the model being generated')
+        help='''The maximum batch size for the model being generated. 
+        Please see model configuration documentation for details: 
+        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size'''
+    )
     parser.add_argument('--preferred_batch_size',
                         type=int,
                         help='''The preferred batch size. Should be multiples
