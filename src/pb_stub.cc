@@ -496,9 +496,10 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
   if (response_size != batch_size) {
     std::string err =
         "Number of InferenceResponse objects do not match the number of "
-        "InferenceRequest objects. InferenceRequest size is:" +
+        "InferenceRequest objects. InferenceRequest(s) size is:" +
         std::to_string(batch_size) +
-        ", and response size is:" + std::to_string(response_size) + "\n";
+        ", and InferenceResponse(s) size is:" + std::to_string(response_size) +
+        "\n";
     throw PythonBackendException(err);
   }
 
