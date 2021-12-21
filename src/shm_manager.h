@@ -1,4 +1,4 @@
-// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,49 +26,171 @@
 
 #pragma once
 
-#include <unistd.h>
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
-#include <boost/interprocess/sync/interprocess_mutex.hpp>
+#include <sys/wait.h>
+#include <boost/interprocess/allocators/allocator.hpp>
+#include <boost/interprocess/detail/atomic.hpp>
+#include <boost/interprocess/managed_external_buffer.hpp>
+#include <iostream>
 #include <memory>
-#include <string>
-#include <utility>
+#include <type_traits>
+#include <typeinfo>
 #include <vector>
-
+#include "pb_exception.h"
 
 namespace triton { namespace backend { namespace python {
+namespace bi = boost::interprocess;
 
-class SharedMemory {
-  std::string shm_key_;
-  size_t* capacity_;
-  off_t* offset_;
-  char* shm_addr_;
-  boost::interprocess::interprocess_mutex* shm_mutex_;
+template <typename T>
+struct AllocatedSharedMemory {
+  AllocatedSharedMemory() = default;
+  AllocatedSharedMemory(
+      std::unique_ptr<T, std::function<void(T*)>>& data,
+      bi::managed_external_buffer::handle_t handle)
+      : data_(std::move(data)), handle_(handle)
+  {
+  }
 
-  // Current capcity, local to each process.
-  size_t current_capacity_;
-
-  // Amount of bytes to grow the shared memory when the pool is completely used.
-  int64_t shm_growth_bytes_;
-
-  // Get the amount of shared memory available.
-  size_t GetAvailableSharedMemory();
-  boost::interprocess::shared_memory_object shm_obj_;
-  std::unique_ptr<boost::interprocess::mapped_region> shm_map_;
-  std::vector<std::unique_ptr<boost::interprocess::mapped_region>>
-      old_shm_maps_;
-
-  void UpdateSharedMemory();
-
- public:
-  SharedMemory(
-      const std::string& shm_key, int64_t default_byte_size,
-      int64_t shm_growth_bytes, bool truncate = false);
-  void MapOffset(char** shm_addr, off_t offset);
-  void Map(char** shm_addr, size_t byte_size, off_t& offset);
-  off_t Offset();
-  void SetOffset(off_t offset);
-  ~SharedMemory() noexcept(false);
+  std::unique_ptr<T, std::function<void(T*)>> data_;
+  bi::managed_external_buffer::handle_t handle_;
 };
 
+struct AllocatedShmOwnership {
+  uint32_t ref_count_;
+};
+
+class SharedMemoryManager {
+ public:
+  SharedMemoryManager(
+      const std::string& shm_region_name, size_t shm_size,
+      size_t shm_growth_bytes, bool create);
+
+  template <typename T>
+  AllocatedSharedMemory<T> Construct(uint64_t count = 1, bool aligned = false)
+  {
+    T* obj = nullptr;
+    AllocatedShmOwnership* shm_ownership_data = nullptr;
+    bi::managed_external_buffer::handle_t handle = 0;
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      std::size_t requested_bytes =
+          sizeof(T) * count + sizeof(AllocatedShmOwnership);
+      GrowIfNeeded(0);
+
+      void* allocated_data;
+      try {
+        allocated_data = Allocate(requested_bytes, aligned);
+      }
+      catch (bi::bad_alloc& ex) {
+        // Try to grow the shared memory region if the allocate failed.
+        GrowIfNeeded(requested_bytes);
+        allocated_data = Allocate(requested_bytes, aligned);
+      }
+
+      shm_ownership_data =
+          reinterpret_cast<AllocatedShmOwnership*>(allocated_data);
+      obj = reinterpret_cast<T*>(
+          (reinterpret_cast<char*>(shm_ownership_data)) +
+          sizeof(AllocatedShmOwnership));
+      shm_ownership_data->ref_count_ = 1;
+
+      handle = managed_buffer_->get_handle_from_address(
+          reinterpret_cast<void*>(shm_ownership_data));
+    }
+
+    return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
+  }
+
+  template <typename T>
+  AllocatedSharedMemory<T> Load(
+      bi::managed_external_buffer::handle_t handle, bool unsafe = false)
+  {
+    T* object_ptr;
+    AllocatedShmOwnership* shm_ownership_data;
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      GrowIfNeeded(0);
+      shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
+          managed_buffer_->get_address_from_handle(handle));
+      object_ptr = reinterpret_cast<T*>(
+          reinterpret_cast<char*>(shm_ownership_data) +
+          sizeof(AllocatedShmOwnership));
+      if (!unsafe) {
+        shm_ownership_data->ref_count_ += 1;
+      }
+    }
+
+    return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle);
+  }
+
+  size_t FreeMemory();
+
+  void Deallocate(bi::managed_external_buffer::handle_t handle)
+  {
+    bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+    GrowIfNeeded(0);
+    void* ptr = managed_buffer_->get_address_from_handle(handle);
+    managed_buffer_->deallocate(ptr);
+  }
+
+  void DeallocateUnsafe(bi::managed_external_buffer::handle_t handle)
+  {
+    void* ptr = managed_buffer_->get_address_from_handle(handle);
+    managed_buffer_->deallocate(ptr);
+  }
+
+  void GrowIfNeeded(uint64_t bytes);
+  bi::interprocess_mutex* Mutex() { return shm_mutex_; }
+
+  ~SharedMemoryManager() noexcept(false);
+
+ private:
+  std::string shm_region_name_;
+  std::unique_ptr<bi::managed_external_buffer> managed_buffer_;
+  std::unique_ptr<bi::shared_memory_object> shm_obj_;
+  std::shared_ptr<bi::mapped_region> shm_map_;
+  std::vector<std::shared_ptr<bi::mapped_region>> old_shm_maps_;
+  uint64_t current_capacity_;
+  bi::interprocess_mutex* shm_mutex_;
+  size_t shm_growth_bytes_;
+  uint64_t* total_size_;
+  bool create_;
+
+  template <typename T>
+  AllocatedSharedMemory<T> WrapObjectInUniquePtr(
+      T* object, AllocatedShmOwnership* shm_ownership_data,
+      const bi::managed_external_buffer::handle_t& handle)
+  {
+    // Custom deleter to conditionally deallocate the object
+    std::function<void(T*)> deleter = [this, handle,
+                                       shm_ownership_data](T* memory) {
+      bool destroy = false;
+      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      shm_ownership_data->ref_count_ -= 1;
+      if (shm_ownership_data->ref_count_ == 0) {
+        destroy = true;
+      }
+      if (destroy) {
+        DeallocateUnsafe(handle);
+      }
+    };
+
+    auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
+    return AllocatedSharedMemory<T>(data, handle);
+  }
+
+  void* Allocate(uint64_t requested_bytes, bool aligned)
+  {
+    void* ptr;
+    if (aligned) {
+      const std::size_t alignment = 32;
+      ptr = managed_buffer_->allocate_aligned(requested_bytes, alignment);
+    } else {
+      ptr = managed_buffer_->allocate(requested_bytes);
+    }
+
+    return ptr;
+  }
+};
 }}}  // namespace triton::backend::python

@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -44,7 +44,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include "shm_manager.h"
+#include "scoped_defer.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
@@ -53,277 +53,9 @@
 
 namespace triton { namespace backend { namespace python {
 
-#define THROW_IF_ERROR(MSG, X)           \
-  do {                                   \
-    int return__ = (X);                  \
-    if (return__ != 0) {                 \
-      throw PythonBackendException(MSG); \
-    }                                    \
-  } while (false)
-
-void
-LoadStringFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str)
-{
-  String* string;
-  shm_pool->MapOffset((char**)&string, shm_offset);
-  shm_pool->MapOffset((char**)&str, string->data);
-}
-
-void
-SaveStringToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset, const char* str)
-{
-  String* string_shm;
-  shm_pool->Map((char**)&string_shm, sizeof(String), shm_offset);
-  string_shm->length = strlen(str) + 1;
-
-  char* string_data;
-  off_t str_data_offset;
-  shm_pool->Map((char**)&string_data, string_shm->length, str_data_offset);
-  string_shm->data = str_data_offset;
-  strcpy(string_data, str);
-}
-
-void
-SaveRawDataToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
-    char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, uint64_t** offset,
-    off_t raw_ptr_offset)
-{
-  // raw data
-  RawData* raw_data;
-  shm_pool->Map((char**)&raw_data, sizeof(RawData), raw_data_offset);
-
-  raw_data->memory_type = memory_type;
-  raw_data->memory_type_id = memory_type_id;
-  raw_data->byte_size = byte_size;
-  *offset = &(raw_data->offset);
-  if (memory_type == TRITONSERVER_MEMORY_CPU) {
-    // If the raw_ptr_offset is not equal to zero, the user has provided
-    // the offset for the raw ptr.
-    if (raw_ptr_offset == 0) {
-      off_t buffer_offset;
-      shm_pool->Map((char**)&raw_data_ptr, byte_size, buffer_offset);
-      raw_data->memory_ptr = buffer_offset;
-    } else {
-      raw_data->memory_ptr = raw_ptr_offset;
-    }
-  }
-
-  if (memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
-    off_t buffer_offset;
-    shm_pool->Map(
-        (char**)&raw_data_ptr, sizeof(cudaIpcMemHandle_t), buffer_offset);
-    raw_data->memory_ptr = buffer_offset;
-
-#else
-    throw PythonBackendException(
-        "Python backend does not support GPU tensors.");
-#endif  // TRITON_ENABLE_GPU
-  }
-}
-
-void
-SaveMapToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
-    const std::unordered_map<std::string, std::string>& map)
-{
-  Dict* dict;
-  shm_pool->Map((char**)&dict, sizeof(Dict), shm_offset);
-  dict->length = map.size();
-
-  Pair* pairs;
-  shm_pool->Map((char**)&pairs, sizeof(Pair) * map.size(), dict->values);
-
-  size_t i = 0;
-  for (const auto& pair : map) {
-    SaveStringToSharedMemory(shm_pool, pairs[i].key, pair.first.c_str());
-    SaveStringToSharedMemory(shm_pool, pairs[i].value, pair.second.c_str());
-    i += 1;
-  }
-}
-
-void
-LoadMapFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset,
-    std::unordered_map<std::string, std::string>& map)
-{
-  Dict* dict;
-  shm_pool->MapOffset((char**)&dict, shm_offset);
-
-  Pair* pairs;
-  shm_pool->MapOffset((char**)&pairs, dict->values);
-  for (size_t i = 0; i < dict->length; i++) {
-    char* key;
-    LoadStringFromSharedMemory(shm_pool, pairs[i].key, key);
-
-    char* value;
-    LoadStringFromSharedMemory(shm_pool, pairs[i].value, value);
-    map.emplace(std::make_pair(key, value));
-  }
-}
-
-void
-SaveTensorToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
-    char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int64_t memory_type_id, uint64_t byte_size, const char* name,
-    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
-    uint64_t** offset_ptr, off_t raw_ptr_offset)
-{
-  off_t raw_data_offset;
-  // Raw Data
-  SaveRawDataToSharedMemory(
-      shm_pool, raw_data_offset, raw_data_ptr, memory_type, memory_type_id,
-      byte_size, offset_ptr, raw_ptr_offset);
-  tensor->raw_data = raw_data_offset;
-
-  // name
-  off_t name_offset;
-  SaveStringToSharedMemory(shm_pool, name_offset, name);
-  tensor->name = name_offset;
-
-  // input dtype
-  tensor->dtype = dtype;
-
-  // input dims
-  int64_t* tensor_dims;
-  tensor->dims_count = dims_count;
-  off_t tensor_dims_offset;
-  shm_pool->Map(
-      (char**)&tensor_dims, sizeof(int64_t) * dims_count, tensor_dims_offset);
-  tensor->dims = tensor_dims_offset;
-
-  for (size_t j = 0; j < dims_count; ++j) {
-    tensor_dims[j] = dims[j];
-  }
-}
-
-void
-CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
-{
-  const void* buff;
-  size_t size;
-#if ARCHIVE_VERSION_NUMBER >= 3000000
-  int64_t offset;
-#else
-  off_t offset;
-#endif
-
-  for (;;) {
-    int return_status;
-    return_status =
-        archive_read_data_block(input_archive, &buff, &size, &offset);
-    if (return_status == ARCHIVE_EOF)
-      break;
-    if (return_status != ARCHIVE_OK)
-      throw PythonBackendException(
-          "archive_read_data_block() failed with error code = " +
-          std::to_string(return_status));
-
-    return_status =
-        archive_write_data_block(output_archive, buff, size, offset);
-    if (return_status != ARCHIVE_OK) {
-      throw PythonBackendException(
-          "archive_write_data_block() failed with error code = " +
-          std::to_string(return_status) + ", error message is " +
-          archive_error_string(output_archive));
-    }
-  }
-}
-
-void
-ExtractTarFile(std::string& archive_path, std::string& dst_path)
-{
-  char current_directory[PATH_MAX];
-  if (getcwd(current_directory, PATH_MAX) == nullptr) {
-    throw PythonBackendException(
-        (std::string("Failed to get the current working directory. Error: ") +
-         std::strerror(errno)));
-  }
-  if (chdir(dst_path.c_str()) == -1) {
-    throw PythonBackendException(
-        (std::string("Failed to change the directory to ") + dst_path +
-         " Error: " + std::strerror(errno))
-            .c_str());
-  }
-
-  struct archive_entry* entry;
-  int flags = ARCHIVE_EXTRACT_TIME;
-
-  struct archive* input_archive = archive_read_new();
-  struct archive* output_archive = archive_write_disk_new();
-  archive_write_disk_set_options(output_archive, flags);
-
-  archive_read_support_filter_gzip(input_archive);
-  archive_read_support_format_tar(input_archive);
-
-  if (archive_path.size() == 0) {
-    throw PythonBackendException("The archive path is empty.");
-  }
-
-  THROW_IF_ERROR(
-      "archive_read_open_filename() failed.",
-      archive_read_open_filename(
-          input_archive, archive_path.c_str(), 10240 /* block_size */));
-
-  while (true) {
-    int read_status = archive_read_next_header(input_archive, &entry);
-    if (read_status == ARCHIVE_EOF)
-      break;
-    if (read_status != ARCHIVE_OK) {
-      throw PythonBackendException(
-          std::string("archive_read_next_header() failed with error code = ") +
-          std::to_string(read_status) + std::string(" error message is ") +
-          archive_error_string(input_archive));
-    }
-
-    read_status = archive_write_header(output_archive, entry);
-    if (read_status != ARCHIVE_OK) {
-      throw PythonBackendException(std::string(
-          "archive_write_header() failed with error code = " +
-          std::to_string(read_status) + std::string(" error message is ") +
-          archive_error_string(output_archive)));
-    }
-
-    CopySingleArchiveEntry(input_archive, output_archive);
-
-    read_status = archive_write_finish_entry(output_archive);
-    if (read_status != ARCHIVE_OK) {
-      throw PythonBackendException(std::string(
-          "archive_write_finish_entry() failed with error code = " +
-          std::to_string(read_status) + std::string(" error message is ") +
-          archive_error_string(output_archive)));
-    }
-  }
-
-  archive_read_close(input_archive);
-  archive_read_free(input_archive);
-
-  archive_write_close(output_archive);
-  archive_write_free(output_archive);
-
-  // Revert the directory change.
-  if (chdir(current_directory) == -1) {
-    throw PythonBackendException(
-        (std::string("Failed to change the directory to ") + current_directory)
-            .c_str());
-  }
-}
-
-bool
-FileExists(std::string& path)
-{
-  struct stat buffer;
-  return stat(path.c_str(), &buffer) == 0;
-}
-
 #ifdef TRITON_ENABLE_GPU
 
-CUDADriverAPI::CUDADriverAPI()
+CUDAHandler::CUDAHandler()
 {
   dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
 
@@ -350,7 +82,7 @@ CUDADriverAPI::CUDADriverAPI()
 }
 
 void
-CUDADriverAPI::PointerGetAttribute(
+CUDAHandler::PointerGetAttribute(
     CUdeviceptr* start_address, CUpointer_attribute attribute,
     CUdeviceptr dev_ptr)
 {
@@ -368,12 +100,108 @@ CUDADriverAPI::PointerGetAttribute(
 }
 
 bool
-CUDADriverAPI::IsAvailable()
+CUDAHandler::IsAvailable()
 {
   return dl_open_handle_ != nullptr;
 }
 
-CUDADriverAPI::~CUDADriverAPI() noexcept(false)
+void
+CUDAHandler::OpenCudaHandle(
+    int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
+    void** data_ptr)
+{
+  std::lock_guard<std::mutex> guard{mu_};
+  int current_device;
+
+  // Save the previous device
+  cudaError_t err = cudaGetDevice(&current_device);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to get the current CUDA device. error: ") +
+        cudaGetErrorString(err));
+  }
+
+  bool overridden = (current_device != memory_type_id);
+
+  // Restore the previous device before returning from the function.
+  ScopedDefer _(std::bind([&overridden, &current_device] {
+    if (overridden) {
+      cudaError_t err = cudaSetDevice(current_device);
+      if (err != cudaSuccess) {
+        throw PythonBackendException(
+            "Failed to set the CUDA device to " +
+            std::to_string(current_device) +
+            ". error: " + cudaGetErrorString(err));
+      }
+    }
+  }));
+
+  if (overridden) {
+    err = cudaSetDevice(memory_type_id);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          "Failed to set the CUDA device to " + std::to_string(memory_type_id) +
+          ". error: " + cudaGetErrorString(err));
+    }
+  }
+
+  err = cudaIpcOpenMemHandle(
+      data_ptr, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to open the cudaIpcHandle. error: ") +
+        cudaGetErrorString(err));
+  }
+}
+
+void
+CUDAHandler::CloseCudaHandle(int64_t memory_type_id, void* data_ptr)
+{
+  std::lock_guard<std::mutex> guard{mu_};
+  int current_device;
+
+  // Save the previous device
+  cudaError_t err = cudaGetDevice(&current_device);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to get the current CUDA device. error: ") +
+        cudaGetErrorString(err));
+  }
+
+  bool overridden = (current_device != memory_type_id);
+
+  // Restore the previous device before returning from the function.
+  ScopedDefer _(std::bind([&overridden, &current_device] {
+    if (overridden) {
+      cudaError_t err = cudaSetDevice(current_device);
+      if (err != cudaSuccess) {
+        throw PythonBackendException(
+            "Failed to set the CUDA device to " +
+            std::to_string(current_device) +
+            ". error: " + cudaGetErrorString(err));
+      }
+    }
+  }));
+
+  if (overridden) {
+    err = cudaSetDevice(memory_type_id);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          std::string("Failed to set the CUDA device to ") +
+          std::to_string(memory_type_id) +
+          ". error: " + cudaGetErrorString(err));
+    }
+  }
+
+  err = cudaIpcCloseMemHandle(data_ptr);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to close the cudaIpcHandle. error: ") +
+        cudaGetErrorString(err));
+  }
+}
+
+CUDAHandler::~CUDAHandler() noexcept(false)
 {
   if (dl_open_handle_ != nullptr) {
     int status = dlclose(dl_open_handle_);
@@ -383,5 +211,4 @@ CUDADriverAPI::~CUDADriverAPI() noexcept(false)
   }
 }
 #endif
-
 }}}  // namespace triton::backend::python

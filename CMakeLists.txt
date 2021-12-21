@@ -36,6 +36,7 @@ project(tritonpythonbackend LANGUAGES C CXX)
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
+option(TRITON_ENABLE_NVTX "Include nvtx markers collection in backend." OFF)
 
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
@@ -115,6 +116,10 @@ elseif()
   message(WARNING "TRITON_ENABLE_GPU is OFF, GPU Tensor support will be disabled")
 endif() # TRITON_ENABLE_GPU
 
+if(${TRITON_ENABLE_NVTX})
+  add_definitions(-DTRITON_ENABLE_NVTX=1)
+endif() # TRITON_ENABLE_NVTX
+
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -131,14 +136,23 @@ set(
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
+  src/pb_string.cc
+  src/pb_string.h
+  src/pb_map.cc
+  src/pb_map.h
+  src/scoped_defer.cc
+  src/scoped_defer.h
   src/pb_error.cc
   src/pb_error.h
+  src/pb_memory.cc
+  src/pb_memory.h
   src/pb_tensor.cc
   src/pb_tensor.h
   src/pb_utils.cc
   src/pb_utils.h
   src/shm_manager.cc
   src/shm_manager.h
+  src/pb_exception.h
 )
 
 set(
@@ -146,10 +160,10 @@ set(
   src/python.cc
   src/pb_env.cc
   src/pb_env.h
-  src/pb_main_utils.cc
-  src/pb_main_utils.h
   src/pb_metric_reporter.cc
   src/pb_metric_reporter.h
+  src/request_executor.cc
+  src/request_executor.h
 )
 
 list(APPEND
@@ -164,10 +178,10 @@ add_library(
 
 set(
   PYTHNON_BACKEND_STUB_SRCS
-  src/pb_stub_utils.cc
   src/pb_stub_utils.h
-  src/pb_stub.cc
+  src/pb_stub_utils.cc
   src/pb_stub.h
+  src/pb_stub.cc
 )
 
 list(APPEND

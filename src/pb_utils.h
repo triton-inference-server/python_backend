@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,11 +31,12 @@
 #endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
 #include <climits>
-#include <exception>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "pb_exception.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
@@ -50,12 +51,12 @@ namespace bi = boost::interprocess;
       (X);                                                         \
     }                                                              \
     catch (cont PythonBackendException & pb_exception) {           \
-      off_t string_offset__;                                       \
+      bi::managed_external_buffer::handle_t string_handle__;       \
       try {                                                        \
         SaveStringToSharedMemory(                                  \
-            SHM_POOL, string_offset__, pb_exception.what());       \
+            SHM_POOL, string_handle__, pb_exception.what());       \
         RESPONSE->has_error = true;                                \
-        RESPONSE->error = string_offset__;                         \
+        RESPONSE->error = string_handle__;                         \
         if (R)                                                     \
           return;                                                  \
       }                                                            \
@@ -76,191 +77,103 @@ namespace bi = boost::interprocess;
     }                                                                     \
   } while (false)
 
+#define THROW_IF_CUDA_ERROR(X)                          \
+  do {                                                  \
+    cudaError_t cuda_err__ = (X);                       \
+    if (cuda_err__ != cudaSuccess) {                    \
+      throw PythonBackendException(                     \
+          std::string(cudaGetErrorString(cuda_err__))); \
+    }                                                   \
+  } while (false)
 
-struct InitializeResponse {
+#define THROW_IF_ERROR(MSG, X)           \
+  do {                                   \
+    int return__ = (X);                  \
+    if (return__ != 0) {                 \
+      throw PythonBackendException(MSG); \
+    }                                    \
+  } while (false)
+
+
+#define DISALLOW_COPY(TypeName) TypeName(const TypeName&) = delete;
+#define DISALLOW_ASSIGN(TypeName) void operator=(const TypeName&) = delete;
+#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
+  DISALLOW_COPY(TypeName)                  \
+  DISALLOW_ASSIGN(TypeName)
+
+struct InitializeResponseShm {
   // Indicates whether the response has an error or not.
   bool response_has_error;
   // Indicates whether the response error is set or not.
   bool response_is_error_set;
   // Contains the error message.
-  off_t response_error;
+  bi::managed_external_buffer::handle_t response_error;
 };
 
 // Control data structure for the communication between the Python stub and the
 // main stub.
-struct IPCControl {
+struct IPCControlShm {
   bool stub_health;
   bool parent_health;
   bool uses_env;
-  off_t parent_health_mutex;
-  off_t stub_health_mutex;
-  off_t stub_message_queue;
-  off_t parent_message_queue;
-};
-
-//
-// Represents a raw data
-//
-struct RawData {
-  off_t memory_ptr;
-  // offset represents the pointer offset.
-  uint64_t offset;
-  TRITONSERVER_MemoryType memory_type;
-  int64_t memory_type_id;
-  uint64_t byte_size;
-};
-
-//
-// Represents a Tensor object that will be passed to Python code.
-//
-struct Tensor {
-  // Offset for raw data field.
-  off_t raw_data;
-  // Offset for name field.
-  off_t name;
-  TRITONSERVER_DataType dtype;
-  // Shared memory offset for the dimensions.
-  off_t dims;
-  size_t dims_count;
-  bool is_cuda_handle_set;
-};
-
-struct String {
-  off_t data;
-  size_t length;
-};
-
-//
-// Inference Request
-//
-struct Request {
-  // Offset for the id field.
-  off_t id;
-  uint64_t correlation_id;
-  // Offset for input field.
-  off_t inputs;
-  uint32_t requested_input_count;
-  // Offset for the requested output names
-  off_t requested_output_names;
-  uint32_t requested_output_count;
-  off_t model_name;
-  int64_t model_version;
-  uint32_t flags;
-};
-
-struct Response {
-  // Offset for Tensor output.
-  off_t outputs;
-  uint32_t outputs_size;
-  off_t error;
-  bool has_error;
-  // Indicates whether this error has a message or not.
-  bool is_error_set;
+  bi::interprocess_mutex parent_health_mutex;
+  bi::interprocess_mutex stub_health_mutex;
+  bi::managed_external_buffer::handle_t stub_message_queue;
+  bi::managed_external_buffer::handle_t parent_message_queue;
 };
 
 struct ResponseBatch {
-  // Offset for response object.
-  off_t responses;
   uint32_t batch_size;
-  off_t error;
+  bi::managed_external_buffer::handle_t error;
   bool has_error;
+
   // Indicates whether an additional call to stub is required for the clean up
   // of the resources.
   bool cleanup;
+
   // Indicates whether this error has a message or not.
   bool is_error_set;
 };
 
 struct RequestBatch {
-  // Offset for request object.
-  off_t requests;
   uint32_t batch_size;
+
+  // GPU Buffers handle
+  bi::managed_external_buffer::handle_t gpu_buffers_handle;
+
+  // GPU buffers count
+  uint32_t gpu_buffers_count;
 };
-
-// Representing a key value pair
-struct Pair {
-  off_t key;
-  off_t value;
-};
-
-struct Dict {
-  uint32_t length;
-  // Values point to the location where there are `length` pairs.
-  off_t values;
-};
-
-//
-// PythonBackendException
-//
-// Exception thrown if error occurs in PythonBackend.
-//
-struct PythonBackendException : std::exception {
-  PythonBackendException(std::string message) : message_(message) {}
-
-  const char* what() const throw() { return message_.c_str(); }
-
-  std::string message_;
-};
-
-void SaveMapToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
-    const std::unordered_map<std::string, std::string>& map);
-
-void LoadMapFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset,
-    std::unordered_map<std::string, std::string>& map);
-
-void SaveStringToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& shm_offset,
-    const char* str);
-void LoadStringFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t shm_offset, char*& str);
-
-void SaveRawDataToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t& raw_data_offset,
-    char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int memory_type_id, uint64_t byte_size, uint64_t** offset_ptr,
-    off_t raw_ptr_offset = 0);
-
-void SaveTensorToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor,
-    char*& raw_data_ptr, TRITONSERVER_MemoryType memory_type,
-    int64_t memory_type_id, uint64_t byte_size, const char* name,
-    const int64_t* dims, size_t dims_count, TRITONSERVER_DataType dtype,
-    uint64_t** offset_ptr, off_t raw_ptr_offset);
-
-void LoadTensorFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_shm_offset,
-    Tensor& tensor);
-
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
 
 #ifdef TRITON_ENABLE_GPU
-class CUDADriverAPI {
+class CUDAHandler {
  public:
-  static CUDADriverAPI& getInstance()
+  static CUDAHandler& getInstance()
   {
-    static CUDADriverAPI instance;
+    static CUDAHandler instance;
     return instance;
   }
 
  private:
+  std::mutex mu_;
   void* dl_open_handle_ = nullptr;
   CUresult (*cu_pointer_get_attribute_fn_)(
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
-  CUDADriverAPI();
-  ~CUDADriverAPI() noexcept(false);
+  CUDAHandler();
+  ~CUDAHandler() noexcept(false);
 
  public:
-  CUDADriverAPI(CUDADriverAPI const&) = delete;
-  void operator=(CUDADriverAPI const&) = delete;
+  CUDAHandler(CUDAHandler const&) = delete;
+  void operator=(CUDAHandler const&) = delete;
   bool IsAvailable();
   void PointerGetAttribute(
       CUdeviceptr* start_address, CUpointer_attribute attr,
       CUdeviceptr device_ptr);
+  void OpenCudaHandle(
+      int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
+      void** data_ptr);
+  void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
 };
 #endif  // TRITON_ENABLE_GPU
 

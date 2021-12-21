@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -29,52 +29,53 @@
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/thread/thread_time.hpp>
 #include <iostream>
-#include "ipc_message.h"
-#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
-MessageQueue::MessageQueue(
-    std::unique_ptr<SharedMemory>& shm_pool, std::size_t number_of_messages)
+
+std::unique_ptr<MessageQueue>
+MessageQueue::Create(
+    std::unique_ptr<SharedMemoryManager>& shm_pool, uint32_t message_queue_size)
 {
-  MessageQueueShm* message_queue_shm;
-  shm_pool->Map(
-      (char**)&message_queue_shm, sizeof(MessageQueueShm), shm_struct_);
+  AllocatedSharedMemory<MessageQueueShm> mq_shm =
+      shm_pool->Construct<MessageQueueShm>();
+  mq_shm.data_->size = message_queue_size;
 
-  message_queue_shm->size = number_of_messages;
-  size_ = &(message_queue_shm->size);
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_buffer_shm =
+      shm_pool->Construct<bi::managed_external_buffer::handle_t>(
+          message_queue_size);
+  mq_shm.data_->buffer = mq_buffer_shm.handle_;
+  mq_shm.data_->head = 0;
+  mq_shm.data_->tail = 0;
 
-  message_queue_shm->index = 0;
-  index_ = &(message_queue_shm->index);
+  new (&(mq_shm.data_->mutex)) bi::interprocess_mutex{};
+  new (&(mq_shm.data_->sem_empty))
+      bi::interprocess_semaphore{message_queue_size};
+  new (&(mq_shm.data_->sem_full)) bi::interprocess_semaphore{0};
 
-  shm_pool->Map(
-      (char**)&sem_full_, sizeof(bi::interprocess_semaphore),
-      message_queue_shm->sem_full);
-  shm_pool->Map(
-      (char**)&sem_empty_, sizeof(bi::interprocess_semaphore),
-      message_queue_shm->sem_empty);
+  return std::unique_ptr<MessageQueue>(new MessageQueue(mq_shm, mq_buffer_shm));
+}
 
-  new (sem_full_) bi::interprocess_semaphore(0);
-  new (sem_empty_) bi::interprocess_semaphore(number_of_messages);
-
-  shm_pool->Map(
-      (char**)&mutex_, sizeof(bi::interprocess_mutex),
-      message_queue_shm->mutex);
-  new (mutex_) bi::interprocess_mutex;
-
-  shm_pool->Map(
-      (char**)&buffer_, sizeof(off_t) * number_of_messages,
-      message_queue_shm->buffer);
+MessageQueue::MessageQueue(
+    AllocatedSharedMemory<MessageQueueShm>& mq_shm,
+    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>& mq_buffer_shm)
+    : mq_shm_(std::move(mq_shm)), mq_buffer_shm_(std::move(mq_buffer_shm))
+{
+  mq_buffer_shm_ptr_ = mq_buffer_shm_.data_.get();
+  mq_shm_ptr_ = mq_shm_.data_.get();
+  mq_handle_ = mq_shm_.handle_;
 }
 
 void
-MessageQueue::Push(off_t message, int const& duration, bool& success)
+MessageQueue::Push(
+    bi::managed_external_buffer::handle_t message, int const& duration,
+    bool& success)
 {
   boost::system_time timeout =
       boost::get_system_time() + boost::posix_time::milliseconds(duration);
 
   while (true) {
     try {
-      if (!sem_empty_->timed_wait(timeout)) {
+      if (!SemEmptyMutable()->timed_wait(timeout)) {
         success = false;
         return;
       } else {
@@ -88,26 +89,26 @@ MessageQueue::Push(off_t message, int const& duration, bool& success)
   {
     timeout =
         boost::get_system_time() + boost::posix_time::milliseconds(duration);
-    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_, timeout};
+    bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable(), timeout};
     if (!lock) {
-      sem_empty_->post();
+      SemEmptyMutable()->post();
       success = false;
       return;
     }
     success = true;
 
-    buffer_[*index_] = message;
-    (*index_)++;
+    Buffer()[Head()] = message;
+    HeadIncrement();
   }
-  sem_full_->post();
+  SemFullMutable()->post();
 }
 
 void
-MessageQueue::Push(off_t message)
+MessageQueue::Push(bi::managed_external_buffer::handle_t message)
 {
   while (true) {
     try {
-      sem_empty_->wait();
+      SemEmptyMutable()->wait();
       break;
     }
     catch (bi::interprocess_exception& ex) {
@@ -115,27 +116,21 @@ MessageQueue::Push(off_t message)
   }
 
   {
-    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_};
-    buffer_[*index_] = message;
-    (*index_)++;
+    bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
+    Buffer()[Head()] = message;
+    HeadIncrement();
   }
-  sem_full_->post();
+  SemFullMutable()->post();
 }
 
-off_t
-MessageQueue::ShmOffset()
-{
-  return shm_struct_;
-}
-
-off_t
+bi::managed_external_buffer::handle_t
 MessageQueue::Pop()
 {
-  off_t message;
+  bi::managed_external_buffer::handle_t message;
 
   while (true) {
     try {
-      sem_full_->wait();
+      SemFullMutable()->wait();
       break;
     }
     catch (bi::interprocess_exception& ex) {
@@ -143,25 +138,38 @@ MessageQueue::Pop()
   }
 
   {
-    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_};
-    message = buffer_[*index_ - 1];
-    (*index_)--;
+    bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
+
+    message = Buffer()[Tail()];
+    TailIncrement();
   }
-  sem_empty_->post();
+  SemEmptyMutable()->post();
 
   return message;
 }
 
-off_t
+void
+MessageQueue::HeadIncrement()
+{
+  mq_shm_ptr_->head = (mq_shm_ptr_->head + 1) % Size();
+}
+
+void
+MessageQueue::TailIncrement()
+{
+  mq_shm_ptr_->tail = (mq_shm_ptr_->tail + 1) % Size();
+}
+
+bi::managed_external_buffer::handle_t
 MessageQueue::Pop(int const& duration, bool& success)
 {
-  off_t message = 0;
+  bi::managed_external_buffer::handle_t message = 0;
   boost::system_time timeout =
       boost::get_system_time() + boost::posix_time::milliseconds(duration);
 
   while (true) {
     try {
-      if (!sem_full_->timed_wait(timeout)) {
+      if (!SemFullMutable()->timed_wait(timeout)) {
         success = false;
         return message;
       } else {
@@ -175,18 +183,18 @@ MessageQueue::Pop(int const& duration, bool& success)
   {
     timeout =
         boost::get_system_time() + boost::posix_time::milliseconds(duration);
-    bi::scoped_lock<bi::interprocess_mutex> lock{*mutex_, timeout};
+    bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable(), timeout};
     if (!lock) {
-      sem_full_->post();
+      SemFullMutable()->post();
       success = false;
       return message;
     }
     success = true;
 
-    message = buffer_[*index_ - 1];
-    (*index_)--;
+    message = Buffer()[Tail()];
+    TailIncrement();
   }
-  sem_empty_->post();
+  SemEmptyMutable()->post();
 
   return message;
 }
@@ -194,31 +202,42 @@ MessageQueue::Pop(int const& duration, bool& success)
 void
 MessageQueue::ResetSemaphores()
 {
-  new (sem_full_) bi::interprocess_semaphore(0);
-  new (sem_empty_) bi::interprocess_semaphore(*size_);
-  new (mutex_) bi::interprocess_mutex;
+  new (SemFullMutable()) bi::interprocess_semaphore(0);
+  new (SemEmptyMutable()) bi::interprocess_semaphore(Size());
+  new (MutexMutable()) bi::interprocess_mutex;
+  mq_shm_ptr_->tail = 0;
+  mq_shm_ptr_->head = 0;
 }
 
 std::unique_ptr<MessageQueue>
 MessageQueue::LoadFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t message_queue_offset)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bi::managed_external_buffer::handle_t message_queue_handle)
 {
-  std::unique_ptr<MessageQueue> message_queue =
-      std::make_unique<MessageQueue>();
-  MessageQueueShm* message_queue_shm;
-  shm_pool->MapOffset((char**)&message_queue_shm, message_queue_offset);
-  message_queue->size_ = &(message_queue_shm->size);
-  message_queue->index_ = &(message_queue_shm->index);
+  AllocatedSharedMemory<MessageQueueShm> mq_shm =
+      shm_pool->Load<MessageQueueShm>(message_queue_handle);
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_shm_buffer =
+      shm_pool->Load<bi::managed_external_buffer::handle_t>(
+          mq_shm.data_->buffer);
 
-  shm_pool->MapOffset((char**)&message_queue->mutex_, message_queue_shm->mutex);
-  shm_pool->MapOffset(
-      (char**)&message_queue->sem_full_, message_queue_shm->sem_full);
-  shm_pool->MapOffset(
-      (char**)&message_queue->sem_empty_, message_queue_shm->sem_empty);
-  shm_pool->MapOffset(
-      (char**)&message_queue->buffer_, message_queue_shm->buffer);
-  message_queue->shm_struct_ = message_queue_offset;
-  return message_queue;
+  return std::unique_ptr<MessageQueue>(new MessageQueue(mq_shm, mq_shm_buffer));
 }
 
+bi::managed_external_buffer::handle_t
+MessageQueue::ShmHandle()
+{
+  return mq_handle_;
+}
+
+void
+MessageQueue::Release()
+{
+  if (mq_shm_.data_ != nullptr) {
+    mq_shm_.data_.release();
+  }
+
+  if (mq_buffer_shm_.data_ != nullptr) {
+    mq_buffer_shm_.data_.release();
+  }
+}
 }}}  // namespace triton::backend::python

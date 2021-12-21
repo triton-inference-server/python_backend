@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -51,68 +51,62 @@ typedef enum PYTHONSTUB_commandtype_enum {
 /// Shared memory representation of IPCMessage
 ///
 /// \param command determines the IPC command that is going to be passed.
-/// \param args determines the shared memory offset for the input parameters.
-/// \param is_response determines whether this is a response of another IPC
-/// message. If this parameter is set, it must provide the offset of the
-/// corresponding request in \param request_offset.
-/// \param request_offset determines the request offset.
+/// \param args determines the shared memory handle for the input parameters.
+/// \param inline_response determines whether this is a response of another IPC
+/// message. If this parameter is set, it must provide the handle of the
+/// corresponding request in \param response_handle.
+/// \param response_handle determines the request handle.
+/// \param response_mutex stores the handle for the mutex for the response
+/// object.
+/// \param response_cond stores the handle for the condition variable
+/// for the response object.
 struct IPCMessageShm {
   PYTHONSTUB_CommandType command;
-  off_t args;
+  bi::managed_external_buffer::handle_t args;
   bool inline_response = false;
-  off_t request_offset;
-  off_t response_mutex;
-  off_t response_cond;
+  bi::managed_external_buffer::handle_t response_handle;
+  bi::managed_external_buffer::handle_t response_mutex;
+  bi::managed_external_buffer::handle_t response_cond;
 };
 
 class IPCMessage {
-  struct IPCMessageShm* ipc_message_shm_;
-  off_t shm_offset_;
-  bi::interprocess_mutex* response_mutex_;
-  bi::interprocess_condition* response_cond_;
-
  public:
-  IPCMessage() {}
-  IPCMessage(
-      const std::unique_ptr<SharedMemory>& shm_pool, bool inline_response)
-  {
-    shm_pool->Map(
-        (char**)&ipc_message_shm_, sizeof(IPCMessageShm), shm_offset_);
-
-    ipc_message_shm_->inline_response = inline_response;
-    if (inline_response) {
-      shm_pool->Map(
-          (char**)&response_mutex_, sizeof(bi::interprocess_mutex) + 15,
-          ipc_message_shm_->response_mutex);
-      shm_pool->Map(
-          (char**)&response_cond_, sizeof(bi::interprocess_condition) + 15,
-          ipc_message_shm_->response_cond);
-
-      void* ptr_a = reinterpret_cast<void*>(
-          ((uintptr_t)response_cond_ + 15) & ~(uintptr_t)0x0F);
-      ipc_message_shm_->response_cond += ((char*)ptr_a - (char*)response_cond_);
-      void* ptr_b = reinterpret_cast<void*>(
-          ((uintptr_t)response_mutex_ + 15) & ~(uintptr_t)0x0F);
-      ipc_message_shm_->response_mutex +=
-          ((char*)ptr_b - (char*)response_mutex_);
-      response_cond_ = reinterpret_cast<bi::interprocess_condition*>(ptr_a);
-      response_mutex_ = reinterpret_cast<bi::interprocess_mutex*>(ptr_b);
-
-      new (response_cond_) bi::interprocess_condition;
-      new (response_mutex_) bi::interprocess_mutex;
-    }
-  }
-
-  off_t SharedMemoryOffset() { return shm_offset_; }
-
+  static std::unique_ptr<IPCMessage> Create(
+      const std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bool inline_response);
   static std::unique_ptr<IPCMessage> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t message_offset);
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t message_handle);
+
   PYTHONSTUB_CommandType& Command();
   bool& InlineResponse();
-  off_t& RequestOffset();
+  bi::managed_external_buffer::handle_t& ResponseHandle();
   bi::interprocess_condition* ResponseCondition();
   bi::interprocess_mutex* ResponseMutex();
-  off_t& Args();
+  bi::managed_external_buffer::handle_t& Args();
+  bi::managed_external_buffer::handle_t ShmHandle();
+  void Release();
+
+ private:
+  AllocatedSharedMemory<IPCMessageShm> ipc_message_shm_;
+  IPCMessageShm* ipc_message_shm_ptr_;
+
+  AllocatedSharedMemory<bi::interprocess_mutex> response_mutex_shm_;
+  bi::interprocess_mutex* response_mutex_shm_ptr_;
+
+  AllocatedSharedMemory<bi::interprocess_condition> response_cond_shm_;
+  bi::interprocess_condition* response_cond_shm_ptr_;
+
+  bi::managed_external_buffer::handle_t ipc_message_handle_;
+
+  /// Create/load a IPCMessage shm object.
+  /// \param ipc_message_shm IPCMessage representation in shared memory.
+  /// \param response_mutex_shm response mutex.
+  /// \param response_condition_shm response condition.
+  IPCMessage(
+      AllocatedSharedMemory<IPCMessageShm>& ipc_message_shm,
+      AllocatedSharedMemory<bi::interprocess_mutex>& response_mutex_shm,
+      AllocatedSharedMemory<bi::interprocess_condition>& response_cond_shm);
 };
 
 }}};  // namespace triton::backend::python
