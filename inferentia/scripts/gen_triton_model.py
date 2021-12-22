@@ -429,14 +429,17 @@ def get_tensorflow_execute_impl(disable_batch_requests_to_neuron):
         num_threads = len(self.pred_list)
         model_feed_dict_list = [{} for _ in range(num_threads)]
         num_requests = len(requests)
+        request_batch_sizes = []
         inputs = []
         for i in range(len(self.input_list)):
             name, dt, shape = self.input_list[i]
             first_tensor = pb_utils.get_input_tensor_by_name(requests[0], name).as_numpy()
+            request_batch_sizes.append(np.size(first_tensor, axis=0))
             batched_tensor = first_tensor
             for j in range(1, num_requests):
                 tensor = pb_utils.get_input_tensor_by_name(requests[j],
                                                             name).as_numpy()
+                request_batch_sizes.append(request_batch_sizes[-1] + np.size(tensor, axis=0))
                 batched_tensor = np.concatenate((batched_tensor, tensor), axis=0)
             split_tensor = [None] * num_threads
             for split_index in range(num_threads):
@@ -465,7 +468,7 @@ def get_tensorflow_execute_impl(disable_batch_requests_to_neuron):
             for idx in range(num_threads - 1):
                 full_tensor = np.concatenate(
                     (full_tensor, out_list[idx + 1]), axis=0)
-            chuncky_tensors.append(np.split(full_tensor, num_requests, axis=0))
+            chuncky_tensors.append(np.split(full_tensor, request_batch_sizes, axis=0))
         
         for i in range(num_requests):
             output_tensors = []
@@ -538,23 +541,25 @@ def get_pytorch_execute_impl(disable_batch_requests_to_neuron):
         responses = []
         inputs = []
         num_requests = len(requests)
+        request_batch_sizes = []
         for i in self.input_dict.keys():
             name, dt, shape = self.input_dict[i]
             first_tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[0],
                                                             name).as_numpy())
+            request_batch_sizes.append(first_tensor.size(dim=0))
             batched_tensor = first_tensor
             for j in range(1, num_requests):
                 tensor = torch.as_tensor(pb_utils.get_input_tensor_by_name(requests[j],
                                                             name).as_numpy())
+                request_batch_sizes.append(request_batch_sizes[-1] + tensor.size(dim=0))
                 batched_tensor = torch.cat((batched_tensor, tensor), dim=0)
             inputs.append(batched_tensor)
 
         batched_results = self.model_neuron(*inputs)
-
         chunky_batched_results = []
         for i in self.output_dict.keys():
             batch = batched_results[i] if isinstance(batched_results, tuple) else batched_results
-            chunky_batched_results.append(torch.chunk(batch, num_requests, dim=0))
+            chunky_batched_results.append(torch.tensor_split(batch, request_batch_sizes, dim=0))
         for i in range(num_requests):
             output_tensors = []
             for j in self.output_dict.keys():

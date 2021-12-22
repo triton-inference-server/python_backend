@@ -186,11 +186,17 @@ module installed in order to use this script for tensorflow models.
 Similar to PyTorch, `--neuron_core_range` and `--triton_model_instance_count`
 can be used to specify the neuron core range and number of triton model
 instances. However, the neuron core indices don't point to a specific
-neuron core in the chip. For TensorFlow, we use deprecated feature of 
+neuron core in the chip. For TensorFlow, we use deprecated feature of
 `NEURONCORE_GROUP_SIZES` to load model. The model in this case will be loaded on
 next available Neuron cores and not specific ones. See
 [Parallel Execution using NEURONCORE_GROUP_SIZES](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/parallel-ncgs.html?highlight=NEURONCORE_GROUP_SIZES)
 for more information.
+
+Another note, since Neuron-Tensorflow(unlike Neuron-Python) does not have
+built-in functions for running a model for multiple cores, `model.py` will
+distribute the workload by splitting the input tensor across available cores.
+It is recommended the first dimension for the inputs be `None` if the user enables
+processing across multiple cores.
 
 Please use the `-h` or `--help` options in `gen_triton_model.py` to
 learn about more configurable options.
