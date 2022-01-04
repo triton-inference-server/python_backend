@@ -45,7 +45,6 @@ export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
 export TEST_SCRIPT="test.sh"
 CONTAINER_NAME="qa_container"
 
-
 cd ${TRITON_PATH}
 echo "Using server repo tag: $TRITON_SERVER_REPO_TAG"
 # Clone necessary branches

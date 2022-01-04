@@ -41,6 +41,7 @@ and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest
     - [PyTorch](#pytorch)
     - [TensorFlow](#tensorflow)
   - [Serving Inferentia model in Triton](#serving-inferentia-model-in-triton)
+    - [Using Triton's Dynamic Batching](#using-tritons-dynamic-batching)
   - [Testing Inferentia Setup for Accuracy](#testing-inferentia-setup-for-accuracy)
 
 ## Inferentia setup
@@ -48,13 +49,13 @@ and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest
 First step of running Triton with Inferentia is to create an AWS Inferentia
  instance with Deep Learning AMI (tested with Ubuntu 18.04).
 `ssh -i <private-key-name>.pem ubuntu@<instance address>`
-Note: It is recommended to set your storage space to greater than default value 
+Note: It is recommended to set your storage space to greater than default value
 of 110 GiB. The current version of Triton has been tested
 with storage of 500 GiB.
 
 After logging into the inf1* instance, you will need to clone
-[this current Github repo](https://github.com/triton-inference-server/python_backend). 
- Follow [steps on Github to set up ssh access](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) 
+[this current Github repo](https://github.com/triton-inference-server/python_backend).
+ Follow [steps on Github to set up ssh access](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
 or simply clone with https.
 Clone this repo with Github to home repo `/home/ubuntu`.
 
@@ -87,7 +88,7 @@ After starting the Triton container, go into the `python_backend` folder and run
 This script will:
 1. Setup miniconda enviroment
 2. Install necessary dependencies
-3. Create a [Custom Python Execution Environment](https://github.com/triton-inference-server/python_backend#using-custom-python-execution-environments), 
+3. Create a [Custom Python Execution Environment](https://github.com/triton-inference-server/python_backend#using-custom-python-execution-environments),
    `python_backend_stub` to use for Inferentia
 4. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html),
     the Neuron compiler and [neuron-rtd](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-runtime/overview.html) the Neuron Runtime
@@ -106,15 +107,16 @@ Currently, we only support [PyTorch](https://awsdocs-neuron.readthedocs-hosted.c
 and [TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/index.html)
 workflows for execution on inferentia. 
 
-The user is required to create their own `*.pt` (for pytorch) or `*.savedmodels` (for tensorflow) models. This is 
-a critical step since Inferentia will need the underlying `.NEFF` graph to execute
-the inference request. Please refer to: 
+The user is required to create their own `*.pt` (for pytorch) or `*.savedmodels` 
+(for tensorflow) models. This is a critical step since Inferentia will need 
+the underlying `.NEFF` graph to execute the inference request. Please refer to:
+
 - [Neuron compiler CLI Reference Guide](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/command-line-reference.html)
 - [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
-- [PyTorch Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/tutorials/index.html) 
+- [PyTorch Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/tutorials/index.html)
 - [TensorFlow Tutorials](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html)
-  
 for guidance on how to compile models.
+
 ### PyTorch
 
 For PyTorch, we support models traced by [PyTorch-Neuron trace python API](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/api-compilation-python-api.html)
@@ -157,8 +159,9 @@ the number of neuron cores to be a proper multiple of the instance
 count.
 
 ### TensorFlow
+
 For TensorFlow, the model must be compiled for AWS Neuron. See
-[AWS Neuron TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html
+[AWS Neuron TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/tutorials/index.html)
 tutorials to learn how to get a compiled model that uses Neuron
 cores. Currently, the code is tested only on `tensorflow==1.15`.
 
@@ -183,11 +186,17 @@ module installed in order to use this script for tensorflow models.
 Similar to PyTorch, `--neuron_core_range` and `--triton_model_instance_count`
 can be used to specify the neuron core range and number of triton model
 instances. However, the neuron core indices don't point to a specific
-neuron core in the chip. For TensorFlow, we use deprecated feature of 
+neuron core in the chip. For TensorFlow, we use deprecated feature of
 `NEURONCORE_GROUP_SIZES` to load model. The model in this case will be loaded on
 next available Neuron cores and not specific ones. See
 [Parallel Execution using NEURONCORE_GROUP_SIZES](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/appnotes/perf/parallel-ncgs.html?highlight=NEURONCORE_GROUP_SIZES)
 for more information.
+
+Another note, since Neuron-Tensorflow(unlike Neuron-Python) does not have
+built-in functions for running a model for multiple cores, `model.py` will
+distribute the workload by splitting the input tensor across available cores.
+It is recommended the first dimension for the inputs be `None` if the user enables
+processing across multiple cores.
 
 Please use the `-h` or `--help` options in `gen_triton_model.py` to
 learn about more configurable options.
@@ -219,29 +228,52 @@ Now, the server can be launched with the model as below:
  $tritonserver --model-repository <path_to_model_repository>
 ```
 
-Note: 
+Note:
+
 1. The `config.pbtxt` and `model.py` should be treated as
 starting point. The users can customize these files as per
 their need.
-2. Triton Inferentia is currently tested with a **single** model. 
+2. Triton Inferentia is currently tested with a **single** model.
+
+### Using Triton's Dynamic Batching
+
+To enable dynamic batching, `--enable_dynamic_batching`
+flag needs to be specified. `gen_triton_model.py` supports following three 
+options for configuring [Triton's dynamic batching](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md):
+
+1. `--preferred_batch_size`: Please refer to [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#preferred-batch-sizes) for details on preferred batch size. To optimize
+   performance, this is recommended to be multiples of engaged neuron cores.
+   For example, if each instance is using 2 neuron cores, `preferred_batch_size`
+   could be 2, 4 or 6. 
+2. `--max_queue_delay_microseconds`: Please refer to
+   [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#delayed-batching) for details.
+3. `--disable_batch_requests_to_neuron`: Enable the non-default way for Triton to
+   handle batched requests. Triton backend will send each request to neuron
+   separately, irrespective of if the Triton server requests are batched.
+   This flag is recommended when users want to optimize performance with models
+   that do not perform well with batching without the flag.
+
+Additionally, `--max_batch_size` will affect the maximum batching limit. Please
+refer to the [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size)
+for details.
 
 ## Testing Inferentia Setup for Accuracy
+
 The [qa folder](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/qa)
 contains the necessary files to set up testing with a simple add_sub model. The test
 requires an instance with more than 8 inferentia cores to run, eg:`inf1.6xlarge`.
-start the test, run 
+start the test, run
 ```
  $source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
 ``` 
 where `<triton path>` is usually `/home/ubuntu`/.
 This script will pull the [server repo](https://github.com/triton-inference-server/server)
-that contains the tests for inferentia. It will then build the most recent 
-Triton Server and Triton SDK. 
+that contains the tests for inferentia. It will then build the most recent
+Triton Server and Triton SDK.
 
 Note: If you would need to change some of the tests in the server repo,
-you would need to run 
+you would need to run
 ```
  $export TRITON_SERVER_REPO_TAG=<your branch name>
 ``` 
-before running the script. 
-
+before running the script.
