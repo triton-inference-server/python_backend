@@ -78,27 +78,36 @@
     }                                                           \
   } while (false)
 
-
-#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X) \
-  do {                                                                 \
-    TRITONSERVER_Error* raarie_err__ = (X);                            \
-    if (raarie_err__ != nullptr) {                                     \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__); \
-      return;                                                          \
-    }                                                                  \
+#define GOTO_IF_TRUE(X, T) \
+  do {                     \
+    if (X) {               \
+      goto T;              \
+    }                      \
   } while (false)
 
-#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(RESPONSES, RESPONSES_COUNT, X) \
-  do {                                                                     \
-    try {                                                                  \
-      (X);                                                                 \
-    }                                                                      \
-    catch (const PythonBackendException& exception) {                      \
-      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(            \
-          TRITONSERVER_ERROR_INTERNAL, exception.what());                  \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);     \
-      return;                                                              \
-    }                                                                      \
+
+#define RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(                           \
+    RESPONSES, RESPONSES_COUNT, BOOL, X)                                 \
+  do {                                                                   \
+    try {                                                                \
+      (X);                                                               \
+    }                                                                    \
+    catch (const PythonBackendException& exception) {                    \
+      BOOL = true;                                                       \
+      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(          \
+          TRITONSERVER_ERROR_INTERNAL, exception.what());                \
+      for (size_t ridx = 0; ridx < RESPONSES_COUNT; ++ridx) {            \
+        if (RESPONSES[ridx] != nullptr) {                                \
+          LOG_IF_ERROR(                                                  \
+              TRITONBACKEND_ResponseSend(                                \
+                  RESPONSES[ridx], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                  raarie_err__),                                         \
+              "failed to send error response");                          \
+          RESPONSES[ridx] = nullptr;                                     \
+        }                                                                \
+      }                                                                  \
+      TRITONSERVER_ErrorDelete(raarie_err__);                            \
+    }                                                                    \
   } while (false)
 
 #define RESPOND_AND_RETURN_IF_ERROR(REQUEST, X)                         \
@@ -118,20 +127,6 @@
       }                                                                 \
       return rarie_err__;                                               \
     }                                                                   \
-  } while (false)
-
-#define RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(                 \
-    REQUESTS, REQUEST_COUNT, X)                                       \
-  do {                                                                \
-    try {                                                             \
-      (X);                                                            \
-    }                                                                 \
-    catch (const PythonBackendException& exception) {                 \
-      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(        \
-          TRITONSERVER_ERROR_INTERNAL, exception.what());             \
-      RequestsRespondWithError(REQUESTS, REQUEST_COUNT, rarie_err__); \
-      return;                                                         \
-    }                                                                 \
   } while (false)
 
 #define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                     \
@@ -604,6 +599,27 @@ ModelInstanceState::ProcessRequests(
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
 
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("model ") + model_state->Name() + ", instance " + Name() +
+       ", executing " + std::to_string(request_count) + " requests")
+          .c_str());
+
+  uint64_t exec_start_ns = 0;
+  uint64_t compute_start_ns = 0;
+  uint64_t compute_end_ns = 0;
+  uint64_t exec_end_ns = 0;
+
+  bool has_gpu_output;
+  // The vector that stores the tensor pairs for the tensors that the stub
+  // provides in GPU but the output buffer provided by Triton is in CPU.
+  std::vector<std::pair<std::shared_ptr<PbTensor>, std::pair<void*, uint32_t>>>
+      tensor_buffer_pairs;
+  std::unique_ptr<IPCMessage> ipc_message;
+
+
+  SET_TIMESTAMP(exec_start_ns);
+
   // For each request collect the total batch size for this inference
   // execution. The batch-size, number of inputs, and size of each
   // input has already been checked so don't need to do that here.
@@ -622,7 +638,26 @@ ModelInstanceState::ProcessRequests(
                   .c_str()));
       return;
     }
+  }
 
+  // We take the responsibility of the responses.
+  std::vector<TRITONBACKEND_Response*> responses;
+  responses.reserve(request_count);
+  bool all_response_failed = false;
+
+  for (size_t i = 0; i < request_count; i++) {
+    TRITONBACKEND_Response* response;
+    auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
+    if (err == nullptr) {
+      responses.emplace_back(response);
+    } else {
+      responses.emplace_back(nullptr);
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
+      TRITONSERVER_ErrorDelete(err);
+    }
+  }
+
+  for (size_t i = 0; i < request_count; i++) {
     if (max_batch_size > 0) {
       // Retrieve the batch size from one of the inputs, if the model
       // supports batching, the first dimension size is batch size
@@ -636,8 +671,9 @@ ModelInstanceState::ProcessRequests(
         total_batch_size += shape[0];
       }
       if (err != nullptr) {
-        RequestsRespondWithError(requests, request_count, err);
-        return;
+        RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+            responses, request_count, all_response_failed, err);
+        GOTO_IF_TRUE(all_response_failed, earlyexit);
       }
     } else {
       ++total_batch_size;
@@ -655,85 +691,67 @@ ModelInstanceState::ProcessRequests(
   // scheduler has done something badly wrong so fail and release all
   // requests.
   if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
-    RequestsRespondWithError(
-        requests, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+        responses, request_count, all_response_failed,
         TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
             std::string(
                 "batch size " + std::to_string(total_batch_size) + " for '" +
                 name + "', max allowed is " + std::to_string(max_batch_size))
                 .c_str()));
-    return;
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
   }
 
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("model ") + model_state->Name() + ", instance " + Name() +
-       ", executing " + std::to_string(request_count) + " requests")
-          .c_str());
-  uint64_t exec_start_ns = 0;
-  SET_TIMESTAMP(exec_start_ns);
-
-  std::unique_ptr<IPCMessage> ipc_message =
-      std::make_unique<IPCMessage>(shm_pool_, false /*inline_resposne*/);
+  ipc_message =
+      std::make_unique<IPCMessage>(shm_pool_, false /*inline_response*/);
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
 
   RequestBatch* request_batch;
   off_t request_batch_offset;
-  RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(
-      requests, request_count,
+  RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+      responses, request_count, all_response_failed,
       shm_pool_->Map(
           (char**)&request_batch, sizeof(RequestBatch), request_batch_offset));
+  GOTO_IF_TRUE(all_response_failed, earlyexit);
+
   ipc_message->Args() = request_batch_offset;
   request_batch->batch_size = request_count;
 
   Request* requests_shm;
   off_t requests_shm_offset;
-  RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(
-      requests, request_count,
+  RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+      responses, request_count, all_response_failed,
       shm_pool_->Map(
           (char**)&requests_shm, sizeof(Request) * request_count,
           requests_shm_offset));
+  GOTO_IF_TRUE(all_response_failed, earlyexit);
   request_batch->requests = requests_shm_offset;
-
-  // We take the responsibilty of the responses.
-  std::vector<TRITONBACKEND_Response*> responses;
-  responses.reserve(request_count);
-
-  for (size_t i = 0; i < request_count; i++) {
-    TRITONBACKEND_Response* response;
-    auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
-    if (err == nullptr) {
-      responses.emplace_back(response);
-    } else {
-      responses.emplace_back(nullptr);
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response.");
-      TRITONSERVER_ErrorDelete(err);
-    }
-  }
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
     Request* python_infer_request = &requests_shm[r];
     uint32_t requested_input_count = 0;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+        responses, request_count, all_response_failed,
         TRITONBACKEND_RequestInputCount(request, &requested_input_count));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
 
     uint32_t requested_output_count = 0;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+        responses, request_count, all_response_failed,
         TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
     python_infer_request->requested_output_count = requested_output_count;
 
     Tensor* input_tensors;
     off_t input_tensors_offset;
 
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+        responses, request_count, all_response_failed,
         shm_pool_->Map(
             (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
             input_tensors_offset));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
     python_infer_request->inputs = input_tensors_offset;
 
     std::vector<std::shared_ptr<PbTensor>> pb_input_tensors;
@@ -741,10 +759,11 @@ ModelInstanceState::ProcessRequests(
       Tensor* input_tensor = &input_tensors[iidx];
       std::shared_ptr<PbTensor> pb_input_tensor;
 
-      RESPOND_ALL_AND_RETURN_IF_ERROR(
-          &responses, request_count,
+      RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+          responses, request_count, all_response_failed,
           GetInputTensor(
               iidx, input_tensor, pb_input_tensor, request, responses));
+      GOTO_IF_TRUE(all_response_failed, earlyexit);
       pb_input_tensors.emplace_back(std::move(pb_input_tensor));
     }
 
@@ -752,32 +771,36 @@ ModelInstanceState::ProcessRequests(
     // Append the list of requested outputs to the inference_request
     for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
       const char* requested_output_name;
-      RESPOND_ALL_AND_RETURN_IF_ERROR(
-          &responses, request_count,
+      RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+          responses, request_count, all_response_failed,
           TRITONBACKEND_RequestOutputName(
               request, iidx, &requested_output_name));
+      GOTO_IF_TRUE(all_response_failed, earlyexit);
       requested_output_names.emplace_back(requested_output_name);
     }
 
     // request id
     const char* id;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count, TRITONBACKEND_RequestId(request, &id));
+    RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+        responses, request_count, all_response_failed,
+        TRITONBACKEND_RequestId(request, &id));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
 
     uint64_t correlation_id;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_ERROR(
+        responses, request_count, all_response_failed,
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
 
     InferRequest infer_request(
         id, correlation_id, pb_input_tensors, requested_output_names,
         model_state->Name(), model_state->Version());
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+        responses, request_count, all_response_failed,
         infer_request.SaveToSharedMemory(shm_pool_, python_infer_request));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
   }
 
-  uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
 
   // This means that the stub process has exited and Python
@@ -786,8 +809,8 @@ ModelInstanceState::ProcessRequests(
     const char* error_message = "The stub process has exited unexpectedly.";
     RespondErrorToAllRequests(
         error_message, responses, requests, request_count);
-
-    return;
+    all_response_failed = true;
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
   }
 
   off_t response_message;
@@ -795,13 +818,15 @@ ModelInstanceState::ProcessRequests(
       ipc_message->SharedMemoryOffset(), response_message, restart, responses,
       requests, request_count);
   if (restart) {
-    return;
+    all_response_failed = true;
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
   }
 
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count,
+  RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+      responses, request_count, all_response_failed,
       ipc_message =
           IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
+  GOTO_IF_TRUE(all_response_failed, earlyexit);
 
   // If the stub command is no longer PYTHONSTUB_InferExecRequest, it
   // indicates that inference request exeuction has finished.
@@ -819,24 +844,25 @@ ModelInstanceState::ProcessRequests(
       restart = true;
       RespondErrorToAllRequests(
           TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
-
-      return;
+      all_response_failed = true;
+      GOTO_IF_TRUE(all_response_failed, earlyexit);
     }
 
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
+    RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+        responses, request_count, all_response_failed,
         ipc_message =
             IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
   }
 
-  uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
 
   // Parsing the request response
   ResponseBatch* response_batch;
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count,
+  RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+      responses, request_count, all_response_failed,
       shm_pool_->MapOffset((char**)&response_batch, ipc_message->Args()));
+  GOTO_IF_TRUE(all_response_failed, earlyexit);
 
   // If inference fails, release all the requests and send an error response.
   // If inference fails at this stage, it usually indicates a bug in the model
@@ -844,10 +870,11 @@ ModelInstanceState::ProcessRequests(
   if (response_batch->has_error) {
     if (response_batch->is_error_set) {
       char* error_message;
-      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-          &responses, request_count,
+      RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+          responses, request_count, all_response_failed,
           LoadStringFromSharedMemory(
               shm_pool_, response_batch->error, error_message));
+      GOTO_IF_TRUE(all_response_failed, earlyexit);
       RespondErrorToAllRequests(
           error_message, responses, requests, request_count);
     } else {
@@ -856,21 +883,17 @@ ModelInstanceState::ProcessRequests(
       RespondErrorToAllRequests(
           error_message, responses, requests, request_count);
     }
-
-    return;
+    all_response_failed = true;
+    GOTO_IF_TRUE(all_response_failed, earlyexit);
   }
 
   Response* responses_shm;
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count,
+  RESPOND_ALL_AND_SET_TRUE_IF_EXCEPTION(
+      responses, request_count, all_response_failed,
       shm_pool_->MapOffset((char**)&responses_shm, response_batch->responses));
+  GOTO_IF_TRUE(all_response_failed, earlyexit);
 
-  bool has_gpu_output = false;
-
-  // The vector that stores the tensor pairs for the tensors that the stub
-  // provides in GPU but the output buffer provided by Triton is in CPU.
-  std::vector<std::pair<std::shared_ptr<PbTensor>, std::pair<void*, uint32_t>>>
-      tensor_buffer_pairs;
+  has_gpu_output = false;
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = responses[r];
@@ -1072,9 +1095,9 @@ ModelInstanceState::ProcessRequests(
             responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr));
   }
 
-  uint64_t exec_end_ns = 0;
   SET_TIMESTAMP(exec_end_ns);
 
+earlyexit:
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
 
@@ -1094,11 +1117,13 @@ ModelInstanceState::ProcessRequests(
 
   // Report the entire batch statistics. This backend does not support
   // batching so the total batch size is always 1.
-  LOG_IF_ERROR(
-      TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          TritonModelInstance(), total_batch_size, exec_start_ns,
-          compute_start_ns, compute_end_ns, exec_end_ns),
-      "failed reporting batch request statistics");
+  if (!all_response_failed) {
+    LOG_IF_ERROR(
+        TRITONBACKEND_ModelInstanceReportBatchStatistics(
+            TritonModelInstance(), total_batch_size, exec_start_ns,
+            compute_start_ns, compute_end_ns, exec_end_ns),
+        "failed reporting batch request statistics");
+  }
 
   return;
 }
