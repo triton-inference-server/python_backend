@@ -1,4 +1,4 @@
-// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -56,6 +56,7 @@
 #include "message_queue.h"
 #include "pb_env.h"
 #include "pb_main_utils.h"
+#include "pb_metric_reporter.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
@@ -78,27 +79,47 @@
     }                                                           \
   } while (false)
 
-
-#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X) \
-  do {                                                                 \
-    TRITONSERVER_Error* raarie_err__ = (X);                            \
-    if (raarie_err__ != nullptr) {                                     \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__); \
-      return;                                                          \
-    }                                                                  \
+#define RESPOND_ALL_AND_RETURN_IF_ERROR(RESPONSES, RESPONSES_COUNT, X)      \
+  do {                                                                      \
+    TRITONSERVER_Error* raasnie_err__ = (X);                                \
+    if (raasnie_err__ != nullptr) {                                         \
+      for (size_t ridx = 0; ridx < RESPONSES_COUNT; ++ridx) {               \
+        if ((*RESPONSES)[ridx] != nullptr) {                                \
+          LOG_IF_ERROR(                                                     \
+              TRITONBACKEND_ResponseSend(                                   \
+                  (*RESPONSES)[ridx], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                  raasnie_err__),                                           \
+              "failed to send error response");                             \
+          (*RESPONSES)[ridx] = nullptr;                                     \
+        }                                                                   \
+      }                                                                     \
+      TRITONSERVER_ErrorDelete(raasnie_err__);                              \
+      return;                                                               \
+    }                                                                       \
   } while (false)
 
-#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(RESPONSES, RESPONSES_COUNT, X) \
-  do {                                                                     \
-    try {                                                                  \
-      (X);                                                                 \
-    }                                                                      \
-    catch (const PythonBackendException& exception) {                      \
-      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(            \
-          TRITONSERVER_ERROR_INTERNAL, exception.what());                  \
-      SendErrorForResponses(RESPONSES, RESPONSES_COUNT, raarie_err__);     \
-      return;                                                              \
-    }                                                                      \
+
+#define RESPOND_ALL_AND_RETURN_IF_EXCEPTION(RESPONSES, RESPONSES_COUNT, X)  \
+  do {                                                                      \
+    try {                                                                   \
+      (X);                                                                  \
+    }                                                                       \
+    catch (const PythonBackendException& exception) {                       \
+      TRITONSERVER_Error* raarie_err__ = TRITONSERVER_ErrorNew(             \
+          TRITONSERVER_ERROR_INTERNAL, exception.what());                   \
+      for (size_t ridx = 0; ridx < RESPONSES_COUNT; ++ridx) {               \
+        if ((*RESPONSES)[ridx] != nullptr) {                                \
+          LOG_IF_ERROR(                                                     \
+              TRITONBACKEND_ResponseSend(                                   \
+                  (*RESPONSES)[ridx], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                  raarie_err__),                                            \
+              "failed to send error response");                             \
+          (*RESPONSES)[ridx] = nullptr;                                     \
+        }                                                                   \
+      }                                                                     \
+      TRITONSERVER_ErrorDelete(raarie_err__);                               \
+      return;                                                               \
+    }                                                                       \
   } while (false)
 
 #define RESPOND_AND_RETURN_IF_ERROR(REQUEST, X)                         \
@@ -120,54 +141,40 @@
     }                                                                   \
   } while (false)
 
-#define RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(                 \
-    REQUESTS, REQUEST_COUNT, X)                                       \
-  do {                                                                \
-    try {                                                             \
-      (X);                                                            \
-    }                                                                 \
-    catch (const PythonBackendException& exception) {                 \
-      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew(        \
-          TRITONSERVER_ERROR_INTERNAL, exception.what());             \
-      RequestsRespondWithError(REQUESTS, REQUEST_COUNT, rarie_err__); \
-      return;                                                         \
-    }                                                                 \
+#define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                      \
+  do {                                                                   \
+    if ((*RESPONSES)[IDX] != nullptr) {                                  \
+      TRITONSERVER_Error* err__ = (X);                                   \
+      if (err__ != nullptr) {                                            \
+        LOG_IF_ERROR(                                                    \
+            TRITONBACKEND_ResponseSend(                                  \
+                (*RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                err__),                                                  \
+            "failed to send error response");                            \
+        (*RESPONSES)[IDX] = nullptr;                                     \
+        TRITONSERVER_ErrorDelete(err__);                                 \
+      }                                                                  \
+    }                                                                    \
   } while (false)
 
-#define GUARDED_RESPOND_IF_ERROR(RESPONSES, IDX, X)                     \
-  do {                                                                  \
-    if ((RESPONSES)[IDX] != nullptr) {                                  \
-      TRITONSERVER_Error* err__ = (X);                                  \
-      if (err__ != nullptr) {                                           \
-        LOG_IF_ERROR(                                                   \
-            TRITONBACKEND_ResponseSend(                                 \
-                (RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
-                err__),                                                 \
-            "failed to send error response");                           \
-        (RESPONSES)[IDX] = nullptr;                                     \
-        TRITONSERVER_ErrorDelete(err__);                                \
-      }                                                                 \
-    }                                                                   \
-  } while (false)
-
-#define GUARDED_RESPOND_IF_EXCEPTION(RESPONSES, IDX, X)                 \
-  do {                                                                  \
-    if ((RESPONSES)[IDX] != nullptr) {                                  \
-      try {                                                             \
-        (X);                                                            \
-      }                                                                 \
-      catch (const PythonBackendException& pb_exception) {              \
-        TRITONSERVER_Error* err__ = TRITONSERVER_ErrorNew(              \
-            TRITONSERVER_ERROR_INTERNAL, pb_exception.what());          \
-        LOG_IF_ERROR(                                                   \
-            TRITONBACKEND_ResponseSend(                                 \
-                (RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
-                err__),                                                 \
-            "failed to send error response");                           \
-        (RESPONSES)[IDX] = nullptr;                                     \
-        TRITONSERVER_ErrorDelete(err__);                                \
-      }                                                                 \
-    }                                                                   \
+#define GUARDED_RESPOND_IF_EXCEPTION(RESPONSES, IDX, X)                  \
+  do {                                                                   \
+    if ((*RESPONSES)[IDX] != nullptr) {                                  \
+      try {                                                              \
+        (X);                                                             \
+      }                                                                  \
+      catch (const PythonBackendException& pb_exception) {               \
+        TRITONSERVER_Error* err__ = TRITONSERVER_ErrorNew(               \
+            TRITONSERVER_ERROR_INTERNAL, pb_exception.what());           \
+        LOG_IF_ERROR(                                                    \
+            TRITONBACKEND_ResponseSend(                                  \
+                (*RESPONSES)[IDX], TRITONSERVER_RESPONSE_COMPLETE_FINAL, \
+                err__),                                                  \
+            "failed to send error response");                            \
+        (*RESPONSES)[IDX] = nullptr;                                     \
+        TRITONSERVER_ErrorDelete(err__);                                 \
+      }                                                                  \
+    }                                                                    \
   } while (false)
 
 #define RETURN_IF_EXCEPTION(X)                                 \
@@ -262,7 +269,7 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* GetInputTensor(
       const uint32_t input_idx, Tensor* input_tensor_shm,
       std::shared_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
-      std::vector<TRITONBACKEND_Response*>& responses);
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
 
   void ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -283,12 +290,13 @@ class ModelInstanceState : public BackendModelInstance {
   // Get a message from the stub process
   void SendMessageAndReceiveResponse(
       off_t message, off_t& response, bool& restart,
-      std::vector<TRITONBACKEND_Response*>& responses,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
   // Responds to all the requests with an error message.
   void RespondErrorToAllRequests(
-      const char* message, std::vector<TRITONBACKEND_Response*>& responses,
+      const char* message,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
   // Kill stub process
@@ -346,7 +354,7 @@ ModelInstanceState::WaitForBLSRequestsToFinish()
 void
 ModelInstanceState::SendMessageAndReceiveResponse(
     off_t message, off_t& response, bool& restart,
-    std::vector<TRITONBACKEND_Response*>& responses,
+    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
     TRITONBACKEND_Request** requests, const uint32_t request_count)
 {
   auto error = SendMessageToStub(message);
@@ -445,11 +453,12 @@ ModelInstanceState::ReceiveMessageFromStub(off_t& message)
 
 void
 ModelInstanceState::RespondErrorToAllRequests(
-    const char* message, std::vector<TRITONBACKEND_Response*>& responses,
+    const char* message,
+    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
     TRITONBACKEND_Request** requests, const uint32_t request_count)
 {
   for (uint32_t r = 0; r < request_count; ++r) {
-    if (responses[r] == nullptr)
+    if ((*responses)[r] == nullptr)
       continue;
 
     std::string err_message =
@@ -462,10 +471,10 @@ ModelInstanceState::RespondErrorToAllRequests(
         TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_message.c_str());
     LOG_IF_ERROR(
         TRITONBACKEND_ResponseSend(
-            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+            (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
         "failed sending response");
 
-    responses[r] = nullptr;
+    (*responses)[r] = nullptr;
     TRITONSERVER_ErrorDelete(err);
   }
 }
@@ -604,6 +613,15 @@ ModelInstanceState::ProcessRequests(
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
 
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("model ") + model_state->Name() + ", instance " + Name() +
+       ", executing " + std::to_string(request_count) + " requests")
+          .c_str());
+
+  uint64_t exec_start_ns = 0;
+  SET_TIMESTAMP(exec_start_ns);
+
   // For each request collect the total batch size for this inference
   // execution. The batch-size, number of inputs, and size of each
   // input has already been checked so don't need to do that here.
@@ -622,7 +640,29 @@ ModelInstanceState::ProcessRequests(
                   .c_str()));
       return;
     }
+  }
 
+  // We take the responsibility of the responses.
+  std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
+      new std::vector<TRITONBACKEND_Response*>());
+  responses->reserve(request_count);
+  PbMetricReporter reporter(
+      TritonModelInstance(), requests, request_count, responses);
+  reporter.SetExecStartNs(exec_start_ns);
+
+  for (size_t i = 0; i < request_count; i++) {
+    TRITONBACKEND_Response* response;
+    auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
+    if (err == nullptr) {
+      responses->emplace_back(response);
+    } else {
+      responses->emplace_back(nullptr);
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
+      TRITONSERVER_ErrorDelete(err);
+    }
+  }
+
+  for (size_t i = 0; i < request_count; i++) {
     if (max_batch_size > 0) {
       // Retrieve the batch size from one of the inputs, if the model
       // supports batching, the first dimension size is batch size
@@ -636,8 +676,7 @@ ModelInstanceState::ProcessRequests(
         total_batch_size += shape[0];
       }
       if (err != nullptr) {
-        RequestsRespondWithError(requests, request_count, err);
-        return;
+        RESPOND_ALL_AND_RETURN_IF_ERROR(responses, request_count, err);
       }
     } else {
       ++total_batch_size;
@@ -655,74 +694,50 @@ ModelInstanceState::ProcessRequests(
   // scheduler has done something badly wrong so fail and release all
   // requests.
   if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
-    RequestsRespondWithError(
-        requests, request_count,
+    RESPOND_ALL_AND_RETURN_IF_ERROR(
+        responses, request_count,
         TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
             std::string(
                 "batch size " + std::to_string(total_batch_size) + " for '" +
                 name + "', max allowed is " + std::to_string(max_batch_size))
                 .c_str()));
-    return;
   }
 
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("model ") + model_state->Name() + ", instance " + Name() +
-       ", executing " + std::to_string(request_count) + " requests")
-          .c_str());
-  uint64_t exec_start_ns = 0;
-  SET_TIMESTAMP(exec_start_ns);
-
   std::unique_ptr<IPCMessage> ipc_message =
-      std::make_unique<IPCMessage>(shm_pool_, false /*inline_resposne*/);
+      std::make_unique<IPCMessage>(shm_pool_, false /*inline_response*/);
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
 
   RequestBatch* request_batch;
   off_t request_batch_offset;
-  RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(
-      requests, request_count,
+  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+      responses, request_count,
       shm_pool_->Map(
           (char**)&request_batch, sizeof(RequestBatch), request_batch_offset));
+
   ipc_message->Args() = request_batch_offset;
   request_batch->batch_size = request_count;
 
   Request* requests_shm;
   off_t requests_shm_offset;
-  RESPOND_ALL_REQUESTS_AND_RETURN_IF_EXCEPTION(
-      requests, request_count,
+  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+      responses, request_count,
       shm_pool_->Map(
           (char**)&requests_shm, sizeof(Request) * request_count,
           requests_shm_offset));
   request_batch->requests = requests_shm_offset;
-
-  // We take the responsibilty of the responses.
-  std::vector<TRITONBACKEND_Response*> responses;
-  responses.reserve(request_count);
-
-  for (size_t i = 0; i < request_count; i++) {
-    TRITONBACKEND_Response* response;
-    auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
-    if (err == nullptr) {
-      responses.emplace_back(response);
-    } else {
-      responses.emplace_back(nullptr);
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response.");
-      TRITONSERVER_ErrorDelete(err);
-    }
-  }
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
     Request* python_infer_request = &requests_shm[r];
     uint32_t requested_input_count = 0;
     RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count,
+        responses, request_count,
         TRITONBACKEND_RequestInputCount(request, &requested_input_count));
 
     uint32_t requested_output_count = 0;
     RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count,
+        responses, request_count,
         TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
     python_infer_request->requested_output_count = requested_output_count;
 
@@ -730,7 +745,7 @@ ModelInstanceState::ProcessRequests(
     off_t input_tensors_offset;
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
+        responses, request_count,
         shm_pool_->Map(
             (char**)&input_tensors, sizeof(Tensor) * requested_input_count,
             input_tensors_offset));
@@ -742,7 +757,7 @@ ModelInstanceState::ProcessRequests(
       std::shared_ptr<PbTensor> pb_input_tensor;
 
       RESPOND_ALL_AND_RETURN_IF_ERROR(
-          &responses, request_count,
+          responses, request_count,
           GetInputTensor(
               iidx, input_tensor, pb_input_tensor, request, responses));
       pb_input_tensors.emplace_back(std::move(pb_input_tensor));
@@ -753,7 +768,7 @@ ModelInstanceState::ProcessRequests(
     for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
       const char* requested_output_name;
       RESPOND_ALL_AND_RETURN_IF_ERROR(
-          &responses, request_count,
+          responses, request_count,
           TRITONBACKEND_RequestOutputName(
               request, iidx, &requested_output_name));
       requested_output_names.emplace_back(requested_output_name);
@@ -762,23 +777,24 @@ ModelInstanceState::ProcessRequests(
     // request id
     const char* id;
     RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count, TRITONBACKEND_RequestId(request, &id));
+        responses, request_count, TRITONBACKEND_RequestId(request, &id));
 
     uint64_t correlation_id;
     RESPOND_ALL_AND_RETURN_IF_ERROR(
-        &responses, request_count,
+        responses, request_count,
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
 
     InferRequest infer_request(
         id, correlation_id, pb_input_tensors, requested_output_names,
         model_state->Name(), model_state->Version());
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
+        responses, request_count,
         infer_request.SaveToSharedMemory(shm_pool_, python_infer_request));
   }
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
+  reporter.SetComputeStartNs(compute_start_ns);
 
   // This means that the stub process has exited and Python
   // backend failed to restart the stub process.
@@ -786,7 +802,6 @@ ModelInstanceState::ProcessRequests(
     const char* error_message = "The stub process has exited unexpectedly.";
     RespondErrorToAllRequests(
         error_message, responses, requests, request_count);
-
     return;
   }
 
@@ -799,7 +814,7 @@ ModelInstanceState::ProcessRequests(
   }
 
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count,
+      responses, request_count,
       ipc_message =
           IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
 
@@ -819,23 +834,23 @@ ModelInstanceState::ProcessRequests(
       restart = true;
       RespondErrorToAllRequests(
           TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
-
       return;
     }
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        &responses, request_count,
+        responses, request_count,
         ipc_message =
             IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
   }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
+  reporter.SetComputeEndNs(compute_end_ns);
 
   // Parsing the request response
   ResponseBatch* response_batch;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count,
+      responses, request_count,
       shm_pool_->MapOffset((char**)&response_batch, ipc_message->Args()));
 
   // If inference fails, release all the requests and send an error response.
@@ -845,7 +860,7 @@ ModelInstanceState::ProcessRequests(
     if (response_batch->is_error_set) {
       char* error_message;
       RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-          &responses, request_count,
+          responses, request_count,
           LoadStringFromSharedMemory(
               shm_pool_, response_batch->error, error_message));
       RespondErrorToAllRequests(
@@ -856,14 +871,14 @@ ModelInstanceState::ProcessRequests(
       RespondErrorToAllRequests(
           error_message, responses, requests, request_count);
     }
-
     return;
   }
 
   Response* responses_shm;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      &responses, request_count,
+      responses, request_count,
       shm_pool_->MapOffset((char**)&responses_shm, response_batch->responses));
+
 
   bool has_gpu_output = false;
 
@@ -873,7 +888,7 @@ ModelInstanceState::ProcessRequests(
       tensor_buffer_pairs;
 
   for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Response* response = responses[r];
+    TRITONBACKEND_Response* response = (*responses)[r];
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
 
@@ -892,7 +907,7 @@ ModelInstanceState::ProcessRequests(
 
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseSend(
-                  responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+                  (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
               "failed sending response");
           TRITONSERVER_ErrorDelete(err);
         } else {
@@ -902,12 +917,12 @@ ModelInstanceState::ProcessRequests(
 
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseSend(
-                  responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+                  (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
               "failed sending response");
           TRITONSERVER_ErrorDelete(err);
         }
 
-        responses[r] = nullptr;
+        (*responses)[r] = nullptr;
 
         // If has_error is true, we do not look at the response even if the
         // response is set.
@@ -919,10 +934,10 @@ ModelInstanceState::ProcessRequests(
           TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
       LOG_IF_ERROR(
           TRITONBACKEND_ResponseSend(
-              responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+              (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
           "failed sending response");
       TRITONSERVER_ErrorDelete(err);
-      responses[r] = nullptr;
+      (*responses)[r] = nullptr;
       continue;
     }
 
@@ -1069,36 +1084,13 @@ ModelInstanceState::ProcessRequests(
     GUARDED_RESPOND_IF_ERROR(
         responses, r,
         TRITONBACKEND_ResponseSend(
-            responses[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr));
+            (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr));
   }
 
   uint64_t exec_end_ns = 0;
   SET_TIMESTAMP(exec_end_ns);
-
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-
-    // Report statistics for the request. Note that there could
-    // still be responses that have not yet been sent but those
-    // cannot be captured in the statistics as they reflect only the
-    // request object. We use the execution start/end time for
-    // compute also so that the entire execution time is associated
-    // with the inference computation.
-    LOG_IF_ERROR(
-        TRITONBACKEND_ModelInstanceReportStatistics(
-            TritonModelInstance(), request,
-            (responses[r] != nullptr) /* success */, exec_start_ns,
-            compute_start_ns, compute_end_ns, exec_end_ns),
-        "failed reporting request statistics");
-  }
-
-  // Report the entire batch statistics. This backend does not support
-  // batching so the total batch size is always 1.
-  LOG_IF_ERROR(
-      TRITONBACKEND_ModelInstanceReportBatchStatistics(
-          TritonModelInstance(), total_batch_size, exec_start_ns,
-          compute_start_ns, compute_end_ns, exec_end_ns),
-      "failed reporting batch request statistics");
+  reporter.SetExecEndNs(exec_end_ns);
+  reporter.SetBatchStatistics(total_batch_size);
 
   return;
 }
@@ -1472,7 +1464,7 @@ TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(
     const uint32_t input_idx, Tensor* input_tensor_shm,
     std::shared_ptr<PbTensor>& input_tensor, TRITONBACKEND_Request* request,
-    std::vector<TRITONBACKEND_Response*>& responses)
+    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses)
 {
   const char* input_name;
   // Load iidx'th input name
@@ -1495,7 +1487,7 @@ ModelInstanceState::GetInputTensor(
       &input_dims_count, &input_byte_size, &input_buffer_count));
 
   BackendInputCollector collector(
-      &request, 1, &responses, Model()->TritonMemoryManager(),
+      &request, 1, responses.get(), Model()->TritonMemoryManager(),
       false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
       HostPolicyName().c_str());
 
