@@ -149,6 +149,8 @@ set(
   src/pb_env.h
   src/pb_main_utils.cc
   src/pb_main_utils.h
+  src/pb_metric_reporter.cc
+  src/pb_metric_reporter.h
 )
 
 list(APPEND
