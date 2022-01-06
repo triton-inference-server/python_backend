@@ -265,10 +265,18 @@ RequestExecutor::Infer(
 
         // userp is only set for the CPU tensors
         if (memory_type != TRITONSERVER_MEMORY_GPU) {
-          output_tensors.push_back(std::make_shared<PbTensor>(
-              sname, dims_vector, datatype, memory_type, memory_type_id,
-              const_cast<void*>(base), byte_size, nullptr /* DLManagedTensor */,
-              *(reinterpret_cast<off_t*>(userp))));
+          if (byte_size != 0) {
+            output_tensors.push_back(std::make_shared<PbTensor>(
+                sname, dims_vector, datatype, memory_type, memory_type_id,
+                const_cast<void*>(base), byte_size,
+                nullptr /* DLManagedTensor */,
+                *(reinterpret_cast<off_t*>(userp))));
+          } else {
+            output_tensors.push_back(std::make_shared<PbTensor>(
+                sname, dims_vector, datatype, memory_type, memory_type_id,
+                const_cast<void*>(base), byte_size,
+                nullptr /* DLManagedTensor */, 0 /* shared memory offest */));
+          }
         } else {
           output_tensors.push_back(std::make_shared<PbTensor>(
               sname, dims_vector, datatype, memory_type, memory_type_id,
