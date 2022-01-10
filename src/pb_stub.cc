@@ -790,7 +790,7 @@ main(int argc, char** argv)
           // shared memory and will be set to false by the parent process.
           // The parent process expects that the stub process sets this
           // variable to true within 1 second.
-          sleep(0.3);
+          std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
           stub->UpdateHealth();
 
