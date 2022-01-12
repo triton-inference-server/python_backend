@@ -478,14 +478,24 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
 
   // Execute Response
   py::object execute_return = model_instance_.attr("execute")(request_list);
-  py::list responses;
+  py::object responses_obj;
   bool is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
 
   if (is_coroutine) {
-    responses = asyncio.attr("run")(execute_return);
+    responses_obj = asyncio.attr("run")(execute_return);
   } else {
-    responses = execute_return;
+    responses_obj = execute_return;
   }
+
+  // Check the return type of execute function.
+  if (!py::isinstance<py::list>(responses_obj)) {
+    std::string str = py::str(execute_return.get_type());
+    throw PythonBackendException(
+        std::string("Expected a list in the execute return, found type '") +
+        str + "'.");
+  }
+
+  py::list responses = responses_obj;
 
   Response* responses_shm;
   off_t responses_shm_offset;
@@ -511,6 +521,15 @@ Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
 
   size_t i = 0;
   for (auto& response : responses) {
+    // Check the return type of execute function.
+    if (!py::isinstance<InferResponse>(response)) {
+      std::string str = py::str(response.get_type());
+      throw PythonBackendException(
+          std::string("Expected an 'InferenceResponse' object in the execute "
+                      "function return list, found type '") +
+          str + "'.");
+    }
+
     InferResponse* infer_response = response.cast<InferResponse*>();
     Response* response_shm = &responses_shm[i];
     ProcessResponse(response_shm, response_batch, infer_response);
