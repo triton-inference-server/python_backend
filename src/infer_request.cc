@@ -39,10 +39,12 @@ InferRequest::InferRequest(
     const std::string& request_id, uint64_t correlation_id,
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::vector<std::string>& requested_output_names,
-    const std::string& model_name, const int64_t model_version)
+    const std::string& model_name, const int64_t model_version,
+    bool sequence_start, bool sequence_end)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
-      model_version_(model_version)
+      model_version_(model_version), sequence_start_(sequence_start),
+      sequence_end_(sequence_end)
 {
 }
 
@@ -82,6 +84,18 @@ InferRequest::ModelVersion()
   return model_version_;
 }
 
+bool
+InferRequest::SequenceStart()
+{
+  return sequence_start_;
+}
+
+bool
+InferRequest::SequenceEnd()
+{
+  return sequence_end_;
+}
+
 void
 InferRequest::SaveToSharedMemory(
     std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm)
@@ -97,6 +111,8 @@ InferRequest::SaveToSharedMemory(
       (char**)&requested_output_names,
       sizeof(off_t) * request_shm->requested_output_count,
       requested_output_names_offset);
+  request_shm->sequence_end = SequenceEnd();
+  request_shm->sequence_start = SequenceStart();
 
   request_shm->requested_output_names = requested_output_names_offset;
   size_t i = 0;
@@ -150,7 +166,8 @@ InferRequest::LoadFromSharedMemory(
   LoadStringFromSharedMemory(shm_pool, request->model_name, model_name);
   return std::make_unique<InferRequest>(
       id, request->correlation_id, std::move(py_input_tensors),
-      requested_output_names, model_name, request->model_version);
+      requested_output_names, model_name, request->model_version,
+      request->sequence_start, request->sequence_end);
 }
 
 #ifdef TRITON_PB_STUB

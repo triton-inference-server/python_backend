@@ -38,19 +38,24 @@ class InferRequest {
   std::vector<std::string> requested_output_names_;
   std::string model_name_;
   int64_t model_version_;
+  bool sequence_start_;
+  bool sequence_end_;
 
  public:
   InferRequest(
       const std::string& request_id, uint64_t correlation_id,
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::vector<std::string>& requested_output_names,
-      const std::string& model_name, const int64_t model_version);
+      const std::string& model_name, const int64_t model_version,
+      bool sequence_start = false, bool sequence_end = false);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   uint64_t CorrelationId();
   const std::string& ModelName();
   int64_t ModelVersion();
+  bool SequenceStart();
+  bool SequenceEnd();
   const std::vector<std::string>& RequestedOutputNames();
 
   /// Save an Inference Request to shared memory.
