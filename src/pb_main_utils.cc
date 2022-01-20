@@ -206,17 +206,8 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
         irequest, infer_request->CorrelationId()));
 
-    uint32_t flags = 0;
-    if (infer_request->SequenceStart()) {
-      flags |= TRITONSERVER_REQUEST_FLAG_SEQUENCE_START;
-    }
-
-    if (infer_request->SequenceEnd()) {
-      flags |= TRITONSERVER_REQUEST_FLAG_SEQUENCE_END;
-    }
-
-    THROW_IF_TRITON_ERROR(
-        TRITONSERVER_InferenceRequestSetFlags(irequest, flags));
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
+        irequest, infer_request->Flags()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));
