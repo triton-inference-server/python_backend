@@ -587,7 +587,21 @@ class TritonPythonModel:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0)
+
+      # The `flags` argument can be used to indicate whether the request is starting
+      # or ending the sequence. An example indicating that the request is starting
+      # the sequence:
+      # inference_request = pb_utils.InferenceRequest(model_name='model_name',
+      #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+      #   inputs=[<list of pb_utils.Tensor objects>],
+      #   request_id="1", correlation_id=4, flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
+      #
+      # For indicating the ending of the sequence you can use the 
+      # `pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END` flag. If the request
+      # is both starting and ending a sequence at the same time, you can use the bitwise
+      # OR operator to enable both the flags. See the Sequence Batcher docs in 
+      # the server repository for more information about the sequence models.
 
       # Execute the inference_request and wait for the response
       inference_response = inference_request.exec()
