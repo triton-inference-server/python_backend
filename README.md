@@ -52,6 +52,7 @@ any C++ code.
   - [Error Handling](#error-handling)
   - [Managing Shared Memory](#managing-shared-memory)
 - [Business Logic Scripting](#business-logic-scripting)
+  - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Limitations](#limitations)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
@@ -587,7 +588,7 @@ class TritonPythonModel:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0)
 
       # Execute the inference_request and wait for the response
       inference_response = inference_request.exec()
@@ -659,6 +660,32 @@ class TritonPythonModel:
 
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
+
+## Using BLS with Stateful Models
+
+[Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#stateful-models)
+require setting additional flags in the inference request to indicate the
+start and of a sequence. The `flags` argument in the `pb_utils.InferenceRequest`
+object can be used to indicate whether the request is the first or last request
+in the sequence. An example indicating that the request is starting the
+sequence:
+
+```python
+inference_request = pb_utils.InferenceRequest(model_name='model_name',
+  requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+  inputs=[<list of pb_utils.Tensor objects>],
+  request_id="1", correlation_id=4, flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
+```
+
+For indicating the ending of the sequence you can use the 
+`pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END` flag. If the request is both
+starting and ending a sequence at the same time (i.e. the sequence has only a
+single request), you can use the bitwise OR operator to enable both of the
+flags:
+
+```
+flags = pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START | pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END
+```
 
 ## Limitations
 
