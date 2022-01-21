@@ -784,9 +784,13 @@ ModelInstanceState::ProcessRequests(
         responses, request_count,
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
 
+    uint32_t flags;
+    RESPOND_ALL_AND_RETURN_IF_ERROR(
+        responses, request_count, TRITONBACKEND_RequestFlags(request, &flags));
+
     InferRequest infer_request(
         id, correlation_id, pb_input_tensors, requested_output_names,
-        model_state->Name(), model_state->Version());
+        model_state->Name(), model_state->Version(), flags);
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         responses, request_count,
         infer_request.SaveToSharedMemory(shm_pool_, python_infer_request));

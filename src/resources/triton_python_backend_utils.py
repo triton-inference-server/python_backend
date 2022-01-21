@@ -273,3 +273,7 @@ def numpy_to_triton_type(data_type):
 
 def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
+
+
+TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
+TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2

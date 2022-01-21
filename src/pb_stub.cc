@@ -698,15 +698,18 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               const std::string&, uint64_t,
               const std::vector<std::shared_ptr<PbTensor>>&,
               const std::vector<std::string>&, const std::string&,
-              const int64_t>(),
+              const int64_t, const uint32_t>(),
           py::arg("request_id") = "", py::arg("correlation_id") = 0,
           py::arg("inputs"), py::arg("requested_output_names"),
-          py::arg("model_name"), py::arg("model_version") = -1)
+          py::arg("model_name"), py::arg("model_version") = -1,
+          py::arg("flags") = 0)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
+      .def("flags", &InferRequest::Flags)
+      .def("set_flags", &InferRequest::SetFlags)
       .def("exec", &InferRequest::Exec)
       .def(
           "async_exec",

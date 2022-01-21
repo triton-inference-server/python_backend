@@ -145,6 +145,7 @@ struct Request {
   uint32_t requested_output_count;
   off_t model_name;
   int64_t model_version;
+  uint32_t flags;
 };
 
 struct Response {

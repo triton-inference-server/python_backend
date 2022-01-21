@@ -203,6 +203,12 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
 
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
+        irequest, infer_request->CorrelationId()));
+
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
+        irequest, infer_request->Flags()));
+
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));
 
@@ -238,7 +244,6 @@ RequestExecutor::Infer(
       response = completed.get();
       *triton_response = response;
       delete_inference_request = false;
-
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
 
       uint32_t output_count;
