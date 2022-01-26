@@ -661,6 +661,9 @@ class TritonPythonModel:
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
+Note: Async BLS is not supported on Python 3.6 or lower due to the `async` keyword
+and `asyncio.run` being introduced in Python 3.7. 
+
 ## Using BLS with Stateful Models
 
 [Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#stateful-models)
