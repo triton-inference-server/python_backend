@@ -997,6 +997,8 @@ ModelInstanceState::ProcessRequests(
         cudaIpcMemHandle_t cuda_ipc_mem_handle;
         cudaError_t err = cudaIpcGetMemHandle(&cuda_ipc_mem_handle, buffer);
         output_tensor->SetCudaIpcMemHandle(&cuda_ipc_mem_handle);
+        output_tensor->SetMemoryType(actual_memory_type);
+        output_tensor->SetMemoryTypeId(actual_memory_type_id);
 
         if (err != cudaSuccess) {
           GUARDED_RESPOND_IF_ERROR(
