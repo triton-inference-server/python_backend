@@ -120,14 +120,15 @@ $ python3 python_backend/examples/add_sub/client.py
 * numpy
 * rapidjson-dev
 * libarchive-dev
+* zlib1g-dev
 
 ```
 pip3 install numpy
 ```
 
-On Ubuntu or Debian you can use the command below to install `rapidjson` and `libarchive`:
+On Ubuntu or Debian you can use the command below to install `rapidjson`, `libarchive`, and `zlib`:
 ```
-sudo apt-get install rapidjson-dev libarchive-dev
+sudo apt-get install rapidjson-dev libarchive-dev zlib1g-dev
 ```
 
 2. Build Python backend. Replace \<GIT\_BRANCH\_NAME\> with the GitHub branch
