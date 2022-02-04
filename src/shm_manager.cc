@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 
 #include "shm_manager.h"
 
+namespace triton { namespace backend { namespace python {
 
 SharedMemoryManager::SharedMemoryManager(
     const std::string& shm_region_name, size_t shm_size, bool create)
@@ -56,7 +57,7 @@ SharedMemoryManager::SharedMemoryManager(
     managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
         bi::create_only, shm_map_->get_address(), shm_size);
   } else {
-    off_t shm_size;
+    int64_t shm_size = 0;
     shm_obj_->get_size(shm_size);
     managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
         bi::open_only, shm_map_->get_address(), shm_size);
@@ -115,3 +116,5 @@ SharedMemoryManager::~SharedMemoryManager() noexcept(false)
     bi::shared_memory_object::remove(shm_region_name_.c_str());
   }
 }
+
+}}}  // namespace triton::backend::python

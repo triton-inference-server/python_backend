@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -32,33 +32,66 @@
 
 #pragma once
 
+namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
 
+template <typename T>
+struct AllocatedSharedMemory {
+  AllocatedSharedMemory() = default;
+  AllocatedSharedMemory(
+      std::unique_ptr<T, std::function<void(T*)>>& data,
+      bi::managed_external_buffer::handle_t handle)
+      : data_(std::move(data)), handle_(handle)
+  {
+  }
+
+  std::unique_ptr<T, std::function<void(T*)>> data_;
+  bi::managed_external_buffer::handle_t handle_;
+};
 
 class SharedMemoryManager {
  public:
   SharedMemoryManager(
       const std::string& shm_region_name, size_t shm_size, bool create);
 
-  template <typename T, typename U, typename... Args>
-  std::shared_ptr<U> Construct(Args&... args)
+  template <typename T>
+  AllocatedSharedMemory<T> Construct()
   {
-    T* obj_ptr;
+    T* obj;
     bi::managed_external_buffer::handle_t handle;
 
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
       GrowIfNeeded(sizeof(T));
-      obj_ptr = managed_buffer_->construct<T>(bi::anonymous_instance)();
+      obj = reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T)));
       handle = managed_buffer_->get_handle_from_address(
-          reinterpret_cast<void*>(obj_ptr));
+          reinterpret_cast<void*>(obj));
     }
 
-    return U::Create(obj_ptr, handle, args...);
+    return WrapObjectInUniquePtr(obj, handle);
   }
 
-  template <typename T, typename U, typename... Args>
-  std::shared_ptr<U> ConstructMany(size_t number, Args&... args)
+  template <typename T>
+  AllocatedSharedMemory<T> ConstructAligned()
+  {
+    T* obj;
+    bi::managed_external_buffer::handle_t handle;
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      GrowIfNeeded(sizeof(T));
+      const std::size_t alignment = 32;
+      obj = reinterpret_cast<T*>(
+          managed_buffer_->allocate_aligned(sizeof(T), alignment));
+      handle = managed_buffer_->get_handle_from_address(
+          reinterpret_cast<void*>(obj));
+    }
+
+    return WrapObjectInUniquePtr(obj, handle);
+  }
+
+  template <typename T>
+  AllocatedSharedMemory<T> ConstructMany(size_t number)
   {
     T* object;
     bi::managed_external_buffer::handle_t handle;
@@ -66,12 +99,13 @@ class SharedMemoryManager {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
       GrowIfNeeded(sizeof(T) * number);
 
-      object = managed_buffer_->construct<T>(bi::anonymous_instance)[number]();
+      object =
+          reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T) * number));
       handle = managed_buffer_->get_handle_from_address(
           reinterpret_cast<void*>(object));
     }
 
-    return U::Create(object, handle, number, args...);
+    return WrapObjectInUniquePtr(object, handle);
   }
 
   std::unique_ptr<bi::managed_external_buffer>& ManagedBuffer()
@@ -79,10 +113,8 @@ class SharedMemoryManager {
     return managed_buffer_;
   }
 
-  template <typename T, typename U, typename... Args>
-  std::shared_ptr<U> Load(
-      bi::managed_external_buffer::handle_t handle, Args&... args,
-      bool release = false)
+  template <typename T>
+  AllocatedSharedMemory<T> Load(bi::managed_external_buffer::handle_t handle)
   {
     T* object_ptr;
     {
@@ -91,20 +123,20 @@ class SharedMemoryManager {
       object_ptr = reinterpret_cast<T*>(
           managed_buffer_->get_address_from_handle(handle));
     }
-    return U::Load(object_ptr, handle, args...);
+
+    return WrapObjectInUniquePtr(object_ptr, handle);
   }
 
   size_t FreeMemory();
 
-  template <typename T>
-  void DestroyPtr(bi::managed_external_buffer::handle_t handle)
+  void Deallocate(bi::managed_external_buffer::handle_t handle)
   {
     bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
     GrowIfNeeded(0);
-    T* ptr =
-        reinterpret_cast<T*>(managed_buffer_->get_address_from_handle(handle));
-    managed_buffer_->destroy_ptr(ptr);
+    void* ptr = managed_buffer_->get_address_from_handle(handle);
+    managed_buffer_->deallocate(ptr);
   }
+
   ~SharedMemoryManager() noexcept(false);
 
  private:
@@ -119,61 +151,21 @@ class SharedMemoryManager {
   uint64_t* total_size_;
   bool create_;
   void GrowIfNeeded(size_t bytes);
+
+  template <typename T>
+  AllocatedSharedMemory<T> WrapObjectInUniquePtr(
+      T* object, const bi::managed_external_buffer::handle_t& handle)
+  {
+    // Custom deleter to deallocate the object when it goes out of scope.
+    std::function<void(T*)> deleter = [this, handle](T* memory) {
+      if (memory != nullptr) {
+        this->Deallocate(handle);
+      }
+    };
+
+    auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
+    return AllocatedSharedMemory<T>(data, handle);
+  }
 };
 
-// All the objects that want to be stored in shared memory must
-// extend this class.
-template <typename T>
-class ShmObject {
- public:
-  void Release() { released_ = true; }
-  ~ShmObject()
-  {
-    if (released_) {
-      shm_manager_->DestroyPtr<T>(handle_);
-    }
-  }
-
- protected:
-  bi::managed_external_buffer::handle_t handle_;
-  std::shared_ptr<SharedMemoryManager> shm_manager_;
-  T* data_;
-  bool released_;
-};
-
-template <typename T>
-class Array : ShmObject<T> {
-  T* data_;
-  std::size_t array_size_;
-  std::shared_ptr<SharedMemoryManager> shm_manager_;
-
- public:
-  static std::unique_ptr<Array<T>> Create(
-      T* ptr, bi::managed_external_buffer::handle_t handle, std::size_t size,
-      std::shared_ptr<SharedMemoryManager>& shm_manager)
-  {
-    auto array = std::make_unique<Array<T>>();
-    array->data_ = ptr;
-    array->array_size_ = size;
-    array->handle_ = handle;
-    array->shm_manager_ = shm_manager;
-
-    return array;
-  }
-
-  static std::unique_ptr<Array<T>> Load(
-      T* ptr, bi::managed_external_buffer::handle_t handle,
-      std::shared_ptr<SharedMemoryManager>& shm_manager, std::size_t size)
-  {
-    auto array = std::make_unique<Array<T>>();
-    array->data_ = ptr;
-    array->array_size_ = size;
-    array->handle_ = handle;
-    array->shm_manager_ = shm_manager;
-
-    return array;
-  }
-
-  const T& operator[](std::size_t idx) const { return data_[idx]; }
-  T& operator[](std::size_t idx) { return data_[idx]; }
-};
+}}}  // namespace triton::backend::python
