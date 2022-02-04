@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -634,10 +634,14 @@ PbTensor::LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool)
           "'.");
     }
     char* d_buffer;
+
+    // Sync the memory type id. Since it will be updated by the main process
+    // after providing the GPU buffers.
+    memory_type_id_ = raw_data_shm_->memory_type_id;
+
     cudaSetDevice(this->MemoryTypeId());
     shm_pool->MapOffset(
         (char**)&cuda_ipc_mem_handle_, raw_data_shm_->memory_ptr);
-
 
     // Lock the mutex when using cudaIpcOpenMemHandle. This code is only
     // required in the stub process. In the Triton process, we never use
@@ -727,6 +731,20 @@ PbTensor::SetDataPtr(void* ptr)
   memory_ptr_ = ptr;
 }
 
+void
+PbTensor::SetMemoryType(TRITONSERVER_MemoryType memory_type)
+{
+  memory_type_ = memory_type;
+  raw_data_shm_->memory_type = memory_type;
+}
+
+void
+PbTensor::SetMemoryTypeId(int64_t memory_type_id)
+{
+  memory_type_id_ = memory_type_id;
+  raw_data_shm_->memory_type_id = memory_type_id;
+}
+
 #ifdef TRITON_ENABLE_GPU
 #ifndef TRITON_PB_STUB
 void
@@ -746,6 +764,8 @@ PbTensor::SetBackendMemory(
   }
 
   memory_ptr_ = backend_memory->MemoryPtr();
+  SetMemoryType(backend_memory->MemoryType());
+  SetMemoryTypeId(backend_memory->MemoryTypeId());
   backend_memory_ = std::move(backend_memory);
   raw_data_shm_->offset = this->GetGPUPointerOffset();
   tensor_shm_->is_cuda_handle_set = true;
