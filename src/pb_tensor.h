@@ -244,6 +244,9 @@ class PbTensor {
   /// \return The location to the memory where the data is stored.
   void* GetDataPtr() const;
 
+  void SetMemoryType(TRITONSERVER_MemoryType memory_type);
+  void SetMemoryTypeId(int64_t memory_type_id);
+
   /// Set the underlying pointer to use. This must be only used when the tensor
   /// is being reused.
   void SetDataPtr(void* ptr);
