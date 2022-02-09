@@ -38,6 +38,40 @@
 namespace triton { namespace backend { namespace python {
 
 void
+CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
+{
+  const void* buff;
+  size_t size;
+#if ARCHIVE_VERSION_NUMBER >= 3000000
+  int64_t offset;
+#else
+  off_t offset;
+#endif
+
+  for (;;) {
+    int return_status;
+    return_status =
+        archive_read_data_block(input_archive, &buff, &size, &offset);
+    if (return_status == ARCHIVE_EOF)
+      break;
+    if (return_status != ARCHIVE_OK)
+      throw PythonBackendException(
+          "archive_read_data_block() failed with error code = " +
+          std::to_string(return_status));
+
+    return_status =
+        archive_write_data_block(output_archive, buff, size, offset);
+    if (return_status != ARCHIVE_OK) {
+      throw PythonBackendException(
+          "archive_write_data_block() failed with error code = " +
+          std::to_string(return_status) + ", error message is " +
+          archive_error_string(output_archive));
+    }
+  }
+}
+
+
+void
 ExtractTarFile(std::string& archive_path, std::string& dst_path)
 {
   char current_directory[PATH_MAX];

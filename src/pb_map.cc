@@ -32,7 +32,7 @@ namespace triton { namespace backend { namespace python {
 std::unique_ptr<PbMap>
 PbMap::Create(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    std::unordered_map<std::string, std::string> map)
+    std::unordered_map<std::string, std::string>& map)
 {
   std::vector<std::unique_ptr<PbString>> strings;
   AllocatedSharedMemory<DictShm> dict_shm = shm_pool->Construct<DictShm>();
@@ -40,6 +40,7 @@ PbMap::Create(
 
   AllocatedSharedMemory<PairShm> pair_shms =
       shm_pool->ConstructMany<PairShm>(map.size());
+  dict_shm.data_->values = pair_shms.handle_;
 
   size_t i = 0;
   for (auto& pair : map) {
@@ -54,16 +55,73 @@ PbMap::Create(
     i++;
   }
 
-  return std::unique_ptr<PbMap>(new PbMap(strings, dict_shm, pair_shms));
+  return std::unique_ptr<PbMap>(new PbMap(strings, dict_shm, pair_shms, map));
+}
+
+const std::unordered_map<std::string, std::string>&
+PbMap::UnorderedMap()
+{
+  return map_;
+}
+
+bi::managed_external_buffer::handle_t
+PbMap::ShmOffset()
+{
+  return dict_handle_;
+}
+
+std::unique_ptr<PbMap>
+PbMap::LoadFromSharedMemory(
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bi::managed_external_buffer::handle_t handle)
+{
+  AllocatedSharedMemory<DictShm> dict_shm = shm_pool->Load<DictShm>(handle);
+  AllocatedSharedMemory<PairShm> pair_shms =
+      shm_pool->Load<PairShm>(dict_shm.data_->values);
+
+  std::vector<std::unique_ptr<PbString>> pb_strings;
+  std::unordered_map<std::string, std::string> map;
+  for (size_t i = 0; i < dict_shm.data_->length; i++) {
+    std::unique_ptr<PbString> key = PbString::LoadFromSharedMemory(
+        shm_pool, (pair_shms.data_.get())[i].key);
+
+    std::unique_ptr<PbString> value = PbString::LoadFromSharedMemory(
+        shm_pool, (pair_shms.data_.get())[i].value);
+
+    map.insert({key->String(), value->String()});
+    pb_strings.emplace_back(std::move(key));
+    pb_strings.emplace_back(std::move(value));
+  }
+
+  return std::unique_ptr<PbMap>(
+      new PbMap(pb_strings, dict_shm, pair_shms, map));
+}
+
+void
+PbMap::Release()
+{
+  for (auto& string : strings_) {
+    string->Release();
+  }
+
+  if (dict_shm_.data_ != nullptr) {
+    dict_shm_.data_.release();
+  }
+
+  if (pair_shms_.data_ != nullptr) {
+    pair_shms_.data_.release();
+  }
 }
 
 PbMap::PbMap(
     std::vector<std::unique_ptr<PbString>>& strings,
     AllocatedSharedMemory<DictShm>& dict_shm,
-    AllocatedSharedMemory<PairShm>& pair_shms)
+    AllocatedSharedMemory<PairShm>& pair_shms,
+    std::unordered_map<std::string, std::string>& map)
     : strings_(std::move(strings)), dict_shm_(std::move(dict_shm)),
-      pair_shms_(std::move(pair_shms))
+      pair_shms_(std::move(pair_shms)), map_(std::move(map))
 {
+  dict_handle_ = dict_shm.handle_;
 }
 
 }}}  // namespace triton::backend::python

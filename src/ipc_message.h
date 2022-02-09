@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -71,7 +71,8 @@ class IPCMessage {
       const std::unique_ptr<SharedMemoryManager>& shm_pool,
       bool inline_response);
   static std::unique_ptr<IPCMessage> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool, off_t message_offset);
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t message_offset);
 
   PYTHONSTUB_CommandType& Command();
   bool& InlineResponse();
@@ -79,12 +80,10 @@ class IPCMessage {
   bi::interprocess_condition* ResponseCondition();
   bi::interprocess_mutex* ResponseMutex();
   bi::managed_external_buffer::handle_t& Args();
+  bi::managed_external_buffer::handle_t ShmOffset();
+  void Release();
 
-  bi::managed_external_buffer::handle_t ShmOffset()
-  {
-    return ipc_message_handle_;
-  }
-
+ private:
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm_;
   IPCMessageShm* ipc_message_shm_ptr_;
 

@@ -110,6 +110,12 @@ IPCMessage::ResponseOffset()
   return ipc_message_shm_ptr_->response_offset;
 }
 
+bi::managed_external_buffer::handle_t
+IPCMessage::ShmOffset()
+{
+  return ipc_message_handle_;
+}
+
 IPCMessage::IPCMessage(
     AllocatedSharedMemory<IPCMessageShm>& ipc_message_shm,
     AllocatedSharedMemory<bi::interprocess_mutex>& response_mutex_shm,
@@ -122,6 +128,22 @@ IPCMessage::IPCMessage(
   response_mutex_shm_ptr_ = response_mutex_shm_.data_.get();
   response_cond_shm_ptr_ = response_cond_shm_.data_.get();
   ipc_message_handle_ = ipc_message_shm_.handle_;
+}
+
+void
+IPCMessage::Release()
+{
+  if (ipc_message_shm_.data_ != nullptr) {
+    ipc_message_shm_.data_.release();
+  }
+
+  if (response_mutex_shm_.data_ != nullptr) {
+    response_mutex_shm_.data_.release();
+  }
+
+  if (response_cond_shm_.data_ != nullptr) {
+    response_cond_shm_.data_.release();
+  }
 }
 
 }}};  // namespace triton::backend::python

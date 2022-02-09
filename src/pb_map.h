@@ -46,19 +46,25 @@ class PbMap {
  public:
   static std::unique_ptr<PbMap> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      std::unordered_map<std::string, std::string> map);
+      std::unordered_map<std::string, std::string>& map);
   static std::unique_ptr<PbMap> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
-  std::unordered_map<std::string, std::string> UnorderedMap();
+  const std::unordered_map<std::string, std::string>& UnorderedMap();
+  bi::managed_external_buffer::handle_t ShmOffset();
+  void Release();
 
  private:
   PbMap(
       std::vector<std::unique_ptr<PbString>>& strings,
       AllocatedSharedMemory<DictShm>& dict_shm,
-      AllocatedSharedMemory<PairShm>& pair_shms);
+      AllocatedSharedMemory<PairShm>& pair_shms,
+      std::unordered_map<std::string, std::string>& map);
+
   std::vector<std::unique_ptr<PbString>> strings_;
   AllocatedSharedMemory<DictShm> dict_shm_;
   AllocatedSharedMemory<PairShm> pair_shms_;
+  bi::managed_external_buffer::handle_t dict_handle_;
+  std::unordered_map<std::string, std::string> map_;
 };
 }}}  // namespace triton::backend::python

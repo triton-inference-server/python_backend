@@ -627,7 +627,7 @@ PbTensor::SaveToSharedMemory(
 void
 PbTensor::LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool)
 {
-  if (!this->IsCPU()) {
+  if (!IsCPU()) {
     if (!tensor_shm_->is_cuda_handle_set) {
       throw PythonBackendException(
           std::string("Failed to get cudaIpcMemHandle for tensor '") + name_ +

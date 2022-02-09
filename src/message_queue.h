@@ -80,6 +80,12 @@ class MessageQueue {
   /// to be restarted so that the message queue is in a proper state.
   void ResetSemaphores();
 
+  /// Get the shared memory offset of MessageQueue
+  bi::managed_external_buffer::handle_t ShmOffset();
+
+  /// Release the ownership of this object in shared memory.
+  void Release();
+
  private:
   std::size_t& Size() { return mq_shm_ptr_->size; }
   const bi::interprocess_mutex& Mutex() { return mq_shm_ptr_->mutex; }
@@ -99,8 +105,6 @@ class MessageQueue {
   {
     return &(mq_shm_ptr_->sem_full);
   }
-
-  bi::managed_external_buffer::handle_t ShmOffset() { return mq_handle_; }
 
   AllocatedSharedMemory<MessageQueueShm> mq_shm_;
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_buffer_shm_;

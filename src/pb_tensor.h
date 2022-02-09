@@ -72,23 +72,15 @@ class PbTensor {
   PYTHONBACKEND_TensorType tensor_type_;
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
-  Tensor* tensor_shm_;
-  RawData* raw_data_shm_;
 
 #ifdef TRITON_ENABLE_GPU
-  bool is_cuda_handle_set_;
-  cudaIpcMemHandle_t* cuda_ipc_mem_handle_ = nullptr;
+
   std::shared_ptr<std::mutex> cuda_ipc_open_mutex_;
   std::shared_ptr<std::mutex> cuda_ipc_close_mutex_;
 #ifndef TRITON_PB_STUB
   std::unique_ptr<BackendMemory> backend_memory_;
 #endif  // TRITON_PB_STUB
 #endif  // TRITON_ENABLE_GPU
-  // bool is_reused_ = false;
-  uint64_t device_ptr_offset_ = 0;
-  bool destruct_cuda_ipc_mem_handle_ = false;
-  off_t raw_shm_offset_ = 0;
-  off_t shm_offset_ = 0;
 
  public:
 #ifdef TRITON_PB_STUB
