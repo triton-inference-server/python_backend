@@ -76,4 +76,16 @@ PbString::ShmOffset()
   return string_handle_;
 }
 
+void
+PbString::Release()
+{
+  if (string_container_shm_.data_ != nullptr) {
+    string_container_shm_.data_.release();
+  }
+
+  if (string_shm_.data_ != nullptr) {
+    string_shm_.data_.release();
+  }
+}
+
 }}}  // namespace triton::backend::python

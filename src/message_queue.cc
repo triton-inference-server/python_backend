@@ -207,4 +207,21 @@ MessageQueue::LoadFromSharedMemory(
   return std::unique_ptr<MessageQueue>(new MessageQueue(mq_shm, mq_shm_buffer));
 }
 
+bi::managed_external_buffer::handle_t
+MessageQueue::ShmOffset()
+{
+  return mq_handle_;
+}
+
+void
+MessageQueue::Release()
+{
+  if (mq_shm_.data_ != nullptr) {
+    mq_shm_.data_.release();
+  }
+
+  if (mq_buffer_shm_.data_ != nullptr) {
+    mq_buffer_shm_.data_.release();
+  }
+}
 }}}  // namespace triton::backend::python

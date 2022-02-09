@@ -47,6 +47,7 @@ class PbString {
   char* MutableString() { return string_shm_ptr_; }
   const char* String() { return string_shm_ptr_; }
   bi::managed_external_buffer::handle_t ShmOffset();
+  void Release();
 
  private:
   AllocatedSharedMemory<StringShm> string_container_shm_;
