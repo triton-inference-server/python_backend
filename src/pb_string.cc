@@ -65,9 +65,9 @@ PbString::PbString(
     : string_container_shm_(std::move(string_container_shm)),
       string_shm_(std::move(string_shm))
 {
-  string_shm_ptr_ = string_shm.data_.get();
-  string_container_shm_ptr_ = string_container_shm.data_.get();
-  string_handle_ = string_container_shm.handle_;
+  string_shm_ptr_ = string_shm_.data_.get();
+  string_container_shm_ptr_ = string_container_shm_.data_.get();
+  string_handle_ = string_container_shm_.handle_;
 }
 
 bi::managed_external_buffer::handle_t

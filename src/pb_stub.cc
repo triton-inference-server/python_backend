@@ -222,7 +222,7 @@ Stub::PopMessage()
 {
   bool success = false;
   std::unique_ptr<IPCMessage> ipc_message;
-  off_t message;
+  bi::managed_external_buffer::handle_t message;
   while (!success) {
     message = stub_message_queue_->Pop(1000, success);
   }
@@ -246,13 +246,18 @@ Stub::RunCommand()
           IPCMessage::Create(shm_pool_, false /* inline_response */);
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
 
+      // Release the ownership of this message. The parent process is the owner
+      // of this message.
+      initialize_response_msg->Release();
+
       AllocatedSharedMemory<InitializeResponseShm> initialize_response =
           shm_pool_->Construct<InitializeResponseShm>();
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
+      initialize_response_msg->Args() = initialize_response.handle_;
 
       try {
-        Initialize(initialize_response_msg->Args());
+        Initialize(ipc_message->Args());
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -273,14 +278,17 @@ Stub::RunCommand()
             error_string_shm = PbString::Create(shm_pool_, error_string));
         if (error_string_shm != nullptr) {
           initialize_response.data_->response_is_error_set = true;
+          error_string_shm->Release();
           initialize_response.data_->response_error =
               error_string_shm->ShmOffset();
         }
 
+        initialize_response.data_.release();
         SendIPCMessage(initialize_response_msg);
         return true;  // Terminate the stub process.
       }
 
+      initialize_response.data_.release();
       SendIPCMessage(initialize_response_msg);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {

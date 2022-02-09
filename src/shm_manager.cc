@@ -87,7 +87,8 @@ SharedMemoryManager::GrowIfNeeded(size_t byte_size)
 
   size_t free_memory = managed_buffer_->get_free_memory();
 
-  // Multiply the requested bytes by 1.1
+  // [FIXME] Temporary workaround to make sure that enough storage has been
+  // allocated to hold both the data and the allocation meta data
   size_t requested_bytes = byte_size * 1.1;
   if (requested_bytes > free_memory) {
     int64_t new_size = *total_size_ + (requested_bytes - free_memory);

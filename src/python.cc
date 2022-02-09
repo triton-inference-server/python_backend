@@ -474,6 +474,7 @@ TRITONSERVER_Error*
 ModelInstanceState::StartStubProcess()
 {
   new (&(ipc_control_->stub_health_mutex)) bi::interprocess_mutex;
+  health_mutex_ = &(ipc_control_->stub_health_mutex);
   stub_message_queue_->ResetSemaphores();
   parent_message_queue_->ResetSemaphores();
 
@@ -632,9 +633,10 @@ ModelInstanceState::StartStubProcess()
               .c_str());
     }
 
-    auto initialize_response = (shm_pool_->Load<InitializeResponseShm>(
-                                    initialize_response_message->Args()))
-                                   .data_;
+    auto initialize_response =
+        std::move((shm_pool_->Load<InitializeResponseShm>(
+                      initialize_response_message->Args())))
+            .data_;
 
     if (initialize_response->response_has_error) {
       if (initialize_response->response_is_error_set) {
@@ -782,6 +784,7 @@ ModelInstanceState::~ModelInstanceState()
           IPCMessage::Create(shm_pool_, false /* inline_response */);
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
+      ipc_message->Release();
       stub_message_queue_->Push(ipc_message->ShmOffset());
       parent_message_queue_->Pop();
 
@@ -798,6 +801,12 @@ ModelInstanceState::~ModelInstanceState()
     }
     waitpid(stub_pid_, &status, 0);
   }
+
+  // First destroy the IPCControl. This makes sure that IPCControl is destroyed
+  // before the shared memory manager goes out of scope.
+  ipc_control_.reset();
+  stub_message_queue_.reset();
+  parent_message_queue_.reset();
 }
 
 TRITONSERVER_Error*
