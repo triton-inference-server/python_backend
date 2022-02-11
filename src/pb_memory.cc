@@ -120,6 +120,13 @@ PbMemory::PbMemory(
 {
 }
 
+void
+PbMemory::Release()
+{
+  memory_shm_.data_.release();
+  memory_data_shm_.data_.release();
+}
+
 void*
 PbMemory::GetGPUStartAddress()
 {
@@ -149,6 +156,30 @@ PbMemory::GetGPUPointerOffset()
         "Calling GetGPUPointerOffset function on CPU tensor.");
   }
   return offset;
+}
+
+TRITONSERVER_MemoryType
+PbMemory::MemoryType() const
+{
+  return memory_shm_ptr_->memory_type;
+}
+
+int64_t
+PbMemory::MemoryTypeId() const
+{
+  return memory_shm_ptr_->memory_type_id;
+}
+
+uint64_t
+PbMemory::ByteSize() const
+{
+  return memory_shm_ptr_->byte_size;
+}
+
+char*
+PbMemory::DataPtr() const
+{
+  return data_ptr_;
 }
 
 }}}  // namespace triton::backend::python

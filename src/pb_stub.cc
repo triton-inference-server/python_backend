@@ -40,11 +40,9 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
-#include "message_queue.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
-#include "pb_utils.h"
 #include "shm_manager.h"
 
 #ifdef TRITON_ENABLE_GPU

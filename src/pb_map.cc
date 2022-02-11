@@ -25,7 +25,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "pb_map.h"
-#include "pb_string.h"
 
 namespace triton { namespace backend { namespace python {
 

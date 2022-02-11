@@ -41,6 +41,8 @@ namespace py = pybind11;
 #endif
 
 #include <string>
+#include "pb_memory.h"
+#include "pb_string.h"
 #include "pb_utils.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_memory.h"
@@ -48,40 +50,30 @@ namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
-typedef enum PYTHONBACKEND_tensortype_enum {
-  PYTHONBACKEND_RAW,
-  PYTHONBACKEND_NUMPY,
-  PYTHONBACKEND_DLPACK
-} PYTHONBACKEND_TensorType;
+//
+// Represents a Tensor object in shared memory.
+//
+struct TensorShm {
+  // Offset for the pointer data in shared memory.
+  bi::managed_external_buffer::handle_t memory;
 
-// PbTensor class is the representation of Triton tensors
-// inside Python backend.
+  // Offset for name field.
+  bi::managed_external_buffer::handle_t name;
+
+  TRITONSERVER_DataType dtype;
+
+  // Shared memory offset for the dimensions.
+  bi::managed_external_buffer::handle_t dims;
+  size_t dims_count;
+};
+
+// PbTensor class is the representation of Triton tensors inside Python backend.
+// Once the `SaveToSharedMemory` function is called, class attributes and the
+// actual data that is stored in shared memory can become out of sync. Because
+// of this reason most of the class attributes cannot be changed after a Tensor
+// is created. The only exceptions are `SetName`, `SetMemoryType`, and
+// `SetMemoryTypeId`.
 class PbTensor {
- private:
-  std::string name_;
-#ifdef TRITON_PB_STUB
-  py::array numpy_array_;
-  // Storing the serialized version of the numpy array
-  py::array numpy_array_serialized_;
-#endif
-  TRITONSERVER_DataType dtype_;
-  void* memory_ptr_;
-  int64_t memory_type_id_;
-  std::vector<int64_t> dims_;
-  TRITONSERVER_MemoryType memory_type_;
-  PYTHONBACKEND_TensorType tensor_type_;
-  uint64_t byte_size_;
-  DLManagedTensor* dl_managed_tensor_;
-
-#ifdef TRITON_ENABLE_GPU
-
-  std::shared_ptr<std::mutex> cuda_ipc_open_mutex_;
-  std::shared_ptr<std::mutex> cuda_ipc_close_mutex_;
-#ifndef TRITON_PB_STUB
-  std::unique_ptr<BackendMemory> backend_memory_;
-#endif  // TRITON_PB_STUB
-#endif  // TRITON_ENABLE_GPU
-
  public:
 #ifdef TRITON_PB_STUB
   /// Create a PbTensor using a numpy array
@@ -108,18 +100,30 @@ class PbTensor {
   /// \param memory_type The memory type of the tensor
   /// \param memory_type_id The memory type_id of the tensor
   /// \param memory_ptr Pointer to the location of the data. Data must be
-  /// contiguous and in C order.
+  /// contiguous and in C-order.
   /// \param byte_size Total number of bytes that the tensor uses.
-  /// \param shm_offset The shared memory offset of the device pointer.
+  /// \param shm_offset The shared memory offset of pointer if it is stored in
+  /// shared memory.
   PbTensor(
       const std::string& name, const std::vector<int64_t>& dims,
       TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
       int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
-      DLManagedTensor* dl_managed_tensor = nullptr, off_t shm_offset = 0);
+      DLManagedTensor* dl_managed_tensor = nullptr,
+      bi::managed_external_buffer::handle_t shm_offset = 0);
+
+  /// This constructor is used when
+  /// loading the tensor from shared memory.
+  /// \param tensor_shm The name of the tensor
+  /// \param dims_shm Tensor dimensions
+  /// \param pb_string Triton dtype
+  PbTensor(
+      AllocatedSharedMemory<TensorShm>& tensor_shm,
+      AllocatedSharedMemory<int64_t>& dims_shm,
+      std::unique_ptr<PbString>& name_shm,
+      std::unique_ptr<PbMemory>& pb_memory);
 
   // Copying tensor objects is not allowed.
-  PbTensor(const PbTensor& other) = delete;
-  PbTensor& operator=(const PbTensor& other) = delete;
+  DISALLOW_COPY_AND_ASSIGN(PbTensor);
 
 #ifdef TRITON_PB_STUB
   /// Construct a Python backend tensor using a DLPack
@@ -143,40 +147,16 @@ class PbTensor {
   /// Get the name of the tensor
   /// \return name of the tensor.
   const std::string& Name() const;
+
+  /// Set the name of the tensor
+  /// \param name Name of the tensor.
+  void SetName(const std::string& name);
+
+  bi::managed_external_buffer::handle_t ShmOffset();
+
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t tensor_offset,
-      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
-      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
-#ifdef TRITON_ENABLE_GPU
-
-  /// Get the GPU start address.
-  /// \return The start address of a device pointer.
-  /// \throws PythonBackendException if the tensor is stored in CPU.
-  void* GetGPUStartAddress();
-
-  /// Get the cuda IPC handle corresponding to this tensor.
-  /// \return The cudaIpcMemHandle
-  const cudaIpcMemHandle_t* CudaIpcMemHandle();
-
-  /// Set cuda IPC open mutex. This mutex will be used for cudaIpcOpenMemHandle
-  /// and cudaIpcCloseMemHandle calls.
-  void SetCudaIpcMutexes(
-      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
-      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
-
-  /// Set the cuda IPC handle corresponding to this tensor.
-  /// \param cuda_ipc_mem_handle CUDA ipc mem handle.
-  void SetCudaIpcMemHandle(cudaIpcMemHandle_t* cuda_ipc_mem_handle)
-  {
-    tensor_shm_->is_cuda_handle_set = true;
-    *cuda_ipc_mem_handle_ = *cuda_ipc_mem_handle;
-  }
-
-  /// Get the GPU pointer offset.
-  /// \return The offset of a device pointer.
-  /// \throws PythonBackendException if the tensor is stored in CPU.
-  uint64_t GetGPUPointerOffset();
-#endif  // TRITON_ENABLE_GPU
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t tensor_offset);
 
 #ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.
@@ -185,36 +165,16 @@ class PbTensor {
   const py::array& AsNumpy() const;
 #endif
 
-#ifndef TRITON_PB_STUB
-  /// Set the backend memory object that holds the data for GPU tensors.
-  /// \param backend_memory Backend memory.
-  void SetBackendMemory(
-      std::unique_ptr<BackendMemory> backend_memory,
-      std::unique_ptr<SharedMemory>& shm_pool);
-#endif
-
   /// Save tensor inside shared memory.
-  void SaveToSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, Tensor* tensor_shm,
-      bool copy_cpu, bool copy_gpu);
+  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
 
   /// Get the triton dtype
   /// \return Triton dtype
-  int TritonDtype() const;
+  TRITONSERVER_DataType TritonDtype() const;
 
   /// This function will be automatically called by the stub when the tensor is
   /// no longer required.
   void DeleteDLPack();
-
-  /// Shared memory offset of the raw pointer.
-  off_t RawShmOffset();
-
-  /// Shared memory offset of the tensor.
-  off_t ShmOffset() { return shm_offset_; }
-
-  /// Get the type of the tensor
-  /// \return Type of the tensor.
-  PYTHONBACKEND_TensorType TensorType() const;
 
   /// Tells whether the Tensor is stored in CPU or not.
   /// \return A boolean value indicating whether the tensor is stored in CPU
@@ -228,37 +188,48 @@ class PbTensor {
   /// \return the memory type of the tensor.
   TRITONSERVER_MemoryType MemoryType() const;
 
+  /// Get a mutable reference to the MemoryType.
+  /// \return the pointer to the memory type of the tensor.
+  TRITONSERVER_MemoryType* MutableMemoryType();
+
+  /// Get the triton memory type of the Tensor.
+  /// \return the memory type of the tensor.
+  int64_t MemoryTypeId() const;
+
   /// Get the dimensions of the tensor
   /// \return A vector containing the tensor dimensions.
   const std::vector<int64_t>& Dims() const;
-
-  /// Get the data pointer.
-  /// \return The location to the memory where the data is stored.
-  void* GetDataPtr() const;
-
-  void SetMemoryType(TRITONSERVER_MemoryType memory_type);
-  void SetMemoryTypeId(int64_t memory_type_id);
-
-  /// Set the underlying pointer to use. This must be only used when the tensor
-  /// is being reused.
-  void SetDataPtr(void* ptr);
-
-  /// After the GPU tensor buffer is provided, copy the data to the output
-  /// buffers.
-  void LoadGPUData(std::unique_ptr<SharedMemory>& shm_pool);
-  void CopyToCPU(std::unique_ptr<SharedMemory>& shm_pool);
-
-  Tensor* SharedMemoryObject() { return tensor_shm_; }
-  RawData* RawDataShm() { return raw_data_shm_; }
-
-
-  /// Get the memory type id.
-  /// \return The memory type id of the tensor.
-  int64_t MemoryTypeId() const;
 
   PbTensor();
 
   /// Destructor
   ~PbTensor() noexcept(false);
+
+ private:
+  std::string name_;
+#ifdef TRITON_PB_STUB
+  py::array numpy_array_;
+  // Storing the serialized version of the numpy array
+  py::array numpy_array_serialized_;
+#endif
+  TRITONSERVER_DataType dtype_;
+  void* memory_ptr_;
+  int64_t memory_type_id_;
+  std::vector<int64_t> dims_;
+  TRITONSERVER_MemoryType memory_type_;
+  uint64_t byte_size_;
+  DLManagedTensor* dl_managed_tensor_;
+
+  bi::managed_external_buffer::handle_t shm_offset_;
+
+  AllocatedSharedMemory<TensorShm> tensor_shm_;
+  TensorShm* tensor_shm_ptr_;
+
+  AllocatedSharedMemory<int64_t> dims_shm_;
+  int64_t* dims_shm_ptr_;
+
+  std::unique_ptr<PbString> name_shm_;
+  // The pointer is null when the object is not stored in shared memory.
+  std::unique_ptr<PbMemory> pb_memory_;
 };
 }}}  // namespace triton::backend::python

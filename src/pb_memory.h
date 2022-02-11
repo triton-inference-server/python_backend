@@ -70,6 +70,22 @@ class PbMemory {
   bi::managed_external_buffer::handle_t ShmOffset();
   void Release();
 
+  /// Get the total byte size of the tensor.
+  uint64_t ByteSize() const;
+
+  /// Get the triton memory type.
+  /// \return the memory type of the tensor.
+  TRITONSERVER_MemoryType MemoryType() const;
+
+  /// Get the pointer.
+  /// \return The location to the memory where the data is stored.
+  char* DataPtr() const;
+
+  /// Get the memory type id.
+  /// \return The memory type id of the tensor.
+  int64_t MemoryTypeId() const;
+
+
  private:
   AllocatedSharedMemory<MemoryShm> memory_shm_;
   MemoryShm* memory_shm_ptr_;

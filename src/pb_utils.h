@@ -121,22 +121,6 @@ struct IPCControlShm {
   bi::managed_external_buffer::handle_t parent_message_queue;
 };
 
-
-//
-// Represents a Tensor object that will be passed to Python code.
-//
-struct Tensor {
-  // Offset for raw data field.
-  off_t raw_data;
-  // Offset for name field.
-  off_t name;
-  TRITONSERVER_DataType dtype;
-  // Shared memory offset for the dimensions.
-  off_t dims;
-  size_t dims_count;
-  bool is_cuda_handle_set;
-};
-
 struct ResponseShm {
   // Offset for Tensor output.
   off_t outputs;

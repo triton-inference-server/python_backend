@@ -44,7 +44,6 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include "shm_manager.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
