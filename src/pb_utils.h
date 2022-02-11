@@ -76,6 +76,15 @@ namespace bi = boost::interprocess;
     }                                                                     \
   } while (false)
 
+#define THROW_IF_CUDA_ERROR(X)                          \
+  do {                                                  \
+    cudaError_t cuda_err__ = (X);                       \
+    if (cuda_err__ != cudaSuccess) {                    \
+      throw PythonBackendException(                     \
+          std::string(cudaGetErrorString(cuda_err__))); \
+    }                                                   \
+  } while (false)
+
 #define THROW_IF_ERROR(MSG, X)           \
   do {                                   \
     int return__ = (X);                  \
@@ -83,6 +92,13 @@ namespace bi = boost::interprocess;
       throw PythonBackendException(MSG); \
     }                                    \
   } while (false)
+
+
+#define DISALLOW_COPY(TypeName) TypeName(const TypeName&) = delete;
+#define DISALLOW_ASSIGN(TypeName) void operator=(const TypeName&) = delete;
+#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
+  DISALLOW_COPY(TypeName)                  \
+  DISALLOW_ASSIGN(TypeName)
 
 struct InitializeResponseShm {
   // Indicates whether the response has an error or not.
@@ -105,16 +121,6 @@ struct IPCControlShm {
   bi::managed_external_buffer::handle_t parent_message_queue;
 };
 
-//
-// Represents a memory object in shared memory.
-//
-struct MemoryShm {
-  bi::managed_external_buffer::handle_t memory_ptr;
-  uint64_t offset;
-  TRITONSERVER_MemoryType memory_type;
-  int64_t memory_type_id;
-  uint64_t byte_size;
-};
 
 //
 // Represents a Tensor object that will be passed to Python code.
