@@ -53,8 +53,8 @@ PbMemory::Create(
     memory_data_shm = shm_pool->ConstructMany<char>(byte_size);
     if (data != nullptr) {
       std::copy(data, data + byte_size, memory_data_shm.data_.get());
-      data = memory_data_shm.data_.get();
     }
+    data = memory_data_shm.data_.get();
   }
 
   memory_shm.data_->byte_size = byte_size;
@@ -66,8 +66,10 @@ PbMemory::Create(
       memory_shm, memory_data_shm, data, false /* opened_cuda_ipc_handle */));
 
 #ifdef TRITON_ENABLE_GPU
-  pb_memory->memory_shm_.data_->gpu_pointer_offset =
-      pb_memory->GetGPUPointerOffset();
+  if (memory_type == TRITONSERVER_MEMORY_GPU) {
+    pb_memory->memory_shm_.data_->gpu_pointer_offset =
+        pb_memory->GetGPUPointerOffset();
+  }
 #endif
 
   return pb_memory;

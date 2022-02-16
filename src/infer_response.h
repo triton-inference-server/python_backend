@@ -54,6 +54,7 @@ class InferResponse {
       bi::managed_external_buffer::handle_t response_offset);
   bool HasError();
   std::shared_ptr<PbError>& Error();
+  bi::managed_external_buffer::handle_t ShmOffset();
 
   // Disallow copying the inference response object.
   DISALLOW_COPY_AND_ASSIGN(InferResponse);

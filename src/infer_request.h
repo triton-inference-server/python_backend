@@ -66,6 +66,7 @@ class InferRequest {
   uint32_t Flags();
   void SetFlags(uint32_t flags);
   const std::vector<std::string>& RequestedOutputNames();
+  void Release();
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.

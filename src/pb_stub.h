@@ -34,6 +34,7 @@
 #include <memory>
 #include <mutex>
 #include "infer_request.h"
+#include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
 #include "pb_utils.h"
@@ -83,6 +84,12 @@ class Stub {
   /// Finalize and terminate the stub process
   void Finalize();
 
+  /// Execute a batch of requests.
+  void Execute(
+      AllocatedSharedMemory<RequestBatch>& request_batch,
+      AllocatedSharedMemory<ResponseBatch>& response_batch);
+
+  void ProcessResponse(InferResponse* response);
   ~Stub();
 
  private:

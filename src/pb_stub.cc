@@ -291,6 +291,48 @@ Stub::RunCommand()
       SendIPCMessage(initialize_response_msg);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
+      bool has_exception = false;
+      std::string error_string;
+
+      std::unique_ptr<IPCMessage> execute_response =
+          IPCMessage::Create(shm_pool_, false /* Inline response */);
+      execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+
+      AllocatedSharedMemory<RequestBatch> request_batch =
+          shm_pool_->Load<RequestBatch>(ipc_message->Args());
+      AllocatedSharedMemory<ResponseBatch> response_batch =
+          shm_pool_->Construct<ResponseBatch>();
+      execute_response->Args() = response_batch.handle_;
+
+      response_batch.data_->has_error = false;
+      response_batch.data_->is_error_set = false;
+      try {
+        Execute(request_batch, response_batch);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        has_exception = true;
+        error_string = pb_exception.what();
+      }
+      catch (const py::error_already_set& error) {
+        has_exception = true;
+        error_string = error.what();
+      }
+
+      if (has_exception) {
+        std::string err_message =
+            std::string(
+                "Failed to process the request(s) for model '" +
+                model_instance_name_ + "', message: ") +
+            error_string;
+        LOG_INFO << err_message.c_str();
+        response_batch.data_->has_error = true;
+        std::unique_ptr<PbString> error_string_shm =
+            PbString::Create(shm_pool_, error_string);
+
+        response_batch.data_->is_error_set = true;
+        response_batch.data_->error = error_string_shm->ShmOffset();
+      }
+      SendIPCMessage(execute_response);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
@@ -371,6 +413,114 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_offset)
   }
 
   initialized_ = true;
+}
+
+void
+Stub::ProcessResponse(InferResponse* response)
+{
+  std::vector<std::shared_ptr<PbTensor>>& output_tensors =
+      response->OutputTensors();
+  for (auto& output_tensor : output_tensors) {
+    if (!output_tensor->IsCPU()) {
+      // #ifdef TRITON_ENABLE_GPU
+      //       AddToTensorsToRemove(output_tensor);
+      // #else
+      //       throw PythonBackendException("GPU tensors is not supported.");
+      // #endif
+    }
+  }
+  response->SaveToSharedMemory(shm_pool_);
+}
+
+void
+Stub::Execute(
+    AllocatedSharedMemory<RequestBatch>& request_batch,
+    AllocatedSharedMemory<ResponseBatch>& response_batch)
+{
+  uint32_t batch_size = request_batch.data_->batch_size;
+
+  if (batch_size == 0) {
+    return;
+  }
+
+  py::list py_request_list;
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+      request_shm_offset =
+          shm_pool_->Load<bi::managed_external_buffer::handle_t>(
+              request_batch.data_->requests);
+
+  for (size_t i = 0; i < batch_size; i++) {
+    // [FIXME] Some custom handling might be required for GPU tensors
+    py_request_list.append(InferRequest::LoadFromSharedMemory(
+        shm_pool_, (request_shm_offset.data_.get())[i]));
+  }
+
+  if (!py::hasattr(model_instance_, "execute")) {
+    std::string message =
+        "Python model " + model_path_ + " does not implement `execute` method.";
+    throw PythonBackendException(message);
+  }
+
+  py::object request_list = py_request_list;
+  py::module asyncio = py::module::import("asyncio");
+
+  // Execute Response
+  py::object execute_return = model_instance_.attr("execute")(request_list);
+  py::object responses_obj;
+  bool is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+
+  if (is_coroutine) {
+    responses_obj = asyncio.attr("run")(execute_return);
+  } else {
+    responses_obj = execute_return;
+  }
+
+  // Check the return type of execute function.
+  if (!py::isinstance<py::list>(responses_obj)) {
+    std::string str = py::str(execute_return.get_type());
+    throw PythonBackendException(
+        std::string("Expected a list in the execute return, found type '") +
+        str + "'.");
+  }
+
+  py::list responses = responses_obj;
+  size_t response_size = py::len(responses);
+
+  // If the number of request objects do not match the number of resposne
+  // objects throw an error.
+  if (response_size != batch_size) {
+    std::string err =
+        "Number of InferenceResponse objects do not match the number of "
+        "InferenceRequest objects. InferenceRequest(s) size is:" +
+        std::to_string(batch_size) +
+        ", and InferenceResponse(s) size is:" + std::to_string(response_size) +
+        "\n";
+    throw PythonBackendException(err);
+  }
+
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+      responses_shm_offset =
+          shm_pool_->ConstructMany<bi::managed_external_buffer::handle_t>(
+              response_size);
+  response_batch.data_->responses = responses_shm_offset.handle_;
+  response_batch.data_->batch_size = response_size;
+
+  size_t i = 0;
+  for (auto& response : responses) {
+    // Check the return type of execute function.
+    if (!py::isinstance<InferResponse>(response)) {
+      std::string str = py::str(response.get_type());
+      throw PythonBackendException(
+          std::string("Expected an 'InferenceResponse' object in the execute "
+                      "function return list, found type '") +
+          str + "'.");
+    }
+
+    InferResponse* infer_response = response.cast<InferResponse*>();
+    ProcessResponse(infer_response);
+    (responses_shm_offset.data_.get()[i]) = infer_response->ShmOffset();
+    i += 1;
+  }
 }
 
 void

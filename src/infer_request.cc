@@ -95,6 +95,20 @@ InferRequest::SetFlags(uint32_t flags)
 }
 
 void
+InferRequest::Release()
+{
+  infer_request_shm_.data_.release();
+  request_id_shm_->Release();
+  for (auto& requested_output_shm : requested_output_names_shm_) {
+    requested_output_shm->Release();
+  }
+
+  model_name_shm_->Release();
+  output_names_handle_shm_.data_.release();
+  input_tensors_handle_.data_.release();
+}
+
+void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<InferRequestShm> infer_request_shm =
@@ -116,8 +130,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm.data_->requested_output_names = output_names_handle.handle_;
 
   size_t i = 0;
-  std::vector<std::unique_ptr<PbString>> requested_output_names_shm(
-      RequestedOutputNames().size());
+  std::vector<std::unique_ptr<PbString>> requested_output_names_shm;
   for (auto& requested_output_name : requested_output_names_) {
     std::unique_ptr<PbString> requested_output_name_shm =
         PbString::Create(shm_pool, requested_output_name);
@@ -157,6 +170,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   requested_output_names_shm_ = std::move(requested_output_names_shm);
   input_tensors_handle_ = std::move(input_tensors_handle);
   input_tensors_handle_ptr_ = input_tensors_handle.data_.get();
+  model_name_shm_ = std::move(model_name_shm);
 }
 
 std::unique_ptr<InferRequest>

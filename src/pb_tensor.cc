@@ -406,6 +406,7 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   pb_memory_ = PbMemory::Create(
       shm_pool, memory_type_, memory_type_id_, byte_size_,
       reinterpret_cast<char*>(memory_ptr_));
+  memory_ptr_ = pb_memory_->DataPtr();
 }
 
 std::shared_ptr<PbTensor>
@@ -429,6 +430,12 @@ TRITONSERVER_DataType
 PbTensor::TritonDtype() const
 {
   return dtype_;
+}
+
+void*
+PbTensor::DataPtr()
+{
+  return memory_ptr_;
 }
 
 bi::managed_external_buffer::handle_t

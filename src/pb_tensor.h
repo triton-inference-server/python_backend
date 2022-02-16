@@ -172,6 +172,10 @@ class PbTensor {
   /// \return Triton dtype
   TRITONSERVER_DataType TritonDtype() const;
 
+  /// Get the data ptr
+  /// \return Get the raw pointer.
+  void* DataPtr();
+
   /// This function will be automatically called by the stub when the tensor is
   /// no longer required.
   void DeleteDLPack();

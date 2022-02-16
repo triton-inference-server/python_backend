@@ -86,6 +86,12 @@ InferResponse::SaveToSharedMemory(
   }
 }
 
+bi::managed_external_buffer::handle_t
+InferResponse::ShmOffset()
+{
+  return shm_offset_;
+}
+
 std::unique_ptr<InferResponse>
 InferResponse::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
