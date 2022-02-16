@@ -27,7 +27,10 @@
 #include <sys/wait.h>
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/managed_external_buffer.hpp>
+#include <iostream>
 #include <memory>
+#include <type_traits>
+#include <typeinfo>
 #include <vector>
 
 #pragma once

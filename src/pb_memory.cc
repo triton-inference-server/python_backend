@@ -120,6 +120,15 @@ PbMemory::PbMemory(
       memory_data_shm_(std::move(memory_data_shm)), data_ptr_(data),
       opened_cuda_ipc_handle_(opened_cuda_ipc_handle)
 {
+  memory_shm_ptr_ = memory_shm_.data_.get();
+  memory_data_shm_ptr_ = memory_data_shm_.data_.get();
+  memory_shm_handle_ = memory_shm_.handle_;
+}
+
+bi::managed_external_buffer::handle_t
+PbMemory::ShmOffset()
+{
+  return memory_shm_handle_;
 }
 
 void

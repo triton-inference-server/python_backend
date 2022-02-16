@@ -40,20 +40,26 @@ PbError::ShmOffset()
 }
 
 void
+PbError::Release()
+{
+  message_shm_->Release();
+}
+
+void
 PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   message_shm_ = PbString::Create(shm_pool, message_);
   shm_handle_ = message_shm_->ShmOffset();
 }
 
-std::unique_ptr<PbError>
+std::shared_ptr<PbError>
 PbError::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t shm_offset)
 {
   std::unique_ptr<PbString> message_shm =
       PbString::LoadFromSharedMemory(shm_pool, shm_offset);
-  return std::unique_ptr<PbError>(new PbError(message_shm));
+  return std::shared_ptr<PbError>(new PbError(message_shm));
 }
 
 PbError::PbError(std::unique_ptr<PbString>& message_shm)

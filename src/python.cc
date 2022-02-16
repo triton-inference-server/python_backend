@@ -832,7 +832,7 @@ ModelInstanceState::GetInputTensor(
 #endif  // TRITON_ENABLE_GPU
 
   if (cpu_only_tensors || src_memory_type != TRITONSERVER_MEMORY_GPU) {
-    input_tensor = std::make_unique<PbTensor>(
+    input_tensor = std::make_shared<PbTensor>(
         std::string(input_name),
         std::vector<int64_t>(input_shape, input_shape + input_dims_count),
         input_dtype, TRITONSERVER_MEMORY_CPU /* memory_type */,
@@ -853,7 +853,7 @@ ModelInstanceState::GetInputTensor(
         input_name, nullptr, 0, alloc_perference,
         reinterpret_cast<const char**>(&buffer), &input_byte_size,
         &src_memory_type, &src_memory_type_id));
-    input_tensor = std::make_unique<PbTensor>(
+    input_tensor = std::make_shared<PbTensor>(
         std::string(input_name),
         std::vector<int64_t>(input_shape, input_shape + input_dims_count),
         input_dtype, src_memory_type, src_memory_type_id,
@@ -1046,6 +1046,7 @@ ModelInstanceState::ProcessRequests(
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         responses, request_count, infer_request->SaveToSharedMemory(shm_pool_));
+    (requests_shm.data_.get())[r] = infer_request->ShmOffset();
     pb_inference_requests.emplace_back(std::move(infer_request));
   }
 

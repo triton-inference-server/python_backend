@@ -67,6 +67,7 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::vector<std::string>& RequestedOutputNames();
   void Release();
+  bi::managed_external_buffer::handle_t ShmOffset();
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.
@@ -115,5 +116,6 @@ class InferRequest {
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
       input_tensors_handle_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
+  bi::managed_external_buffer::handle_t shm_offset_;
 };
 }}};  // namespace triton::backend::python

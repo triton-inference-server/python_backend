@@ -60,6 +60,7 @@ InferResponse::SaveToSharedMemory(
   response_shm_ = shm_pool->Construct<ResponseShm>();
   response_shm_.data_->has_error = false;
   response_shm_.data_->is_error_set = false;
+  shm_offset_ = response_shm_.handle_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
@@ -84,6 +85,21 @@ InferResponse::SaveToSharedMemory(
       j++;
     }
   }
+}
+
+void
+InferResponse::Release()
+{
+  response_shm_.data_.release();
+  if (error_ != nullptr) {
+    error_->Release();
+  }
+
+  for (auto& output_tensor : output_tensors_) {
+    output_tensor->Release();
+  }
+
+  tensor_offset_shm_.data_.release();
 }
 
 bi::managed_external_buffer::handle_t
@@ -138,6 +154,7 @@ InferResponse::InferResponse(
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
   tensor_offset_shm_ = std::move(tensor_offset_shm);
+  shm_offset_ = response_shm_.handle_;
 }
 
 std::shared_ptr<PbError>&

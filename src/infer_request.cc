@@ -94,6 +94,12 @@ InferRequest::SetFlags(uint32_t flags)
   flags_ = flags;
 }
 
+bi::managed_external_buffer::handle_t
+InferRequest::ShmOffset()
+{
+  return shm_offset_;
+}
+
 void
 InferRequest::Release()
 {
@@ -101,6 +107,10 @@ InferRequest::Release()
   request_id_shm_->Release();
   for (auto& requested_output_shm : requested_output_names_shm_) {
     requested_output_shm->Release();
+  }
+
+  for (auto& input : inputs_) {
+    input->Release();
   }
 
   model_name_shm_->Release();
@@ -156,7 +166,6 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm.data_->inputs = input_tensors_handle.handle_;
   i = 0;
   for (auto& input : Inputs()) {
-    input->SaveToSharedMemory(shm_pool);
     (input_tensors_handle.data_.get())[i] = input->ShmOffset();
     i++;
   }
@@ -171,6 +180,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   input_tensors_handle_ = std::move(input_tensors_handle);
   input_tensors_handle_ptr_ = input_tensors_handle.data_.get();
   model_name_shm_ = std::move(model_name_shm);
+  shm_offset_ = infer_request_shm_.handle_;
 }
 
 std::unique_ptr<InferRequest>
@@ -201,6 +211,7 @@ InferRequest::LoadFromSharedMemory(
        ++output_idx) {
     std::unique_ptr<PbString> pb_string = PbString::LoadFromSharedMemory(
         shm_pool, (output_names_handle.data_.get())[output_idx]);
+
     requested_output_names_shm.emplace_back(std::move(pb_string));
   }
 
@@ -248,7 +259,7 @@ InferRequest::InferRequest(
   for (size_t output_idx = 0;
        output_idx < infer_request_shm_ptr_->requested_output_count;
        ++output_idx) {
-    auto& pb_string = requested_output_names_shm[output_idx];
+    auto& pb_string = requested_output_names_shm_[output_idx];
     requested_output_names.emplace_back(pb_string->String());
   }
 

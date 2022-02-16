@@ -384,17 +384,13 @@ PbTensor::AsNumpy() const
 void
 PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  AllocatedSharedMemory<TensorShm> tensor_shm =
-      shm_pool->Construct<TensorShm>();
-  tensor_shm_ = std::move(tensor_shm);
+  tensor_shm_ = shm_pool->Construct<TensorShm>();
   tensor_shm_ptr_ = tensor_shm_.data_.get();
   tensor_shm_ptr_->dtype = dtype_;
   tensor_shm_ptr_->dims_count = dims_.size();
-  shm_offset_ = tensor_shm.handle_;
+  shm_offset_ = tensor_shm_.handle_;
 
-  AllocatedSharedMemory<int64_t> dims_shm =
-      shm_pool->ConstructMany<int64_t>(dims_.size());
-  dims_shm_ = std::move(dims_shm);
+  dims_shm_ = shm_pool->ConstructMany<int64_t>(dims_.size());
   dims_shm_ptr_ = dims_shm_.data_.get();
 
   // Write the dimensions data to shared memory.
@@ -403,9 +399,13 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   }
 
   name_shm_ = PbString::Create(shm_pool, name_);
+  tensor_shm_ptr_->name = name_shm_->ShmOffset();
   pb_memory_ = PbMemory::Create(
       shm_pool, memory_type_, memory_type_id_, byte_size_,
       reinterpret_cast<char*>(memory_ptr_));
+
+  tensor_shm_ptr_->memory = pb_memory_->ShmOffset();
+  tensor_shm_ptr_->dims = dims_shm_.handle_;
   memory_ptr_ = pb_memory_->DataPtr();
 }
 
@@ -442,6 +442,15 @@ bi::managed_external_buffer::handle_t
 PbTensor::ShmOffset()
 {
   return shm_offset_;
+}
+
+void
+PbTensor::Release()
+{
+  tensor_shm_.data_.release();
+  dims_shm_.data_.release();
+  name_shm_->Release();
+  pb_memory_->Release();
 }
 
 PbTensor::PbTensor(

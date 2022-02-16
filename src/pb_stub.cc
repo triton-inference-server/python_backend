@@ -332,6 +332,9 @@ Stub::RunCommand()
         response_batch.data_->is_error_set = true;
         response_batch.data_->error = error_string_shm->ShmOffset();
       }
+
+      response_batch.data_.release();
+
       SendIPCMessage(execute_response);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
@@ -385,6 +388,14 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_offset)
   py::setattr(
       python_backend_utils, "TritonModelException",
       c_python_backend_utils.attr("TritonModelException"));
+  py::setattr(
+      python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
+  py::setattr(
+      python_backend_utils, "InferenceRequest",
+      c_python_backend_utils.attr("InferenceRequest"));
+  py::setattr(
+      python_backend_utils, "InferenceResponse",
+      c_python_backend_utils.attr("InferenceResponse"));
 
   py::object TritonPythonModel =
       py::module_::import(
@@ -451,8 +462,10 @@ Stub::Execute(
 
   for (size_t i = 0; i < batch_size; i++) {
     // [FIXME] Some custom handling might be required for GPU tensors
-    py_request_list.append(InferRequest::LoadFromSharedMemory(
-        shm_pool_, (request_shm_offset.data_.get())[i]));
+    std::unique_ptr<InferRequest> infer_request =
+        InferRequest::LoadFromSharedMemory(
+            shm_pool_, (request_shm_offset.data_.get())[i]);
+    py_request_list.append(std::move(infer_request));
   }
 
   if (!py::hasattr(model_instance_, "execute")) {
@@ -497,6 +510,16 @@ Stub::Execute(
         "\n";
     throw PythonBackendException(err);
   }
+  for (auto& response : responses) {
+    // Check the return type of execute function.
+    if (!py::isinstance<InferResponse>(response)) {
+      std::string str = py::str(response.get_type());
+      throw PythonBackendException(
+          std::string("Expected an 'InferenceResponse' object in the execute "
+                      "function return list, found type '") +
+          str + "'.");
+    }
+  }
 
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
       responses_shm_offset =
@@ -507,20 +530,13 @@ Stub::Execute(
 
   size_t i = 0;
   for (auto& response : responses) {
-    // Check the return type of execute function.
-    if (!py::isinstance<InferResponse>(response)) {
-      std::string str = py::str(response.get_type());
-      throw PythonBackendException(
-          std::string("Expected an 'InferenceResponse' object in the execute "
-                      "function return list, found type '") +
-          str + "'.");
-    }
-
     InferResponse* infer_response = response.cast<InferResponse*>();
     ProcessResponse(infer_response);
-    (responses_shm_offset.data_.get()[i]) = infer_response->ShmOffset();
+    (responses_shm_offset.data_.get())[i] = infer_response->ShmOffset();
     i += 1;
+    infer_response->Release();
   }
+  responses_shm_offset.data_.release();
 }
 
 void
@@ -548,6 +564,7 @@ void
 Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
+  ipc_message->Release();
   while (!success) {
     parent_message_queue_->Push(ipc_message->ShmOffset(), 1000, success);
   }
@@ -577,11 +594,11 @@ Stub::GetOrCreateInstance()
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
-  py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
+  py::class_<PbError, std::unique_ptr<PbError>>(module, "TritonError")
       .def(py::init<std::string>())
       .def("message", &PbError::Message);
 
-  py::class_<InferRequest, std::shared_ptr<InferRequest>>(
+  py::class_<InferRequest, std::unique_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
           py::init<

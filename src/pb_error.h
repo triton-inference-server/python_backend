@@ -37,15 +37,16 @@ class PbError {
   const std::string& Message();
   void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
   bi::managed_external_buffer::handle_t ShmOffset();
-  static std::unique_ptr<PbError> LoadFromSharedMemory(
+  static std::shared_ptr<PbError> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
+  void Release();
   DISALLOW_COPY_AND_ASSIGN(PbError);
 
  private:
   PbError(std::unique_ptr<PbString>& pb_error);
   std::string message_;
-  std::unique_ptr<PbString> message_shm_;
+  std::shared_ptr<PbString> message_shm_;
   bi::managed_external_buffer::handle_t shm_handle_;
 };
 }}};  // namespace triton::backend::python
