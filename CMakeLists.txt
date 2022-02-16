@@ -131,8 +131,14 @@ set(
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
+  src/pb_string.cc
+  src/pb_string.h
+  src/pb_map.cc
+  src/pb_map.h
   src/pb_error.cc
   src/pb_error.h
+  src/pb_memory.cc
+  src/pb_memory.h
   src/pb_tensor.cc
   src/pb_tensor.h
   src/pb_utils.cc
@@ -148,8 +154,6 @@ set(
   src/pb_env.h
   src/pb_metric_reporter.cc
   src/pb_metric_reporter.h
-  src/request_executor.cc
-  src/request_executor.h
 )
 
 list(APPEND
@@ -164,10 +168,10 @@ add_library(
 
 set(
   PYTHNON_BACKEND_STUB_SRCS
-  src/pb_stub_utils.cc
   src/pb_stub_utils.h
-  src/pb_stub.cc
+  src/pb_stub_utils.cc
   src/pb_stub.h
+  src/pb_stub.cc
 )
 
 list(APPEND

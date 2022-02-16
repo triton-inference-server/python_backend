@@ -70,7 +70,7 @@ struct TensorShm {
 // PbTensor class is the representation of Triton tensors inside Python backend.
 // Once the `SaveToSharedMemory` function is called, class attributes and the
 // actual data that is stored in shared memory can become out of sync. Because
-// of this reason most of the class attributes cannot be changed after a Tensor
+// of this most of the class attributes cannot be changed after a Tensor
 // is created. The only exceptions are `SetName`, `SetMemoryType`, and
 // `SetMemoryTypeId`.
 class PbTensor {
@@ -229,6 +229,7 @@ class PbTensor {
   int64_t* dims_shm_ptr_;
 
   std::unique_ptr<PbString> name_shm_;
+
   // The pointer is null when the object is not stored in shared memory.
   std::unique_ptr<PbMemory> pb_memory_;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,13 +27,25 @@
 #pragma once
 
 #include <string>
+#include "pb_string.h"
+#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 class PbError {
-  std::string message_;
-
  public:
   PbError(const std::string& message) : message_(message) {}
   const std::string& Message();
+  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  bi::managed_external_buffer::handle_t ShmOffset();
+  static std::unique_ptr<PbError> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t handle);
+  DISALLOW_COPY_AND_ASSIGN(PbError);
+
+ private:
+  PbError(std::unique_ptr<PbString>& pb_error);
+  std::string message_;
+  std::unique_ptr<PbString> message_shm_;
+  bi::managed_external_buffer::handle_t shm_handle_;
 };
 }}};  // namespace triton::backend::python

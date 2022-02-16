@@ -33,6 +33,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include "infer_request.h"
 #include "ipc_message.h"
 #include "message_queue.h"
 #include "pb_utils.h"

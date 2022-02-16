@@ -121,16 +121,6 @@ struct IPCControlShm {
   bi::managed_external_buffer::handle_t parent_message_queue;
 };
 
-struct ResponseShm {
-  // Offset for Tensor output.
-  off_t outputs;
-  uint32_t outputs_size;
-  off_t error;
-  bool has_error;
-  // Indicates whether this error has a message or not.
-  bool is_error_set;
-};
-
 struct ResponseBatch {
   // Offset for response object.
   off_t responses;

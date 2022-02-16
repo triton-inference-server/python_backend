@@ -78,6 +78,9 @@ class InferRequest {
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t request_offset);
 
+  /// Disallow copying the inference request object.
+  DISALLOW_COPY_AND_ASSIGN(InferRequest);
+
  private:
   InferRequest(
       AllocatedSharedMemory<InferRequestShm>& infer_request_shm,

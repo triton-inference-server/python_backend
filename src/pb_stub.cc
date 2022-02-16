@@ -40,6 +40,7 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
@@ -429,6 +430,51 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
       .def(py::init<std::string>())
       .def("message", &PbError::Message);
+
+  py::class_<InferRequest, std::shared_ptr<InferRequest>>(
+      module, "InferenceRequest")
+      .def(
+          py::init<
+              const std::string&, uint64_t,
+              const std::vector<std::shared_ptr<PbTensor>>&,
+              const std::vector<std::string>&, const std::string&,
+              const int64_t, const uint32_t>(),
+          py::arg("request_id") = "", py::arg("correlation_id") = 0,
+          py::arg("inputs"), py::arg("requested_output_names"),
+          py::arg("model_name"), py::arg("model_version") = -1,
+          py::arg("flags") = 0)
+      .def(
+          "inputs", &InferRequest::Inputs,
+          py::return_value_policy::reference_internal)
+      .def("request_id", &InferRequest::RequestId)
+      .def("correlation_id", &InferRequest::CorrelationId)
+      .def("flags", &InferRequest::Flags)
+      .def("set_flags", &InferRequest::SetFlags)
+      .def(
+          "requested_output_names", &InferRequest::RequestedOutputNames,
+          py::return_value_policy::reference_internal);
+
+  py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
+      .def(py::init(&PbTensor::FromNumpy))
+      .def("name", &PbTensor::Name)
+      .def("as_numpy", &PbTensor::AsNumpy)
+      .def("triton_dtype", &PbTensor::TritonDtype)
+      .def("to_dlpack", &PbTensor::ToDLPack)
+      .def("is_cpu", &PbTensor::IsCPU)
+      .def("from_dlpack", &PbTensor::FromDLPack);
+
+  py::class_<InferResponse>(module, "InferenceResponse")
+      .def(
+          py::init<
+              const std::vector<std::shared_ptr<PbTensor>>&,
+              std::shared_ptr<PbError>>(),
+          py::arg("output_tensors"), py::arg("error") = nullptr)
+      .def(
+          "output_tensors", &InferResponse::OutputTensors,
+          py::return_value_policy::reference)
+      .def("has_error", &InferResponse::HasError)
+      .def("error", &InferResponse::Error);
+
 
   py::register_exception<PythonBackendException>(
       module, "TritonModelException");
