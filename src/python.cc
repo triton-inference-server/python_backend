@@ -1063,6 +1063,11 @@ ModelInstanceState::ProcessRequests(
   SendMessageAndReceiveResponse(
       ipc_message->ShmOffset(), response_message, restart, responses, requests,
       request_count);
+
+  defer _(nullptr, std::bind([this, &restart] {
+            if (!restart)
+              stub_message_queue_->Push(1000);
+          }));
   if (restart) {
     return;
   }
@@ -1071,8 +1076,6 @@ ModelInstanceState::ProcessRequests(
       responses, request_count,
       ipc_message =
           IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
-
-  defer _(nullptr, std::bind([this] { stub_message_queue_->Push(1000); }));
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);

@@ -105,8 +105,9 @@ PbMemory::LoadFromSharedMemory(
          memory_shm.data_->gpu_pointer_offset);
     opened_cuda_ipc_handle = true;
 #endif
+  } else {
+    data_ptr = memory_data_shm.data_.get();
   }
-
   return std::unique_ptr<PbMemory>(new PbMemory(
       memory_shm, memory_data_shm, data_ptr,
       opened_cuda_ipc_handle /* opened_cuda_ipc_handle */));

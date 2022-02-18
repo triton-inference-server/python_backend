@@ -54,8 +54,7 @@ struct AllocatedSharedMemory {
 };
 
 struct AllocatedShmOwnership {
-  bool stub_owns_;
-  bool parent_owns_;
+  uint32_t ref_count_;
   bi::managed_external_buffer::handle_t handle_;
 };
 
@@ -86,13 +85,7 @@ class SharedMemoryManager {
       shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
           managed_buffer_->allocate(sizeof(AllocatedShmOwnership)));
 
-      if (create_) {
-        shm_ownership_data->parent_owns_ = true;
-        shm_ownership_data->stub_owns_ = false;
-      } else {
-        shm_ownership_data->stub_owns_ = true;
-        shm_ownership_data->parent_owns_ = false;
-      }
+      shm_ownership_data->ref_count_ = 1;
 
       bi::managed_external_buffer::handle_t handle_obj =
           managed_buffer_->get_handle_from_address(
@@ -125,11 +118,7 @@ class SharedMemoryManager {
           reinterpret_cast<T*>(managed_buffer_->get_address_from_handle(
               shm_ownership_data->handle_));
 
-      if (create_) {
-        shm_ownership_data->parent_owns_ = true;
-      } else {
-        shm_ownership_data->stub_owns_ = true;
-      }
+      shm_ownership_data->ref_count_ += 1;
     }
 
     return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle);
@@ -166,51 +155,25 @@ class SharedMemoryManager {
       T* object, AllocatedShmOwnership* shm_ownership_data,
       const bi::managed_external_buffer::handle_t& handle)
   {
-    if (create_) {
-      // Custom deleter to deallocate the object when it goes out of scope.
-      std::function<void(T*)> deleter = [this, handle,
-                                         shm_ownership_data](T* memory) {
-        bool destroy = false;
-        {
-          bi::scoped_lock<bi::interprocess_mutex> gaurd{*(this->shm_mutex_)};
-          shm_ownership_data->parent_owns_ = false;
-          if (!shm_ownership_data->stub_owns_ &&
-              !shm_ownership_data->parent_owns_) {
-            destroy = true;
-          }
+    // Custom deleter to deallocate the object when it goes out of scope.
+    std::function<void(T*)> deleter = [this, handle,
+                                       shm_ownership_data](T* memory) {
+      bool destroy = false;
+      {
+        bi::scoped_lock<bi::interprocess_mutex> gaurd{*(this->shm_mutex_)};
+        shm_ownership_data->ref_count_ -= 1;
+        if (shm_ownership_data->ref_count_ == 0) {
+          destroy = true;
         }
-        if (destroy) {
-          this->Deallocate(shm_ownership_data->handle_);
-          this->Deallocate(handle);
-        }
-      };
+      }
+      if (destroy) {
+        this->Deallocate(shm_ownership_data->handle_);
+        this->Deallocate(handle);
+      }
+    };
 
-      auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
-      return AllocatedSharedMemory<T>(data, handle);
-    } else {
-      // Custom deleter to deallocate the object when it goes out of scope.
-      std::function<void(T*)> deleter = [this, handle,
-                                         shm_ownership_data](T* memory) {
-        bool destroy = false;
-        {
-          bi::scoped_lock<bi::interprocess_mutex> gaurd{*(this->shm_mutex_)};
-          shm_ownership_data->stub_owns_ = false;
-          if (!shm_ownership_data->stub_owns_ &&
-              !shm_ownership_data->parent_owns_) {
-            destroy = true;
-          }
-        }
-
-        if (destroy) {
-          this->Deallocate(shm_ownership_data->handle_);
-          this->Deallocate(handle);
-        }
-      };
-
-      auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
-      return AllocatedSharedMemory<T>(data, handle);
-    }
+    auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
+    return AllocatedSharedMemory<T>(data, handle);
   }
 };
-
 }}}  // namespace triton::backend::python

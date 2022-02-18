@@ -44,7 +44,8 @@ MessageQueue::Create(
       shm_pool->Construct<bi::managed_external_buffer::handle_t>(
           message_queue_size);
   mq_shm.data_->buffer = mq_buffer_shm.handle_;
-  mq_shm.data_->index = 0;
+  mq_shm.data_->head = 0;
+  mq_shm.data_->tail = 0;
 
   new (&(mq_shm.data_->mutex)) bi::interprocess_mutex{};
   new (&(mq_shm.data_->sem_empty))
@@ -96,8 +97,8 @@ MessageQueue::Push(
     }
     success = true;
 
-    Buffer()[Index()] = message;
-    Index()++;
+    Buffer()[Head()] = message;
+    Head() = (Head() + 1) % Size();
   }
   SemFullMutable()->post();
 }
@@ -116,8 +117,8 @@ MessageQueue::Push(bi::managed_external_buffer::handle_t message)
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
-    Buffer()[Index()] = message;
-    Index()++;
+    Buffer()[Head()] = message;
+    Head() = (Head() + 1) % Size();
   }
   SemFullMutable()->post();
 }
@@ -125,7 +126,7 @@ MessageQueue::Push(bi::managed_external_buffer::handle_t message)
 bi::managed_external_buffer::handle_t
 MessageQueue::Pop()
 {
-  off_t message;
+  bi::managed_external_buffer::handle_t message;
 
   while (true) {
     try {
@@ -138,8 +139,9 @@ MessageQueue::Pop()
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
-    message = Buffer()[Index() - 1];
-    Index()--;
+
+    message = Buffer()[Tail()];
+    Tail() = (Tail() + 1) % Size();
   }
   SemEmptyMutable()->post();
 
@@ -149,7 +151,7 @@ MessageQueue::Pop()
 bi::managed_external_buffer::handle_t
 MessageQueue::Pop(int const& duration, bool& success)
 {
-  off_t message = 0;
+  bi::managed_external_buffer::handle_t message = 0;
   boost::system_time timeout =
       boost::get_system_time() + boost::posix_time::milliseconds(duration);
 
@@ -177,8 +179,8 @@ MessageQueue::Pop(int const& duration, bool& success)
     }
     success = true;
 
-    message = Buffer()[Index() - 1];
-    Index()--;
+    message = Buffer()[Tail()];
+    Tail() = (Tail() + 1) % Size();
   }
   SemEmptyMutable()->post();
 

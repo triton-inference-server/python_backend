@@ -45,7 +45,8 @@ struct MessageQueueShm {
   std::size_t size;
   bi::managed_external_buffer::handle_t buffer;
   bi::interprocess_mutex mutex;
-  int index;
+  int head;
+  int tail;
   bi::interprocess_semaphore sem_empty{0};
   bi::interprocess_semaphore sem_full{0};
 };
@@ -90,7 +91,8 @@ class MessageQueue {
   std::size_t& Size() { return mq_shm_ptr_->size; }
   const bi::interprocess_mutex& Mutex() { return mq_shm_ptr_->mutex; }
   bi::interprocess_mutex* MutexMutable() { return &(mq_shm_ptr_->mutex); }
-  int& Index() { return mq_shm_ptr_->index; }
+  int& Head() { return mq_shm_ptr_->head; }
+  int& Tail() { return mq_shm_ptr_->tail; }
   bi::managed_external_buffer::handle_t* Buffer() { return mq_buffer_shm_ptr_; }
   const bi::interprocess_semaphore& SemEmpty()
   {
