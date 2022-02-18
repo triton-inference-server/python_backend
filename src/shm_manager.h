@@ -26,6 +26,7 @@
 
 #include <sys/wait.h>
 #include <boost/interprocess/allocators/allocator.hpp>
+#include <boost/interprocess/detail/atomic.hpp>
 #include <boost/interprocess/managed_external_buffer.hpp>
 #include <iostream>
 #include <memory>
@@ -52,63 +53,56 @@ struct AllocatedSharedMemory {
   bi::managed_external_buffer::handle_t handle_;
 };
 
+struct AllocatedShmOwnership {
+  bool stub_owns_;
+  bool parent_owns_;
+  bi::managed_external_buffer::handle_t handle_;
+};
+
 class SharedMemoryManager {
  public:
   SharedMemoryManager(
       const std::string& shm_region_name, size_t shm_size, bool create);
 
   template <typename T>
-  AllocatedSharedMemory<T> Construct()
+  AllocatedSharedMemory<T> Construct(uint32_t count = 1, bool aligned = false)
   {
     T* obj;
+    AllocatedShmOwnership* shm_ownership_data;
     bi::managed_external_buffer::handle_t handle;
 
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-      GrowIfNeeded(sizeof(T));
-      obj = reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T)));
+      GrowIfNeeded(sizeof(AllocatedShmOwnership));
+      GrowIfNeeded(sizeof(T) * count);
+      if (!aligned) {
+        obj =
+            reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T) * count));
+      } else {
+        const std::size_t alignment = 32;
+        obj = reinterpret_cast<T*>(
+            managed_buffer_->allocate_aligned(sizeof(T) * count, alignment));
+      }
+      shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
+          managed_buffer_->allocate(sizeof(AllocatedShmOwnership)));
+
+      if (create_) {
+        shm_ownership_data->parent_owns_ = true;
+        shm_ownership_data->stub_owns_ = false;
+      } else {
+        shm_ownership_data->stub_owns_ = true;
+        shm_ownership_data->parent_owns_ = false;
+      }
+
+      bi::managed_external_buffer::handle_t handle_obj =
+          managed_buffer_->get_handle_from_address(
+              reinterpret_cast<void*>(obj));
       handle = managed_buffer_->get_handle_from_address(
-          reinterpret_cast<void*>(obj));
+          reinterpret_cast<void*>(shm_ownership_data));
+      shm_ownership_data->handle_ = handle_obj;
     }
 
-    return WrapObjectInUniquePtr(obj, handle);
-  }
-
-  template <typename T>
-  AllocatedSharedMemory<T> ConstructAligned()
-  {
-    T* obj;
-    bi::managed_external_buffer::handle_t handle;
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-      GrowIfNeeded(sizeof(T));
-      const std::size_t alignment = 32;
-      obj = reinterpret_cast<T*>(
-          managed_buffer_->allocate_aligned(sizeof(T), alignment));
-      handle = managed_buffer_->get_handle_from_address(
-          reinterpret_cast<void*>(obj));
-    }
-
-    return WrapObjectInUniquePtr(obj, handle);
-  }
-
-  template <typename T>
-  AllocatedSharedMemory<T> ConstructMany(size_t number)
-  {
-    T* object;
-    bi::managed_external_buffer::handle_t handle;
-    {
-      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-      GrowIfNeeded(sizeof(T) * number);
-
-      object =
-          reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T) * number));
-      handle = managed_buffer_->get_handle_from_address(
-          reinterpret_cast<void*>(object));
-    }
-
-    return WrapObjectInUniquePtr(object, handle);
+    return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
   }
 
   std::unique_ptr<bi::managed_external_buffer>& ManagedBuffer()
@@ -120,14 +114,25 @@ class SharedMemoryManager {
   AllocatedSharedMemory<T> Load(bi::managed_external_buffer::handle_t handle)
   {
     T* object_ptr;
+    AllocatedShmOwnership* shm_ownership_data;
+
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
       GrowIfNeeded(0);
-      object_ptr = reinterpret_cast<T*>(
+      shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
           managed_buffer_->get_address_from_handle(handle));
+      object_ptr =
+          reinterpret_cast<T*>(managed_buffer_->get_address_from_handle(
+              shm_ownership_data->handle_));
+
+      if (create_) {
+        shm_ownership_data->parent_owns_ = true;
+      } else {
+        shm_ownership_data->stub_owns_ = true;
+      }
     }
 
-    return WrapObjectInUniquePtr(object_ptr, handle);
+    return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle);
   }
 
   size_t FreeMemory();
@@ -150,6 +155,7 @@ class SharedMemoryManager {
   std::vector<std::shared_ptr<bi::mapped_region>> old_shm_maps_;
   uint64_t current_capacity_;
   bi::interprocess_mutex* shm_mutex_;
+
   size_t shm_growth_bytes_;
   uint64_t* total_size_;
   bool create_;
@@ -157,17 +163,53 @@ class SharedMemoryManager {
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
-      T* object, const bi::managed_external_buffer::handle_t& handle)
+      T* object, AllocatedShmOwnership* shm_ownership_data,
+      const bi::managed_external_buffer::handle_t& handle)
   {
-    // Custom deleter to deallocate the object when it goes out of scope.
-    std::function<void(T*)> deleter = [this, handle](T* memory) {
-      if (memory != nullptr) {
-        this->Deallocate(handle);
-      }
-    };
+    if (create_) {
+      // Custom deleter to deallocate the object when it goes out of scope.
+      std::function<void(T*)> deleter = [this, handle,
+                                         shm_ownership_data](T* memory) {
+        bool destroy = false;
+        {
+          bi::scoped_lock<bi::interprocess_mutex> gaurd{*(this->shm_mutex_)};
+          shm_ownership_data->parent_owns_ = false;
+          if (!shm_ownership_data->stub_owns_ &&
+              !shm_ownership_data->parent_owns_) {
+            destroy = true;
+          }
+        }
+        if (destroy) {
+          this->Deallocate(shm_ownership_data->handle_);
+          this->Deallocate(handle);
+        }
+      };
 
-    auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
-    return AllocatedSharedMemory<T>(data, handle);
+      auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
+      return AllocatedSharedMemory<T>(data, handle);
+    } else {
+      // Custom deleter to deallocate the object when it goes out of scope.
+      std::function<void(T*)> deleter = [this, handle,
+                                         shm_ownership_data](T* memory) {
+        bool destroy = false;
+        {
+          bi::scoped_lock<bi::interprocess_mutex> gaurd{*(this->shm_mutex_)};
+          shm_ownership_data->stub_owns_ = false;
+          if (!shm_ownership_data->stub_owns_ &&
+              !shm_ownership_data->parent_owns_) {
+            destroy = true;
+          }
+        }
+
+        if (destroy) {
+          this->Deallocate(shm_ownership_data->handle_);
+          this->Deallocate(handle);
+        }
+      };
+
+      auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
+      return AllocatedSharedMemory<T>(data, handle);
+    }
   }
 };
 

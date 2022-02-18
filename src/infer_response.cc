@@ -73,7 +73,7 @@ InferResponse::SaveToSharedMemory(
     response_shm_.data_->outputs_size = 0;
   } else {
     tensor_offset_shm_ =
-        shm_pool->ConstructMany<bi::managed_external_buffer::handle_t>(
+        shm_pool->Construct<bi::managed_external_buffer::handle_t>(
             output_tensor_length);
     response_shm_.data_->outputs = tensor_offset_shm_.handle_;
     response_shm_.data_->outputs_size = output_tensor_length;
@@ -128,7 +128,8 @@ InferResponse::LoadFromSharedMemory(
         PbError::LoadFromSharedMemory(shm_pool, response_shm.data_->error);
   } else if (
       response_shm.data_->has_error && !response_shm.data_->is_error_set) {
-    pb_error = std::make_shared<PbError>("");
+    pb_error =
+        std::make_shared<PbError>("Failed to retrieve the response error.");
   } else {
     tensor_offset_shm = shm_pool->Load<bi::managed_external_buffer::handle_t>(
         response_shm.data_->outputs);

@@ -37,7 +37,7 @@ PbString::Create(
   string_container_shm.data_->length = string.size();
 
   AllocatedSharedMemory<char> string_shm =
-      shm_pool->ConstructMany<char>(string.size());
+      shm_pool->Construct<char>(string.size());
   std::memcpy(string_shm.data_.get(), string.data(), string.size());
   string_container_shm.data_->data = string_shm.handle_;
 

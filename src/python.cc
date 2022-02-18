@@ -191,6 +191,7 @@
 namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
+using defer = std::shared_ptr<void>;
 
 struct BackendState {
   std::string python_lib;
@@ -600,6 +601,7 @@ ModelInstanceState::StartStubProcess()
     }
 
   } else {
+    defer _(nullptr, std::bind([this] { stub_message_queue_->Push(1000); }));
     stub_pid_ = pid;
     triton::common::TritonJson::WriteBuffer buffer;
     Model()->ModelConfig().Write(&buffer);
@@ -621,14 +623,8 @@ ModelInstanceState::StartStubProcess()
     bi::managed_external_buffer::handle_t initialize_map_offset =
         pb_map->ShmOffset();
 
-    // The stub process will be the owner of the map.
-    pb_map->Release();
-
     initialize_message->Args() = initialize_map_offset;
     stub_message_queue_->Push(initialize_message->ShmOffset());
-
-    // The stub process will be the owner of the message.
-    initialize_message->Release();
 
     std::unique_ptr<IPCMessage> initialize_response_message =
         IPCMessage::LoadFromSharedMemory(
@@ -987,7 +983,7 @@ ModelInstanceState::ProcessRequests(
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       responses, request_count,
       requests_shm =
-          shm_pool_->ConstructMany<bi::managed_external_buffer::handle_t>(
+          shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
               request_count));
   request_batch.data_->requests = requests_shm.handle_;
 
@@ -1063,14 +1059,6 @@ ModelInstanceState::ProcessRequests(
     return;
   }
 
-  // Release the ownership of all the shared memory objects.
-  ipc_message->Release();
-  for (auto& pb_infer_request : pb_inference_requests) {
-    pb_infer_request->Release();
-  }
-  request_batch.data_.release();
-  requests_shm.data_.release();
-
   bi::managed_external_buffer::handle_t response_message;
   SendMessageAndReceiveResponse(
       ipc_message->ShmOffset(), response_message, restart, responses, requests,
@@ -1083,6 +1071,8 @@ ModelInstanceState::ProcessRequests(
       responses, request_count,
       ipc_message =
           IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
+
+  defer _(nullptr, std::bind([this] { stub_message_queue_->Push(1000); }));
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -1141,7 +1131,6 @@ ModelInstanceState::ProcessRequests(
       infer_response = InferResponse::LoadFromSharedMemory(
           shm_pool_, (response_shm_offset.data_.get())[r]);
       if (infer_response->HasError()) {
-        // if (infer_response->IsErrorMessageSet()) {
         TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
             infer_response->Error()->Message().c_str());
@@ -1151,23 +1140,9 @@ ModelInstanceState::ProcessRequests(
                 (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
             "failed sending response");
         TRITONSERVER_ErrorDelete(err);
-        // } else {
-        //   const char* err_string = "Failed to process response.";
-        //   TRITONSERVER_Error* err =
-        //       TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_string);
-
-        //   LOG_IF_ERROR(
-        //       TRITONBACKEND_ResponseSend(
-        //           (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL,
-        //           err),
-        //       "failed sending response");
-        //   TRITONSERVER_ErrorDelete(err);
-        // }
-
         (*responses)[r] = nullptr;
 
-        // If has_error is true, we do not look at the response even if the
-        // response is set.
+        // If has_error is true, we do not look at the response tensors.
         continue;
       }
     }
@@ -1367,7 +1342,6 @@ ModelInstanceState::~ModelInstanceState()
           IPCMessage::Create(shm_pool_, false /* inline_response */);
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
-      ipc_message->Release();
       stub_message_queue_->Push(ipc_message->ShmOffset());
       parent_message_queue_->Pop();
 

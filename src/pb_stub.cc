@@ -46,6 +46,7 @@
 #include "pb_string.h"
 #include "shm_manager.h"
 
+
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
 #endif  // TRITON_ENABLE_GPU
@@ -53,6 +54,7 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 namespace bi = boost::interprocess;
+using defer = std::shared_ptr<void>;
 
 namespace triton { namespace backend { namespace python {
 
@@ -147,10 +149,6 @@ Stub::Instantiate(
         shm_pool_->Load<IPCControlShm>(ipc_control_offset);
     ipc_control_ = ipc_control.data_.get();
 
-    // Release the pointer. The owner of IPCControl is the main process and it
-    // will deallocate it automatically.
-    ipc_control.data_.release();
-
     health_mutex_ = &(ipc_control_->stub_health_mutex);
 
     stub_message_queue_ = MessageQueue::LoadFromSharedMemory(
@@ -158,11 +156,6 @@ Stub::Instantiate(
 
     parent_message_queue_ = MessageQueue::LoadFromSharedMemory(
         shm_pool_, ipc_control_->parent_message_queue);
-
-    // Release the owenrship of message queues to avoid double free. The main
-    // process is the owner of these queues.
-    stub_message_queue_->Release();
-    parent_message_queue_->Release();
 
     // If the Python model is using an execution environment, we need to
     // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
@@ -244,13 +237,17 @@ Stub::RunCommand()
       std::unique_ptr<IPCMessage> initialize_response_msg =
           IPCMessage::Create(shm_pool_, false /* inline_response */);
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
-
-      // Release the ownership of this message. The parent process is the owner
-      // of this message.
-      initialize_response_msg->Release();
-
+      std::unique_ptr<PbString> error_string_shm;
       AllocatedSharedMemory<InitializeResponseShm> initialize_response =
           shm_pool_->Construct<InitializeResponseShm>();
+
+      // Order is important
+      defer receive_initialize_finalize(
+          nullptr, std::bind([this] { stub_message_queue_->Pop(); }));
+      defer _(nullptr, std::bind([this, &initialize_response_msg] {
+                SendIPCMessage(initialize_response_msg);
+              }));
+
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
       initialize_response_msg->Args() = initialize_response.handle_;
@@ -272,23 +269,17 @@ Stub::RunCommand()
         initialize_response.data_->response_has_error = true;
         initialize_response.data_->response_is_error_set = false;
 
-        std::unique_ptr<PbString> error_string_shm;
         LOG_IF_EXCEPTION(
             error_string_shm = PbString::Create(shm_pool_, error_string));
         if (error_string_shm != nullptr) {
           initialize_response.data_->response_is_error_set = true;
-          error_string_shm->Release();
           initialize_response.data_->response_error =
               error_string_shm->ShmOffset();
         }
 
-        initialize_response.data_.release();
-        SendIPCMessage(initialize_response_msg);
         return true;  // Terminate the stub process.
       }
 
-      initialize_response.data_.release();
-      SendIPCMessage(initialize_response_msg);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
       bool has_exception = false;
@@ -302,12 +293,25 @@ Stub::RunCommand()
           shm_pool_->Load<RequestBatch>(ipc_message->Args());
       AllocatedSharedMemory<ResponseBatch> response_batch =
           shm_pool_->Construct<ResponseBatch>();
+      std::unique_ptr<PbString> error_string_shm;
+      py::list inference_responses;
+
+      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+          responses_shm_offset =
+              shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
+                  request_batch.data_->batch_size);
       execute_response->Args() = response_batch.handle_;
+      defer execute_finalize(
+          nullptr, std::bind([this] { stub_message_queue_->Pop(); }));
+      defer _(nullptr, std::bind([this, &execute_response] {
+                SendIPCMessage(execute_response);
+              }));
 
       response_batch.data_->has_error = false;
       response_batch.data_->is_error_set = false;
       try {
-        Execute(request_batch, response_batch);
+        inference_responses =
+            Execute(request_batch, response_batch, responses_shm_offset);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -325,24 +329,18 @@ Stub::RunCommand()
                 model_instance_name_ + "', message: ") +
             error_string;
         LOG_INFO << err_message.c_str();
+        error_string_shm = PbString::Create(shm_pool_, error_string);
         response_batch.data_->has_error = true;
-        std::unique_ptr<PbString> error_string_shm =
-            PbString::Create(shm_pool_, error_string);
 
         response_batch.data_->is_error_set = true;
         response_batch.data_->error = error_string_shm->ShmOffset();
       }
 
-      response_batch.data_.release();
-
-      SendIPCMessage(execute_response);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
       SendIPCMessage(ipc_message);
       return true;  // Terminate the stub process
-    case PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers:
-      break;
     default:
       break;
   }
@@ -443,15 +441,18 @@ Stub::ProcessResponse(InferResponse* response)
   response->SaveToSharedMemory(shm_pool_);
 }
 
-void
+py::list
 Stub::Execute(
     AllocatedSharedMemory<RequestBatch>& request_batch,
-    AllocatedSharedMemory<ResponseBatch>& response_batch)
+    AllocatedSharedMemory<ResponseBatch>& response_batch,
+    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
+        responses_shm_offset)
 {
   uint32_t batch_size = request_batch.data_->batch_size;
+  py::list responses;
 
   if (batch_size == 0) {
-    return;
+    return responses;
   }
 
   py::list py_request_list;
@@ -496,7 +497,7 @@ Stub::Execute(
         str + "'.");
   }
 
-  py::list responses = responses_obj;
+  responses = responses_obj;
   size_t response_size = py::len(responses);
 
   // If the number of request objects do not match the number of resposne
@@ -521,10 +522,6 @@ Stub::Execute(
     }
   }
 
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      responses_shm_offset =
-          shm_pool_->ConstructMany<bi::managed_external_buffer::handle_t>(
-              response_size);
   response_batch.data_->responses = responses_shm_offset.handle_;
   response_batch.data_->batch_size = response_size;
 
@@ -534,9 +531,9 @@ Stub::Execute(
     ProcessResponse(infer_response);
     (responses_shm_offset.data_.get())[i] = infer_response->ShmOffset();
     i += 1;
-    infer_response->Release();
   }
-  responses_shm_offset.data_.release();
+
+  return responses;
 }
 
 void
@@ -564,7 +561,6 @@ void
 Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
-  ipc_message->Release();
   while (!success) {
     parent_message_queue_->Push(ipc_message->ShmOffset(), 1000, success);
   }

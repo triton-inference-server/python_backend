@@ -390,7 +390,7 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   tensor_shm_ptr_->dims_count = dims_.size();
   shm_offset_ = tensor_shm_.handle_;
 
-  dims_shm_ = shm_pool->ConstructMany<int64_t>(dims_.size());
+  dims_shm_ = shm_pool->Construct<int64_t>(dims_.size());
   dims_shm_ptr_ = dims_shm_.data_.get();
 
   // Write the dimensions data to shared memory.

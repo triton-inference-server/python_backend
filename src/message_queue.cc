@@ -41,7 +41,7 @@ MessageQueue::Create(
   mq_shm.data_->size = message_queue_size;
 
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_buffer_shm =
-      shm_pool->ConstructMany<bi::managed_external_buffer::handle_t>(
+      shm_pool->Construct<bi::managed_external_buffer::handle_t>(
           message_queue_size);
   mq_shm.data_->buffer = mq_buffer_shm.handle_;
   mq_shm.data_->index = 0;

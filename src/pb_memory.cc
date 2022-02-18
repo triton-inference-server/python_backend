@@ -40,7 +40,7 @@ PbMemory::Create(
   AllocatedSharedMemory<char> memory_data_shm;
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
-    memory_data_shm = shm_pool->ConstructMany<char>(sizeof(cudaIpcMemHandle_t));
+    memory_data_shm = shm_pool->Construct<char>(sizeof(cudaIpcMemHandle_t));
     if (data != nullptr) {
       THROW_IF_CUDA_ERROR(cudaSetDevice(memory_type_id));
       THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
@@ -50,7 +50,7 @@ PbMemory::Create(
   }
 #endif
   else {
-    memory_data_shm = shm_pool->ConstructMany<char>(byte_size);
+    memory_data_shm = shm_pool->Construct<char>(byte_size);
     if (data != nullptr) {
       std::copy(data, data + byte_size, memory_data_shm.data_.get());
     }

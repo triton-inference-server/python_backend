@@ -38,7 +38,7 @@ PbMap::Create(
   dict_shm.data_->length = map.size();
 
   AllocatedSharedMemory<PairShm> pair_shms =
-      shm_pool->ConstructMany<PairShm>(map.size());
+      shm_pool->Construct<PairShm>(map.size());
   dict_shm.data_->values = pair_shms.handle_;
 
   size_t i = 0;

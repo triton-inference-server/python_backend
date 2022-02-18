@@ -85,9 +85,11 @@ class Stub {
   void Finalize();
 
   /// Execute a batch of requests.
-  void Execute(
+  py::list Execute(
       AllocatedSharedMemory<RequestBatch>& request_batch,
-      AllocatedSharedMemory<ResponseBatch>& response_batch);
+      AllocatedSharedMemory<ResponseBatch>& response_batch,
+      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
+          responses_shm_offset);
 
   void ProcessResponse(InferResponse* response);
   ~Stub();

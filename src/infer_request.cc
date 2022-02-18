@@ -135,7 +135,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
       output_names_handle =
-          shm_pool->ConstructMany<bi::managed_external_buffer::handle_t>(
+          shm_pool->Construct<bi::managed_external_buffer::handle_t>(
               RequestedOutputNames().size());
   infer_request_shm.data_->requested_output_names = output_names_handle.handle_;
 
@@ -160,7 +160,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
       input_tensors_handle =
-          shm_pool->ConstructMany<bi::managed_external_buffer::handle_t>(
+          shm_pool->Construct<bi::managed_external_buffer::handle_t>(
               Inputs().size());
 
   infer_request_shm.data_->inputs = input_tensors_handle.handle_;

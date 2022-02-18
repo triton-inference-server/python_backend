@@ -40,10 +40,11 @@ IPCMessage::Create(
   AllocatedSharedMemory<bi::interprocess_mutex> response_mutex_shm;
   AllocatedSharedMemory<bi::interprocess_condition> response_cond_shm;
   if (inline_response) {
-    response_mutex_shm =
-        std::move(shm_pool->ConstructAligned<bi::interprocess_mutex>());
+    response_mutex_shm = std::move(shm_pool->Construct<bi::interprocess_mutex>(
+        1 /* count */, true /* aligned */));
     response_cond_shm =
-        std::move(shm_pool->ConstructAligned<bi::interprocess_condition>());
+        std::move(shm_pool->Construct<bi::interprocess_condition>(
+            1 /* count */, true /* aligned */));
 
     ipc_message_shm.data_->response_mutex = response_mutex_shm.handle_;
     ipc_message_shm.data_->response_cond = response_cond_shm.handle_;
