@@ -590,7 +590,7 @@ Stub::GetOrCreateInstance()
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
-  py::class_<PbError, std::unique_ptr<PbError>>(module, "TritonError")
+  py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
       .def(py::init<std::string>())
       .def("message", &PbError::Message);
 

@@ -29,6 +29,7 @@
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <iostream>
 
+#include "pb_utils.h"
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
@@ -79,9 +80,9 @@ SharedMemoryManager::GrowIfNeeded(size_t byte_size)
 {
   if (*total_size_ != current_capacity_) {
     shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
-    old_shm_maps_.push_back(shm_map_);
     managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
         bi::open_only, shm_map_->get_address(), *total_size_);
+    old_shm_maps_.push_back(shm_map_);
     current_capacity_ = *total_size_;
   }
 
@@ -92,15 +93,38 @@ SharedMemoryManager::GrowIfNeeded(size_t byte_size)
   size_t requested_bytes = byte_size * 1.1;
   if (requested_bytes > free_memory) {
     int64_t new_size = *total_size_ + (requested_bytes - free_memory);
-    shm_obj_->truncate(new_size);
+    try {
+      shm_obj_->truncate(new_size);
+    }
+    catch (bi::interprocess_exception& ex) {
+      std::string error_message =
+          ("Failed to increase the shared memory pool size for key '" +
+           shm_region_name_ + "' to " + std::to_string(*total_size_) +
+           " bytes. If you are running Triton inside docker, use '--shm-size' "
+           "flag to control the shared memory region size. Error: " +
+           ex.what());
+      throw PythonBackendException(error_message);
+    }
 
-    shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
-    old_shm_maps_.push_back(shm_map_);
-    managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
-        bi::open_only, shm_map_->get_address(), new_size);
-    managed_buffer_->grow(new_size - current_capacity_);
-    current_capacity_ = managed_buffer_->get_size();
-    *total_size_ = new_size;
+    try {
+      int64_t new_size = *total_size_ + (requested_bytes - free_memory);
+      shm_obj_->truncate(new_size);
+      shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
+      old_shm_maps_.push_back(shm_map_);
+      managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+          bi::open_only, shm_map_->get_address(), new_size);
+      managed_buffer_->grow(new_size - current_capacity_);
+      current_capacity_ = managed_buffer_->get_size();
+      *total_size_ = new_size;
+    }
+    catch (bi::interprocess_exception& ex) {
+      shm_obj_->truncate(*total_size_);
+      std::string error_message =
+          ("Failed to create new mapped region for the grown shared memory "
+           "region '" +
+           shm_region_name_ + "'. " + ex.what());
+      throw PythonBackendException(error_message);
+    }
   }
 }
 

@@ -72,8 +72,8 @@ class SharedMemoryManager {
 
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-      GrowIfNeeded(sizeof(AllocatedShmOwnership));
       GrowIfNeeded(sizeof(T) * count);
+      GrowIfNeeded(sizeof(AllocatedShmOwnership));
       if (!aligned) {
         obj =
             reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T) * count));
@@ -96,11 +96,6 @@ class SharedMemoryManager {
     }
 
     return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
-  }
-
-  std::unique_ptr<bi::managed_external_buffer>& ManagedBuffer()
-  {
-    return managed_buffer_;
   }
 
   template <typename T>
