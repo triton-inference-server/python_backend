@@ -42,11 +42,11 @@ class PbString {
       const std::string& string);
   static std::unique_ptr<PbString> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t offset);
+      bi::managed_external_buffer::handle_t handle);
 
   char* MutableString() { return string_shm_ptr_; }
   const char* String() { return string_shm_ptr_; }
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
   void Release();
 
  private:

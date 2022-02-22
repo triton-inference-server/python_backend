@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -50,12 +50,12 @@ namespace bi = boost::interprocess;
       (X);                                                         \
     }                                                              \
     catch (cont PythonBackendException & pb_exception) {           \
-      off_t string_offset__;                                       \
+      bi::managed_external_buffer::handle_t string_handle__;       \
       try {                                                        \
         SaveStringToSharedMemory(                                  \
-            SHM_POOL, string_offset__, pb_exception.what());       \
+            SHM_POOL, string_handle__, pb_exception.what());       \
         RESPONSE->has_error = true;                                \
-        RESPONSE->error = string_offset__;                         \
+        RESPONSE->error = string_handle__;                         \
         if (R)                                                     \
           return;                                                  \
       }                                                            \
@@ -122,10 +122,10 @@ struct IPCControlShm {
 };
 
 struct ResponseBatch {
-  // Offset for response object.
-  off_t responses;
+  // Handle for response object.
+  bi::managed_external_buffer::handle_t responses;
   uint32_t batch_size;
-  off_t error;
+  bi::managed_external_buffer::handle_t error;
   bool has_error;
   // Indicates whether an additional call to stub is required for the clean up
   // of the resources.
@@ -135,8 +135,8 @@ struct ResponseBatch {
 };
 
 struct RequestBatch {
-  // Offset for request object.
-  off_t requests;
+  // Handle for request object.
+  bi::managed_external_buffer::handle_t requests;
   uint32_t batch_size;
 };
 

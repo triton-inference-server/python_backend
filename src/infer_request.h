@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -35,13 +35,13 @@ namespace triton { namespace backend { namespace python {
 // Inference Request
 //
 struct InferRequestShm {
-  // Offset for the id field.
+  // Handle for the id field.
   bi::managed_external_buffer::handle_t id;
   uint64_t correlation_id;
-  // Offset for input field.
+  // Handle for input field.
   bi::managed_external_buffer::handle_t inputs;
   uint32_t input_count;
-  // Offset for the requested output names
+  // Handle for the requested output names
   bi::managed_external_buffer::handle_t requested_output_names;
   uint32_t requested_output_count;
   bi::managed_external_buffer::handle_t model_name;
@@ -67,7 +67,7 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::vector<std::string>& RequestedOutputNames();
   void Release();
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.
@@ -75,10 +75,10 @@ class InferRequest {
 
   /// Create an Inference Request object from shared memory.
   /// \param shm_pool Shared memory pool
-  /// \param request_offset Shared memory offset of the request.
+  /// \param request_handle Shared memory handle of the request.
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t request_offset);
+      bi::managed_external_buffer::handle_t request_handle);
 
   /// Disallow copying the inference request object.
   DISALLOW_COPY_AND_ASSIGN(InferRequest);
@@ -116,6 +116,6 @@ class InferRequest {
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
       input_tensors_handle_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
-  bi::managed_external_buffer::handle_t shm_offset_;
+  bi::managed_external_buffer::handle_t shm_handle_;
 };
 }}};  // namespace triton::backend::python

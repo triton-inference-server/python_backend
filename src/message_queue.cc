@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -198,10 +198,10 @@ MessageQueue::ResetSemaphores()
 std::unique_ptr<MessageQueue>
 MessageQueue::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t message_queue_offset)
+    bi::managed_external_buffer::handle_t message_queue_handle)
 {
   AllocatedSharedMemory<MessageQueueShm> mq_shm =
-      shm_pool->Load<MessageQueueShm>(message_queue_offset);
+      shm_pool->Load<MessageQueueShm>(message_queue_handle);
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_shm_buffer =
       shm_pool->Load<bi::managed_external_buffer::handle_t>(
           mq_shm.data_->buffer);
@@ -210,7 +210,7 @@ MessageQueue::LoadFromSharedMemory(
 }
 
 bi::managed_external_buffer::handle_t
-MessageQueue::ShmOffset()
+MessageQueue::ShmHandle()
 {
   return mq_handle_;
 }

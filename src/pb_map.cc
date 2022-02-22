@@ -46,8 +46,8 @@ PbMap::Create(
     auto key = PbString::Create(shm_pool, pair.first);
     auto value = PbString::Create(shm_pool, pair.second);
 
-    (pair_shms.data_.get())[i].key = key->ShmOffset();
-    (pair_shms.data_.get())[i].value = value->ShmOffset();
+    (pair_shms.data_.get())[i].key = key->ShmHandle();
+    (pair_shms.data_.get())[i].value = value->ShmHandle();
 
     strings.emplace_back(std::move(key));
     strings.emplace_back(std::move(value));
@@ -64,7 +64,7 @@ PbMap::UnorderedMap()
 }
 
 bi::managed_external_buffer::handle_t
-PbMap::ShmOffset()
+PbMap::ShmHandle()
 {
   return dict_handle_;
 }

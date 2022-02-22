@@ -48,10 +48,10 @@ PbString::Create(
 std::unique_ptr<PbString>
 PbString::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t offset)
+    bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<StringShm> string_container_shm =
-      shm_pool->Load<StringShm>(offset);
+      shm_pool->Load<StringShm>(handle);
   AllocatedSharedMemory<char> string_shm =
       shm_pool->Load<char>(string_container_shm.data_->data);
 
@@ -71,7 +71,7 @@ PbString::PbString(
 }
 
 bi::managed_external_buffer::handle_t
-PbString::ShmOffset()
+PbString::ShmHandle()
 {
   return string_handle_;
 }

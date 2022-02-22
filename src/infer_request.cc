@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -95,9 +95,9 @@ InferRequest::SetFlags(uint32_t flags)
 }
 
 bi::managed_external_buffer::handle_t
-InferRequest::ShmOffset()
+InferRequest::ShmHandle()
 {
-  return shm_offset_;
+  return shm_handle_;
 }
 
 void
@@ -129,7 +129,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   std::unique_ptr<PbString> request_id_shm =
       PbString::Create(shm_pool, RequestId());
 
-  infer_request_shm.data_->id = request_id_shm->ShmOffset();
+  infer_request_shm.data_->id = request_id_shm->ShmHandle();
   infer_request_shm.data_->requested_output_count =
       RequestedOutputNames().size();
 
@@ -145,7 +145,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
     std::unique_ptr<PbString> requested_output_name_shm =
         PbString::Create(shm_pool, requested_output_name);
     (output_names_handle.data_.get())[i] =
-        requested_output_name_shm->ShmOffset();
+        requested_output_name_shm->ShmHandle();
     requested_output_names_shm.emplace_back(
         std::move(requested_output_name_shm));
     i++;
@@ -156,7 +156,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 
   std::unique_ptr<PbString> model_name_shm =
       PbString::Create(shm_pool, ModelName());
-  infer_request_shm.data_->model_name = model_name_shm->ShmOffset();
+  infer_request_shm.data_->model_name = model_name_shm->ShmHandle();
 
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
       input_tensors_handle =
@@ -166,7 +166,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm.data_->inputs = input_tensors_handle.handle_;
   i = 0;
   for (auto& input : Inputs()) {
-    (input_tensors_handle.data_.get())[i] = input->ShmOffset();
+    (input_tensors_handle.data_.get())[i] = input->ShmHandle();
     i++;
   }
 
@@ -180,16 +180,16 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   input_tensors_handle_ = std::move(input_tensors_handle);
   input_tensors_handle_ptr_ = input_tensors_handle.data_.get();
   model_name_shm_ = std::move(model_name_shm);
-  shm_offset_ = infer_request_shm_.handle_;
+  shm_handle_ = infer_request_shm_.handle_;
 }
 
 std::unique_ptr<InferRequest>
 InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t request_offset)
+    bi::managed_external_buffer::handle_t request_handle)
 {
   AllocatedSharedMemory<InferRequestShm> infer_request_shm =
-      shm_pool->Load<InferRequestShm>(request_offset);
+      shm_pool->Load<InferRequestShm>(request_handle);
   std::unique_ptr<PbString> request_id_shm =
       PbString::LoadFromSharedMemory(shm_pool, infer_request_shm.data_->id);
 

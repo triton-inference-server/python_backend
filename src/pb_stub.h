@@ -57,7 +57,7 @@ class Stub {
       int64_t shm_growth_size, int64_t shm_default_size,
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
-      bi::managed_external_buffer::handle_t ipc_control_offset,
+      bi::managed_external_buffer::handle_t ipc_control_handle,
       const std::string& model_instance_name);
 
   /// Get the health of the stub process.
@@ -70,7 +70,7 @@ class Stub {
   bool RunCommand();
 
   /// Initialize the user's Python code.
-  void Initialize(bi::managed_external_buffer::handle_t map_offset);
+  void Initialize(bi::managed_external_buffer::handle_t map_handle);
 
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
@@ -89,7 +89,7 @@ class Stub {
       AllocatedSharedMemory<RequestBatch>& request_batch,
       AllocatedSharedMemory<ResponseBatch>& response_batch,
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          responses_shm_offset);
+          responses_shm_handle);
 
   void ProcessResponse(InferResponse* response);
   ~Stub();

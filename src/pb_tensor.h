@@ -53,15 +53,15 @@ namespace triton { namespace backend { namespace python {
 // Represents a Tensor object in shared memory.
 //
 struct TensorShm {
-  // Offset for the pointer data in shared memory.
+  // Handle for the pointer data in shared memory.
   bi::managed_external_buffer::handle_t memory;
 
-  // Offset for name field.
+  // Handle for name field.
   bi::managed_external_buffer::handle_t name;
 
   TRITONSERVER_DataType dtype;
 
-  // Shared memory offset for the dimensions.
+  // Shared memory handle for the dimensions.
   bi::managed_external_buffer::handle_t dims;
   size_t dims_count;
 };
@@ -101,14 +101,14 @@ class PbTensor {
   /// \param memory_ptr Pointer to the location of the data. Data must be
   /// contiguous and in C-order.
   /// \param byte_size Total number of bytes that the tensor uses.
-  /// \param shm_offset The shared memory offset of pointer if it is stored in
+  /// \param shm_handle The shared memory handle of pointer if it is stored in
   /// shared memory.
   PbTensor(
       const std::string& name, const std::vector<int64_t>& dims,
       TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
       int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
       DLManagedTensor* dl_managed_tensor = nullptr,
-      bi::managed_external_buffer::handle_t shm_offset = 0);
+      bi::managed_external_buffer::handle_t shm_handle = 0);
 
   /// This constructor is used when
   /// loading the tensor from shared memory.
@@ -151,11 +151,11 @@ class PbTensor {
   /// \param name Name of the tensor.
   void SetName(const std::string& name);
 
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
 
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t tensor_offset);
+      bi::managed_external_buffer::handle_t tensor_handle);
 
 #ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.
@@ -226,7 +226,7 @@ class PbTensor {
   uint64_t byte_size_;
   DLManagedTensor* dl_managed_tensor_;
 
-  bi::managed_external_buffer::handle_t shm_offset_;
+  bi::managed_external_buffer::handle_t shm_handle_;
 
   AllocatedSharedMemory<TensorShm> tensor_shm_;
   TensorShm* tensor_shm_ptr_;

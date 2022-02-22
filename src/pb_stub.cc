@@ -131,7 +131,7 @@ Stub::Instantiate(
     int64_t shm_growth_size, int64_t shm_default_size,
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
-    bi::managed_external_buffer::handle_t ipc_control_offset,
+    bi::managed_external_buffer::handle_t ipc_control_handle,
     const std::string& model_instance_name)
 {
   model_path_ = model_path;
@@ -146,7 +146,7 @@ Stub::Instantiate(
         shm_region_name, shm_default_size, shm_growth_size, false /* create */);
 
     AllocatedSharedMemory<IPCControlShm> ipc_control =
-        shm_pool_->Load<IPCControlShm>(ipc_control_offset);
+        shm_pool_->Load<IPCControlShm>(ipc_control_handle);
     ipc_control_ = ipc_control.data_.get();
 
     health_mutex_ = &(ipc_control_->stub_health_mutex);
@@ -274,7 +274,7 @@ Stub::RunCommand()
         if (error_string_shm != nullptr) {
           initialize_response.data_->response_is_error_set = true;
           initialize_response.data_->response_error =
-              error_string_shm->ShmOffset();
+              error_string_shm->ShmHandle();
         }
 
         return true;  // Terminate the stub process.
@@ -297,7 +297,7 @@ Stub::RunCommand()
       py::list inference_responses;
 
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-          responses_shm_offset =
+          responses_shm_handle =
               shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
                   request_batch.data_->batch_size);
       execute_response->Args() = response_batch.handle_;
@@ -311,7 +311,7 @@ Stub::RunCommand()
       response_batch.data_->is_error_set = false;
       try {
         inference_responses =
-            Execute(request_batch, response_batch, responses_shm_offset);
+            Execute(request_batch, response_batch, responses_shm_handle);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -333,7 +333,7 @@ Stub::RunCommand()
         response_batch.data_->has_error = true;
 
         response_batch.data_->is_error_set = true;
-        response_batch.data_->error = error_string_shm->ShmOffset();
+        response_batch.data_->error = error_string_shm->ShmHandle();
       }
 
     } break;
@@ -349,7 +349,7 @@ Stub::RunCommand()
 }
 
 void
-Stub::Initialize(bi::managed_external_buffer::handle_t map_offset)
+Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 {
   py::module sys = py::module_::import("sys");
 
@@ -405,7 +405,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_offset)
 
   std::unordered_map<std::string, std::string> map;
   std::unique_ptr<PbMap> pb_map_shm =
-      PbMap::LoadFromSharedMemory(shm_pool_, map_offset);
+      PbMap::LoadFromSharedMemory(shm_pool_, map_handle);
 
   // Get the unordered_map representation of the map in shared memory.
   map = pb_map_shm->UnorderedMap();
@@ -446,7 +446,7 @@ Stub::Execute(
     AllocatedSharedMemory<RequestBatch>& request_batch,
     AllocatedSharedMemory<ResponseBatch>& response_batch,
     AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-        responses_shm_offset)
+        responses_shm_handle)
 {
   uint32_t batch_size = request_batch.data_->batch_size;
   py::list responses;
@@ -457,7 +457,7 @@ Stub::Execute(
 
   py::list py_request_list;
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      request_shm_offset =
+      request_shm_handle =
           shm_pool_->Load<bi::managed_external_buffer::handle_t>(
               request_batch.data_->requests);
 
@@ -465,7 +465,7 @@ Stub::Execute(
     // [FIXME] Some custom handling might be required for GPU tensors
     std::unique_ptr<InferRequest> infer_request =
         InferRequest::LoadFromSharedMemory(
-            shm_pool_, (request_shm_offset.data_.get())[i]);
+            shm_pool_, (request_shm_handle.data_.get())[i]);
     py_request_list.append(std::move(infer_request));
   }
 
@@ -522,14 +522,14 @@ Stub::Execute(
     }
   }
 
-  response_batch.data_->responses = responses_shm_offset.handle_;
+  response_batch.data_->responses = responses_shm_handle.handle_;
   response_batch.data_->batch_size = response_size;
 
   size_t i = 0;
   for (auto& response : responses) {
     InferResponse* infer_response = response.cast<InferResponse*>();
     ProcessResponse(infer_response);
-    (responses_shm_offset.data_.get())[i] = infer_response->ShmOffset();
+    (responses_shm_handle.data_.get())[i] = infer_response->ShmHandle();
     i += 1;
   }
 
@@ -562,7 +562,7 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
   while (!success) {
-    parent_message_queue_->Push(ipc_message->ShmOffset(), 1000, success);
+    parent_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
   }
 }
 
@@ -688,7 +688,7 @@ main(int argc, char** argv)
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl offset */, model_instance_name);
+        std::stoi(argv[7]) /* IPCControl handle */, model_instance_name);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();

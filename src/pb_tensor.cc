@@ -123,7 +123,7 @@ PbTensor::PbTensor(
     TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
     DLManagedTensor* dl_managed_tensor,
-    bi::managed_external_buffer::handle_t shm_offset)
+    bi::managed_external_buffer::handle_t shm_handle)
 {
   name_ = name;
   memory_ptr_ = memory_ptr;
@@ -131,7 +131,7 @@ PbTensor::PbTensor(
   memory_type_id_ = memory_type_id;
   dtype_ = dtype;
   dims_ = dims;
-  // [FIXME] fix shm_offset
+  // [FIXME] fix shm_handle
 
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
@@ -388,7 +388,7 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   tensor_shm_ptr_ = tensor_shm_.data_.get();
   tensor_shm_ptr_->dtype = dtype_;
   tensor_shm_ptr_->dims_count = dims_.size();
-  shm_offset_ = tensor_shm_.handle_;
+  shm_handle_ = tensor_shm_.handle_;
 
   dims_shm_ = shm_pool->Construct<int64_t>(dims_.size());
   dims_shm_ptr_ = dims_shm_.data_.get();
@@ -399,12 +399,12 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   }
 
   name_shm_ = PbString::Create(shm_pool, name_);
-  tensor_shm_ptr_->name = name_shm_->ShmOffset();
+  tensor_shm_ptr_->name = name_shm_->ShmHandle();
   pb_memory_ = PbMemory::Create(
       shm_pool, memory_type_, memory_type_id_, byte_size_,
       reinterpret_cast<char*>(memory_ptr_));
 
-  tensor_shm_ptr_->memory = pb_memory_->ShmOffset();
+  tensor_shm_ptr_->memory = pb_memory_->ShmHandle();
   tensor_shm_ptr_->dims = dims_shm_.handle_;
   memory_ptr_ = pb_memory_->DataPtr();
 }
@@ -412,10 +412,10 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 std::shared_ptr<PbTensor>
 PbTensor::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t tensor_offset)
+    bi::managed_external_buffer::handle_t tensor_handle)
 {
   AllocatedSharedMemory<TensorShm> tensor_shm =
-      shm_pool->Load<TensorShm>(tensor_offset);
+      shm_pool->Load<TensorShm>(tensor_handle);
   AllocatedSharedMemory<int64_t> dims_shm =
       shm_pool->Load<int64_t>(tensor_shm.data_->dims);
   std::unique_ptr<PbString> name_shm =
@@ -439,9 +439,9 @@ PbTensor::DataPtr()
 }
 
 bi::managed_external_buffer::handle_t
-PbTensor::ShmOffset()
+PbTensor::ShmHandle()
 {
-  return shm_offset_;
+  return shm_handle_;
 }
 
 void
@@ -472,7 +472,7 @@ PbTensor::PbTensor(
   memory_ptr_ = pb_memory_->DataPtr();
   memory_type_ = pb_memory_->MemoryType();
   memory_type_id_ = pb_memory_->MemoryTypeId();
-  shm_offset_ = tensor_shm_.handle_;
+  shm_handle_ = tensor_shm_.handle_;
 
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||

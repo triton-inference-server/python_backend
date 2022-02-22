@@ -51,7 +51,7 @@ class PbMap {
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
   const std::unordered_map<std::string, std::string>& UnorderedMap();
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
   void Release();
 
  private:

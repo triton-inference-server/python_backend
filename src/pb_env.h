@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -35,7 +35,6 @@ namespace triton { namespace backend { namespace python {
 void ExtractTarFile(std::string& archive_path, std::string& dst_path);
 
 bool FileExists(std::string& path);
-
 
 //
 // A class that manages Python environments

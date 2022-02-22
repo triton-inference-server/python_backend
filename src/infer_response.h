@@ -33,7 +33,7 @@
 namespace triton { namespace backend { namespace python {
 
 struct ResponseShm {
-  // Offset for Tensor output.
+  // Handle for Tensor output.
   bi::managed_external_buffer::handle_t outputs;
   uint32_t outputs_size;
   bi::managed_external_buffer::handle_t error;
@@ -51,10 +51,10 @@ class InferResponse {
   void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
   static std::unique_ptr<InferResponse> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t response_offset);
+      bi::managed_external_buffer::handle_t response_handle);
   bool HasError();
   std::shared_ptr<PbError>& Error();
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
   void Release();
 
   // Disallow copying the inference response object.
@@ -66,12 +66,12 @@ class InferResponse {
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
       std::shared_ptr<PbError>& pb_error,
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          tensor_offset_shm);
+          tensor_handle_shm);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
   std::shared_ptr<PbError> error_;
-  bi::managed_external_buffer::handle_t shm_offset_;
+  bi::managed_external_buffer::handle_t shm_handle_;
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      tensor_offset_shm_;
+      tensor_handle_shm_;
   AllocatedSharedMemory<ResponseShm> response_shm_;
 };
 }}}  // namespace triton::backend::python

@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -60,7 +60,7 @@ InferResponse::SaveToSharedMemory(
   response_shm_ = shm_pool->Construct<ResponseShm>();
   response_shm_.data_->has_error = false;
   response_shm_.data_->is_error_set = false;
-  shm_offset_ = response_shm_.handle_;
+  shm_handle_ = response_shm_.handle_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
@@ -69,19 +69,19 @@ InferResponse::SaveToSharedMemory(
     Error()->SaveToSharedMemory(shm_pool);
 
     response_shm_.data_->is_error_set = true;
-    response_shm_.data_->error = Error()->ShmOffset();
+    response_shm_.data_->error = Error()->ShmHandle();
     response_shm_.data_->outputs_size = 0;
   } else {
-    tensor_offset_shm_ =
+    tensor_handle_shm_ =
         shm_pool->Construct<bi::managed_external_buffer::handle_t>(
             output_tensor_length);
-    response_shm_.data_->outputs = tensor_offset_shm_.handle_;
+    response_shm_.data_->outputs = tensor_handle_shm_.handle_;
     response_shm_.data_->outputs_size = output_tensor_length;
 
     size_t j = 0;
     for (auto& output_tensor : output_tensors_) {
       output_tensor->SaveToSharedMemory(shm_pool);
-      (tensor_offset_shm_.data_.get())[j] = output_tensor->ShmOffset();
+      (tensor_handle_shm_.data_.get())[j] = output_tensor->ShmHandle();
       j++;
     }
   }
@@ -99,28 +99,28 @@ InferResponse::Release()
     output_tensor->Release();
   }
 
-  tensor_offset_shm_.data_.release();
+  tensor_handle_shm_.data_.release();
 }
 
 bi::managed_external_buffer::handle_t
-InferResponse::ShmOffset()
+InferResponse::ShmHandle()
 {
-  return shm_offset_;
+  return shm_handle_;
 }
 
 std::unique_ptr<InferResponse>
 InferResponse::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t response_offset)
+    bi::managed_external_buffer::handle_t response_handle)
 {
   AllocatedSharedMemory<ResponseShm> response_shm =
-      shm_pool->Load<ResponseShm>(response_offset);
+      shm_pool->Load<ResponseShm>(response_handle);
   uint32_t requested_output_count = response_shm.data_->outputs_size;
 
   std::shared_ptr<PbError> pb_error;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      tensor_offset_shm;
+      tensor_handle_shm;
 
   // If the error field is set, do not load output tensors from shared memory.
   if (response_shm.data_->has_error && response_shm.data_->is_error_set) {
@@ -131,17 +131,17 @@ InferResponse::LoadFromSharedMemory(
     pb_error =
         std::make_shared<PbError>("Failed to retrieve the response error.");
   } else {
-    tensor_offset_shm = shm_pool->Load<bi::managed_external_buffer::handle_t>(
+    tensor_handle_shm = shm_pool->Load<bi::managed_external_buffer::handle_t>(
         response_shm.data_->outputs);
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
       std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
-          shm_pool, (tensor_offset_shm.data_.get())[idx]);
+          shm_pool, (tensor_handle_shm.data_.get())[idx]);
       output_tensors.emplace_back(std::move(pb_tensor));
     }
   }
 
   return std::unique_ptr<InferResponse>(new InferResponse(
-      response_shm, output_tensors, pb_error, tensor_offset_shm));
+      response_shm, output_tensors, pb_error, tensor_handle_shm));
 }
 
 InferResponse::InferResponse(
@@ -149,13 +149,13 @@ InferResponse::InferResponse(
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
     std::shared_ptr<PbError>& pb_error,
     AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-        tensor_offset_shm)
+        tensor_handle_shm)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
-  tensor_offset_shm_ = std::move(tensor_offset_shm);
-  shm_offset_ = response_shm_.handle_;
+  tensor_handle_shm_ = std::move(tensor_handle_shm);
+  shm_handle_ = response_shm_.handle_;
 }
 
 std::shared_ptr<PbError>&

@@ -237,13 +237,12 @@ class ModelInstanceState : public BackendModelInstance {
   std::string model_path_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;
-  bi::managed_external_buffer::handle_t ipc_control_offset_;
+  bi::managed_external_buffer::handle_t ipc_control_handle_;
   std::vector<std::future<void>> bls_futures_;
   std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   std::string shm_region_name_;
-  off_t shm_reset_offset_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -544,7 +543,7 @@ ModelInstanceState::StartStubProcess()
          << " " << shm_region_name_ << " " << shm_default_size << " "
          << shm_growth_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
-         << ipc_control_offset_ << " " << Name();
+         << ipc_control_handle_ << " " << Name();
       ipc_control_->uses_env = true;
       bash_argument = ss.str();
     } else {
@@ -553,7 +552,7 @@ ModelInstanceState::StartStubProcess()
          << shm_region_name_ << " " << shm_default_size << " "
          << shm_growth_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
-         << ipc_control_offset_ << " " << Name();
+         << ipc_control_handle_ << " " << Name();
       bash_argument = ss.str();
     }
     LOG_MESSAGE(
@@ -620,11 +619,11 @@ ModelInstanceState::StartStubProcess()
     initialize_message->Command() = PYTHONSTUB_InitializeRequest;
 
     std::unique_ptr<PbMap> pb_map = PbMap::Create(shm_pool_, initialize_map);
-    bi::managed_external_buffer::handle_t initialize_map_offset =
-        pb_map->ShmOffset();
+    bi::managed_external_buffer::handle_t initialize_map_handle =
+        pb_map->ShmHandle();
 
-    initialize_message->Args() = initialize_map_offset;
-    stub_message_queue_->Push(initialize_message->ShmOffset());
+    initialize_message->Args() = initialize_map_handle;
+    stub_message_queue_->Push(initialize_message->ShmHandle());
 
     std::unique_ptr<IPCMessage> initialize_response_message =
         IPCMessage::LoadFromSharedMemory(
@@ -696,7 +695,7 @@ ModelInstanceState::SetupStubProcess()
   AllocatedSharedMemory<IPCControlShm> ipc_control =
       shm_pool_->Construct<IPCControlShm>();
   ipc_control_ = std::move(ipc_control.data_);
-  ipc_control_offset_ = ipc_control.handle_;
+  ipc_control_handle_ = ipc_control.handle_;
 
   uint64_t model_version = model_state->Version();
   const char* model_path = model_state->RepositoryPath().c_str();
@@ -761,8 +760,8 @@ ModelInstanceState::SetupStubProcess()
   RETURN_IF_EXCEPTION(
       parent_message_queue_ =
           MessageQueue::Create(shm_pool_, message_queue_size));
-  ipc_control_->parent_message_queue = parent_message_queue_->ShmOffset();
-  ipc_control_->stub_message_queue = stub_message_queue_->ShmOffset();
+  ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
+  ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
 
   RETURN_IF_ERROR(StartStubProcess());
 
@@ -1045,7 +1044,7 @@ ModelInstanceState::ProcessRequests(
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         responses, request_count, infer_request->SaveToSharedMemory(shm_pool_));
-    (requests_shm.data_.get())[r] = infer_request->ShmOffset();
+    (requests_shm.data_.get())[r] = infer_request->ShmHandle();
     pb_inference_requests.emplace_back(std::move(infer_request));
   }
 
@@ -1064,7 +1063,7 @@ ModelInstanceState::ProcessRequests(
 
   bi::managed_external_buffer::handle_t response_message;
   SendMessageAndReceiveResponse(
-      ipc_message->ShmOffset(), response_message, restart, responses, requests,
+      ipc_message->ShmHandle(), response_message, restart, responses, requests,
       request_count);
 
   defer _(nullptr, std::bind([this, &restart] {
@@ -1112,10 +1111,10 @@ ModelInstanceState::ProcessRequests(
   }
 
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      response_shm_offset;
+      response_shm_handle;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       responses, request_count,
-      response_shm_offset =
+      response_shm_handle =
           shm_pool_->Load<bi::managed_external_buffer::handle_t>(
               response_batch.data_->responses));
 
@@ -1135,7 +1134,7 @@ ModelInstanceState::ProcessRequests(
     std::unique_ptr<InferResponse> infer_response;
     try {
       infer_response = InferResponse::LoadFromSharedMemory(
-          shm_pool_, (response_shm_offset.data_.get())[r]);
+          shm_pool_, (response_shm_handle.data_.get())[r]);
       if (infer_response->HasError()) {
         TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
@@ -1348,7 +1347,7 @@ ModelInstanceState::~ModelInstanceState()
           IPCMessage::Create(shm_pool_, false /* inline_response */);
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
-      stub_message_queue_->Push(ipc_message->ShmOffset());
+      stub_message_queue_->Push(ipc_message->ShmHandle());
       parent_message_queue_->Pop();
 
       stub_message_queue_.reset();

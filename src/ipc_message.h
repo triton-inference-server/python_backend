@@ -51,16 +51,20 @@ typedef enum PYTHONSTUB_commandtype_enum {
 /// Shared memory representation of IPCMessage
 ///
 /// \param command determines the IPC command that is going to be passed.
-/// \param args determines the shared memory offset for the input parameters.
-/// \param is_response determines whether this is a response of another IPC
-/// message. If this parameter is set, it must provide the offset of the
-/// corresponding request in \param response_offset.
-/// \param response_offset determines the request offset.
+/// \param args determines the shared memory handle for the input parameters.
+/// \param inline_response determines whether this is a response of another IPC
+/// message. If this parameter is set, it must provide the handle of the
+/// corresponding request in \param response_handle.
+/// \param response_handle determines the request handle.
+/// \param response_mutex stores the handle for the mutex for the response
+/// object.
+/// \param response_cond stores the handle for the condition variable
+/// for the response object.
 struct IPCMessageShm {
   PYTHONSTUB_CommandType command;
   bi::managed_external_buffer::handle_t args;
   bool inline_response = false;
-  bi::managed_external_buffer::handle_t response_offset;
+  bi::managed_external_buffer::handle_t response_handle;
   bi::managed_external_buffer::handle_t response_mutex;
   bi::managed_external_buffer::handle_t response_cond;
 };
@@ -72,15 +76,15 @@ class IPCMessage {
       bool inline_response);
   static std::unique_ptr<IPCMessage> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t message_offset);
+      bi::managed_external_buffer::handle_t message_handle);
 
   PYTHONSTUB_CommandType& Command();
   bool& InlineResponse();
-  bi::managed_external_buffer::handle_t& ResponseOffset();
+  bi::managed_external_buffer::handle_t& ResponseHandle();
   bi::interprocess_condition* ResponseCondition();
   bi::interprocess_mutex* ResponseMutex();
   bi::managed_external_buffer::handle_t& Args();
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
   void Release();
 
  private:

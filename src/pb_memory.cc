@@ -127,7 +127,7 @@ PbMemory::PbMemory(
 }
 
 bi::managed_external_buffer::handle_t
-PbMemory::ShmOffset()
+PbMemory::ShmHandle()
 {
   return memory_shm_handle_;
 }

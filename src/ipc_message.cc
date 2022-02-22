@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -57,10 +57,10 @@ IPCMessage::Create(
 std::unique_ptr<IPCMessage>
 IPCMessage::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t message_offset)
+    bi::managed_external_buffer::handle_t message_handle)
 {
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm =
-      shm_pool->Load<IPCMessageShm>(message_offset);
+      shm_pool->Load<IPCMessageShm>(message_handle);
 
   AllocatedSharedMemory<bi::interprocess_mutex> response_mutex_shm;
   AllocatedSharedMemory<bi::interprocess_condition> response_cond_shm;
@@ -106,13 +106,13 @@ IPCMessage::ResponseMutex()
 }
 
 bi::managed_external_buffer::handle_t&
-IPCMessage::ResponseOffset()
+IPCMessage::ResponseHandle()
 {
-  return ipc_message_shm_ptr_->response_offset;
+  return ipc_message_shm_ptr_->response_handle;
 }
 
 bi::managed_external_buffer::handle_t
-IPCMessage::ShmOffset()
+IPCMessage::ShmHandle()
 {
   return ipc_message_handle_;
 }

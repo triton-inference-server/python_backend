@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -37,7 +37,7 @@ namespace bi = boost::interprocess;
 /// Struct holding the represenation of a message stack inside the shared
 /// memory.
 /// \param size Total size of the message stack.
-/// \param mutex Offset of the mutex variable protecting index.
+/// \param mutex Handle of the mutex variable protecting index.
 /// \param index Used element index.
 /// \param sem_empty Semaphore object counting the number of empty buffer slots.
 /// \param sem_full Semaphore object counting the number of used buffer slots.
@@ -61,10 +61,10 @@ class MessageQueue {
   /// Load an already existing message queue from the shared memory.
   static std::unique_ptr<MessageQueue> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t message_queue_offset);
+      bi::managed_external_buffer::handle_t message_queue_handle);
 
   /// Push a message inside the message queue.
-  /// \param message The shared memory offset of the message.
+  /// \param message The shared memory handle of the message.
   void Push(bi::managed_external_buffer::handle_t message);
   void Push(
       bi::managed_external_buffer::handle_t message, int const& duration,
@@ -72,7 +72,7 @@ class MessageQueue {
 
   /// Pop a message from the message queue. This call will block until there
   /// is a message inside the message queue to return.
-  /// \return the offset of the new message.
+  /// \return the handle of the new message.
   bi::managed_external_buffer::handle_t Pop();
   bi::managed_external_buffer::handle_t Pop(int const& duration, bool& success);
 
@@ -81,8 +81,8 @@ class MessageQueue {
   /// to be restarted so that the message queue is in a proper state.
   void ResetSemaphores();
 
-  /// Get the shared memory offset of MessageQueue
-  bi::managed_external_buffer::handle_t ShmOffset();
+  /// Get the shared memory handle of MessageQueue
+  bi::managed_external_buffer::handle_t ShmHandle();
 
   /// Release the ownership of this object in shared memory.
   void Release();

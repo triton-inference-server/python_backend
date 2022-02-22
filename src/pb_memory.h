@@ -41,8 +41,8 @@ namespace triton { namespace backend { namespace python {
 // Represents a memory object in shared memory.
 //
 struct MemoryShm {
-  // The shared memory offset of the data. For device pointers this will contain
-  // the offset to the cudaMemHandle_t object.
+  // The shared memory handle of the data. For device pointers this will contain
+  // the handle to the cudaMemHandle_t object.
   bi::managed_external_buffer::handle_t memory_ptr;
 
   // If the memory type is a GPU pointer, the offset of the GPU pointer from the
@@ -62,12 +62,12 @@ class PbMemory {
       uint64_t byte_size, char* data);
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t memory_offset);
+      bi::managed_external_buffer::handle_t memory_handle);
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       std::unique_ptr<BackendMemory>& backend_memory);
 
-  bi::managed_external_buffer::handle_t ShmOffset();
+  bi::managed_external_buffer::handle_t ShmHandle();
   void Release();
 
   /// Get the total byte size of the tensor.
