@@ -35,10 +35,12 @@
 namespace triton { namespace backend { namespace python {
 
 SharedMemoryManager::SharedMemoryManager(
-    const std::string& shm_region_name, size_t shm_size, bool create)
+    const std::string& shm_region_name, size_t shm_size,
+    size_t shm_growth_bytes, bool create)
 {
   shm_region_name_ = shm_region_name;
   create_ = create;
+  shm_growth_bytes_ = shm_growth_bytes;
 
   if (create) {
     shm_obj_ = std::make_unique<bi::shared_memory_object>(
@@ -86,13 +88,10 @@ SharedMemoryManager::GrowIfNeeded(size_t byte_size)
     current_capacity_ = *total_size_;
   }
 
-  size_t free_memory = managed_buffer_->get_free_memory();
-
-  // [FIXME] Temporary workaround to make sure that enough storage has been
-  // allocated to hold both the data and the allocation meta data
-  size_t requested_bytes = byte_size * 1.1;
-  if (requested_bytes > free_memory) {
-    int64_t new_size = *total_size_ + (requested_bytes - free_memory);
+  if (byte_size != 0) {
+    size_t bytes_to_be_added =
+        shm_growth_bytes_ * (byte_size / shm_growth_bytes_ + 1);
+    int64_t new_size = *total_size_ + bytes_to_be_added;
     try {
       shm_obj_->truncate(new_size);
     }
@@ -107,7 +106,6 @@ SharedMemoryManager::GrowIfNeeded(size_t byte_size)
     }
 
     try {
-      int64_t new_size = *total_size_ + (requested_bytes - free_memory);
       shm_obj_->truncate(new_size);
       shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
       old_shm_maps_.push_back(shm_map_);
@@ -137,9 +135,7 @@ SharedMemoryManager::FreeMemory()
 
 SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
-  if (create_) {
-    bi::shared_memory_object::remove(shm_region_name_.c_str());
-  }
+  bi::shared_memory_object::remove(shm_region_name_.c_str());
 }
 
 }}}  // namespace triton::backend::python

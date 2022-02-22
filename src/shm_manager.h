@@ -24,6 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
 #include <sys/wait.h>
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/detail/atomic.hpp>
@@ -33,8 +35,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
-
-#pragma once
+#include "pb_exception.h"
 
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
@@ -61,31 +62,63 @@ struct AllocatedShmOwnership {
 class SharedMemoryManager {
  public:
   SharedMemoryManager(
-      const std::string& shm_region_name, size_t shm_size, bool create);
+      const std::string& shm_region_name, size_t shm_size,
+      size_t shm_growth_bytes, bool create);
 
   template <typename T>
   AllocatedSharedMemory<T> Construct(uint32_t count = 1, bool aligned = false)
   {
-    T* obj;
-    AllocatedShmOwnership* shm_ownership_data;
+    T* obj = nullptr;
+    AllocatedShmOwnership* shm_ownership_data = nullptr;
     bi::managed_external_buffer::handle_t handle;
 
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-      GrowIfNeeded(sizeof(T) * count);
-      GrowIfNeeded(sizeof(AllocatedShmOwnership));
-      if (!aligned) {
-        obj =
-            reinterpret_cast<T*>(managed_buffer_->allocate(sizeof(T) * count));
-      } else {
-        const std::size_t alignment = 32;
-        obj = reinterpret_cast<T*>(
-            managed_buffer_->allocate_aligned(sizeof(T) * count, alignment));
-      }
-      shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
-          managed_buffer_->allocate(sizeof(AllocatedShmOwnership)));
+      std::size_t requested_bytes = sizeof(T) * count;
 
-      shm_ownership_data->ref_count_ = 1;
+      bool grown = false;
+      for (size_t retries = 0; retries < 2; retries++) {
+        try {
+          if (!aligned) {
+            obj = reinterpret_cast<T*>(
+                managed_buffer_->allocate(requested_bytes));
+          } else {
+            const std::size_t alignment = 32;
+            obj = reinterpret_cast<T*>(
+                managed_buffer_->allocate_aligned(requested_bytes, alignment));
+          }
+          break;
+        }
+        catch (bi::bad_alloc& ex) {
+          if (grown) {
+            throw PythonBackendException(std::string(
+                "Failed to allocate " + std::to_string(requested_bytes) +
+                " byte(s) in shared memory."));
+          }
+          GrowIfNeeded(requested_bytes);
+          grown = true;
+        }
+      }
+
+      grown = false;
+      for (size_t retries = 0; retries < 2; retries++) {
+        try {
+          shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
+              managed_buffer_->allocate(sizeof(AllocatedShmOwnership)));
+          requested_bytes = sizeof(AllocatedShmOwnership);
+          shm_ownership_data->ref_count_ = 1;
+          break;
+        }
+        catch (bi::bad_alloc& ex) {
+          if (grown) {
+            throw PythonBackendException(std::string(
+                "Failed to allocate " + std::to_string(requested_bytes) +
+                " byte(s) in shared memory."));
+          }
+          GrowIfNeeded(requested_bytes);
+          grown = true;
+        }
+      }
 
       bi::managed_external_buffer::handle_t handle_obj =
           managed_buffer_->get_handle_from_address(

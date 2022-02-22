@@ -143,7 +143,7 @@ Stub::Instantiate(
 
   try {
     shm_pool_ = std::make_unique<SharedMemoryManager>(
-        shm_region_name, shm_default_size, false /* create */);
+        shm_region_name, shm_default_size, shm_growth_size, false /* create */);
 
     AllocatedSharedMemory<IPCControlShm> ipc_control =
         shm_pool_->Load<IPCControlShm>(ipc_control_offset);

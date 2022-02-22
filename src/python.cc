@@ -680,10 +680,13 @@ ModelInstanceState::SetupStubProcess()
       std::to_string(model_state->StateForBackend()->number_of_instance_inits);
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
+  int64_t shm_growth_byte_size =
+      model_state->StateForBackend()->shm_growth_byte_size;
 
   try {
     shm_pool_ = std::make_unique<SharedMemoryManager>(
-        shm_region_name_, shm_default_size, true /* create */);
+        shm_region_name_, shm_default_size, shm_growth_byte_size,
+        true /* create */);
   }
   catch (const PythonBackendException& pb_exception) {
     return TRITONSERVER_ErrorNew(

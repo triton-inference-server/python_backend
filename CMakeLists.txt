@@ -145,6 +145,7 @@ set(
   src/pb_utils.h
   src/shm_manager.cc
   src/shm_manager.h
+  src/pb_exception.h
 )
 
 set(

@@ -31,11 +31,11 @@
 #endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
 #include <climits>
-#include <exception>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "pb_exception.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
@@ -138,19 +138,6 @@ struct RequestBatch {
   // Offset for request object.
   off_t requests;
   uint32_t batch_size;
-};
-
-//
-// PythonBackendException
-//
-// Exception thrown if error occurs in PythonBackend.
-//
-struct PythonBackendException : std::exception {
-  PythonBackendException(std::string message) : message_(message) {}
-
-  const char* what() const throw() { return message_.c_str(); }
-
-  std::string message_;
 };
 
 #ifdef TRITON_ENABLE_GPU
