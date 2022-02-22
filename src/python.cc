@@ -1118,14 +1118,6 @@ ModelInstanceState::ProcessRequests(
           shm_pool_->Load<bi::managed_external_buffer::handle_t>(
               response_batch.data_->responses));
 
-  // bool has_gpu_output = false;
-
-  // // The vector that stores the tensor pairs for the tensors that the stub
-  // // provides in GPU but the output buffer provided by Triton is in CPU.
-  // std::vector<std::pair<std::shared_ptr<PbTensor>, std::pair<void*,
-  // uint32_t>>>
-  //     tensor_buffer_pairs;
-
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Response* response = (*responses)[r];
     TRITONBACKEND_Request* request = requests[r];
@@ -1189,9 +1181,6 @@ ModelInstanceState::ProcessRequests(
       TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
       int64_t actual_memory_type_id = src_memory_type_id;
 
-      // if (actual_memory_type == TRITONSERVER_MEMORY_GPU)
-      // has_gpu_output = true;
-
       TRITONBACKEND_Output* response_output;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
@@ -1207,46 +1196,6 @@ ModelInstanceState::ProcessRequests(
           TRITONBACKEND_OutputBuffer(
               response_output, &buffer, output_tensor->ByteSize(),
               &actual_memory_type, &actual_memory_type_id));
-
-      //       if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
-      //           actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-      // #ifdef TRITON_ENABLE_GPU
-      //         cudaSetDevice(output_tensor->MemoryTypeId());
-      //         cudaIpcMemHandle_t cuda_ipc_mem_handle;
-      //         cudaError_t err = cudaIpcGetMemHandle(&cuda_ipc_mem_handle,
-      //         buffer);
-      //         output_tensor->SetCudaIpcMemHandle(&cuda_ipc_mem_handle);
-      //         output_tensor->SetMemoryType(actual_memory_type);
-      //         output_tensor->SetMemoryTypeId(actual_memory_type_id);
-
-      //         if (err != cudaSuccess) {
-      //           GUARDED_RESPOND_IF_ERROR(
-      //               responses, r,
-      //               TRITONSERVER_ErrorNew(
-      //                   TRITONSERVER_ERROR_INTERNAL,
-      //                   std::string(
-      //                       "failed to get cuda ipc handle: " +
-      //                       std::string(cudaGetErrorString(err)))
-      //                       .c_str()));
-      //         } else {
-      //           output_tensor->SetDataPtr(buffer);
-      //           output_tensor->RawDataShm()->offset =
-      //               output_tensor->GetGPUPointerOffset();
-      //         }
-      // #endif
-      //       }
-
-      // if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
-      //     (actual_memory_type == TRITONSERVER_MEMORY_CPU ||
-      //      actual_memory_type == TRITONSERVER_MEMORY_CPU_PINNED)) {
-      //   tensor_buffer_pairs.push_back({output_tensor, {buffer, r}});
-
-      //   // Set the memory type to CPU in shared memory. The stubs notices the
-      //   // change in the memory type and should copy the input tensors to
-      //   CPU. output_tensor->RawDataShm()->memory_type =
-      //   TRITONSERVER_MEMORY_CPU; output_tensor->RawDataShm()->memory_type_id
-      //   = actual_memory_type_id;
-      // }
 
       if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
         GUARDED_RESPOND_IF_ERROR(
@@ -1265,47 +1214,6 @@ ModelInstanceState::ProcessRequests(
     }
 #endif  // TRITON_ENABLE_GPU
   }
-
-  // // If the output tensor is in GPU, there will be a second round trip
-  // // required for filling the GPU buffers provided by the main process.
-  // if (has_gpu_output) {
-  //   ipc_message->Command() =
-  //   PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
-  //   SendMessageAndReceiveResponse(
-  //       ipc_message->SharedMemoryOffset(), response_message, restart,
-  //       responses, requests, 0);
-
-  //   bool cuda_copy = false;
-  //   for (auto& tensor_buffer_pair : tensor_buffer_pairs) {
-  //     bool cuda_used = false;
-  //     auto& tensor = tensor_buffer_pair.first;
-
-  //     // Reload the tensor from shared memory so that the memory data is
-  //     // updated.
-  //     std::shared_ptr<std::mutex> cuda_ipc_mutex;
-  //     std::shared_ptr<PbTensor> reloaded_tensor =
-  //         PbTensor::LoadFromSharedMemory(
-  //             shm_pool_, tensor->ShmOffset(),
-  //             cuda_ipc_mutex /* cuda_ipc_open_mutex */,
-  //             cuda_ipc_mutex /* cuda_ipc_close_mutex */);
-  //     auto& buffer = tensor_buffer_pair.second.first;
-  //     auto& response_index = tensor_buffer_pair.second.second;
-  //     GUARDED_RESPOND_IF_ERROR(
-  //         responses, response_index,
-  //         CopyBuffer(
-  //             "Failed to copy the output tensor to buffer.",
-  //             TRITONSERVER_MEMORY_CPU, 0, TRITONSERVER_MEMORY_CPU, 0,
-  //             reloaded_tensor->ByteSize(), reloaded_tensor->GetDataPtr(),
-  //             buffer, CudaStream(), &cuda_used));
-  //     cuda_copy |= cuda_used;
-  //   }
-  // #ifdef TRITON_ENABLE_GPU
-  // if (cuda_copy) {
-  //   cudaStreamSynchronize(stream_);
-  // }
-  // #endif  // TRITON_ENABLE_GPU
-  // }
-
   for (uint32_t r = 0; r < request_count; ++r) {
     // If error happens at this stage, we can only log it
     GUARDED_RESPOND_IF_ERROR(

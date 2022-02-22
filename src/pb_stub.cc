@@ -427,17 +427,6 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 void
 Stub::ProcessResponse(InferResponse* response)
 {
-  std::vector<std::shared_ptr<PbTensor>>& output_tensors =
-      response->OutputTensors();
-  for (auto& output_tensor : output_tensors) {
-    if (!output_tensor->IsCPU()) {
-      // #ifdef TRITON_ENABLE_GPU
-      //       AddToTensorsToRemove(output_tensor);
-      // #else
-      //       throw PythonBackendException("GPU tensors is not supported.");
-      // #endif
-    }
-  }
   response->SaveToSharedMemory(shm_pool_);
 }
 
