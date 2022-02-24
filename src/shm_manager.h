@@ -55,9 +55,9 @@ struct AllocatedSharedMemory {
 };
 
 struct AllocatedShmOwnership {
+  bi::interprocess_mutex mutex_;
   uint32_t ref_count_;
-  bi::managed_external_buffer::handle_t handle_;
-};
+} __attribute__((aligned(32)));
 
 class SharedMemoryManager {
  public:
@@ -74,39 +74,25 @@ class SharedMemoryManager {
 
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-      std::size_t requested_bytes = sizeof(T) * count;
+      std::size_t requested_bytes =
+          sizeof(T) * count + sizeof(AllocatedShmOwnership);
 
       bool grown = false;
       for (size_t retries = 0; retries < 2; retries++) {
         try {
           if (!aligned) {
-            obj = reinterpret_cast<T*>(
+            shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
                 managed_buffer_->allocate(requested_bytes));
           } else {
             const std::size_t alignment = 32;
-            obj = reinterpret_cast<T*>(
+            shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
                 managed_buffer_->allocate_aligned(requested_bytes, alignment));
           }
-          break;
-        }
-        catch (bi::bad_alloc& ex) {
-          if (grown) {
-            throw PythonBackendException(std::string(
-                "Failed to allocate " + std::to_string(requested_bytes) +
-                " byte(s) in shared memory."));
-          }
-          GrowIfNeeded(requested_bytes);
-          grown = true;
-        }
-      }
-
-      grown = false;
-      for (size_t retries = 0; retries < 2; retries++) {
-        try {
-          shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
-              managed_buffer_->allocate(sizeof(AllocatedShmOwnership)));
-          requested_bytes = sizeof(AllocatedShmOwnership);
+          obj = reinterpret_cast<T*>(
+              (reinterpret_cast<char*>(shm_ownership_data)) +
+              sizeof(AllocatedShmOwnership));
           shm_ownership_data->ref_count_ = 1;
+          new (&(shm_ownership_data->mutex_)) bi::interprocess_mutex;
           break;
         }
         catch (bi::bad_alloc& ex) {
@@ -118,15 +104,13 @@ class SharedMemoryManager {
           GrowIfNeeded(requested_bytes);
           grown = true;
         }
-      }
 
-      bi::managed_external_buffer::handle_t handle_obj =
-          managed_buffer_->get_handle_from_address(
-              reinterpret_cast<void*>(obj));
-      handle = managed_buffer_->get_handle_from_address(
-          reinterpret_cast<void*>(shm_ownership_data));
-      shm_ownership_data->handle_ = handle_obj;
+        break;
+      }
     }
+
+    handle = managed_buffer_->get_handle_from_address(
+        reinterpret_cast<void*>(shm_ownership_data));
 
     return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
   }
@@ -142,10 +126,14 @@ class SharedMemoryManager {
       GrowIfNeeded(0);
       shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
           managed_buffer_->get_address_from_handle(handle));
-      object_ptr =
-          reinterpret_cast<T*>(managed_buffer_->get_address_from_handle(
-              shm_ownership_data->handle_));
+      object_ptr = reinterpret_cast<T*>(
+          reinterpret_cast<char*>(shm_ownership_data) +
+          sizeof(AllocatedShmOwnership));
+    }
 
+    {
+      // bi::scoped_lock<bi::interprocess_mutex>
+      // gaurd{shm_ownership_data->mutex_};
       shm_ownership_data->ref_count_ += 1;
     }
 
@@ -162,6 +150,15 @@ class SharedMemoryManager {
     managed_buffer_->deallocate(ptr);
   }
 
+  void DeallocateUnsafe(bi::managed_external_buffer::handle_t handle)
+  {
+    void* ptr = managed_buffer_->get_address_from_handle(handle);
+    managed_buffer_->deallocate(ptr);
+  }
+
+  void GrowIfNeeded(size_t bytes);
+  bi::interprocess_mutex* Mutex() { return shm_mutex_; }
+
   ~SharedMemoryManager() noexcept(false);
 
  private:
@@ -172,11 +169,9 @@ class SharedMemoryManager {
   std::vector<std::shared_ptr<bi::mapped_region>> old_shm_maps_;
   uint64_t current_capacity_;
   bi::interprocess_mutex* shm_mutex_;
-
   size_t shm_growth_bytes_;
   uint64_t* total_size_;
   bool create_;
-  void GrowIfNeeded(size_t bytes);
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
@@ -188,15 +183,15 @@ class SharedMemoryManager {
                                        shm_ownership_data](T* memory) {
       bool destroy = false;
       {
-        bi::scoped_lock<bi::interprocess_mutex> gaurd{*(this->shm_mutex_)};
+        bi::scoped_lock<bi::interprocess_mutex> gaurd{
+            shm_ownership_data->mutex_};
         shm_ownership_data->ref_count_ -= 1;
         if (shm_ownership_data->ref_count_ == 0) {
           destroy = true;
         }
       }
       if (destroy) {
-        this->Deallocate(shm_ownership_data->handle_);
-        this->Deallocate(handle);
+        Deallocate(handle);
       }
     };
 

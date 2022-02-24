@@ -36,6 +36,7 @@ project(tritonpythonbackend LANGUAGES C CXX)
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
+option(TRITON_ENABLE_NVTX "Include nvtx markers collection in backend." OFF)
 
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
@@ -114,6 +115,10 @@ if(${TRITON_ENABLE_GPU})
 elseif()
   message(WARNING "TRITON_ENABLE_GPU is OFF, GPU Tensor support will be disabled")
 endif() # TRITON_ENABLE_GPU
+
+if(${TRITON_ENABLE_NVTX})
+  add_definitions(-DTRITON_ENABLE_NVTX=1)
+endif() # TRITON_ENABLE_NVTX
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)

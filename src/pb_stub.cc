@@ -45,6 +45,7 @@
 #include "pb_map.h"
 #include "pb_string.h"
 #include "shm_manager.h"
+#include "triton/common/nvtx.h"
 
 
 #ifdef TRITON_ENABLE_GPU
@@ -227,6 +228,7 @@ Stub::PopMessage()
 bool
 Stub::RunCommand()
 {
+  NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
   std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
 
   switch (ipc_message->Command()) {
@@ -301,6 +303,8 @@ Stub::RunCommand()
               shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
                   request_batch.data_->batch_size);
       execute_response->Args() = response_batch.handle_;
+
+
       defer execute_finalize(
           nullptr, std::bind([this] { stub_message_queue_->Pop(); }));
       defer _(nullptr, std::bind([this, &execute_response] {
@@ -468,9 +472,15 @@ Stub::Execute(
   py::module asyncio = py::module::import("asyncio");
 
   // Execute Response
-  py::object execute_return = model_instance_.attr("execute")(request_list);
+  py::object execute_return;
   py::object responses_obj;
-  bool is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+  bool is_coroutine;
+
+  {
+    NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+    execute_return = model_instance_.attr("execute")(request_list);
+    is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+  }
 
   if (is_coroutine) {
     responses_obj = asyncio.attr("run")(execute_return);

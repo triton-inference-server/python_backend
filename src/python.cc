@@ -64,6 +64,7 @@
 #include "triton/backend/backend_memory.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
+#include "triton/common/nvtx.h"
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
@@ -775,6 +776,7 @@ ModelInstanceState::GetInputTensor(
     TRITONBACKEND_Request* request,
     std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses)
 {
+  NVTX_RANGE(nvtx_, "GetInputTensor " + Name());
   const char* input_name;
   // Load iidx'th input name
   RETURN_IF_ERROR(
@@ -873,6 +875,7 @@ ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
     bool& restart, std::atomic<bool>& cleanup)
 {
+  NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
@@ -1062,11 +1065,15 @@ ModelInstanceState::ProcessRequests(
   }
 
   bi::managed_external_buffer::handle_t response_message;
-  SendMessageAndReceiveResponse(
-      ipc_message->ShmHandle(), response_message, restart, responses, requests,
-      request_count);
+  {
+    NVTX_RANGE(nvtx_, "StubProcessing " + Name());
+    SendMessageAndReceiveResponse(
+        ipc_message->ShmHandle(), response_message, restart, responses,
+        requests, request_count);
+  }
 
   defer _(nullptr, std::bind([this, &restart] {
+            NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
             if (!restart)
               stub_message_queue_->Push(1000);
           }));
@@ -1119,6 +1126,7 @@ ModelInstanceState::ProcessRequests(
               response_batch.data_->responses));
 
   for (uint32_t r = 0; r < request_count; ++r) {
+    NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
     TRITONBACKEND_Response* response = (*responses)[r];
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
