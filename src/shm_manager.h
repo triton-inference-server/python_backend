@@ -132,8 +132,7 @@ class SharedMemoryManager {
     }
 
     {
-      // bi::scoped_lock<bi::interprocess_mutex>
-      // gaurd{shm_ownership_data->mutex_};
+      bi::scoped_lock<bi::interprocess_mutex> gaurd{shm_ownership_data->mutex_};
       shm_ownership_data->ref_count_ += 1;
     }
 

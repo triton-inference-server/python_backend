@@ -52,7 +52,6 @@ class PbMap {
       bi::managed_external_buffer::handle_t handle);
   const std::unordered_map<std::string, std::string>& UnorderedMap();
   bi::managed_external_buffer::handle_t ShmHandle();
-  void Release();
 
  private:
   PbMap(

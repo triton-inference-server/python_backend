@@ -55,14 +55,7 @@ namespace triton { namespace backend { namespace python {
 struct TensorShm {
   // Handle for the pointer data in shared memory.
   bi::managed_external_buffer::handle_t memory;
-
-  // Handle for name field.
-  bi::managed_external_buffer::handle_t name;
-
   TRITONSERVER_DataType dtype;
-
-  // Shared memory handle for the dimensions.
-  bi::managed_external_buffer::handle_t dims;
   size_t dims_count;
 };
 
@@ -111,8 +104,7 @@ class PbTensor {
   /// \param dims_shm Tensor dimensions
   /// \param pb_string Triton dtype
   PbTensor(
-      AllocatedSharedMemory<TensorShm>& tensor_shm,
-      AllocatedSharedMemory<int64_t>& dims_shm,
+      AllocatedSharedMemory<char>& tensor_shm,
       std::unique_ptr<PbString>& name_shm,
       std::unique_ptr<PbMemory>& pb_memory);
 
@@ -198,9 +190,6 @@ class PbTensor {
   /// \return A vector containing the tensor dimensions.
   const std::vector<int64_t>& Dims() const;
 
-  // Release the ownership of this tensor.
-  void Release();
-
   PbTensor();
 
   /// Destructor
@@ -223,12 +212,9 @@ class PbTensor {
 
   bi::managed_external_buffer::handle_t shm_handle_;
 
-  AllocatedSharedMemory<TensorShm> tensor_shm_;
+  AllocatedSharedMemory<char> tensor_shm_;
   TensorShm* tensor_shm_ptr_;
-
-  AllocatedSharedMemory<int64_t> dims_shm_;
   int64_t* dims_shm_ptr_;
-
   std::unique_ptr<PbString> name_shm_;
 
   // The pointer is null when the object is not stored in shared memory.

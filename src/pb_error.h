@@ -40,7 +40,6 @@ class PbError {
   static std::shared_ptr<PbError> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
-  void Release();
   DISALLOW_COPY_AND_ASSIGN(PbError);
 
  private:

@@ -40,14 +40,23 @@ class PbString {
   static std::unique_ptr<PbString> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       const std::string& string);
+  static std::unique_ptr<PbString> Create(
+      const std::string& string, char* data_shm,
+      bi::managed_external_buffer::handle_t handle);
   static std::unique_ptr<PbString> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
+  static std::unique_ptr<PbString> LoadFromSharedMemory(
+      bi::managed_external_buffer::handle_t handle, char* data_shm);
+  static std::size_t ShmStructSize(const std::string& string);
 
   char* MutableString() { return string_shm_ptr_; }
-  const char* String() { return string_shm_ptr_; }
+  std::string String()
+  {
+    return std::string(
+        string_shm_ptr_, string_shm_ptr_ + string_container_shm_ptr_->length);
+  }
   bi::managed_external_buffer::handle_t ShmHandle();
-  void Release();
 
  private:
   AllocatedSharedMemory<StringShm> string_container_shm_;
@@ -61,6 +70,10 @@ class PbString {
   PbString(
       AllocatedSharedMemory<StringShm>& string_container_shm,
       AllocatedSharedMemory<char>& string_shm);
+
+  PbString(
+      StringShm* string_container_shm, char* string_shm,
+      bi::managed_external_buffer::handle_t handle);
 };
 
 }}}  // namespace triton::backend::python

@@ -66,7 +66,6 @@ class InferRequest {
   uint32_t Flags();
   void SetFlags(uint32_t flags);
   const std::vector<std::string>& RequestedOutputNames();
-  void Release();
   bi::managed_external_buffer::handle_t ShmHandle();
 
   /// Save an Inference Request to shared memory.

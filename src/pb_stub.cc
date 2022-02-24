@@ -304,7 +304,6 @@ Stub::RunCommand()
                   request_batch.data_->batch_size);
       execute_response->Args() = response_batch.handle_;
 
-
       defer execute_finalize(
           nullptr, std::bind([this] { stub_message_queue_->Pop(); }));
       defer _(nullptr, std::bind([this, &execute_response] {

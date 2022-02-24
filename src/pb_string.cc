@@ -46,6 +46,21 @@ PbString::Create(
 }
 
 std::unique_ptr<PbString>
+PbString::Create(
+    const std::string& string, char* data_shm,
+    bi::managed_external_buffer::handle_t handle)
+{
+  StringShm* string_container_shm = reinterpret_cast<StringShm*>(data_shm);
+  string_container_shm->length = string.size();
+
+  char* string_shm = data_shm + sizeof(StringShm);
+  std::memcpy(string_shm, string.data(), string.size());
+
+  return std::unique_ptr<PbString>(
+      new PbString(string_container_shm, string_shm, handle));
+}
+
+std::unique_ptr<PbString>
 PbString::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
@@ -59,6 +74,17 @@ PbString::LoadFromSharedMemory(
       new PbString(string_container_shm, string_shm));
 }
 
+std::unique_ptr<PbString>
+PbString::LoadFromSharedMemory(
+    bi::managed_external_buffer::handle_t handle, char* data_shm)
+{
+  StringShm* string_container_shm = reinterpret_cast<StringShm*>(data_shm);
+  char* string_shm = data_shm + sizeof(StringShm);
+
+  return std::unique_ptr<PbString>(
+      new PbString(string_container_shm, string_shm, handle));
+}
+
 PbString::PbString(
     AllocatedSharedMemory<StringShm>& string_container_shm,
     AllocatedSharedMemory<char>& string_shm)
@@ -70,22 +96,25 @@ PbString::PbString(
   string_handle_ = string_container_shm_.handle_;
 }
 
+PbString::PbString(
+    StringShm* string_container_shm, char* string_shm,
+    bi::managed_external_buffer::handle_t handle)
+{
+  string_shm_ptr_ = string_shm;
+  string_container_shm_ptr_ = string_container_shm;
+  string_handle_ = handle;
+}
+
 bi::managed_external_buffer::handle_t
 PbString::ShmHandle()
 {
   return string_handle_;
 }
 
-void
-PbString::Release()
+std::size_t
+PbString::ShmStructSize(const std::string& string)
 {
-  if (string_container_shm_.data_ != nullptr) {
-    string_container_shm_.data_.release();
-  }
-
-  if (string_shm_.data_ != nullptr) {
-    string_shm_.data_.release();
-  }
+  return string.size() + 1 + sizeof(StringShm);
 }
 
 }}}  // namespace triton::backend::python

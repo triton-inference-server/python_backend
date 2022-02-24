@@ -384,28 +384,33 @@ PbTensor::AsNumpy() const
 void
 PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  tensor_shm_ = shm_pool->Construct<TensorShm>();
-  tensor_shm_ptr_ = tensor_shm_.data_.get();
+  tensor_shm_ = shm_pool->Construct<char>(
+      (sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
+       PbString::ShmStructSize(name_)));
+
+  tensor_shm_ptr_ = reinterpret_cast<TensorShm*>(tensor_shm_.data_.get());
   tensor_shm_ptr_->dtype = dtype_;
   tensor_shm_ptr_->dims_count = dims_.size();
   shm_handle_ = tensor_shm_.handle_;
 
-  dims_shm_ = shm_pool->Construct<int64_t>(dims_.size());
-  dims_shm_ptr_ = dims_shm_.data_.get();
+  dims_shm_ptr_ = reinterpret_cast<int64_t*>(
+      reinterpret_cast<char*>(tensor_shm_ptr_) + sizeof(TensorShm));
 
   // Write the dimensions data to shared memory.
   for (size_t i = 0; i < dims_.size(); i++) {
     dims_shm_ptr_[i] = dims_[i];
   }
 
-  name_shm_ = PbString::Create(shm_pool, name_);
-  tensor_shm_ptr_->name = name_shm_->ShmHandle();
+  name_shm_ = PbString::Create(
+      name_,
+      reinterpret_cast<char*>(tensor_shm_ptr_) + sizeof(TensorShm) +
+          sizeof(int64_t) * dims_.size(),
+      shm_handle_ + sizeof(TensorShm) + sizeof(int64_t) * dims_.size());
   pb_memory_ = PbMemory::Create(
       shm_pool, memory_type_, memory_type_id_, byte_size_,
       reinterpret_cast<char*>(memory_ptr_));
 
   tensor_shm_ptr_->memory = pb_memory_->ShmHandle();
-  tensor_shm_ptr_->dims = dims_shm_.handle_;
   memory_ptr_ = pb_memory_->DataPtr();
 }
 
@@ -414,16 +419,17 @@ PbTensor::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t tensor_handle)
 {
-  AllocatedSharedMemory<TensorShm> tensor_shm =
-      shm_pool->Load<TensorShm>(tensor_handle);
-  AllocatedSharedMemory<int64_t> dims_shm =
-      shm_pool->Load<int64_t>(tensor_shm.data_->dims);
-  std::unique_ptr<PbString> name_shm =
-      PbString::LoadFromSharedMemory(shm_pool, tensor_shm.data_->name);
+  AllocatedSharedMemory<char> tensor_shm = shm_pool->Load<char>(tensor_handle);
+  TensorShm* tensor_shm_ptr =
+      reinterpret_cast<TensorShm*>(tensor_shm.data_.get());
+  size_t name_offset =
+      sizeof(TensorShm) + sizeof(int64_t) * tensor_shm_ptr->dims_count;
+  std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(
+      tensor_handle + name_offset, tensor_shm.data_.get() + name_offset);
   std::unique_ptr<PbMemory> pb_memory =
-      PbMemory::LoadFromSharedMemory(shm_pool, tensor_shm.data_->memory);
+      PbMemory::LoadFromSharedMemory(shm_pool, tensor_shm_ptr->memory);
   return std::shared_ptr<PbTensor>(
-      new PbTensor(tensor_shm, dims_shm, name_shm, pb_memory));
+      new PbTensor(tensor_shm, name_shm, pb_memory));
 }
 
 TRITONSERVER_DataType
@@ -444,29 +450,20 @@ PbTensor::ShmHandle()
   return shm_handle_;
 }
 
-void
-PbTensor::Release()
-{
-  tensor_shm_.data_.release();
-  dims_shm_.data_.release();
-  name_shm_->Release();
-  pb_memory_->Release();
-}
-
 PbTensor::PbTensor(
-    AllocatedSharedMemory<TensorShm>& tensor_shm,
-    AllocatedSharedMemory<int64_t>& dims_shm,
+    AllocatedSharedMemory<char>& tensor_shm,
     std::unique_ptr<PbString>& name_shm, std::unique_ptr<PbMemory>& pb_memory)
-    : tensor_shm_(std::move(tensor_shm)), dims_shm_(std::move(dims_shm)),
-      name_shm_(std::move(name_shm)), pb_memory_(std::move(pb_memory))
+    : tensor_shm_(std::move(tensor_shm)), name_shm_(std::move(name_shm)),
+      pb_memory_(std::move(pb_memory))
 {
-  tensor_shm_ptr_ = tensor_shm_.data_.get();
-  dims_shm_ptr_ = dims_shm_.data_.get();
+  tensor_shm_ptr_ = reinterpret_cast<TensorShm*>(tensor_shm_.data_.get());
+  dims_shm_ptr_ = reinterpret_cast<int64_t*>(
+      reinterpret_cast<char*>(tensor_shm_ptr_) + sizeof(TensorShm));
 
   name_ = name_shm_->String();
   dims_ = std::vector<int64_t>(
-      dims_shm_ptr_, dims_shm_ptr_ + tensor_shm_.data_->dims_count);
-  dtype_ = tensor_shm_.data_->dtype;
+      dims_shm_ptr_, dims_shm_ptr_ + tensor_shm_ptr_->dims_count);
+  dtype_ = tensor_shm_ptr_->dtype;
   dl_managed_tensor_ = nullptr;
   byte_size_ = pb_memory_->ByteSize();
   memory_ptr_ = pb_memory_->DataPtr();

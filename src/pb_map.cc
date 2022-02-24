@@ -96,22 +96,6 @@ PbMap::LoadFromSharedMemory(
       new PbMap(pb_strings, dict_shm, pair_shms, map));
 }
 
-void
-PbMap::Release()
-{
-  for (auto& string : strings_) {
-    string->Release();
-  }
-
-  if (dict_shm_.data_ != nullptr) {
-    dict_shm_.data_.release();
-  }
-
-  if (pair_shms_.data_ != nullptr) {
-    pair_shms_.data_.release();
-  }
-}
-
 PbMap::PbMap(
     std::vector<std::unique_ptr<PbString>>& strings,
     AllocatedSharedMemory<DictShm>& dict_shm,

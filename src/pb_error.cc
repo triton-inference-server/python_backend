@@ -40,12 +40,6 @@ PbError::ShmHandle()
 }
 
 void
-PbError::Release()
-{
-  message_shm_->Release();
-}
-
-void
 PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   message_shm_ = PbString::Create(shm_pool, message_);

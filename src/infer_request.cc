@@ -101,24 +101,6 @@ InferRequest::ShmHandle()
 }
 
 void
-InferRequest::Release()
-{
-  infer_request_shm_.data_.release();
-  request_id_shm_->Release();
-  for (auto& requested_output_shm : requested_output_names_shm_) {
-    requested_output_shm->Release();
-  }
-
-  for (auto& input : inputs_) {
-    input->Release();
-  }
-
-  model_name_shm_->Release();
-  output_names_handle_shm_.data_.release();
-  input_tensors_handle_.data_.release();
-}
-
-void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<InferRequestShm> infer_request_shm =

@@ -226,7 +226,6 @@ class ModelState : public BackendModel {
   bool force_cpu_only_input_tensors_;
 };
 
-
 class ModelInstanceState : public BackendModelInstance {
   ModelInstanceState(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance);
@@ -651,7 +650,7 @@ ModelInstanceState::StartStubProcess()
             PbString::LoadFromSharedMemory(
                 shm_pool_, initialize_response->response_error);
         return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, error_message->String());
+            TRITONSERVER_ERROR_INTERNAL, error_message->String().c_str());
       } else {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
@@ -1107,7 +1106,8 @@ ModelInstanceState::ProcessRequests(
           error_message_shm = PbString::LoadFromSharedMemory(
               shm_pool_, response_batch.data_->error));
       RespondErrorToAllRequests(
-          error_message_shm->String(), responses, requests, request_count);
+          error_message_shm->String().c_str(), responses, requests,
+          request_count);
     } else {
       const char* error_message =
           "Failed to fetch the error in response batch.";

@@ -87,21 +87,6 @@ InferResponse::SaveToSharedMemory(
   }
 }
 
-void
-InferResponse::Release()
-{
-  response_shm_.data_.release();
-  if (error_ != nullptr) {
-    error_->Release();
-  }
-
-  for (auto& output_tensor : output_tensors_) {
-    output_tensor->Release();
-  }
-
-  tensor_handle_shm_.data_.release();
-}
-
 bi::managed_external_buffer::handle_t
 InferResponse::ShmHandle()
 {
