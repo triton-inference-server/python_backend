@@ -122,8 +122,6 @@ struct IPCControlShm {
 };
 
 struct ResponseBatch {
-  // Handle for response object.
-  bi::managed_external_buffer::handle_t responses;
   uint32_t batch_size;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
@@ -135,8 +133,6 @@ struct ResponseBatch {
 };
 
 struct RequestBatch {
-  // Handle for request object.
-  bi::managed_external_buffer::handle_t requests;
   uint32_t batch_size;
 };
 

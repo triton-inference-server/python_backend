@@ -291,17 +291,24 @@ Stub::RunCommand()
           IPCMessage::Create(shm_pool_, false /* Inline response */);
       execute_response->Command() = PYTHONSTUB_ExecuteResposne;
 
-      AllocatedSharedMemory<RequestBatch> request_batch =
-          shm_pool_->Load<RequestBatch>(ipc_message->Args());
-      AllocatedSharedMemory<ResponseBatch> response_batch =
-          shm_pool_->Construct<ResponseBatch>();
+      AllocatedSharedMemory<char> request_batch =
+          shm_pool_->Load<char>(ipc_message->Args());
+      RequestBatch* request_batch_shm_ptr =
+          reinterpret_cast<RequestBatch*>(request_batch.data_.get());
+      AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
+          request_batch_shm_ptr->batch_size *
+              sizeof(bi::managed_external_buffer::handle_t) +
+          sizeof(ResponseBatch));
+      ResponseBatch* response_batch_shm_ptr =
+          reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+
       std::unique_ptr<PbString> error_string_shm;
       py::list inference_responses;
 
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-          responses_shm_handle =
-              shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
-                  request_batch.data_->batch_size);
+      bi::managed_external_buffer::handle_t* responses_shm_handle =
+          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+              response_batch.data_.get() + sizeof(ResponseBatch));
+
       execute_response->Args() = response_batch.handle_;
 
       defer execute_finalize(
@@ -310,11 +317,12 @@ Stub::RunCommand()
                 SendIPCMessage(execute_response);
               }));
 
-      response_batch.data_->has_error = false;
-      response_batch.data_->is_error_set = false;
+      response_batch_shm_ptr->has_error = false;
+      response_batch_shm_ptr->is_error_set = false;
       try {
-        inference_responses =
-            Execute(request_batch, response_batch, responses_shm_handle);
+        inference_responses = Execute(
+            request_batch_shm_ptr, response_batch_shm_ptr,
+            responses_shm_handle);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -333,10 +341,9 @@ Stub::RunCommand()
             error_string;
         LOG_INFO << err_message.c_str();
         error_string_shm = PbString::Create(shm_pool_, error_string);
-        response_batch.data_->has_error = true;
-
-        response_batch.data_->is_error_set = true;
-        response_batch.data_->error = error_string_shm->ShmHandle();
+        response_batch_shm_ptr->has_error = true;
+        response_batch_shm_ptr->is_error_set = true;
+        response_batch_shm_ptr->error = error_string_shm->ShmHandle();
       }
 
     } break;
@@ -435,12 +442,10 @@ Stub::ProcessResponse(InferResponse* response)
 
 py::list
 Stub::Execute(
-    AllocatedSharedMemory<RequestBatch>& request_batch,
-    AllocatedSharedMemory<ResponseBatch>& response_batch,
-    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-        responses_shm_handle)
+    RequestBatch* request_batch_shm_ptr, ResponseBatch* response_batch_shm_ptr,
+    bi::managed_external_buffer::handle_t* responses_shm_handle)
 {
-  uint32_t batch_size = request_batch.data_->batch_size;
+  uint32_t batch_size = request_batch_shm_ptr->batch_size;
   py::list responses;
 
   if (batch_size == 0) {
@@ -448,16 +453,15 @@ Stub::Execute(
   }
 
   py::list py_request_list;
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      request_shm_handle =
-          shm_pool_->Load<bi::managed_external_buffer::handle_t>(
-              request_batch.data_->requests);
+  bi::managed_external_buffer::handle_t* request_shm_handle =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          reinterpret_cast<char*>(request_batch_shm_ptr) +
+          sizeof(RequestBatch));
 
   for (size_t i = 0; i < batch_size; i++) {
     // [FIXME] Some custom handling might be required for GPU tensors
     std::unique_ptr<InferRequest> infer_request =
-        InferRequest::LoadFromSharedMemory(
-            shm_pool_, (request_shm_handle.data_.get())[i]);
+        InferRequest::LoadFromSharedMemory(shm_pool_, request_shm_handle[i]);
     py_request_list.append(std::move(infer_request));
   }
 
@@ -498,11 +502,12 @@ Stub::Execute(
   responses = responses_obj;
   size_t response_size = py::len(responses);
 
-  // If the number of request objects do not match the number of resposne
-  // objects throw an error.
+  // If the number of request objects do not match the number of
+  // resposne objects throw an error.
   if (response_size != batch_size) {
     std::string err =
-        "Number of InferenceResponse objects do not match the number of "
+        "Number of InferenceResponse objects do not match the number "
+        "of "
         "InferenceRequest objects. InferenceRequest(s) size is:" +
         std::to_string(batch_size) +
         ", and InferenceResponse(s) size is:" + std::to_string(response_size) +
@@ -520,14 +525,13 @@ Stub::Execute(
     }
   }
 
-  response_batch.data_->responses = responses_shm_handle.handle_;
-  response_batch.data_->batch_size = response_size;
+  response_batch_shm_ptr->batch_size = response_size;
 
   size_t i = 0;
   for (auto& response : responses) {
     InferResponse* infer_response = response.cast<InferResponse*>();
     ProcessResponse(infer_response);
-    (responses_shm_handle.data_.get())[i] = infer_response->ShmHandle();
+    responses_shm_handle[i] = infer_response->ShmHandle();
     i += 1;
   }
 

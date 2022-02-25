@@ -974,22 +974,21 @@ ModelInstanceState::ProcessRequests(
       IPCMessage::Create(shm_pool_, false /*inline_response*/);
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
 
-  AllocatedSharedMemory<RequestBatch> request_batch;
+  AllocatedSharedMemory<char> request_batch;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       responses, request_count,
-      request_batch = shm_pool_->Construct<RequestBatch>());
+      request_batch = shm_pool_->Construct<char>(
+          sizeof(RequestBatch) +
+          request_count * sizeof(bi::managed_external_buffer::handle_t)));
 
-  request_batch.data_->batch_size = request_count;
+  RequestBatch* request_batch_shm_ptr =
+      reinterpret_cast<RequestBatch*>(request_batch.data_.get());
+  request_batch_shm_ptr->batch_size = request_count;
   ipc_message->Args() = request_batch.handle_;
 
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t> requests_shm;
-
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      responses, request_count,
-      requests_shm =
-          shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
-              request_count));
-  request_batch.data_->requests = requests_shm.handle_;
+  bi::managed_external_buffer::handle_t* requests_shm =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          request_batch.data_.get() + sizeof(RequestBatch));
 
   std::vector<std::unique_ptr<InferRequest>> pb_inference_requests;
   for (uint32_t r = 0; r < request_count; ++r) {
@@ -1046,7 +1045,7 @@ ModelInstanceState::ProcessRequests(
 
     RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
         responses, request_count, infer_request->SaveToSharedMemory(shm_pool_));
-    (requests_shm.data_.get())[r] = infer_request->ShmHandle();
+    requests_shm[r] = infer_request->ShmHandle();
     pb_inference_requests.emplace_back(std::move(infer_request));
   }
 
@@ -1090,21 +1089,24 @@ ModelInstanceState::ProcessRequests(
   reporter.SetComputeEndNs(compute_end_ns);
 
   // Parsing the request response
-  AllocatedSharedMemory<ResponseBatch> response_batch;
+  AllocatedSharedMemory<char> response_batch;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       responses, request_count,
-      response_batch = shm_pool_->Load<ResponseBatch>(ipc_message->Args()));
+      response_batch = shm_pool_->Load<char>(ipc_message->Args()));
+
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
 
   // If inference fails, release all the requests and send an error response.
   // If inference fails at this stage, it usually indicates a bug in the model
   // code
-  if (response_batch.data_->has_error) {
-    if (response_batch.data_->is_error_set) {
+  if (response_batch_shm_ptr->has_error) {
+    if (response_batch_shm_ptr->is_error_set) {
       std::unique_ptr<PbString> error_message_shm;
       RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
           responses, request_count,
           error_message_shm = PbString::LoadFromSharedMemory(
-              shm_pool_, response_batch.data_->error));
+              shm_pool_, response_batch_shm_ptr->error));
       RespondErrorToAllRequests(
           error_message_shm->String().c_str(), responses, requests,
           request_count);
@@ -1117,13 +1119,10 @@ ModelInstanceState::ProcessRequests(
     return;
   }
 
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      response_shm_handle;
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      responses, request_count,
-      response_shm_handle =
-          shm_pool_->Load<bi::managed_external_buffer::handle_t>(
-              response_batch.data_->responses));
+  bi::managed_external_buffer::handle_t* response_shm_handle =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          response_batch.data_.get() + sizeof(ResponseBatch));
+
 
   for (uint32_t r = 0; r < request_count; ++r) {
     NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
@@ -1134,7 +1133,7 @@ ModelInstanceState::ProcessRequests(
     std::unique_ptr<InferResponse> infer_response;
     try {
       infer_response = InferResponse::LoadFromSharedMemory(
-          shm_pool_, (response_shm_handle.data_.get())[r]);
+          shm_pool_, response_shm_handle[r]);
       if (infer_response->HasError()) {
         TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,

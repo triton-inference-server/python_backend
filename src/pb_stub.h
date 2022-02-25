@@ -86,10 +86,9 @@ class Stub {
 
   /// Execute a batch of requests.
   py::list Execute(
-      AllocatedSharedMemory<RequestBatch>& request_batch,
-      AllocatedSharedMemory<ResponseBatch>& response_batch,
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          responses_shm_handle);
+      RequestBatch* request_batch_shm_ptr,
+      ResponseBatch* response_batch_shm_ptr,
+      bi::managed_external_buffer::handle_t* responses_shm_handle);
 
   void ProcessResponse(InferResponse* response);
   ~Stub();
