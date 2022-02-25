@@ -103,66 +103,74 @@ InferRequest::ShmHandle()
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  AllocatedSharedMemory<InferRequestShm> infer_request_shm =
-      shm_pool->Construct<InferRequestShm>();
+  AllocatedSharedMemory<char> infer_request_shm = shm_pool->Construct<char>(
+      sizeof(InferRequestShm) +
+      (RequestedOutputNames().size() *
+       sizeof(bi::managed_external_buffer::handle_t)) +
+      (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t)) +
+      PbString::ShmStructSize(ModelName()) +
+      PbString::ShmStructSize(RequestId()));
 
-  infer_request_shm.data_->correlation_id = CorrelationId();
-
-  std::unique_ptr<PbString> request_id_shm =
-      PbString::Create(shm_pool, RequestId());
-
-  infer_request_shm.data_->id = request_id_shm->ShmHandle();
-  infer_request_shm.data_->requested_output_count =
+  infer_request_shm_ptr_ =
+      reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
+  infer_request_shm_ptr_->correlation_id = CorrelationId();
+  infer_request_shm_ptr_->input_count = Inputs().size();
+  infer_request_shm_ptr_->model_version = model_version_;
+  infer_request_shm_ptr_->requested_output_count =
       RequestedOutputNames().size();
 
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      output_names_handle =
-          shm_pool->Construct<bi::managed_external_buffer::handle_t>(
-              RequestedOutputNames().size());
-  infer_request_shm.data_->requested_output_names = output_names_handle.handle_;
+  output_names_handle_shm_ptr_ =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          reinterpret_cast<char*>(infer_request_shm_ptr_) +
+          sizeof(InferRequestShm));
 
+  // [FIXME] Make this part of the memory layout too.
   size_t i = 0;
   std::vector<std::unique_ptr<PbString>> requested_output_names_shm;
   for (auto& requested_output_name : requested_output_names_) {
     std::unique_ptr<PbString> requested_output_name_shm =
         PbString::Create(shm_pool, requested_output_name);
-    (output_names_handle.data_.get())[i] =
-        requested_output_name_shm->ShmHandle();
+    output_names_handle_shm_ptr_[i] = requested_output_name_shm->ShmHandle();
     requested_output_names_shm.emplace_back(
         std::move(requested_output_name_shm));
     i++;
   }
 
-  infer_request_shm.data_->input_count = Inputs().size();
-  infer_request_shm.data_->model_version = model_version_;
-
-  std::unique_ptr<PbString> model_name_shm =
-      PbString::Create(shm_pool, ModelName());
-  infer_request_shm.data_->model_name = model_name_shm->ShmHandle();
-
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      input_tensors_handle =
-          shm_pool->Construct<bi::managed_external_buffer::handle_t>(
-              Inputs().size());
-
-  infer_request_shm.data_->inputs = input_tensors_handle.handle_;
+  input_tensors_handle_ptr_ =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          reinterpret_cast<char*>(output_names_handle_shm_ptr_) +
+          sizeof(bi::managed_external_buffer::handle_t) *
+              RequestedOutputNames().size());
   i = 0;
   for (auto& input : Inputs()) {
-    (input_tensors_handle.data_.get())[i] = input->ShmHandle();
+    input_tensors_handle_ptr_[i] = input->ShmHandle();
     i++;
   }
 
+  size_t model_name_offset =
+      sizeof(InferRequestShm) +
+      (RequestedOutputNames().size() *
+       sizeof(bi::managed_external_buffer::handle_t)) +
+      (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t));
+
+  std::unique_ptr<PbString> model_name_shm = PbString::Create(
+      ModelName(),
+      reinterpret_cast<char*>(infer_request_shm_ptr_) + model_name_offset,
+      infer_request_shm.handle_ + model_name_offset);
+
+  size_t request_id_offset =
+      model_name_offset + PbString::ShmStructSize(ModelName());
+  std::unique_ptr<PbString> request_id_shm = PbString::Create(
+      RequestId(),
+      reinterpret_cast<char*>(infer_request_shm_ptr_) + request_id_offset,
+      infer_request_shm.handle_ + request_id_offset);
 
   // Save the references to shared memory.
   infer_request_shm_ = std::move(infer_request_shm);
-  infer_request_shm_ptr_ = infer_request_shm.data_.get();
   request_id_shm_ = std::move(request_id_shm);
-  output_names_handle_shm_ = std::move(output_names_handle);
-  requested_output_names_shm_ = std::move(requested_output_names_shm);
-  input_tensors_handle_ = std::move(input_tensors_handle);
-  input_tensors_handle_ptr_ = input_tensors_handle.data_.get();
   model_name_shm_ = std::move(model_name_shm);
   shm_handle_ = infer_request_shm_.handle_;
+  requested_output_names_shm_ = std::move(requested_output_names_shm);
 }
 
 std::unique_ptr<InferRequest>
@@ -170,71 +178,85 @@ InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t request_handle)
 {
-  AllocatedSharedMemory<InferRequestShm> infer_request_shm =
-      shm_pool->Load<InferRequestShm>(request_handle);
-  std::unique_ptr<PbString> request_id_shm =
-      PbString::LoadFromSharedMemory(shm_pool, infer_request_shm.data_->id);
-
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      input_tensors_handle =
-          shm_pool->Load<bi::managed_external_buffer::handle_t>(
-              infer_request_shm.data_->inputs);
-
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      output_names_handle =
-          shm_pool->Load<bi::managed_external_buffer::handle_t>(
-              infer_request_shm.data_->requested_output_names);
+  AllocatedSharedMemory<char> infer_request_shm =
+      shm_pool->Load<char>(request_handle);
+  InferRequestShm* infer_request_shm_ptr =
+      reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
 
   std::vector<std::unique_ptr<PbString>> requested_output_names_shm;
   uint32_t requested_output_count =
-      infer_request_shm.data_->requested_output_count;
+      infer_request_shm_ptr->requested_output_count;
+
+  bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          (reinterpret_cast<char*>(infer_request_shm_ptr) +
+           sizeof(InferRequestShm)));
 
   for (size_t output_idx = 0; output_idx < requested_output_count;
        ++output_idx) {
     std::unique_ptr<PbString> pb_string = PbString::LoadFromSharedMemory(
-        shm_pool, (output_names_handle.data_.get())[output_idx]);
-
+        shm_pool, output_names_handle_shm_ptr[output_idx]);
     requested_output_names_shm.emplace_back(std::move(pb_string));
   }
 
+  bi::managed_external_buffer::handle_t* input_names_handle_shm_ptr =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          (reinterpret_cast<char*>(infer_request_shm_ptr) +
+           sizeof(InferRequestShm) +
+           (infer_request_shm_ptr->requested_output_count *
+            sizeof(bi::managed_external_buffer::handle_t))));
+
   std::vector<std::shared_ptr<PbTensor>> input_tensors;
-  for (size_t input_idx = 0; input_idx < infer_request_shm.data_->input_count;
+  for (size_t input_idx = 0; input_idx < infer_request_shm_ptr->input_count;
        ++input_idx) {
     std::shared_ptr<PbTensor> input_tensor = PbTensor::LoadFromSharedMemory(
-        shm_pool, (input_tensors_handle.data_.get())[input_idx]);
+        shm_pool, input_names_handle_shm_ptr[input_idx]);
     input_tensors.emplace_back(std::move(input_tensor));
   }
 
+  size_t model_name_offset =
+      sizeof(InferRequestShm) +
+      (requested_output_count * sizeof(bi::managed_external_buffer::handle_t)) +
+      (infer_request_shm_ptr->input_count *
+       sizeof(bi::managed_external_buffer::handle_t));
+
   std::unique_ptr<PbString> model_name_shm = PbString::LoadFromSharedMemory(
-      shm_pool, infer_request_shm.data_->model_name);
+      request_handle + model_name_offset,
+      reinterpret_cast<char*>(infer_request_shm_ptr) + model_name_offset);
+
+  size_t request_id_offset = model_name_offset + model_name_shm->Size();
+  std::unique_ptr<PbString> request_id_shm = PbString::LoadFromSharedMemory(
+      request_handle + request_id_offset,
+      reinterpret_cast<char*>(infer_request_shm_ptr) + request_id_offset);
 
   return std::unique_ptr<InferRequest>(new InferRequest(
       infer_request_shm, request_id_shm, requested_output_names_shm,
-      model_name_shm, output_names_handle, input_tensors_handle,
-      input_tensors));
+      model_name_shm, input_tensors));
 }
 
 InferRequest::InferRequest(
-    AllocatedSharedMemory<InferRequestShm>& infer_request_shm,
+    AllocatedSharedMemory<char>& infer_request_shm,
     std::unique_ptr<PbString>& request_id_shm,
     std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
     std::unique_ptr<PbString>& model_name_shm,
-    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-        output_names_handle_shm,
-    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-        input_tensors_handle,
     std::vector<std::shared_ptr<PbTensor>>& input_tensors)
     : infer_request_shm_(std::move(infer_request_shm)),
       request_id_shm_(std::move(request_id_shm)),
       requested_output_names_shm_(std::move(requested_output_names_shm)),
-      model_name_shm_(std::move(model_name_shm)),
-      output_names_handle_shm_(std::move(output_names_handle_shm)),
-      input_tensors_handle_(std::move(input_tensors_handle))
-
+      model_name_shm_(std::move(model_name_shm))
 {
-  infer_request_shm_ptr_ = infer_request_shm_.data_.get();
-  output_names_handle_shm_ptr_ = output_names_handle_shm_.data_.get();
-  input_tensors_handle_ptr_ = input_tensors_handle_.data_.get();
+  infer_request_shm_ptr_ =
+      reinterpret_cast<InferRequestShm*>(infer_request_shm_.data_.get());
+  output_names_handle_shm_ptr_ =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          reinterpret_cast<char*>(infer_request_shm_ptr_) +
+          sizeof(InferRequestShm));
+  input_tensors_handle_ptr_ =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          reinterpret_cast<char*>(infer_request_shm_ptr_) +
+          sizeof(InferRequestShm) +
+          sizeof(bi::managed_external_buffer::handle_t) *
+              infer_request_shm_ptr_->requested_output_count);
   inputs_ = std::move(input_tensors);
 
   std::vector<std::string> requested_output_names;

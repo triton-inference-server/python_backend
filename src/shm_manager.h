@@ -55,7 +55,6 @@ struct AllocatedSharedMemory {
 };
 
 struct AllocatedShmOwnership {
-  bi::interprocess_mutex mutex_;
   uint32_t ref_count_;
 } __attribute__((aligned(32)));
 
@@ -70,7 +69,7 @@ class SharedMemoryManager {
   {
     T* obj = nullptr;
     AllocatedShmOwnership* shm_ownership_data = nullptr;
-    bi::managed_external_buffer::handle_t handle;
+    bi::managed_external_buffer::handle_t handle = 0;
 
     {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
@@ -92,7 +91,6 @@ class SharedMemoryManager {
               (reinterpret_cast<char*>(shm_ownership_data)) +
               sizeof(AllocatedShmOwnership));
           shm_ownership_data->ref_count_ = 1;
-          new (&(shm_ownership_data->mutex_)) bi::interprocess_mutex;
           break;
         }
         catch (bi::bad_alloc& ex) {
@@ -107,10 +105,10 @@ class SharedMemoryManager {
 
         break;
       }
-    }
 
-    handle = managed_buffer_->get_handle_from_address(
-        reinterpret_cast<void*>(shm_ownership_data));
+      handle = managed_buffer_->get_handle_from_address(
+          reinterpret_cast<void*>(shm_ownership_data));
+    }
 
     return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
   }
@@ -129,10 +127,6 @@ class SharedMemoryManager {
       object_ptr = reinterpret_cast<T*>(
           reinterpret_cast<char*>(shm_ownership_data) +
           sizeof(AllocatedShmOwnership));
-    }
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> gaurd{shm_ownership_data->mutex_};
       shm_ownership_data->ref_count_ += 1;
     }
 
@@ -181,16 +175,13 @@ class SharedMemoryManager {
     std::function<void(T*)> deleter = [this, handle,
                                        shm_ownership_data](T* memory) {
       bool destroy = false;
-      {
-        bi::scoped_lock<bi::interprocess_mutex> gaurd{
-            shm_ownership_data->mutex_};
-        shm_ownership_data->ref_count_ -= 1;
-        if (shm_ownership_data->ref_count_ == 0) {
-          destroy = true;
-        }
+      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      shm_ownership_data->ref_count_ -= 1;
+      if (shm_ownership_data->ref_count_ == 0) {
+        destroy = true;
       }
       if (destroy) {
-        Deallocate(handle);
+        DeallocateUnsafe(handle);
       }
     };
 

@@ -57,6 +57,7 @@ class PbString {
         string_shm_ptr_, string_shm_ptr_ + string_container_shm_ptr_->length);
   }
   bi::managed_external_buffer::handle_t ShmHandle();
+  std::size_t Size();
 
  private:
   AllocatedSharedMemory<StringShm> string_container_shm_;

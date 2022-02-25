@@ -114,7 +114,13 @@ PbString::ShmHandle()
 std::size_t
 PbString::ShmStructSize(const std::string& string)
 {
-  return string.size() + 1 + sizeof(StringShm);
+  return string.size() + sizeof(StringShm);
+}
+
+std::size_t
+PbString::Size()
+{
+  return string_container_shm_ptr_->length + sizeof(StringShm);
 }
 
 }}}  // namespace triton::backend::python

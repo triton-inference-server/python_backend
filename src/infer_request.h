@@ -35,16 +35,9 @@ namespace triton { namespace backend { namespace python {
 // Inference Request
 //
 struct InferRequestShm {
-  // Handle for the id field.
-  bi::managed_external_buffer::handle_t id;
   uint64_t correlation_id;
-  // Handle for input field.
-  bi::managed_external_buffer::handle_t inputs;
   uint32_t input_count;
-  // Handle for the requested output names
-  bi::managed_external_buffer::handle_t requested_output_names;
   uint32_t requested_output_count;
-  bi::managed_external_buffer::handle_t model_name;
   int64_t model_version;
   uint32_t flags;
 };
@@ -82,16 +75,14 @@ class InferRequest {
   /// Disallow copying the inference request object.
   DISALLOW_COPY_AND_ASSIGN(InferRequest);
 
+  ~InferRequest() {}
+
  private:
   InferRequest(
-      AllocatedSharedMemory<InferRequestShm>& infer_request_shm,
+      AllocatedSharedMemory<char>& infer_request_shm,
       std::unique_ptr<PbString>& request_id_shm,
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          output_names_handle_shm,
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          input_tensors_handle,
       std::vector<std::shared_ptr<PbTensor>>& input_tensors);
 
   std::string request_id_;
@@ -103,17 +94,13 @@ class InferRequest {
   uint32_t flags_;
 
   // Shared Memory Data Structures
-  AllocatedSharedMemory<InferRequestShm> infer_request_shm_;
+  AllocatedSharedMemory<char> infer_request_shm_;
   InferRequestShm* infer_request_shm_ptr_;
 
   std::unique_ptr<PbString> request_id_shm_;
   std::vector<std::unique_ptr<PbString>> requested_output_names_shm_;
   std::unique_ptr<PbString> model_name_shm_;
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      output_names_handle_shm_;
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      input_tensors_handle_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
 };
