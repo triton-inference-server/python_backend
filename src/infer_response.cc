@@ -57,31 +57,38 @@ InferResponse::SaveToSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   size_t output_tensor_length = output_tensors_.size();
-  response_shm_ = shm_pool->Construct<ResponseShm>();
-  response_shm_.data_->has_error = false;
-  response_shm_.data_->is_error_set = false;
+  if (HasError()) {
+    response_shm_ = shm_pool->Construct<char>(sizeof(ResponseShm));
+  } else {
+    response_shm_ = shm_pool->Construct<char>(
+        sizeof(ResponseShm) +
+        output_tensor_length * sizeof(bi::managed_external_buffer::handle_t));
+  }
+  ResponseShm* response_shm_ptr =
+      reinterpret_cast<ResponseShm*>(response_shm_.data_.get());
+  response_shm_ptr->has_error = false;
+  response_shm_ptr->is_error_set = false;
   shm_handle_ = response_shm_.handle_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
   if (HasError()) {
-    response_shm_.data_->has_error = true;
+    response_shm_ptr->has_error = true;
     Error()->SaveToSharedMemory(shm_pool);
 
-    response_shm_.data_->is_error_set = true;
-    response_shm_.data_->error = Error()->ShmHandle();
-    response_shm_.data_->outputs_size = 0;
+    response_shm_ptr->is_error_set = true;
+    response_shm_ptr->error = Error()->ShmHandle();
+    response_shm_ptr->outputs_size = 0;
   } else {
-    tensor_handle_shm_ =
-        shm_pool->Construct<bi::managed_external_buffer::handle_t>(
-            output_tensor_length);
-    response_shm_.data_->outputs = tensor_handle_shm_.handle_;
-    response_shm_.data_->outputs_size = output_tensor_length;
+    bi::managed_external_buffer::handle_t* tensor_handle_shm_ptr =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_shm_.data_.get() + sizeof(ResponseShm));
+    response_shm_ptr->outputs_size = output_tensor_length;
 
     size_t j = 0;
     for (auto& output_tensor : output_tensors_) {
       output_tensor->SaveToSharedMemory(shm_pool);
-      (tensor_handle_shm_.data_.get())[j] = output_tensor->ShmHandle();
+      tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
   }
@@ -98,48 +105,44 @@ InferResponse::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t response_handle)
 {
-  AllocatedSharedMemory<ResponseShm> response_shm =
-      shm_pool->Load<ResponseShm>(response_handle);
-  uint32_t requested_output_count = response_shm.data_->outputs_size;
+  AllocatedSharedMemory<char> response_shm =
+      shm_pool->Load<char>(response_handle);
+  ResponseShm* response_shm_ptr =
+      reinterpret_cast<ResponseShm*>(response_shm.data_.get());
+  uint32_t requested_output_count = response_shm_ptr->outputs_size;
 
   std::shared_ptr<PbError> pb_error;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      tensor_handle_shm;
 
   // If the error field is set, do not load output tensors from shared memory.
-  if (response_shm.data_->has_error && response_shm.data_->is_error_set) {
-    pb_error =
-        PbError::LoadFromSharedMemory(shm_pool, response_shm.data_->error);
-  } else if (
-      response_shm.data_->has_error && !response_shm.data_->is_error_set) {
+  if (response_shm_ptr->has_error && response_shm_ptr->is_error_set) {
+    pb_error = PbError::LoadFromSharedMemory(shm_pool, response_shm_ptr->error);
+  } else if (response_shm_ptr->has_error && !response_shm_ptr->is_error_set) {
     pb_error =
         std::make_shared<PbError>("Failed to retrieve the response error.");
   } else {
-    tensor_handle_shm = shm_pool->Load<bi::managed_external_buffer::handle_t>(
-        response_shm.data_->outputs);
+    bi::managed_external_buffer::handle_t* tensor_handle_shm =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_shm.data_.get() + sizeof(ResponseShm));
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
-      std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
-          shm_pool, (tensor_handle_shm.data_.get())[idx]);
+      std::shared_ptr<PbTensor> pb_tensor =
+          PbTensor::LoadFromSharedMemory(shm_pool, tensor_handle_shm[idx]);
       output_tensors.emplace_back(std::move(pb_tensor));
     }
   }
 
-  return std::unique_ptr<InferResponse>(new InferResponse(
-      response_shm, output_tensors, pb_error, tensor_handle_shm));
+  return std::unique_ptr<InferResponse>(
+      new InferResponse(response_shm, output_tensors, pb_error));
 }
 
 InferResponse::InferResponse(
-    AllocatedSharedMemory<ResponseShm>& response_shm,
+    AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error,
-    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-        tensor_handle_shm)
+    std::shared_ptr<PbError>& pb_error)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
-  tensor_handle_shm_ = std::move(tensor_handle_shm);
   shm_handle_ = response_shm_.handle_;
 }
 

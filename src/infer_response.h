@@ -33,8 +33,6 @@
 namespace triton { namespace backend { namespace python {
 
 struct ResponseShm {
-  // Handle for Tensor output.
-  bi::managed_external_buffer::handle_t outputs;
   uint32_t outputs_size;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
@@ -61,16 +59,12 @@ class InferResponse {
 
  private:
   InferResponse(
-      AllocatedSharedMemory<ResponseShm>& response_shm,
+      AllocatedSharedMemory<char>& response_shm,
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error,
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          tensor_handle_shm);
+      std::shared_ptr<PbError>& pb_error);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
   std::shared_ptr<PbError> error_;
   bi::managed_external_buffer::handle_t shm_handle_;
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-      tensor_handle_shm_;
-  AllocatedSharedMemory<ResponseShm> response_shm_;
+  AllocatedSharedMemory<char> response_shm_;
 };
 }}}  // namespace triton::backend::python

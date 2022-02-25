@@ -41,10 +41,6 @@ namespace triton { namespace backend { namespace python {
 // Represents a memory object in shared memory.
 //
 struct MemoryShm {
-  // The shared memory handle of the data. For device pointers this will contain
-  // the handle to the cudaMemHandle_t object.
-  bi::managed_external_buffer::handle_t memory_ptr;
-
   // If the memory type is a GPU pointer, the offset of the GPU pointer from the
   // base address. For CPU memory type this field contains garbage data.
   uint64_t gpu_pointer_offset;
@@ -68,7 +64,6 @@ class PbMemory {
       std::unique_ptr<BackendMemory>& backend_memory);
 
   bi::managed_external_buffer::handle_t ShmHandle();
-  void Release();
 
   /// Get the total byte size of the tensor.
   uint64_t ByteSize() const;
@@ -85,13 +80,9 @@ class PbMemory {
   /// \return The memory type id of the tensor.
   int64_t MemoryTypeId() const;
 
-
  private:
-  AllocatedSharedMemory<MemoryShm> memory_shm_;
+  AllocatedSharedMemory<char> memory_shm_;
   MemoryShm* memory_shm_ptr_;
-
-  AllocatedSharedMemory<char> memory_data_shm_;
-  char* memory_data_shm_ptr_;
 
   // Refers to the pointer that can hold the data. For CPU pointers this will be
   // the same as memory_data_shm_ptr_.
@@ -111,8 +102,7 @@ class PbMemory {
   void* GetGPUStartAddress();
 
   PbMemory(
-      AllocatedSharedMemory<MemoryShm>& memory_shm,
-      AllocatedSharedMemory<char>& memory_data_shm, char* data,
+      AllocatedSharedMemory<char>& memory_shm, char* data,
       bool opened_cuda_ipc_handle);
 };
 }}}  // namespace triton::backend::python
