@@ -34,9 +34,9 @@
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
 
-/// Struct holding the represenation of a message stack inside the shared
+/// Struct holding the represenation of a message queue inside the shared
 /// memory.
-/// \param size Total size of the message stack.
+/// \param size Total size of the message queue.
 /// \param mutex Handle of the mutex variable protecting index.
 /// \param index Used element index.
 /// \param sem_empty Semaphore object counting the number of empty buffer slots.

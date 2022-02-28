@@ -56,14 +56,21 @@ class PbMemory {
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data);
+  static std::unique_ptr<PbMemory> Create(
+      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
+      uint64_t byte_size, char* data, char* data_shm,
+      bi::managed_external_buffer::handle_t handle);
+
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t memory_handle);
-  static std::unique_ptr<PbMemory> Create(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      std::unique_ptr<BackendMemory>& backend_memory);
+  static std::unique_ptr<PbMemory> LoadFromSharedMemory(
+      bi::managed_external_buffer::handle_t handle, char* data_shm);
+  static std::size_t ShmStructSize(
+      TRITONSERVER_MemoryType memory_type, uint64_t byte_size);
 
   bi::managed_external_buffer::handle_t ShmHandle();
+
 
   /// Get the total byte size of the tensor.
   uint64_t ByteSize() const;
@@ -101,8 +108,18 @@ class PbMemory {
   /// \throws PythonBackendException if the tensor is stored in CPU.
   void* GetGPUStartAddress();
 
+  static void FillShmData(
+      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
+      uint64_t byte_size, char* data, char* data_shm,
+      bi::managed_external_buffer::handle_t handle);
+
   PbMemory(
       AllocatedSharedMemory<char>& memory_shm, char* data,
+      bool opened_cuda_ipc_handle);
+
+  PbMemory(
+      char* memory_shm, char* data,
+      bi::managed_external_buffer::handle_t handle,
       bool opened_cuda_ipc_handle);
 };
 }}}  // namespace triton::backend::python

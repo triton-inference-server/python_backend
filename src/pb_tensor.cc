@@ -386,7 +386,8 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   tensor_shm_ = shm_pool->Construct<char>(
       (sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
-       PbString::ShmStructSize(name_)));
+       PbString::ShmStructSize(name_) +
+       PbMemory::ShmStructSize(memory_type_, byte_size_)));
 
   tensor_shm_ptr_ = reinterpret_cast<TensorShm*>(tensor_shm_.data_.get());
   tensor_shm_ptr_->dtype = dtype_;
@@ -401,14 +402,16 @@ PbTensor::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
     dims_shm_ptr_[i] = dims_[i];
   }
 
+  std::size_t name_offset = sizeof(TensorShm) + sizeof(int64_t) * dims_.size();
   name_shm_ = PbString::Create(
-      name_,
-      reinterpret_cast<char*>(tensor_shm_ptr_) + sizeof(TensorShm) +
-          sizeof(int64_t) * dims_.size(),
-      shm_handle_ + sizeof(TensorShm) + sizeof(int64_t) * dims_.size());
+      name_, reinterpret_cast<char*>(tensor_shm_ptr_) + name_offset,
+      shm_handle_ + name_offset);
+  std::size_t pb_memory_offset = name_offset + PbString::ShmStructSize(name_);
   pb_memory_ = PbMemory::Create(
-      shm_pool, memory_type_, memory_type_id_, byte_size_,
-      reinterpret_cast<char*>(memory_ptr_));
+      memory_type_, memory_type_id_, byte_size_,
+      reinterpret_cast<char*>(memory_ptr_),
+      reinterpret_cast<char*>(tensor_shm_ptr_) + pb_memory_offset,
+      shm_handle_ + pb_memory_offset);
 
   tensor_shm_ptr_->memory = pb_memory_->ShmHandle();
   memory_ptr_ = pb_memory_->DataPtr();
@@ -426,8 +429,10 @@ PbTensor::LoadFromSharedMemory(
       sizeof(TensorShm) + sizeof(int64_t) * tensor_shm_ptr->dims_count;
   std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(
       tensor_handle + name_offset, tensor_shm.data_.get() + name_offset);
-  std::unique_ptr<PbMemory> pb_memory =
-      PbMemory::LoadFromSharedMemory(shm_pool, tensor_shm_ptr->memory);
+
+  std::size_t pb_memory_offset = name_offset + name_shm->Size();
+  std::unique_ptr<PbMemory> pb_memory = PbMemory::LoadFromSharedMemory(
+      pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset);
   return std::shared_ptr<PbTensor>(
       new PbTensor(tensor_shm, name_shm, pb_memory));
 }

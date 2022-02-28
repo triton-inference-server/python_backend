@@ -132,7 +132,6 @@ SharedMemoryManager::FreeMemory()
   return managed_buffer_->get_free_memory();
 }
 
-
 SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
   bi::shared_memory_object::remove(shm_region_name_.c_str());

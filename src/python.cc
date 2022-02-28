@@ -1123,7 +1123,6 @@ ModelInstanceState::ProcessRequests(
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
           response_batch.data_.get() + sizeof(ResponseBatch));
 
-
   for (uint32_t r = 0; r < request_count; ++r) {
     NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
     TRITONBACKEND_Response* response = (*responses)[r];
