@@ -600,7 +600,12 @@ ModelInstanceState::StartStubProcess()
     }
 
   } else {
-    defer _(nullptr, std::bind([this] { stub_message_queue_->Push(1000); }));
+    defer _(nullptr, std::bind([this] {
+              // Push a dummy message to the message queue so that the stub
+              // process is notified that it can release the object stored in
+              // shared memory.
+              stub_message_queue_->Push(1000);
+            }));
     stub_pid_ = pid;
     triton::common::TritonJson::WriteBuffer buffer;
     Model()->ModelConfig().Write(&buffer);
@@ -1071,6 +1076,9 @@ ModelInstanceState::ProcessRequests(
   }
 
   defer _(nullptr, std::bind([this, &restart] {
+            // Push a dummy message to the message queue so that the stub
+            // process is notified that it can release the object stored
+            // in shared memory.
             NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
             if (!restart)
               stub_message_queue_->Push(1000);

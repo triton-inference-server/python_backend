@@ -108,6 +108,9 @@ class MessageQueue {
     return &(mq_shm_ptr_->sem_full);
   }
 
+  void HeadIncrement();
+  void TailIncrement();
+
   AllocatedSharedMemory<MessageQueueShm> mq_shm_;
   AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_buffer_shm_;
 

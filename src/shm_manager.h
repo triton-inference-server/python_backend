@@ -56,7 +56,7 @@ struct AllocatedSharedMemory {
 
 struct AllocatedShmOwnership {
   uint32_t ref_count_;
-} __attribute__((aligned(32)));
+};
 
 class SharedMemoryManager {
  public:
@@ -76,35 +76,22 @@ class SharedMemoryManager {
       std::size_t requested_bytes =
           sizeof(T) * count + sizeof(AllocatedShmOwnership);
 
-      bool grown = false;
-      for (size_t retries = 0; retries < 2; retries++) {
-        try {
-          if (!aligned) {
-            shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
-                managed_buffer_->allocate(requested_bytes));
-          } else {
-            const std::size_t alignment = 32;
-            shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
-                managed_buffer_->allocate_aligned(requested_bytes, alignment));
-          }
-          obj = reinterpret_cast<T*>(
-              (reinterpret_cast<char*>(shm_ownership_data)) +
-              sizeof(AllocatedShmOwnership));
-          shm_ownership_data->ref_count_ = 1;
-          break;
-        }
-        catch (bi::bad_alloc& ex) {
-          if (grown) {
-            throw PythonBackendException(std::string(
-                "Failed to allocate " + std::to_string(requested_bytes) +
-                " byte(s) in shared memory."));
-          }
-          GrowIfNeeded(requested_bytes);
-          grown = true;
-        }
-
-        break;
+      void* allocated_data;
+      try {
+        allocated_data = Allocate(requested_bytes, aligned);
       }
+      catch (bi::bad_alloc& ex) {
+        // Try to grow the shared memory region if the allocate failed.
+        GrowIfNeeded(requested_bytes);
+        allocated_data = Allocate(requested_bytes, aligned);
+      }
+
+      shm_ownership_data =
+          reinterpret_cast<AllocatedShmOwnership*>(allocated_data);
+      obj = reinterpret_cast<T*>(
+          (reinterpret_cast<char*>(shm_ownership_data)) +
+          sizeof(AllocatedShmOwnership));
+      shm_ownership_data->ref_count_ = 1;
 
       handle = managed_buffer_->get_handle_from_address(
           reinterpret_cast<void*>(shm_ownership_data));
@@ -171,7 +158,7 @@ class SharedMemoryManager {
       T* object, AllocatedShmOwnership* shm_ownership_data,
       const bi::managed_external_buffer::handle_t& handle)
   {
-    // Custom deleter to deallocate the object when it goes out of scope.
+    // Custom deleter to conditionally deallocate the object
     std::function<void(T*)> deleter = [this, handle,
                                        shm_ownership_data](T* memory) {
       bool destroy = false;
@@ -187,6 +174,19 @@ class SharedMemoryManager {
 
     auto data = std::unique_ptr<T, decltype(deleter)>(object, deleter);
     return AllocatedSharedMemory<T>(data, handle);
+  }
+
+  void* Allocate(bool aligned, size_t requested_bytes)
+  {
+    void* ptr;
+    if (aligned) {
+      const std::size_t alignment = 32;
+      ptr = managed_buffer_->allocate_aligned(requested_bytes, alignment);
+    } else {
+      ptr = managed_buffer_->allocate(requested_bytes);
+    }
+
+    return ptr;
   }
 };
 }}}  // namespace triton::backend::python

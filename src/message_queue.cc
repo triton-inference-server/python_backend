@@ -98,7 +98,7 @@ MessageQueue::Push(
     success = true;
 
     Buffer()[Head()] = message;
-    Head() = (Head() + 1) % Size();
+    HeadIncrement();
   }
   SemFullMutable()->post();
 }
@@ -118,7 +118,7 @@ MessageQueue::Push(bi::managed_external_buffer::handle_t message)
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
     Buffer()[Head()] = message;
-    Head() = (Head() + 1) % Size();
+    HeadIncrement();
   }
   SemFullMutable()->post();
 }
@@ -141,11 +141,23 @@ MessageQueue::Pop()
     bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
 
     message = Buffer()[Tail()];
-    Tail() = (Tail() + 1) % Size();
+    TailIncrement();
   }
   SemEmptyMutable()->post();
 
   return message;
+}
+
+void
+MessageQueue::HeadIncrement()
+{
+  mq_shm_ptr_->head = (mq_shm_ptr_->head + 1) % Size();
+}
+
+void
+MessageQueue::TailIncrement()
+{
+  mq_shm_ptr_->tail = (mq_shm_ptr_->tail + 1) % Size();
 }
 
 bi::managed_external_buffer::handle_t
@@ -180,7 +192,7 @@ MessageQueue::Pop(int const& duration, bool& success)
     success = true;
 
     message = Buffer()[Tail()];
-    Tail() = (Tail() + 1) % Size();
+    TailIncrement();
   }
   SemEmptyMutable()->post();
 
