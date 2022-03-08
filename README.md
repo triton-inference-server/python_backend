@@ -51,7 +51,7 @@ any C++ code.
     - [Important Notes](#important-notes)
   - [Error Handling](#error-handling)
   - [Managing Shared Memory](#managing-shared-memory)
-  - [Python Global Interpreter Lock (GIL)](#python-global-interpreter-lock-gil)
+  - [Multiple Model Instance Support](#multiple-model-instance-support)
 - [Business Logic Scripting](#business-logic-scripting)
   - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Limitations](#limitations)
@@ -550,21 +550,21 @@ properly set the `--shm-size` flag depending on the size of your inputs and
 outputs. The default value for docker run command is `64MB` which is very
 small.
 
-## Python Global Interpreter Lock (GIL)
+## Multiple Model Instance Support
 
 Python interpreter uses a global lock known as
 [GIL](https://docs.python.org/3/c-api/init.html#thread-state-and-the-global-interpreter-lock).
 Because of GIL, it is not possible have multiple threads running in the same
 Python interpreter simultaneously as each thread requires to acquire the GIL
 when accessing Python objects which will serialize all the operations. In order
-to work around this issue, Python backend spawns a complete separate process for each
+to work around this issue, Python backend spawns a separate process for each
 [model instance](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#multiple-model-instances).
 This is in contrast with how other Triton backends such as
 [ONNXRuntime](https://github.com/triton-inference-server/onnxruntime_backend),
-[Tensorflow](https://github.com/triton-inference-server/tensorflow_backend), and
+[TensorFlow](https://github.com/triton-inference-server/tensorflow_backend), and
 [PyTorch](https://github.com/triton-inference-server/pytorch_backend) handle
 multiple instances. Increasing the instance count for these backends will create
-an additional thread instead of spawning a separate process.
+additional threads instead of spawning separate processes.
 
 # Business Logic Scripting
 
