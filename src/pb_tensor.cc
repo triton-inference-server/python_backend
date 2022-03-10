@@ -601,6 +601,7 @@ PbTensor::SaveToSharedMemory(
         raw_shm_offset_);
     cuda_ipc_mem_handle_ = reinterpret_cast<cudaIpcMemHandle_t*>(cuda_handle);
 
+
     if (copy_gpu) {
       tensor_shm->is_cuda_handle_set = true;
       *ptr_offset = this->GetGPUPointerOffset();
