@@ -176,7 +176,7 @@ class SharedMemoryManager {
     return AllocatedSharedMemory<T>(data, handle);
   }
 
-  void* Allocate(bool aligned, size_t requested_bytes)
+  void* Allocate(size_t requested_bytes, bool aligned)
   {
     void* ptr;
     if (aligned) {

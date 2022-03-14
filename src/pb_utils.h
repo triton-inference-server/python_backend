@@ -40,6 +40,8 @@
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
 
+using defer = std::shared_ptr<void>;
+
 namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;

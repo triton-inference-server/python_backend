@@ -58,6 +58,7 @@
 #include "pb_map.h"
 #include "pb_metric_reporter.h"
 #include "pb_utils.h"
+#include "request_executor.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_input_collector.h"
@@ -192,7 +193,6 @@
 namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
-using defer = std::shared_ptr<void>;
 
 struct BackendState {
   std::string python_lib;
@@ -243,6 +243,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   std::string shm_region_name_;
+  std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -290,14 +291,21 @@ class ModelInstanceState : public BackendModelInstance {
   // Start stub process
   TRITONSERVER_Error* StartStubProcess();
 
+  // Convert TRITONBACKEND_Input to Python backend tensors.
   TRITONSERVER_Error* GetInputTensor(
       const uint32_t input_idx, std::shared_ptr<PbTensor>& input_tensor,
       TRITONBACKEND_Request* request,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
 
+  // Process all the requests obtained from Triton.
   void ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
-      bool& restart, std::atomic<bool>& cleanup);
+      bool& restart);
+
+  // Execute a BLS Request
+  void ExecuteBLSRequest(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t message_offset);
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -875,9 +883,146 @@ ModelInstanceState::GetInputTensor(
 }
 
 void
+ModelInstanceState::ExecuteBLSRequest(
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bi::managed_external_buffer::handle_t message_offset)
+{
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  auto request_executor =
+      std::make_unique<RequestExecutor>(model_state->TritonServer());
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::LoadFromSharedMemory(shm_pool, message_offset);
+  bool is_response_batch_set = false;
+  std::unique_ptr<InferResponse> infer_response;
+  ResponseBatch* response_batch;
+  TRITONSERVER_InferenceResponse* inference_response = nullptr;
+  std::unique_ptr<PbString> pb_error_message;
+  std::unique_ptr<IPCMessage> bls_response;
+  AllocatedSharedMemory<char> response_batch_shm;
+  try {
+    bls_response = IPCMessage::Create(shm_pool_, false /* inline_response */);
+
+    AllocatedSharedMemory<char> request_batch =
+        shm_pool_->Load<char>(ipc_message->Args());
+    RequestBatch* request_batch_shm_ptr =
+        reinterpret_cast<RequestBatch*>(request_batch.data_.get());
+
+    bls_response->Command() = PYTHONSTUB_InferExecResponse;
+    ipc_message->ResponseHandle() = bls_response->ShmHandle();
+
+    response_batch_shm = shm_pool_->Construct<char>(
+        sizeof(ResponseBatch) + sizeof(bi::managed_external_buffer::handle_t));
+    response_batch =
+        reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+    bi::managed_external_buffer::handle_t* response_handle =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_batch_shm.data_.get() + sizeof(ResponseBatch));
+    bls_response->Args() = response_batch_shm.handle_;
+
+    response_batch->batch_size = 1;
+    response_batch->has_error = false;
+    response_batch->is_error_set = false;
+    response_batch->cleanup = false;
+    is_response_batch_set = true;
+    // bool has_gpu_tensor = false;
+
+    PythonBackendException pb_exception(std::string{});
+
+    if (request_batch_shm_ptr->batch_size == 1) {
+      std::unique_ptr<InferRequest> infer_request;
+      std::shared_ptr<std::mutex> cuda_ipc_mutex;
+      bi::managed_external_buffer::handle_t* request_handle =
+          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+              request_batch.data_.get() + sizeof(RequestBatch));
+      infer_request =
+          InferRequest::LoadFromSharedMemory(shm_pool_, *request_handle);
+
+      // If the BLS inputs are in GPU an additional round trip between the
+      // stub process and the main process is required. The reason is that we
+      // need to first allocate the GPU memory from the memory pool and then
+      // ask the stub process to fill in those allocated buffers.
+      // [FIXME]
+      // for (auto& input_tensor : infer_request->Inputs()) {
+      //         if (!input_tensor->IsCPU()) {
+      // #ifdef TRITON_ENABLE_GPU
+      //           BackendMemory* backend_memory;
+      //           std::unique_ptr<BackendMemory> lbackend_memory;
+      //           has_gpu_tensor = true;
+      //           TRITONSERVER_Error* error = BackendMemory::Create(
+      //               Model()->TritonMemoryManager(),
+      //               {BackendMemory::AllocationType::GPU_POOL,
+      //                BackendMemory::AllocationType::GPU},
+      //               input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
+      //               &backend_memory);
+      //           if (error != nullptr) {
+      //             LOG_MESSAGE(
+      //                 TRITONSERVER_LOG_ERROR,
+      //                 TRITONSERVER_ErrorMessage(error));
+      //             break;
+      //           }
+      //           lbackend_memory.reset(backend_memory);
+      //           input_tensor->SetBackendMemory(std::move(lbackend_memory),
+      //           shm_pool_);
+      // #endif  // TRITON_ENABLE_GPU
+      //         }
+      // }
+
+      // Wait for the extra round trip to complete. The stub process will fill
+      // in the data for the GPU tensors. If there is an error, the extra round
+      // trip must be still completed, otherwise the stub process will always be
+      // waiting for a message from the parent process.
+      // if (has_gpu_tensor) {
+      //   bi::scoped_lock<bi::interprocess_mutex> lock{
+      //       *(ipc_message->ResponseMutex())};
+      //   ipc_message->ResponseCondition()->notify_all();
+      //   ipc_message->ResponseCondition()->wait(lock);
+      // }
+
+      if (pb_exception.what() != nullptr) {
+        infer_response = request_executor->Infer(
+            infer_request, shm_pool_, &inference_response);
+
+        if (inference_response != nullptr) {
+          std::lock_guard<std::mutex> lock{bls_responses_mutex_};
+          bls_inference_responses_.push_back(inference_response);
+        }
+
+        infer_response->SaveToSharedMemory(shm_pool_);
+        *response_handle = infer_response->ShmHandle();
+      } else {
+        throw pb_exception;
+      }
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    if (is_response_batch_set) {
+      response_batch->has_error = true;
+      LOG_IF_EXCEPTION(
+          pb_error_message = PbString::Create(shm_pool, pb_exception.what()));
+
+      if (pb_error_message != nullptr) {
+        response_batch->is_error_set = true;
+        response_batch->error = pb_error_message->ShmHandle();
+      }
+    } else {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    ipc_message->ResponseCondition()->notify_all();
+
+    ipc_message->ResponseCondition()->wait(lock);
+  }
+  request_executors_.emplace_back(std::move(request_executor));
+}
+
+void
 ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
-    bool& restart, std::atomic<bool>& cleanup)
+    bool& restart)
 {
   NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
@@ -1075,6 +1220,7 @@ ModelInstanceState::ProcessRequests(
         requests, request_count);
   }
 
+
   defer _(nullptr, std::bind([this, &restart] {
             // Push a dummy message to the message queue so that the stub
             // process is notified that it can release the object stored
@@ -1091,6 +1237,34 @@ ModelInstanceState::ProcessRequests(
       responses, request_count,
       ipc_message =
           IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
+
+  // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
+  // that inference request exeuction has finished and there are no more BLS
+  // requests to execute. Otherwise, the Python backend will continuosly execute
+  // BLS requests pushed to the message queue.
+  while (ipc_message->Command() ==
+         PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
+    bi::managed_external_buffer::handle_t current_message = response_message;
+
+    // Launch the BLS request in a future.
+    bls_futures_.emplace_back(
+        std::async(std::launch::async, [this, current_message]() {
+          this->ExecuteBLSRequest(this->shm_pool_, current_message);
+        }));
+
+    auto error = ReceiveMessageFromStub(response_message);
+    if (error != nullptr) {
+      restart = true;
+      RespondErrorToAllRequests(
+          TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
+      return;
+    }
+
+    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
+        responses, request_count,
+        ipc_message =
+            IPCMessage::LoadFromSharedMemory(shm_pool_, response_message));
+  }
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -1668,8 +1842,7 @@ TRITONBACKEND_ModelInstanceExecute(
   // If restart is equal to true, it indicates that the stub process is
   // unhealthy and needs a restart.
   bool restart = false;
-  std::atomic<bool> cleanup{false};
-  instance_state->ProcessRequests(requests, request_count, restart, cleanup);
+  instance_state->ProcessRequests(requests, request_count, restart);
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];

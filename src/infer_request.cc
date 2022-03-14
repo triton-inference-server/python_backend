@@ -275,4 +275,122 @@ InferRequest::InferRequest(
   correlation_id_ = infer_request_shm_ptr_->correlation_id;
 }
 
+#ifdef TRITON_PB_STUB
+std::unique_ptr<InferResponse>
+InferRequest::Exec()
+{
+  ResponseBatch* response_batch = nullptr;
+  bool responses_is_set = false;
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  std::unique_ptr<SharedMemoryManager>& shm_pool = stub->SharedMemory();
+  bi::managed_external_buffer::handle_t* response_handle = nullptr;
+
+  PythonBackendException pb_exception(std::string{});
+  std::unique_ptr<IPCMessage> ipc_message;
+
+  AllocatedSharedMemory<char> request_batch;
+  defer data_load_complete(nullptr, std::bind([&ipc_message] {
+                             bi::scoped_lock<bi::interprocess_mutex> lock{
+                                 *(ipc_message->ResponseMutex())};
+                             ipc_message->ResponseCondition()->notify_all();
+                           }));
+
+  try {
+    py::gil_scoped_release release;
+    ipc_message = IPCMessage::Create(shm_pool, true /* inline_response */);
+    bool has_exception = false;
+    PythonBackendException pb_exception(std::string{});
+
+    ipc_message->Command() =
+        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
+
+    request_batch = shm_pool->Construct<char>(
+        sizeof(RequestBatch) + sizeof(bi::managed_external_buffer::handle_t));
+
+    RequestBatch* request_batch_shm_ptr =
+        reinterpret_cast<RequestBatch*>(request_batch.data_.get());
+    request_batch_shm_ptr->batch_size = 1;
+    ipc_message->Args() = request_batch.handle_;
+
+    bi::managed_external_buffer::handle_t* requests_shm =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            request_batch.data_.get() + sizeof(RequestBatch));
+    request_batch_shm_ptr->batch_size = 1;
+
+    size_t i = 0;
+    for (auto& input_tensor : inputs_) {
+      // [FIXME] Custom handling for GPU tensors
+      input_tensor->SaveToSharedMemory(shm_pool);
+      ++i;
+    }
+
+    SaveToSharedMemory(shm_pool);
+
+    // Save the shared memory offset of the request.
+    *requests_shm = ShmHandle();
+
+    // Send the BLS request to the parent process and wait for the response.
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      stub->SendIPCMessage(ipc_message);
+      ipc_message->ResponseCondition()->wait(lock);
+    }
+
+    // [FIXME] Additional roundtrip required for the GPU tensors.
+
+    // The exception will be thrown after the message was sent to the main
+    // process.
+    if (has_exception) {
+      throw pb_exception;
+    }
+
+    // Get the response for the current message.
+    std::unique_ptr<IPCMessage> bls_response = IPCMessage::LoadFromSharedMemory(
+        shm_pool, ipc_message->ResponseHandle());
+
+    AllocatedSharedMemory<char> response_batch_shm =
+        shm_pool->Load<char>(bls_response->Args());
+    response_batch =
+        reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+    response_handle = reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+        response_batch_shm.data_.get() + sizeof(ResponseBatch));
+
+    responses_is_set = true;
+    if (response_batch->has_error) {
+      if (response_batch->is_error_set) {
+        std::unique_ptr<PbString> pb_string =
+            PbString::LoadFromSharedMemory(shm_pool, response_batch->error);
+        return std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(pb_string->String()));
+      } else {
+        return std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(
+                "An error occurred while performing BLS request."));
+      }
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    return std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{},
+        std::make_shared<PbError>(pb_exception.what()));
+  }
+
+  if (responses_is_set) {
+    std::unique_ptr<InferResponse> infer_response =
+        InferResponse::LoadFromSharedMemory(shm_pool, *response_handle);
+
+    return infer_response;
+  } else {
+    return std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{},
+        std::make_shared<PbError>(
+            "An error occurred while performing BLS request."));
+  }
+}
+
+#endif
+
 }}}  // namespace triton::backend::python

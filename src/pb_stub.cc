@@ -615,6 +615,20 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("correlation_id", &InferRequest::CorrelationId)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
+      .def("exec", &InferRequest::Exec)
+      .def(
+          "async_exec",
+          [](std::shared_ptr<InferRequest>& infer_request) {
+            py::object loop =
+                py::module_::import("asyncio").attr("get_running_loop")();
+            py::cpp_function callback = [infer_request]() {
+              auto response = infer_request->Exec();
+              return response;
+            };
+            py::object future =
+                loop.attr("run_in_executor")(py::none(), callback);
+            return future;
+          })
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal);

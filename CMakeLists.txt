@@ -160,6 +160,8 @@ set(
   src/pb_env.h
   src/pb_metric_reporter.cc
   src/pb_metric_reporter.h
+  src/request_executor.cc
+  src/request_executor.h
 )
 
 list(APPEND

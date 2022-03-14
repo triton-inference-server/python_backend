@@ -48,6 +48,8 @@ IPCMessage::Create(
 
     ipc_message_shm.data_->response_mutex = response_mutex_shm.handle_;
     ipc_message_shm.data_->response_cond = response_cond_shm.handle_;
+    new (response_mutex_shm.data_.get()) bi::interprocess_mutex{};
+    new (response_cond_shm.data_.get()) bi::interprocess_condition{};
   }
 
   return std::unique_ptr<IPCMessage>(

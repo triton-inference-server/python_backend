@@ -39,7 +39,7 @@ class RequestExecutor {
  public:
   std::unique_ptr<InferResponse> Infer(
       const std::unique_ptr<InferRequest>& infer_request,
-      const std::unique_ptr<SharedMemory>& shm_pool,
+      const std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_InferenceResponse** response);
   RequestExecutor(TRITONSERVER_Server* server);
   ~RequestExecutor();

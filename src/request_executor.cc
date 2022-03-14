@@ -72,7 +72,7 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
-  SharedMemory* shm_pool = reinterpret_cast<SharedMemory*>(userp);
+  SharedMemoryManager* shm_pool = reinterpret_cast<SharedMemoryManager*>(userp);
 
   // If 'byte_size' is zero just return 'buffer' == nullptr, we don't
   // need to do any other book-keeping.
@@ -88,9 +88,16 @@ ResponseAlloc(
       case TRITONSERVER_MEMORY_CPU_PINNED: {
         *actual_memory_type = TRITONSERVER_MEMORY_CPU;
         *actual_memory_type_id = 0;
-        off_t tensor_offset;
+        bi::managed_external_buffer::handle_t tensor_handle;
         try {
-          shm_pool->Map((char**)buffer, byte_size, tensor_offset);
+          AllocatedSharedMemory<char> memory =
+              shm_pool->Construct<char>(byte_size);
+          *buffer = memory.data_.get();
+          tensor_handle = memory.handle_;
+
+          // Release the ownership to avoid deallocation. The buffer
+          // will be deallocated in ResponseRelease function.
+          memory.data_.release();
         }
         catch (const PythonBackendException& pb_exception) {
           TRITONSERVER_Error* err =
@@ -98,7 +105,8 @@ ResponseAlloc(
           return err;
         }
         // Store the buffer offset in the userp;
-        *buffer_userp = new off_t(tensor_offset);
+        *buffer_userp =
+            new bi::managed_external_buffer::handle_t(tensor_handle);
       } break;
 #ifdef TRITON_ENABLE_GPU
       case TRITONSERVER_MEMORY_GPU: {
@@ -108,7 +116,7 @@ ResponseAlloc(
           return TRITONSERVER_ErrorNew(
               TRITONSERVER_ERROR_INTERNAL,
               std::string(
-                  "unable to recover current CUDA device: " +
+                  "unable to set current CUDA device: " +
                   std::string(cudaGetErrorString(err)))
                   .c_str());
         }
@@ -170,7 +178,7 @@ RequestExecutor::RequestExecutor(TRITONSERVER_Server* server) : server_(server)
 std::unique_ptr<InferResponse>
 RequestExecutor::Infer(
     const std::unique_ptr<InferRequest>& infer_request,
-    const std::unique_ptr<SharedMemory>& shm_pool,
+    const std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_InferenceResponse** triton_response)
 {
   std::unique_ptr<InferResponse> infer_response;
@@ -219,7 +227,7 @@ RequestExecutor::Infer(
           infer_input->Dims().data(), infer_input->Dims().size()));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAppendInputData(
-          irequest, infer_input->Name().c_str(), infer_input->GetDataPtr(),
+          irequest, infer_input->Name().c_str(), infer_input->DataPtr(),
           infer_input->ByteSize(), infer_input->MemoryType(),
           infer_input->MemoryTypeId()));
     }

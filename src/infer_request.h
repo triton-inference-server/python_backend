@@ -27,6 +27,7 @@
 #pragma once
 
 #include <string>
+#include "infer_response.h"
 #include "pb_tensor.h"
 
 namespace triton { namespace backend { namespace python {
@@ -60,6 +61,10 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::vector<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
+
+#ifdef TRITON_PB_STUB
+  std::unique_ptr<InferResponse> Exec();
+#endif
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.
