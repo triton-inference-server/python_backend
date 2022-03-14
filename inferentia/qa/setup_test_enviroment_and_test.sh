@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -44,6 +44,64 @@ export TEST_JSON_REPO=/opt/tritonserver/qa/common/inferentia_perf_analyzer_input
 export TEST_REPO=/opt/tritonserver/qa/L0_inferentia_perf_analyzer
 export TEST_SCRIPT="test.sh"
 CONTAINER_NAME="qa_container"
+CONTAINER_VERSION=""
+UPSTREAM_CONTAINER_VERSION=""
+
+
+USAGE="
+usage: setup_test_enviroment_and_test.sh [options]. These setting will override exported variables
+
+Setup enviroment for testing on Inferentia chips and run perf analyzer tests. 
+-h|--help                        Shows usage
+-d|--default-repo-tag            DEFAULT_REPO_TAG for building the test container. Default is main
+-s|--server-repo-tag             TRITON_SERVER_REPO_TAG for building test container. Default same DEFAULT_REPO_TAG
+-c|--client-repo-tag             TRITON_CLIENT_REPO_TAG for building test container. Default same DEFAULT_REPO_TAG
+-v|--container-version           Container version used in build.py. Default is container version used in build.py
+-u|--upstream-container-version  Upstream container version for test container. Default is container version used in build.py
+-p|--triton-path                 The path where python backend is located and where server repo will be cloned to. Default is /home/ubuntu
+"
+
+# Get all options:
+OPTS=$(getopt -o hd:s:c:v:u:p: --long help,default-repo-tag:,server-repo-tag:,client-repo-tag:,container-version:,upstream-container-version:,triton-path -- "$@")
+
+for OPTS; do
+    case "$OPTS" in
+        -h|--help)
+        printf "%s\\n" "$USAGE"
+        return 0
+        ;;
+        -d|--default-repo-tag)
+        export DEFAULT_REPO_TAG=$2
+        echo "Default repo tag set to: ${DEFAULT_REPO_TAG}"
+        shift 2
+        ;;
+        -s|--server-repo-tag)
+        export TRITON_SERVER_REPO_TAG=$2
+        shift 2
+        echo "Server repo tag set to: ${TRITON_SERVER_REPO_TAG}"
+        ;;
+        -c|--client-repo-tag)
+        export TRITON_CLIENT_REPO_TAG=$2
+        echo "Client repo tag set to: ${TRITON_CLIENT_REPO_TAG}"
+        shift 2
+        ;;
+        -v|--container-version)
+        export CONTAINER_VERSION=$2
+        echo "Container version set to: ${CONTAINER_VERSION}"
+        shift 2
+        ;;
+        -u|--upstream-container-version)
+        export UPSTREAM_CONTAINER_VERSION=$2
+        echo "Upstream container version set to: ${UPSTREAM_CONTAINER_VERSION}"
+        shift 2
+        ;;
+        -p|--triton-path)
+        export TRITON_PATH=$2
+        echo "Triton path set to: ${TRITON_PATH}"
+        shift 2
+        ;;
+    esac
+done
 
 cd ${TRITON_PATH}
 echo "Using server repo tag: $TRITON_SERVER_REPO_TAG"
@@ -60,11 +118,26 @@ cd ${TRITON_PATH}/python_backend
 chmod 777 ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
 sudo ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
 
+# If container version is not known, look up container version and upstream container version from build.py
+cd ${TRITON_PATH}/server
+if [ "${CONTAINER_VERSION}" = "" ]; then
+    QUERY_STRING="import build; container_version,_= build.get_container_versions('$(cat TRITON_VERSION)', None, None); print(container_version)"
+    CONTAINER_VERSION=$(python3 -c "${QUERY_STRING}")
+    echo "found container version: ${CONTAINER_VERSION} from build.py"
+fi
+if [ "${UPSTREAM_CONTAINER_VERSION}" = "" ]; then
+    QUERY_STRING="import build; _,upstream_container_version = build.get_container_versions('$(cat TRITON_VERSION)', None, None); print(upstream_container_version)"
+    UPSTREAM_CONTAINER_VERSION=$(python3 -c "${QUERY_STRING}")
+    echo "found upstream container version: ${UPSTREAM_CONTAINER_VERSION} from build.py"
+fi
+
 # Build container with only python backend 
 cd ${TRITON_PATH}/server
 pip3 install docker
 ./build.py --build-dir=/tmp/tritonbuild \
            --cmake-dir=${TRITON_PATH}/server/build \
+           --container-version=${CONTAINER_VERSION} \
+           --upstream-container-version=${UPSTREAM_CONTAINER_VERSION} \
            --enable-logging --enable-stats --enable-tracing \
            --enable-metrics --enable-gpu-metrics --enable-gpu \
            --filesystem=gcs --filesystem=azure_storage --filesystem=s3 \
@@ -82,7 +155,13 @@ docker tag tritonserver "${BASE_IMAGE}"
 # Build docker container for SDK
 docker build -t ${SDK_IMAGE} \
              -f ${TRITON_PATH}/server/Dockerfile.sdk \
-             --build-arg "TRITON_CLIENT_REPO_SUBDIR=clientrepo" .
+             --build-arg "BASE_IMAGE=nvcr.io/nvidia/tritonserver:${UPSTREAM_CONTAINER_VERSION}-py3-min" \
+             --build-arg "TRITON_CLIENT_REPO_SUBDIR=clientrepo" \
+             --build-arg "TRITON_COMMON_REPO_TAG=${TRITON_COMMON_REPO_TAG}" \
+             --build-arg "TRITON_CORE_REPO_TAG=${TRITON_CORE_REPO_TAG}" \
+             --build-arg "TRITON_BACKEND_REPO_TAG=${TRITON_BACKEND_REPO_TAG}" \
+             --build-arg "TRITON_THIRD_PARTY_REPO_TAG=${TRITON_THIRD_PARTY_REPO_TAG}" \
+             --build-arg "NVIDIA_TRITON_SERVER_SDK_VERSION=${CONTAINER_VERSION}" .
 
 # Build QA container
 docker build -t ${QA_IMAGE} \
