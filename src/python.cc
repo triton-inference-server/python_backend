@@ -990,29 +990,51 @@ ModelInstanceState::ProcessRequests(
               response_output, &buffer, output_tensor->ByteSize(),
               &actual_memory_type, &actual_memory_type_id));
 
+      TRITONSERVER_BufferAttributes* output_buffer_attributes;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_OutputBufferAttributes(
+              response_output, &output_buffer_attributes));
+
       if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
           actual_memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
-        cudaSetDevice(output_tensor->MemoryTypeId());
-        cudaIpcMemHandle_t cuda_ipc_mem_handle;
-        cudaError_t err = cudaIpcGetMemHandle(&cuda_ipc_mem_handle, buffer);
-        output_tensor->SetCudaIpcMemHandle(&cuda_ipc_mem_handle);
-        output_tensor->SetMemoryType(actual_memory_type);
-        output_tensor->SetMemoryTypeId(actual_memory_type_id);
 
-        if (err != cudaSuccess) {
+        if ((*responses)[r] != nullptr) {
+          cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
           GUARDED_RESPOND_IF_ERROR(
               responses, r,
-              TRITONSERVER_ErrorNew(
-                  TRITONSERVER_ERROR_INTERNAL,
-                  std::string(
-                      "failed to get cuda ipc handle: " +
-                      std::string(cudaGetErrorString(err)))
-                      .c_str()));
-        } else {
+              TRITONSERVER_BufferAttributesCudaIpcHandle(
+                  output_buffer_attributes,
+                  reinterpret_cast<void**>(&cuda_ipc_mem_handle_p)));
+
+          cudaSetDevice(output_tensor->MemoryTypeId());
+          output_tensor->SetMemoryType(actual_memory_type);
+          output_tensor->SetMemoryTypeId(actual_memory_type_id);
           output_tensor->SetDataPtr(buffer);
-          output_tensor->RawDataShm()->offset =
-              output_tensor->GetGPUPointerOffset();
+
+          if (cuda_ipc_mem_handle_p != nullptr) {
+            output_tensor->SetCudaIpcMemHandle(cuda_ipc_mem_handle_p);
+            output_tensor->RawDataShm()->offset =
+                output_tensor->GetGPUPointerOffset();
+          } else {
+            cudaIpcMemHandle_t cuda_ipc_mem_handle;
+            cudaError_t err = cudaIpcGetMemHandle(&cuda_ipc_mem_handle, buffer);
+            output_tensor->SetCudaIpcMemHandle(&cuda_ipc_mem_handle);
+            if (err != cudaSuccess) {
+              GUARDED_RESPOND_IF_ERROR(
+                  responses, r,
+                  TRITONSERVER_ErrorNew(
+                      TRITONSERVER_ERROR_INTERNAL,
+                      std::string(
+                          "failed to get cuda ipc handle: " +
+                          std::string(cudaGetErrorString(err)))
+                          .c_str()));
+            } else {
+              output_tensor->RawDataShm()->offset =
+                  output_tensor->GetGPUPointerOffset();
+            }
+          }
         }
 #endif
       }
@@ -1556,8 +1578,35 @@ ModelInstanceState::GetInputTensor(
         input_dtype, src_memory_type, src_memory_type_id,
         const_cast<void*>(buffer), input_byte_size,
         nullptr /* DLManagedTensor */);
-    RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
-        shm_pool_, input_tensor_shm, true /* copy_cpu */, true /* copy_gpu */));
+
+    // If the tensor is using the cuda shared memory, we need to extract the
+    // handle that was used to create the device pointer. This is because of a
+    // limitation in the legacy CUDA IPC API that doesn't allow getting the
+    // handle of an exported pointer. If the cuda handle exists, it indicates
+    // that the cuda shared memory was used and the input is in a single buffer.
+    // [FIXME] for the case where the input is in cuda shared memory and uses
+    // multiple input buffers this needs to be changed.
+    TRITONSERVER_BufferAttributes* buffer_attributes;
+
+    // This value is not used.
+    const void* buffer_p;
+    RETURN_IF_ERROR(TRITONBACKEND_InputBufferAttributes(
+        in, 0, &buffer_p, &buffer_attributes));
+
+    cudaIpcMemHandle_t* cuda_ipc_handle;
+    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesCudaIpcHandle(
+        buffer_attributes, reinterpret_cast<void**>(&cuda_ipc_handle)));
+    if (cuda_ipc_handle != nullptr) {
+      RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
+          shm_pool_, input_tensor_shm, true /* copy_cpu */,
+          false /* copy_gpu */));
+      RETURN_IF_EXCEPTION(input_tensor->SetCudaIpcMemHandle(cuda_ipc_handle));
+      input_tensor->RawDataShm()->offset = input_tensor->GetGPUPointerOffset();
+    } else {
+      RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
+          shm_pool_, input_tensor_shm, true /* copy_cpu */,
+          true /* copy_gpu */));
+    }
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,

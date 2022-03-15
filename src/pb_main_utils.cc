@@ -73,6 +73,8 @@ ResponseAlloc(
     int64_t* actual_memory_type_id)
 {
   SharedMemory* shm_pool = reinterpret_cast<SharedMemory*>(userp);
+  *actual_memory_type = preferred_memory_type;
+  *actual_memory_type_id = preferred_memory_type_id;
 
   // If 'byte_size' is zero just return 'buffer' == nullptr, we don't
   // need to do any other book-keeping.
