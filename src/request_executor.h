@@ -32,6 +32,12 @@ namespace triton { namespace backend { namespace python {
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
 
+
+struct AllocationInfo {
+  bi::managed_external_buffer::handle_t handle_;
+  SharedMemoryManager* shm_manager_;
+};
+
 class RequestExecutor {
   TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
   TRITONSERVER_Server* server_;

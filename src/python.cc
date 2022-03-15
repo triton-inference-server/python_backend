@@ -306,6 +306,12 @@ class ModelInstanceState : public BackendModelInstance {
   void ExecuteBLSRequest(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t message_offset);
+
+  // Cleanup BLS responses
+  void CleanupBLSResponses();
+
+  // Wait for BLS requests to complete
+  void WaitForBLSRequestsToFinish();
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -470,6 +476,25 @@ ModelInstanceState::RespondErrorToAllRequests(
     (*responses)[r] = nullptr;
     TRITONSERVER_ErrorDelete(err);
   }
+}
+
+void
+ModelInstanceState::CleanupBLSResponses()
+{
+  for (auto& bls_inference_response : bls_inference_responses_) {
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceResponseDelete(bls_inference_response),
+        " failed to release BLS inference response.");
+  }
+
+  bls_inference_responses_.clear();
+  request_executors_.clear();
+}
+
+void
+ModelInstanceState::WaitForBLSRequestsToFinish()
+{
+  bls_futures_.clear();
 }
 
 bool
@@ -1843,6 +1868,10 @@ TRITONBACKEND_ModelInstanceExecute(
   // unhealthy and needs a restart.
   bool restart = false;
   instance_state->ProcessRequests(requests, request_count, restart);
+
+  // Wait for all the pending BLS requests to be completed.
+  instance_state->WaitForBLSRequestsToFinish();
+  instance_state->CleanupBLSResponses();
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];

@@ -101,7 +101,8 @@ class SharedMemoryManager {
   }
 
   template <typename T>
-  AllocatedSharedMemory<T> Load(bi::managed_external_buffer::handle_t handle)
+  AllocatedSharedMemory<T> Load(
+      bi::managed_external_buffer::handle_t handle, bool unsafe = false)
   {
     T* object_ptr;
     AllocatedShmOwnership* shm_ownership_data;
@@ -114,7 +115,9 @@ class SharedMemoryManager {
       object_ptr = reinterpret_cast<T*>(
           reinterpret_cast<char*>(shm_ownership_data) +
           sizeof(AllocatedShmOwnership));
-      shm_ownership_data->ref_count_ += 1;
+      if (!unsafe) {
+        shm_ownership_data->ref_count_ += 1;
+      }
     }
 
     return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle);

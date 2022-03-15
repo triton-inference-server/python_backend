@@ -104,9 +104,14 @@ ResponseAlloc(
               CreateTritonErrorFromException(pb_exception);
           return err;
         }
-        // Store the buffer offset in the userp;
-        *buffer_userp =
-            new bi::managed_external_buffer::handle_t(tensor_handle);
+        // Store the buffer offset in the userp; The userp is large enough to
+        // hold the shared memory offset and the address of the Shared memory
+        // manager
+        AllocationInfo* allocation_info = new AllocationInfo;
+        *buffer_userp = allocation_info;
+
+        allocation_info->handle_ = tensor_handle;
+        allocation_info->shm_manager_ = shm_pool;
       } break;
 #ifdef TRITON_ENABLE_GPU
       case TRITONSERVER_MEMORY_GPU: {
@@ -147,8 +152,15 @@ ResponseRelease(
   switch (memory_type) {
     case TRITONSERVER_MEMORY_CPU:
     case TRITONSERVER_MEMORY_CPU_PINNED: {
-      off_t* offset = reinterpret_cast<off_t*>(buffer_userp);
-      delete offset;
+      AllocationInfo* allocation_info =
+          reinterpret_cast<AllocationInfo*>(buffer_userp);
+      {
+        // Load the data so that it is deallocated automatically.
+        auto result = allocation_info->shm_manager_->Load<char>(
+            allocation_info->handle_, true /* unsafe */);
+      }
+
+      delete allocation_info;
     } break;
     case TRITONSERVER_MEMORY_GPU: {
 #ifdef TRITON_ENABLE_GPU
