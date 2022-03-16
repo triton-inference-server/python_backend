@@ -190,6 +190,9 @@ class PbTensor {
   /// \return A vector containing the tensor dimensions.
   const std::vector<int64_t>& Dims() const;
 
+  /// Get the underlying memory
+  std::unique_ptr<PbMemory>& Memory();
+
   PbTensor();
 
   /// Destructor

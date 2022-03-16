@@ -32,6 +32,7 @@
 #include <pthread.h>
 #include <climits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -139,29 +140,34 @@ struct RequestBatch {
 };
 
 #ifdef TRITON_ENABLE_GPU
-class CUDADriverAPI {
+class CUDAHandler {
  public:
-  static CUDADriverAPI& getInstance()
+  static CUDAHandler& getInstance()
   {
-    static CUDADriverAPI instance;
+    static CUDAHandler instance;
     return instance;
   }
 
  private:
+  std::mutex mu_;
   void* dl_open_handle_ = nullptr;
   CUresult (*cu_pointer_get_attribute_fn_)(
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
-  CUDADriverAPI();
-  ~CUDADriverAPI() noexcept(false);
+  CUDAHandler();
+  ~CUDAHandler() noexcept(false);
 
  public:
-  CUDADriverAPI(CUDADriverAPI const&) = delete;
-  void operator=(CUDADriverAPI const&) = delete;
+  CUDAHandler(CUDAHandler const&) = delete;
+  void operator=(CUDAHandler const&) = delete;
   bool IsAvailable();
   void PointerGetAttribute(
       CUdeviceptr* start_address, CUpointer_attribute attr,
       CUdeviceptr device_ptr);
+  void OpenCudaHandle(
+      int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
+      void** data_ptr);
+  void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
 };
 #endif  // TRITON_ENABLE_GPU
 

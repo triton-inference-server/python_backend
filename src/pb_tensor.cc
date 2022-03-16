@@ -182,7 +182,6 @@ PbTensor::MemoryTypeId() const
   return memory_type_id_;
 }
 
-
 uint64_t
 PbTensor::ByteSize() const
 {
@@ -275,6 +274,11 @@ PbTensor::DeleteDLPack()
   }
 }
 
+std::unique_ptr<PbMemory>&
+PbTensor::Memory()
+{
+  return pb_memory_;
+}
 
 #ifdef TRITON_PB_STUB
 std::shared_ptr<PbTensor>

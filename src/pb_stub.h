@@ -91,6 +91,7 @@ class Stub {
       bi::managed_external_buffer::handle_t* responses_shm_handle);
 
   void ProcessResponse(InferResponse* response);
+  void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
   ~Stub();
 
  private:
@@ -117,5 +118,6 @@ class Stub {
   std::condition_variable messages_cv_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
+  std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
 };
 }}}  // namespace triton::backend::python

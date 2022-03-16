@@ -61,6 +61,10 @@ class PbMemory {
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle);
 
+  // Copy the destination buffer to the source buffer.
+  static void CopyBuffer(
+      std::unique_ptr<PbMemory>& dst, std::unique_ptr<PbMemory>& src);
+
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t memory_handle);
@@ -70,7 +74,6 @@ class PbMemory {
       TRITONSERVER_MemoryType memory_type, uint64_t byte_size);
 
   bi::managed_external_buffer::handle_t ShmHandle();
-
 
   /// Get the total byte size of the tensor.
   uint64_t ByteSize() const;
@@ -86,6 +89,8 @@ class PbMemory {
   /// Get the memory type id.
   /// \return The memory type id of the tensor.
   int64_t MemoryTypeId() const;
+
+  ~PbMemory();
 
  private:
   AllocatedSharedMemory<char> memory_shm_;

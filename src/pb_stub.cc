@@ -230,7 +230,6 @@ Stub::RunCommand()
 {
   NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
   std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
-
   switch (ipc_message->Command()) {
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
@@ -351,6 +350,17 @@ Stub::RunCommand()
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
       SendIPCMessage(ipc_message);
       return true;  // Terminate the stub process
+    case PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers:
+      try {
+        LoadGPUBuffers(ipc_message);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_INFO << "An error occurred while trying to load GPU buffers in the "
+                    "Python backend stub: "
+                 << pb_exception.what() << std::endl;
+      }
+
+      break;
     default:
       break;
   }
@@ -438,6 +448,86 @@ void
 Stub::ProcessResponse(InferResponse* response)
 {
   response->SaveToSharedMemory(shm_pool_);
+
+  for (auto& output_tensor : response->OutputTensors()) {
+    if (!output_tensor->IsCPU()) {
+      gpu_tensors_.push_back(output_tensor);
+    }
+  }
+}
+
+void
+Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  AllocatedSharedMemory<char> gpu_buffers_handle =
+      shm_pool_->Load<char>(ipc_message->Args());
+
+  uint64_t* gpu_buffer_count =
+      reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
+  bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          gpu_buffers_handle.data_.get() + sizeof(uint64_t));
+
+  if (gpu_tensors_.size() != *gpu_buffer_count) {
+    LOG_INFO
+        << (std::string(
+                "GPU buffers size does not match the provided buffers: ") +
+            std::to_string(gpu_tensors_.size()) +
+            " != " + std::to_string(*gpu_buffer_count));
+    return;
+  }
+
+  // We need to hold the cpu_buffers until the main process makes a copy from
+  // them.
+  std::vector<std::unique_ptr<PbMemory>> cpu_buffers;
+  std::vector<std::unique_ptr<PbMemory>> dst_buffers;
+
+  bool has_cpu_buffer = false;
+  for (size_t i = 0; i < gpu_tensors_.size(); i++) {
+    std::unique_ptr<PbMemory> dst_buffer =
+        PbMemory::LoadFromSharedMemory(shm_pool_, gpu_buffers_handle_shm[i]);
+    if (dst_buffer->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+      has_cpu_buffer = true;
+    }
+    dst_buffers.emplace_back(std::move(dst_buffer));
+  }
+
+  // Pop a dummy message from the stub message queue indicating that the parent
+  // has finished copying the tensors.
+  defer _(nullptr, std::bind([this, has_cpu_buffer] {
+            if (has_cpu_buffer) {
+              stub_message_queue_->Pop();
+            }
+          }));
+
+  defer load_gpu_buffer_response(nullptr, std::bind([this, has_cpu_buffer] {
+                                   parent_message_queue_->Push(1000);
+                                 }));
+
+  for (size_t i = 0; i < gpu_tensors_.size(); i++) {
+    std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
+
+    // If the memory type is CPU, the buffer is empty and we need to create
+    // a buffer.
+    if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+      dst_buffers[i] = PbMemory::Create(
+          shm_pool_, dst_buffers[i]->MemoryType(),
+          dst_buffers[i]->MemoryTypeId(), src_buffer->ByteSize(),
+          nullptr /* buffer */);
+
+      // Update the handle so that the main process can load it.
+      gpu_buffers_handle_shm[i] = dst_buffers[i]->ShmHandle();
+    }
+
+    PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
+
+    if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+      cpu_buffers.push_back(std::move(dst_buffers[i]));
+    }
+  }
+
+
+  gpu_tensors_.clear();
 }
 
 py::list
@@ -527,10 +617,17 @@ Stub::Execute(
 
   response_batch_shm_ptr->batch_size = response_size;
 
+  std::vector<std::shared_ptr<PbTensor>> gpu_tensors;
+
   size_t i = 0;
   for (auto& response : responses) {
     InferResponse* infer_response = response.cast<InferResponse*>();
     ProcessResponse(infer_response);
+    for (auto output_tensor : infer_response->OutputTensors()) {
+      if (!output_tensor->IsCPU()) {
+        gpu_tensors.push_back(output_tensor);
+      }
+    }
     responses_shm_handle[i] = infer_response->ShmHandle();
     i += 1;
   }

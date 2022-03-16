@@ -54,7 +54,7 @@ namespace triton { namespace backend { namespace python {
 
 #ifdef TRITON_ENABLE_GPU
 
-CUDADriverAPI::CUDADriverAPI()
+CUDAHandler::CUDAHandler()
 {
   dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
 
@@ -81,7 +81,7 @@ CUDADriverAPI::CUDADriverAPI()
 }
 
 void
-CUDADriverAPI::PointerGetAttribute(
+CUDAHandler::PointerGetAttribute(
     CUdeviceptr* start_address, CUpointer_attribute attribute,
     CUdeviceptr dev_ptr)
 {
@@ -99,12 +99,108 @@ CUDADriverAPI::PointerGetAttribute(
 }
 
 bool
-CUDADriverAPI::IsAvailable()
+CUDAHandler::IsAvailable()
 {
   return dl_open_handle_ != nullptr;
 }
 
-CUDADriverAPI::~CUDADriverAPI() noexcept(false)
+void
+CUDAHandler::OpenCudaHandle(
+    int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
+    void** data_ptr)
+{
+  std::lock_guard<std::mutex> guard{mu_};
+  int current_device;
+
+  // Save the previous device
+  cudaError_t err = cudaGetDevice(&current_device);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to get the current CUDA device. error: ") +
+        cudaGetErrorString(err));
+  }
+
+  bool overridden = (current_device != memory_type_id);
+
+  // Restore the previous device before returning from the function.
+  defer _(nullptr, std::bind([&overridden, &current_device] {
+            if (overridden) {
+              cudaError_t err = cudaSetDevice(current_device);
+              if (err != cudaSuccess) {
+                throw PythonBackendException(
+                    "Failed to set the CUDA device to " +
+                    std::to_string(current_device) +
+                    ". error: " + cudaGetErrorString(err));
+              }
+            }
+          }));
+
+  if (overridden) {
+    err = cudaSetDevice(memory_type_id);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          "Failed to set the CUDA device to " + std::to_string(memory_type_id) +
+          ". error: " + cudaGetErrorString(err));
+    }
+  }
+
+  err = cudaIpcOpenMemHandle(
+      data_ptr, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to open the cudaIpcHandle. error: ") +
+        cudaGetErrorString(err));
+  }
+}
+
+void
+CUDAHandler::CloseCudaHandle(int64_t memory_type_id, void* data_ptr)
+{
+  std::lock_guard<std::mutex> guard{mu_};
+  int current_device;
+
+  // Save the previous device
+  cudaError_t err = cudaGetDevice(&current_device);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to get the current CUDA device. error: ") +
+        cudaGetErrorString(err));
+  }
+
+  bool overridden = (current_device != memory_type_id);
+
+  // Restore the previous device before returning from the function.
+  defer _(nullptr, std::bind([&overridden, &current_device] {
+            if (overridden) {
+              cudaError_t err = cudaSetDevice(current_device);
+              if (err != cudaSuccess) {
+                throw PythonBackendException(
+                    "Failed to set the CUDA device to " +
+                    std::to_string(current_device) +
+                    ". error: " + cudaGetErrorString(err));
+              }
+            }
+          }));
+
+  if (overridden) {
+    err = cudaSetDevice(memory_type_id);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          std::string("Failed to set the CUDA device to ") +
+          std::to_string(memory_type_id) +
+          ". error: " + cudaGetErrorString(err));
+    }
+  }
+
+  err = cudaIpcCloseMemHandle(data_ptr);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        std::string("Failed to close the cudaIpcHandle. error: ") +
+        cudaGetErrorString(err));
+  }
+}
+
+CUDAHandler::~CUDAHandler() noexcept(false)
 {
   if (dl_open_handle_ != nullptr) {
     int status = dlclose(dl_open_handle_);
@@ -114,5 +210,4 @@ CUDADriverAPI::~CUDADriverAPI() noexcept(false)
   }
 }
 #endif
-
 }}}  // namespace triton::backend::python

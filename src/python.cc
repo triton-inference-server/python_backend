@@ -846,10 +846,10 @@ ModelInstanceState::GetInputTensor(
   }
 
 #ifdef TRITON_ENABLE_GPU
-  CUDADriverAPI& cuda_driver_api = CUDADriverAPI::getInstance();
+  CUDAHandler& cuda_handler = CUDAHandler::getInstance();
   // If CUDA driver API is not available, the input tensors will be moved to
   // CPU.
-  if (!cuda_driver_api.IsAvailable()) {
+  if (!cuda_handler.IsAvailable()) {
     cpu_only_tensors = true;
   }
 #endif
@@ -1246,14 +1246,15 @@ ModelInstanceState::ProcessRequests(
   }
 
 
-  defer _(nullptr, std::bind([this, &restart] {
-            // Push a dummy message to the message queue so that the stub
-            // process is notified that it can release the object stored
-            // in shared memory.
-            NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
-            if (!restart)
-              stub_message_queue_->Push(1000);
-          }));
+  defer execute_finalize(nullptr, std::bind([this, &restart] {
+                           // Push a dummy message to the message queue so that
+                           // the stub process is notified that it can release
+                           // the object stored in shared memory.
+                           NVTX_RANGE(
+                               nvtx_, "RequestExecuteFinalize " + Name());
+                           if (!restart)
+                             stub_message_queue_->Push(1000);
+                         }));
   if (restart) {
     return;
   }
@@ -1330,6 +1331,13 @@ ModelInstanceState::ProcessRequests(
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
           response_batch.data_.get() + sizeof(ResponseBatch));
 
+  // If the output provided by the model is in GPU, we will pass the list of
+  // buffers provided by Triton to the stub process.
+  bool has_gpu_output = false;
+
+  // GPU output buffers
+  std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers;
+
   for (uint32_t r = 0; r < request_count; ++r) {
     NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
     TRITONBACKEND_Response* response = (*responses)[r];
@@ -1394,6 +1402,9 @@ ModelInstanceState::ProcessRequests(
       TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
       int64_t actual_memory_type_id = src_memory_type_id;
 
+      if (actual_memory_type == TRITONSERVER_MEMORY_GPU)
+        has_gpu_output = true;
+
       TRITONBACKEND_Output* response_output;
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
@@ -1410,6 +1421,31 @@ ModelInstanceState::ProcessRequests(
               response_output, &buffer, output_tensor->ByteSize(),
               &actual_memory_type, &actual_memory_type_id));
 
+      std::unique_ptr<PbMemory> output_buffer;
+      if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
+          actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+        GUARDED_RESPOND_IF_EXCEPTION(
+            responses, r,
+            output_buffer = PbMemory::Create(
+                shm_pool_, actual_memory_type, actual_memory_type_id,
+                output_tensor->ByteSize(), reinterpret_cast<char*>(buffer)));
+
+        gpu_output_buffers.push_back({std::move(output_buffer), buffer});
+      }
+
+      // When we requested a GPU buffer but received a CPU buffer.
+      if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
+          (actual_memory_type == TRITONSERVER_MEMORY_CPU ||
+           actual_memory_type == TRITONSERVER_MEMORY_CPU_PINNED)) {
+        GUARDED_RESPOND_IF_EXCEPTION(
+            responses, r,
+            output_buffer = PbMemory::Create(
+                shm_pool_, actual_memory_type, actual_memory_type_id,
+                0 /* byte size */, nullptr /* data ptr */));
+
+        gpu_output_buffers.push_back({std::move(output_buffer), buffer});
+      }
+
       if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
         GUARDED_RESPOND_IF_ERROR(
             responses, r,
@@ -1419,6 +1455,7 @@ ModelInstanceState::ProcessRequests(
                 output_tensor->ByteSize(), output_tensor->DataPtr(), buffer,
                 CudaStream(), &cuda_used));
       }
+
       cuda_copy |= cuda_used;
     }
 #ifdef TRITON_ENABLE_GPU
@@ -1427,6 +1464,68 @@ ModelInstanceState::ProcessRequests(
     }
 #endif  // TRITON_ENABLE_GPU
   }
+
+  // Finalize the execute.
+  execute_finalize.reset();
+
+  // If the output tensor is in GPU, there will be a second round trip
+  // required for filling the GPU buffers provided by the main process.
+  if (has_gpu_output) {
+    AllocatedSharedMemory<char> gpu_buffers_handle = shm_pool_->Construct<char>(
+        sizeof(uint64_t) + gpu_output_buffers.size() *
+                               sizeof(bi::managed_external_buffer::handle_t));
+    uint64_t* gpu_buffer_count =
+        reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
+    *gpu_buffer_count = gpu_output_buffers.size();
+    bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            gpu_buffers_handle.data_.get() + sizeof(uint64_t));
+
+    for (size_t i = 0; i < gpu_output_buffers.size(); i++) {
+      gpu_buffers_handle_shm[i] = gpu_output_buffers[i].first->ShmHandle();
+    }
+
+    ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
+    ipc_message->Args() = gpu_buffers_handle.handle_;
+    SendMessageAndReceiveResponse(
+        ipc_message->ShmHandle(), response_message, restart, responses,
+        requests, 0);
+
+    bool cuda_copy = false;
+
+    // CPU tensors require an additional notification to the stub process.  This
+    // is to ask the stub process to release the tensor.
+    bool has_cpu_tensor = false;
+    for (size_t i = 0; i < gpu_output_buffers.size(); i++) {
+      if (gpu_output_buffers[i].first->MemoryType() ==
+          TRITONSERVER_MEMORY_CPU) {
+        bool cuda_used;
+        has_cpu_tensor = true;
+        std::unique_ptr<PbMemory> pb_cpu_memory =
+            PbMemory::LoadFromSharedMemory(
+                shm_pool_, gpu_buffers_handle_shm[i]);
+
+        // FIXME
+        CopyBuffer(
+            "Failed to copy the output tensor to buffer.",
+            TRITONSERVER_MEMORY_CPU, 0, TRITONSERVER_MEMORY_CPU, 0,
+            pb_cpu_memory->ByteSize(), pb_cpu_memory->DataPtr(),
+            gpu_output_buffers[i].second, CudaStream(), &cuda_used);
+        cuda_copy |= cuda_used;
+      }
+    }
+
+    if (has_cpu_tensor) {
+      // Any number would work here.
+      stub_message_queue_->Push(1000);
+    }
+#ifdef TRITON_ENABLE_GPU
+    if (cuda_copy) {
+      cudaStreamSynchronize(stream_);
+    }
+#endif  // TRITON_ENABLE_GPU
+  }
+
   for (uint32_t r = 0; r < request_count; ++r) {
     // If error happens at this stage, we can only log it
     GUARDED_RESPOND_IF_ERROR(
