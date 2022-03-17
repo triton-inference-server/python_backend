@@ -56,10 +56,17 @@ class PbMemory {
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data);
+
   static std::unique_ptr<PbMemory> Create(
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle);
+
+#ifndef TRITON_PB_STUB
+  static std::unique_ptr<PbMemory> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      std::unique_ptr<BackendMemory>&& backend_memory);
+#endif
 
   // Copy the destination buffer to the source buffer.
   static void CopyBuffer(
@@ -95,6 +102,10 @@ class PbMemory {
  private:
   AllocatedSharedMemory<char> memory_shm_;
   MemoryShm* memory_shm_ptr_;
+
+#ifndef TRITON_PB_STUB
+  std::unique_ptr<BackendMemory> backend_memory_;
+#endif
 
   // Refers to the pointer that can hold the data. For CPU pointers this will be
   // the same as memory_data_shm_ptr_.

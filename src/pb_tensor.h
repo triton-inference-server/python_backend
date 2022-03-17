@@ -193,6 +193,9 @@ class PbTensor {
   /// Get the underlying memory
   std::unique_ptr<PbMemory>& Memory();
 
+  /// Set the underlying memory
+  void SetMemory(std::unique_ptr<PbMemory>&& memory);
+
   PbTensor();
 
   /// Destructor

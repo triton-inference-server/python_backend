@@ -194,6 +194,16 @@ PbTensor::Dims() const
   return dims_;
 }
 
+void
+PbTensor::SetMemory(std::unique_ptr<PbMemory>&& memory)
+{
+  pb_memory_ = std::move(memory);
+  memory_type_ = pb_memory_->MemoryType();
+  memory_type_id_ = pb_memory_->MemoryTypeId();
+  byte_size_ = pb_memory_->ByteSize();
+  memory_ptr_ = pb_memory_->DataPtr();
+}
+
 #ifdef TRITON_PB_STUB
 void
 delete_unused_dltensor(PyObject* dlp)

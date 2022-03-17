@@ -119,13 +119,15 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->model_version = model_version_;
   infer_request_shm_ptr_->requested_output_count =
       RequestedOutputNames().size();
+  infer_request_shm_ptr_->flags = Flags();
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
           reinterpret_cast<char*>(infer_request_shm_ptr_) +
           sizeof(InferRequestShm));
 
-  // [FIXME] Make this part of the memory layout too.
+  // [FIXME] This could also be a part of the single allocated memory for this
+  // object.
   size_t i = 0;
   std::vector<std::unique_ptr<PbString>> requested_output_names_shm;
   for (auto& requested_output_name : requested_output_names_) {
@@ -318,9 +320,13 @@ InferRequest::Exec()
             request_batch.data_.get() + sizeof(RequestBatch));
     request_batch_shm_ptr->batch_size = 1;
 
+    bool has_gpu_tensor = false;
     size_t i = 0;
     for (auto& input_tensor : inputs_) {
       input_tensor->SaveToSharedMemory(shm_pool);
+      if (!input_tensor->IsCPU()) {
+        has_gpu_tensor = true;
+      }
       ++i;
     }
 
@@ -337,7 +343,42 @@ InferRequest::Exec()
       ipc_message->ResponseCondition()->wait(lock);
     }
 
-    // [FIXME] Additional roundtrip required for the GPU tensors.
+    // Additional round trip required for asking the stub process
+    // to fill in the GPU tensor buffers
+    if (has_gpu_tensor) {
+      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+          gpu_buffers_handle =
+              shm_pool->Load<bi::managed_external_buffer::handle_t>(
+                  request_batch_shm_ptr->gpu_buffers_handle);
+      try {
+        size_t i = 0;
+        for (auto& input_tensor : this->Inputs()) {
+          if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+            std::unique_ptr<PbMemory> dst_buffer =
+                PbMemory::LoadFromSharedMemory(
+                    shm_pool, (gpu_buffers_handle.data_.get())[i]);
+            PbMemory::CopyBuffer(dst_buffer, input_tensor->Memory());
+            ++i;
+#endif  // TRITON_ENABLE_GPU
+          }
+        }
+      }
+      catch (const PythonBackendException& exception) {
+        // We need to catch the exception here. Otherwise, we will not notify
+        // the main process and it will wait for the resposne forever.
+        std::cout << "Has exception!" << (exception.what()) << std::endl;
+        pb_exception = exception;
+        has_exception = true;
+      }
+
+      {
+        bi::scoped_lock<bi::interprocess_mutex> lock{
+            *(ipc_message->ResponseMutex())};
+        ipc_message->ResponseCondition()->notify_all();
+        ipc_message->ResponseCondition()->wait(lock);
+      }
+    }
 
     // The exception will be thrown after the message was sent to the main
     // process.

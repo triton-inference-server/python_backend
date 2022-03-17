@@ -126,15 +126,23 @@ struct ResponseBatch {
   uint32_t batch_size;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
+
   // Indicates whether an additional call to stub is required for the clean up
   // of the resources.
   bool cleanup;
+
   // Indicates whether this error has a message or not.
   bool is_error_set;
 };
 
 struct RequestBatch {
   uint32_t batch_size;
+
+  // GPU Buffers handle
+  bi::managed_external_buffer::handle_t gpu_buffers_handle;
+
+  // GPU buffers count
+  uint32_t gpu_buffers_count;
 };
 
 #ifdef TRITON_ENABLE_GPU

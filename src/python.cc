@@ -937,6 +937,7 @@ ModelInstanceState::ExecuteBLSRequest(
     bls_response->Command() = PYTHONSTUB_InferExecResponse;
     ipc_message->ResponseHandle() = bls_response->ShmHandle();
 
+    // The response batch of the handle will contain a ResponseBatch
     response_batch_shm = shm_pool_->Construct<char>(
         sizeof(ResponseBatch) + sizeof(bi::managed_external_buffer::handle_t));
     response_batch =
@@ -951,13 +952,13 @@ ModelInstanceState::ExecuteBLSRequest(
     response_batch->is_error_set = false;
     response_batch->cleanup = false;
     is_response_batch_set = true;
-    // bool has_gpu_tensor = false;
+    bool has_gpu_tensor = false;
 
     PythonBackendException pb_exception(std::string{});
 
+    uint32_t gpu_buffers_count = 0;
     if (request_batch_shm_ptr->batch_size == 1) {
       std::unique_ptr<InferRequest> infer_request;
-      std::shared_ptr<std::mutex> cuda_ipc_mutex;
       bi::managed_external_buffer::handle_t* request_handle =
           reinterpret_cast<bi::managed_external_buffer::handle_t*>(
               request_batch.data_.get() + sizeof(RequestBatch));
@@ -968,42 +969,56 @@ ModelInstanceState::ExecuteBLSRequest(
       // stub process and the main process is required. The reason is that we
       // need to first allocate the GPU memory from the memory pool and then
       // ask the stub process to fill in those allocated buffers.
-      // [FIXME]
-      // for (auto& input_tensor : infer_request->Inputs()) {
-      //         if (!input_tensor->IsCPU()) {
-      // #ifdef TRITON_ENABLE_GPU
-      //           BackendMemory* backend_memory;
-      //           std::unique_ptr<BackendMemory> lbackend_memory;
-      //           has_gpu_tensor = true;
-      //           TRITONSERVER_Error* error = BackendMemory::Create(
-      //               Model()->TritonMemoryManager(),
-      //               {BackendMemory::AllocationType::GPU_POOL,
-      //                BackendMemory::AllocationType::GPU},
-      //               input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
-      //               &backend_memory);
-      //           if (error != nullptr) {
-      //             LOG_MESSAGE(
-      //                 TRITONSERVER_LOG_ERROR,
-      //                 TRITONSERVER_ErrorMessage(error));
-      //             break;
-      //           }
-      //           lbackend_memory.reset(backend_memory);
-      //           input_tensor->SetBackendMemory(std::move(lbackend_memory),
-      //           shm_pool_);
-      // #endif  // TRITON_ENABLE_GPU
-      //         }
-      // }
+      for (auto& input_tensor : infer_request->Inputs()) {
+        if (!input_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+          gpu_buffers_count++;
+          BackendMemory* backend_memory;
+          std::unique_ptr<BackendMemory> lbackend_memory;
+          has_gpu_tensor = true;
+          TRITONSERVER_Error* error = BackendMemory::Create(
+              Model()->TritonMemoryManager(),
+              {BackendMemory::AllocationType::GPU_POOL,
+               BackendMemory::AllocationType::GPU},
+              input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
+              &backend_memory);
+          if (error != nullptr) {
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(error));
+            break;
+          }
+          lbackend_memory.reset(backend_memory);
+          input_tensor->SetMemory(std::move(
+              PbMemory::Create(shm_pool_, std::move(lbackend_memory))));
+#endif  // TRITON_ENABLE_GPU
+        }
+      }
 
       // Wait for the extra round trip to complete. The stub process will fill
       // in the data for the GPU tensors. If there is an error, the extra round
       // trip must be still completed, otherwise the stub process will always be
       // waiting for a message from the parent process.
-      // if (has_gpu_tensor) {
-      //   bi::scoped_lock<bi::interprocess_mutex> lock{
-      //       *(ipc_message->ResponseMutex())};
-      //   ipc_message->ResponseCondition()->notify_all();
-      //   ipc_message->ResponseCondition()->wait(lock);
-      // }
+      if (has_gpu_tensor) {
+        AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+            gpu_handles =
+                shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
+                    gpu_buffers_count);
+        request_batch_shm_ptr->gpu_buffers_count = gpu_buffers_count;
+        request_batch_shm_ptr->gpu_buffers_handle = gpu_handles.handle_;
+
+        size_t i = 0;
+        for (auto& input_tensor : infer_request->Inputs()) {
+          if (!input_tensor->IsCPU()) {
+            gpu_handles.data_.get()[i] = input_tensor->Memory()->ShmHandle();
+            ++i;
+          }
+        }
+
+        bi::scoped_lock<bi::interprocess_mutex> lock{
+            *(ipc_message->ResponseMutex())};
+        ipc_message->ResponseCondition()->notify_all();
+        ipc_message->ResponseCondition()->wait(lock);
+      }
 
       if (pb_exception.what() != nullptr) {
         infer_response = request_executor->Infer(
@@ -1040,9 +1055,9 @@ ModelInstanceState::ExecuteBLSRequest(
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
     ipc_message->ResponseCondition()->notify_all();
-
     ipc_message->ResponseCondition()->wait(lock);
   }
+
   request_executors_.emplace_back(std::move(request_executor));
 }
 

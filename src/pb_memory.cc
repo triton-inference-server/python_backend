@@ -66,6 +66,21 @@ PbMemory::Create(
   return pb_memory;
 }
 
+#ifndef TRITON_PB_STUB
+std::unique_ptr<PbMemory>
+PbMemory::Create(
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    std::unique_ptr<BackendMemory>&& backend_memory)
+{
+  std::unique_ptr<PbMemory> pb_memory = PbMemory::Create(
+      shm_pool, backend_memory->MemoryType(), backend_memory->MemoryTypeId(),
+      backend_memory->ByteSize(), backend_memory->MemoryPtr());
+  pb_memory->backend_memory_ = std::move(backend_memory);
+
+  return pb_memory;
+}
+#endif
+
 void
 PbMemory::CopyBuffer(
     std::unique_ptr<PbMemory>& dst, std::unique_ptr<PbMemory>& src)
