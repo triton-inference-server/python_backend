@@ -44,6 +44,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include "scoped_defer.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
@@ -123,17 +124,17 @@ CUDAHandler::OpenCudaHandle(
   bool overridden = (current_device != memory_type_id);
 
   // Restore the previous device before returning from the function.
-  defer _(nullptr, std::bind([&overridden, &current_device] {
-            if (overridden) {
-              cudaError_t err = cudaSetDevice(current_device);
-              if (err != cudaSuccess) {
-                throw PythonBackendException(
-                    "Failed to set the CUDA device to " +
-                    std::to_string(current_device) +
-                    ". error: " + cudaGetErrorString(err));
-              }
-            }
-          }));
+  ScopedDefer _(std::bind([&overridden, &current_device] {
+    if (overridden) {
+      cudaError_t err = cudaSetDevice(current_device);
+      if (err != cudaSuccess) {
+        throw PythonBackendException(
+            "Failed to set the CUDA device to " +
+            std::to_string(current_device) +
+            ". error: " + cudaGetErrorString(err));
+      }
+    }
+  }));
 
   if (overridden) {
     err = cudaSetDevice(memory_type_id);
@@ -170,17 +171,17 @@ CUDAHandler::CloseCudaHandle(int64_t memory_type_id, void* data_ptr)
   bool overridden = (current_device != memory_type_id);
 
   // Restore the previous device before returning from the function.
-  defer _(nullptr, std::bind([&overridden, &current_device] {
-            if (overridden) {
-              cudaError_t err = cudaSetDevice(current_device);
-              if (err != cudaSuccess) {
-                throw PythonBackendException(
-                    "Failed to set the CUDA device to " +
-                    std::to_string(current_device) +
-                    ". error: " + cudaGetErrorString(err));
-              }
-            }
-          }));
+  ScopedDefer _(std::bind([&overridden, &current_device] {
+    if (overridden) {
+      cudaError_t err = cudaSetDevice(current_device);
+      if (err != cudaSuccess) {
+        throw PythonBackendException(
+            "Failed to set the CUDA device to " +
+            std::to_string(current_device) +
+            ". error: " + cudaGetErrorString(err));
+      }
+    }
+  }));
 
   if (overridden) {
     err = cudaSetDevice(memory_type_id);

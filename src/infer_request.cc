@@ -25,9 +25,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "infer_request.h"
-#include <boost/interprocess/sync/scoped_lock.hpp>
 
+#include <boost/interprocess/sync/scoped_lock.hpp>
 #include "pb_utils.h"
+#include "scoped_defer.h"
 #ifdef TRITON_PB_STUB
 #include "pb_stub.h"
 #endif
@@ -289,11 +290,11 @@ InferRequest::Exec()
   std::unique_ptr<IPCMessage> ipc_message;
 
   AllocatedSharedMemory<char> request_batch;
-  defer data_load_complete(nullptr, std::bind([&ipc_message] {
-                             bi::scoped_lock<bi::interprocess_mutex> lock{
-                                 *(ipc_message->ResponseMutex())};
-                             ipc_message->ResponseCondition()->notify_all();
-                           }));
+  ScopedDefer data_load_complete(std::bind([&ipc_message] {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    ipc_message->ResponseCondition()->notify_all();
+  }));
 
   try {
     py::gil_scoped_release release;
@@ -319,7 +320,6 @@ InferRequest::Exec()
 
     size_t i = 0;
     for (auto& input_tensor : inputs_) {
-      // [FIXME] Custom handling for GPU tensors
       input_tensor->SaveToSharedMemory(shm_pool);
       ++i;
     }

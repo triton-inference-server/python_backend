@@ -44,6 +44,7 @@
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
+#include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/common/nvtx.h"
 
@@ -55,8 +56,6 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 namespace bi = boost::interprocess;
-using defer = std::shared_ptr<void>;
-
 namespace triton { namespace backend { namespace python {
 
 #define LOG_IF_EXCEPTION(X)                              \
@@ -242,12 +241,17 @@ Stub::RunCommand()
       AllocatedSharedMemory<InitializeResponseShm> initialize_response =
           shm_pool_->Construct<InitializeResponseShm>();
 
-      // Order is important
-      defer receive_initialize_finalize(
-          nullptr, std::bind([this] { stub_message_queue_->Pop(); }));
-      defer _(nullptr, std::bind([this, &initialize_response_msg] {
-                SendIPCMessage(initialize_response_msg);
-              }));
+      // The initialization is done in three steps. First the main process sends
+      // a message to the stub process asking to begin to initilize the Python
+      // model. After that is finished stub process sends a message to the
+      // parent process that the initialization is finished.  Finally, the
+      // parent process sends a message to the stub process asking the stub
+      // process to release any objects it has held in shared memory.
+      ScopedDefer receive_initialize_finalize(
+          std::bind([this] { stub_message_queue_->Pop(); }));
+      ScopedDefer _(std::bind([this, &initialize_response_msg] {
+        SendIPCMessage(initialize_response_msg);
+      }));
 
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
@@ -310,11 +314,10 @@ Stub::RunCommand()
 
       execute_response->Args() = response_batch.handle_;
 
-      defer execute_finalize(
-          nullptr, std::bind([this] { stub_message_queue_->Pop(); }));
-      defer _(nullptr, std::bind([this, &execute_response] {
-                SendIPCMessage(execute_response);
-              }));
+      ScopedDefer execute_finalize(
+          std::bind([this] { stub_message_queue_->Pop(); }));
+      ScopedDefer _(std::bind(
+          [this, &execute_response] { SendIPCMessage(execute_response); }));
 
       response_batch_shm_ptr->has_error = false;
       response_batch_shm_ptr->is_error_set = false;
@@ -494,15 +497,14 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
 
   // Pop a dummy message from the stub message queue indicating that the parent
   // has finished copying the tensors.
-  defer _(nullptr, std::bind([this, has_cpu_buffer] {
-            if (has_cpu_buffer) {
-              stub_message_queue_->Pop();
-            }
-          }));
+  ScopedDefer _(std::bind([this, has_cpu_buffer] {
+    if (has_cpu_buffer) {
+      stub_message_queue_->Pop();
+    }
+  }));
 
-  defer load_gpu_buffer_response(nullptr, std::bind([this, has_cpu_buffer] {
-                                   parent_message_queue_->Push(1000);
-                                 }));
+  ScopedDefer load_gpu_buffer_response(
+      std::bind([this, has_cpu_buffer] { parent_message_queue_->Push(1000); }));
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
@@ -525,7 +527,6 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
       cpu_buffers.push_back(std::move(dst_buffers[i]));
     }
   }
-
 
   gpu_tensors_.clear();
 }

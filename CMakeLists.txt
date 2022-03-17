@@ -140,6 +140,8 @@ set(
   src/pb_string.h
   src/pb_map.cc
   src/pb_map.h
+  src/scoped_defer.cc
+  src/scoped_defer.h
   src/pb_error.cc
   src/pb_error.h
   src/pb_memory.cc

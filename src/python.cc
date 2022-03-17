@@ -59,6 +59,7 @@
 #include "pb_metric_reporter.h"
 #include "pb_utils.h"
 #include "request_executor.h"
+#include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_input_collector.h"
@@ -633,12 +634,13 @@ ModelInstanceState::StartStubProcess()
     }
 
   } else {
-    defer _(nullptr, std::bind([this] {
-              // Push a dummy message to the message queue so that the stub
-              // process is notified that it can release the object stored in
-              // shared memory.
-              stub_message_queue_->Push(1000);
-            }));
+    ScopedDefer _(std::bind([this] {
+      // Push a dummy message to the message queue so that the stub
+      // process is notified that it can release the object stored in
+      // shared memory.
+      stub_message_queue_->Push(1000);
+    }));
+
     stub_pid_ = pid;
     triton::common::TritonJson::WriteBuffer buffer;
     Model()->ModelConfig().Write(&buffer);
@@ -1246,15 +1248,14 @@ ModelInstanceState::ProcessRequests(
   }
 
 
-  defer execute_finalize(nullptr, std::bind([this, &restart] {
-                           // Push a dummy message to the message queue so that
-                           // the stub process is notified that it can release
-                           // the object stored in shared memory.
-                           NVTX_RANGE(
-                               nvtx_, "RequestExecuteFinalize " + Name());
-                           if (!restart)
-                             stub_message_queue_->Push(1000);
-                         }));
+  ScopedDefer execute_finalize(std::bind([this, &restart] {
+    // Push a dummy message to the message queue so that
+    // the stub process is notified that it can release
+    // the object stored in shared memory.
+    NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
+    if (!restart)
+      stub_message_queue_->Push(1000);
+  }));
   if (restart) {
     return;
   }
@@ -1466,7 +1467,7 @@ ModelInstanceState::ProcessRequests(
   }
 
   // Finalize the execute.
-  execute_finalize.reset();
+  execute_finalize.Complete();
 
   // If the output tensor is in GPU, there will be a second round trip
   // required for filling the GPU buffers provided by the main process.

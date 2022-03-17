@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,31 +24,29 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <memory>
-#include "infer_request.h"
-#include "infer_response.h"
+#include "scoped_defer.h"
 
 namespace triton { namespace backend { namespace python {
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
+ScopedDefer::ScopedDefer(std::function<void()> task)
+{
+  task_ = task;
+  done_ = false;
+}
 
+void
+ScopedDefer::Complete()
+{
+  if (!done_) {
+    task_();
+    done_ = true;
+  }
+}
 
-struct AllocationInfo {
-  bi::managed_external_buffer::handle_t handle_;
-  SharedMemoryManager* shm_manager_;
-};
+ScopedDefer::~ScopedDefer()
+{
+  if (!done_) {
+    task_();
+  }
+}
 
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-
- public:
-  std::unique_ptr<InferResponse> Infer(
-      const std::unique_ptr<InferRequest>& infer_request,
-      const std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_InferenceResponse** response);
-  RequestExecutor(TRITONSERVER_Server* server);
-  ~RequestExecutor();
-};
-
-}}}  // namespace triton::backend::python
+}}};  // namespace triton::backend::python
