@@ -46,10 +46,12 @@ class InferResponse {
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
       std::shared_ptr<PbError> error = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
-  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  void SaveToSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
   static std::unique_ptr<InferResponse> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t response_handle);
+      bi::managed_external_buffer::handle_t response_handle,
+      bool open_cuda_handle);
   bool HasError();
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();

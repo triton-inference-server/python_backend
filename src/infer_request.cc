@@ -102,7 +102,8 @@ InferRequest::ShmHandle()
 }
 
 void
-InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+InferRequest::SaveToSharedMemory(
+    std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu)
 {
   AllocatedSharedMemory<char> infer_request_shm = shm_pool->Construct<char>(
       sizeof(InferRequestShm) +
@@ -179,7 +180,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 std::shared_ptr<InferRequest>
 InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t request_handle)
+    bi::managed_external_buffer::handle_t request_handle, bool open_cuda_handle)
 {
   AllocatedSharedMemory<char> infer_request_shm =
       shm_pool->Load<char>(request_handle);
@@ -213,7 +214,7 @@ InferRequest::LoadFromSharedMemory(
   for (size_t input_idx = 0; input_idx < infer_request_shm_ptr->input_count;
        ++input_idx) {
     std::shared_ptr<PbTensor> input_tensor = PbTensor::LoadFromSharedMemory(
-        shm_pool, input_names_handle_shm_ptr[input_idx]);
+        shm_pool, input_names_handle_shm_ptr[input_idx], open_cuda_handle);
     input_tensors.emplace_back(std::move(input_tensor));
   }
 
@@ -323,7 +324,7 @@ InferRequest::Exec()
     bool has_gpu_tensor = false;
     size_t i = 0;
     for (auto& input_tensor : inputs_) {
-      input_tensor->SaveToSharedMemory(shm_pool);
+      input_tensor->SaveToSharedMemory(shm_pool, false /* copy_gpu */);
       if (!input_tensor->IsCPU()) {
         has_gpu_tensor = true;
       }
@@ -355,9 +356,15 @@ InferRequest::Exec()
         for (auto& input_tensor : this->Inputs()) {
           if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
+            if (i == request_batch_shm_ptr->gpu_buffers_count) {
+              std::cout << i << " gpu buffer count "
+                        << (request_batch_shm_ptr->gpu_buffers_count)
+                        << std::endl;
+            }
             std::unique_ptr<PbMemory> dst_buffer =
                 PbMemory::LoadFromSharedMemory(
-                    shm_pool, (gpu_buffers_handle.data_.get())[i]);
+                    shm_pool, (gpu_buffers_handle.data_.get())[i],
+                    true /* open cuda handle */);
             PbMemory::CopyBuffer(dst_buffer, input_tensor->Memory());
             ++i;
 #endif  // TRITON_ENABLE_GPU
@@ -420,7 +427,8 @@ InferRequest::Exec()
 
   if (responses_is_set) {
     std::unique_ptr<InferResponse> infer_response =
-        InferResponse::LoadFromSharedMemory(shm_pool, *response_handle);
+        InferResponse::LoadFromSharedMemory(
+            shm_pool, *response_handle, true /* open cuda handle */);
 
     return infer_response;
   } else {

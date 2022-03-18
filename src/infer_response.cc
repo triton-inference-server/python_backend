@@ -54,7 +54,7 @@ InferResponse::HasError()
 
 void
 InferResponse::SaveToSharedMemory(
-    std::unique_ptr<SharedMemoryManager>& shm_pool)
+    std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu)
 {
   size_t output_tensor_length = output_tensors_.size();
   if (HasError()) {
@@ -89,7 +89,7 @@ InferResponse::SaveToSharedMemory(
 
     size_t j = 0;
     for (auto& output_tensor : output_tensors_) {
-      output_tensor->SaveToSharedMemory(shm_pool);
+      output_tensor->SaveToSharedMemory(shm_pool, copy_gpu);
       tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
@@ -105,7 +105,8 @@ InferResponse::ShmHandle()
 std::unique_ptr<InferResponse>
 InferResponse::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t response_handle)
+    bi::managed_external_buffer::handle_t response_handle,
+    bool open_cuda_handle)
 {
   AllocatedSharedMemory<char> response_shm =
       shm_pool->Load<char>(response_handle);
@@ -127,8 +128,8 @@ InferResponse::LoadFromSharedMemory(
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             response_shm.data_.get() + sizeof(ResponseShm));
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
-      std::shared_ptr<PbTensor> pb_tensor =
-          PbTensor::LoadFromSharedMemory(shm_pool, tensor_handle_shm[idx]);
+      std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
+          shm_pool, tensor_handle_shm[idx], open_cuda_handle);
       output_tensors.emplace_back(std::move(pb_tensor));
     }
   }

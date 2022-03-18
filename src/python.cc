@@ -501,18 +501,7 @@ ModelInstanceState::WaitForBLSRequestsToFinish()
 bool
 ModelInstanceState::IsStubProcessAlive()
 {
-  boost::posix_time::ptime timeout =
-      boost::get_system_time() + boost::posix_time::seconds(1);
-  bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
-
-  // Check if lock has been acquired.
-  if (lock) {
-    return ipc_control_->stub_health;
-  } else {
-    // If It failed to obtain the lock, it means that the stub has been
-    // stuck or exited while holding the health mutex lock.
-    return false;
-  }
+  return true;
 }
 
 TRITONSERVER_Error*
@@ -877,7 +866,8 @@ ModelInstanceState::GetInputTensor(
         input_dtype, TRITONSERVER_MEMORY_CPU /* memory_type */,
         0 /* memory_type_id */, nullptr /* buffer ptr*/, input_byte_size,
         nullptr /* DLManagedTensor */);
-    RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(shm_pool_));
+    RETURN_IF_EXCEPTION(
+        input_tensor->SaveToSharedMemory(shm_pool_, false /* copy_gpu */));
     char* input_buffer = reinterpret_cast<char*>(input_tensor->DataPtr());
     collector.ProcessTensor(
         input_name, input_buffer, input_byte_size,
@@ -898,7 +888,8 @@ ModelInstanceState::GetInputTensor(
         input_dtype, src_memory_type, src_memory_type_id,
         const_cast<void*>(buffer), input_byte_size,
         nullptr /* DLManagedTensor */);
-    RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(shm_pool_));
+    RETURN_IF_EXCEPTION(
+        input_tensor->SaveToSharedMemory(shm_pool_, true /* copy_gpu */));
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
@@ -962,8 +953,8 @@ ModelInstanceState::ExecuteBLSRequest(
       bi::managed_external_buffer::handle_t* request_handle =
           reinterpret_cast<bi::managed_external_buffer::handle_t*>(
               request_batch.data_.get() + sizeof(RequestBatch));
-      infer_request =
-          InferRequest::LoadFromSharedMemory(shm_pool_, *request_handle);
+      infer_request = InferRequest::LoadFromSharedMemory(
+          shm_pool_, *request_handle, false /* open_cuda_handle */);
 
       // If the BLS inputs are in GPU an additional round trip between the
       // stub process and the main process is required. The reason is that we
@@ -993,16 +984,16 @@ ModelInstanceState::ExecuteBLSRequest(
 #endif  // TRITON_ENABLE_GPU
         }
       }
+      AllocatedSharedMemory<bi::managed_external_buffer::handle_t> gpu_handles;
 
       // Wait for the extra round trip to complete. The stub process will fill
       // in the data for the GPU tensors. If there is an error, the extra round
       // trip must be still completed, otherwise the stub process will always be
       // waiting for a message from the parent process.
       if (has_gpu_tensor) {
-        AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
-            gpu_handles =
-                shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
-                    gpu_buffers_count);
+        gpu_handles =
+            shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
+                gpu_buffers_count);
         request_batch_shm_ptr->gpu_buffers_count = gpu_buffers_count;
         request_batch_shm_ptr->gpu_buffers_handle = gpu_handles.handle_;
 
@@ -1363,7 +1354,7 @@ ModelInstanceState::ProcessRequests(
     std::unique_ptr<InferResponse> infer_response;
     try {
       infer_response = InferResponse::LoadFromSharedMemory(
-          shm_pool_, response_shm_handle[r]);
+          shm_pool_, response_shm_handle[r], false /* open_cuda_handle */);
       if (infer_response->HasError()) {
         TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
@@ -1509,7 +1500,7 @@ ModelInstanceState::ProcessRequests(
 
     bool cuda_copy = false;
 
-    // CPU tensors require an additional notification to the stub process.  This
+    // CPU tensors require an additional notification to the stub process. This
     // is to ask the stub process to release the tensor.
     bool has_cpu_tensor = false;
     for (size_t i = 0; i < gpu_output_buffers.size(); i++) {
@@ -1519,7 +1510,8 @@ ModelInstanceState::ProcessRequests(
         has_cpu_tensor = true;
         std::unique_ptr<PbMemory> pb_cpu_memory =
             PbMemory::LoadFromSharedMemory(
-                shm_pool_, gpu_buffers_handle_shm[i]);
+                shm_pool_, gpu_buffers_handle_shm[i],
+                false /* open cuda handle */);
 
         // FIXME
         CopyBuffer(

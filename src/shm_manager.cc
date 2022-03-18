@@ -92,7 +92,7 @@ SharedMemoryManager::SharedMemoryManager(
 }
 
 void
-SharedMemoryManager::GrowIfNeeded(size_t byte_size)
+SharedMemoryManager::GrowIfNeeded(uint64_t byte_size)
 {
   if (*total_size_ != current_capacity_) {
     shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
@@ -103,9 +103,9 @@ SharedMemoryManager::GrowIfNeeded(size_t byte_size)
   }
 
   if (byte_size != 0) {
-    size_t bytes_to_be_added =
+    uint64_t bytes_to_be_added =
         shm_growth_bytes_ * (byte_size / shm_growth_bytes_ + 1);
-    int64_t new_size = *total_size_ + bytes_to_be_added;
+    uint64_t new_size = *total_size_ + bytes_to_be_added;
     try {
       shm_obj_->truncate(new_size);
     }

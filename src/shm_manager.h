@@ -65,7 +65,7 @@ class SharedMemoryManager {
       size_t shm_growth_bytes, bool create);
 
   template <typename T>
-  AllocatedSharedMemory<T> Construct(uint32_t count = 1, bool aligned = false)
+  AllocatedSharedMemory<T> Construct(uint64_t count = 1, bool aligned = false)
   {
     T* obj = nullptr;
     AllocatedShmOwnership* shm_ownership_data = nullptr;
@@ -75,6 +75,7 @@ class SharedMemoryManager {
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
       std::size_t requested_bytes =
           sizeof(T) * count + sizeof(AllocatedShmOwnership);
+      GrowIfNeeded(0);
 
       void* allocated_data;
       try {
@@ -139,7 +140,7 @@ class SharedMemoryManager {
     managed_buffer_->deallocate(ptr);
   }
 
-  void GrowIfNeeded(size_t bytes);
+  void GrowIfNeeded(uint64_t bytes);
   bi::interprocess_mutex* Mutex() { return shm_mutex_; }
 
   ~SharedMemoryManager() noexcept(false);
@@ -179,7 +180,7 @@ class SharedMemoryManager {
     return AllocatedSharedMemory<T>(data, handle);
   }
 
-  void* Allocate(size_t requested_bytes, bool aligned)
+  void* Allocate(uint64_t requested_bytes, bool aligned)
   {
     void* ptr;
     if (aligned) {

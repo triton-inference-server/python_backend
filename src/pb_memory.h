@@ -48,6 +48,7 @@ struct MemoryShm {
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
   uint64_t byte_size;
+  bool is_cuda_handle_set;
 };
 
 class PbMemory {
@@ -55,17 +56,25 @@ class PbMemory {
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      uint64_t byte_size, char* data);
+      uint64_t byte_size, char* data, bool copy_gpu = true);
 
   static std::unique_ptr<PbMemory> Create(
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
-      bi::managed_external_buffer::handle_t handle);
+      bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
+
+#ifdef TRITON_ENABLE_GPU
+  static std::unique_ptr<PbMemory> Create(
+      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
+      uint64_t byte_size, char* data, char* data_shm,
+      bi::managed_external_buffer::handle_t handle,
+      cudaIpcMemHandle_t* cuda_ipc_handle, bool copy_gpu = true);
+#endif
 
 #ifndef TRITON_PB_STUB
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      std::unique_ptr<BackendMemory>&& backend_memory);
+      std::unique_ptr<BackendMemory>&& backend_memory, bool copy_gpu = true);
 #endif
 
   // Copy the destination buffer to the source buffer.
@@ -74,10 +83,12 @@ class PbMemory {
 
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t memory_handle);
+      bi::managed_external_buffer::handle_t memory_handle,
+      bool open_cuda_handle);
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
-      bi::managed_external_buffer::handle_t handle, char* data_shm);
-  static std::size_t ShmStructSize(
+      bi::managed_external_buffer::handle_t handle, char* data_shm,
+      bool open_cuda_handle);
+  static uint64_t ShmStructSize(
       TRITONSERVER_MemoryType memory_type, uint64_t byte_size);
 
   bi::managed_external_buffer::handle_t ShmHandle();
@@ -96,6 +107,10 @@ class PbMemory {
   /// Get the memory type id.
   /// \return The memory type id of the tensor.
   int64_t MemoryTypeId() const;
+
+  /// Get the shm data
+  /// \return The memory type id of the tensor.
+  char* ShmData() const;
 
   ~PbMemory();
 
@@ -127,7 +142,15 @@ class PbMemory {
   static void FillShmData(
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
-      bi::managed_external_buffer::handle_t handle);
+      bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
+
+#ifdef TRITON_ENABLE_GPU
+  static void FillShmData(
+      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
+      uint64_t byte_size, char* data, char* data_shm,
+      bi::managed_external_buffer::handle_t handle,
+      cudaIpcMemHandle_t* cuda_ipc_handle, bool copy_gpu = true);
+#endif
 
   PbMemory(
       AllocatedSharedMemory<char>& memory_shm, char* data,

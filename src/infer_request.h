@@ -68,14 +68,16 @@ class InferRequest {
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.
-  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  void SaveToSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
 
   /// Create an Inference Request object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param request_handle Shared memory handle of the request.
   static std::shared_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t request_handle);
+      bi::managed_external_buffer::handle_t request_handle,
+      bool open_cuda_handle);
 
   /// Disallow copying the inference request object.
   DISALLOW_COPY_AND_ASSIGN(InferRequest);

@@ -450,7 +450,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 void
 Stub::ProcessResponse(InferResponse* response)
 {
-  response->SaveToSharedMemory(shm_pool_);
+  response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
 
   for (auto& output_tensor : response->OutputTensors()) {
     if (!output_tensor->IsCPU()) {
@@ -487,8 +487,8 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
 
   bool has_cpu_buffer = false;
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
-    std::unique_ptr<PbMemory> dst_buffer =
-        PbMemory::LoadFromSharedMemory(shm_pool_, gpu_buffers_handle_shm[i]);
+    std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
+        shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
     if (dst_buffer->MemoryType() == TRITONSERVER_MEMORY_CPU) {
       has_cpu_buffer = true;
     }
@@ -551,8 +551,11 @@ Stub::Execute(
 
   for (size_t i = 0; i < batch_size; i++) {
     std::shared_ptr<InferRequest> infer_request =
-        InferRequest::LoadFromSharedMemory(shm_pool_, request_shm_handle[i]);
+        InferRequest::LoadFromSharedMemory(
+            shm_pool_, request_shm_handle[i], true /* open_cuda_handle */);
     py_request_list.append(std::move(infer_request));
+    std::cout << "Loadfrom shared memory completed for "
+              << (infer_request->ModelName()) << std::endl;
   }
 
   if (!py::hasattr(model_instance_, "execute")) {

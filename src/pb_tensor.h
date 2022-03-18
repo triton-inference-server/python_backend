@@ -142,7 +142,8 @@ class PbTensor {
 
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t tensor_handle);
+      bi::managed_external_buffer::handle_t tensor_handle,
+      bool open_cuda_handle);
 
 #ifdef TRITON_PB_STUB
   /// Get NumPy representation of the tensor.
@@ -152,7 +153,8 @@ class PbTensor {
 #endif
 
   /// Save tensor inside shared memory.
-  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  void SaveToSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu);
 
   /// Get the triton dtype
   /// \return Triton dtype
