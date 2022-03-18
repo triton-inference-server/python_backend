@@ -501,7 +501,18 @@ ModelInstanceState::WaitForBLSRequestsToFinish()
 bool
 ModelInstanceState::IsStubProcessAlive()
 {
-  return true;
+  boost::posix_time::ptime timeout =
+      boost::get_system_time() + boost::posix_time::seconds(1);
+  bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+  // Check if lock has been acquired.
+  if (lock) {
+    return ipc_control_->stub_health;
+  } else {
+    // If It failed to obtain the lock, it means that the stub has been
+    // stuck or exited while holding the health mutex lock.
+    return false;
+  }
 }
 
 TRITONSERVER_Error*

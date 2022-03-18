@@ -205,6 +205,8 @@ MessageQueue::ResetSemaphores()
   new (SemFullMutable()) bi::interprocess_semaphore(0);
   new (SemEmptyMutable()) bi::interprocess_semaphore(Size());
   new (MutexMutable()) bi::interprocess_mutex;
+  mq_shm_ptr_->tail = 0;
+  mq_shm_ptr_->head = 0;
 }
 
 std::unique_ptr<MessageQueue>
