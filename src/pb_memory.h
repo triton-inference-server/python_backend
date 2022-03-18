@@ -63,14 +63,6 @@ class PbMemory {
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
 
-#ifdef TRITON_ENABLE_GPU
-  static std::unique_ptr<PbMemory> Create(
-      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      uint64_t byte_size, char* data, char* data_shm,
-      bi::managed_external_buffer::handle_t handle,
-      cudaIpcMemHandle_t* cuda_ipc_handle, bool copy_gpu = true);
-#endif
-
 #ifndef TRITON_PB_STUB
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
@@ -143,14 +135,6 @@ class PbMemory {
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
-
-#ifdef TRITON_ENABLE_GPU
-  static void FillShmData(
-      TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      uint64_t byte_size, char* data, char* data_shm,
-      bi::managed_external_buffer::handle_t handle,
-      cudaIpcMemHandle_t* cuda_ipc_handle, bool copy_gpu = true);
-#endif
 
   PbMemory(
       AllocatedSharedMemory<char>& memory_shm, char* data,

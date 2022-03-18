@@ -352,24 +352,19 @@ InferRequest::Exec()
               shm_pool->Load<bi::managed_external_buffer::handle_t>(
                   request_batch_shm_ptr->gpu_buffers_handle);
       try {
+#ifdef TRITON_ENABLE_GPU
         size_t i = 0;
         for (auto& input_tensor : this->Inputs()) {
           if (!input_tensor->IsCPU()) {
-#ifdef TRITON_ENABLE_GPU
-            if (i == request_batch_shm_ptr->gpu_buffers_count) {
-              std::cout << i << " gpu buffer count "
-                        << (request_batch_shm_ptr->gpu_buffers_count)
-                        << std::endl;
-            }
             std::unique_ptr<PbMemory> dst_buffer =
                 PbMemory::LoadFromSharedMemory(
                     shm_pool, (gpu_buffers_handle.data_.get())[i],
                     true /* open cuda handle */);
             PbMemory::CopyBuffer(dst_buffer, input_tensor->Memory());
             ++i;
-#endif  // TRITON_ENABLE_GPU
           }
         }
+#endif  // TRITON_ENABLE_GPU
       }
       catch (const PythonBackendException& exception) {
         // We need to catch the exception here. Otherwise, we will not notify

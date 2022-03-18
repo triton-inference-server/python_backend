@@ -201,7 +201,6 @@ PbTensor::SetMemory(std::unique_ptr<PbMemory>&& memory)
   memory_type_ = pb_memory_->MemoryType();
   memory_type_id_ = pb_memory_->MemoryTypeId();
   byte_size_ = pb_memory_->ByteSize();
-  std::cout << "Byte size is " << byte_size_ << std::endl;
   memory_ptr_ = pb_memory_->DataPtr();
 }
 

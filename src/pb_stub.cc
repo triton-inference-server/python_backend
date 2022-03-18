@@ -554,8 +554,6 @@ Stub::Execute(
         InferRequest::LoadFromSharedMemory(
             shm_pool_, request_shm_handle[i], true /* open_cuda_handle */);
     py_request_list.append(std::move(infer_request));
-    std::cout << "Loadfrom shared memory completed for "
-              << (infer_request->ModelName()) << std::endl;
   }
 
   if (!py::hasattr(model_instance_, "execute")) {

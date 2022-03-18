@@ -107,34 +107,6 @@ PbMemory::Create(
   return pb_memory;
 }
 
-std::unique_ptr<PbMemory>
-PbMemory::Create(
-    TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-    uint64_t byte_size, char* data, char* data_shm,
-    bi::managed_external_buffer::handle_t handle,
-    cudaIpcMemHandle_t* cuda_ipc_handle, bool copy_gpu)
-{
-  PbMemory::FillShmData(
-      memory_type, memory_type_id, byte_size, data, data_shm, handle,
-      cuda_ipc_handle, copy_gpu);
-
-  if (memory_type == TRITONSERVER_MEMORY_CPU) {
-    data = data_shm + sizeof(MemoryShm);
-  }
-
-  std::unique_ptr<PbMemory> pb_memory(
-      new PbMemory(data_shm, data, handle, false /* opened_cuda_ipc_handle */));
-
-#ifdef TRITON_ENABLE_GPU
-  if (memory_type == TRITONSERVER_MEMORY_GPU) {
-    pb_memory->memory_shm_ptr_->gpu_pointer_offset =
-        pb_memory->GetGPUPointerOffset();
-  }
-#endif
-
-  return pb_memory;
-}
-
 void
 PbMemory::CopyBuffer(
     std::unique_ptr<PbMemory>& dst, std::unique_ptr<PbMemory>& src)
@@ -180,46 +152,6 @@ PbMemory::CopyBuffer(
   }
 #endif
 }
-
-
-void
-PbMemory::FillShmData(
-    TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-    uint64_t byte_size, char* data, char* data_shm,
-    bi::managed_external_buffer::handle_t handle,
-    cudaIpcMemHandle_t* cuda_ipc_handle, bool copy_gpu)
-{
-  char* memory_data_shm = data_shm + sizeof(MemoryShm);
-  MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
-  memory_shm_ptr->is_cuda_handle_set = copy_gpu;
-
-  if (memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
-    if (copy_gpu) {
-      if (cuda_ipc_handle != nullptr) {
-        *(reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm)) =
-            *cuda_ipc_handle;
-      } else {
-        if (data != nullptr) {
-          // [FIXME] Restore the previous device
-          THROW_IF_CUDA_ERROR(cudaSetDevice(memory_type_id));
-          THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
-              reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm), data));
-        }
-      }
-    }
-#endif
-  } else {
-    if (data != nullptr) {
-      std::copy(data, data + byte_size, memory_data_shm);
-    }
-  }
-
-  memory_shm_ptr->byte_size = byte_size;
-  memory_shm_ptr->memory_type_id = memory_type_id;
-  memory_shm_ptr->memory_type = memory_type;
-}
-
 
 void
 PbMemory::FillShmData(
@@ -320,8 +252,8 @@ PbMemory::LoadFromSharedMemory(
           (reinterpret_cast<char*>(data_ptr_base) +
            memory_shm_ptr->gpu_pointer_offset);
       opened_cuda_ipc_handle = true;
-    }
 #endif
+    }
   } else {
     data_ptr = memory_data_shm;
   }
@@ -356,6 +288,7 @@ PbMemory::ShmHandle()
   return memory_shm_handle_;
 }
 
+#ifdef TRITON_ENABLE_GPU
 void*
 PbMemory::GetGPUStartAddress()
 {
@@ -386,6 +319,7 @@ PbMemory::GetGPUPointerOffset()
   }
   return offset;
 }
+#endif
 
 TRITONSERVER_MemoryType
 PbMemory::MemoryType() const
@@ -435,9 +369,11 @@ PbMemory::ShmStructSize(TRITONSERVER_MemoryType memory_type, uint64_t byte_size)
 PbMemory::~PbMemory()
 {
   if (opened_cuda_ipc_handle_) {
+#ifdef TRITON_ENABLE_GPU
     CUDAHandler& cuda_handler = CUDAHandler::getInstance();
     cuda_handler.CloseCudaHandle(
         memory_shm_ptr_->memory_type_id, GetGPUStartAddress());
+#endif
   }
 }
 
