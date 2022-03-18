@@ -189,7 +189,7 @@ RequestExecutor::RequestExecutor(TRITONSERVER_Server* server) : server_(server)
 
 std::unique_ptr<InferResponse>
 RequestExecutor::Infer(
-    const std::unique_ptr<InferRequest>& infer_request,
+    const std::shared_ptr<InferRequest>& infer_request,
     const std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_InferenceResponse** triton_response)
 {

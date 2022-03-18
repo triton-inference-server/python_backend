@@ -958,7 +958,7 @@ ModelInstanceState::ExecuteBLSRequest(
 
     uint32_t gpu_buffers_count = 0;
     if (request_batch_shm_ptr->batch_size == 1) {
-      std::unique_ptr<InferRequest> infer_request;
+      std::shared_ptr<InferRequest> infer_request;
       bi::managed_external_buffer::handle_t* request_handle =
           reinterpret_cast<bi::managed_external_buffer::handle_t*>(
               request_batch.data_.get() + sizeof(RequestBatch));

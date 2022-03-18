@@ -73,7 +73,7 @@ class InferRequest {
   /// Create an Inference Request object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param request_handle Shared memory handle of the request.
-  static std::unique_ptr<InferRequest> LoadFromSharedMemory(
+  static std::shared_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t request_handle);
 

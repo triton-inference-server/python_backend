@@ -176,7 +176,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   requested_output_names_shm_ = std::move(requested_output_names_shm);
 }
 
-std::unique_ptr<InferRequest>
+std::shared_ptr<InferRequest>
 InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t request_handle)

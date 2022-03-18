@@ -550,8 +550,7 @@ Stub::Execute(
           sizeof(RequestBatch));
 
   for (size_t i = 0; i < batch_size; i++) {
-    // [FIXME] Some custom handling might be required for GPU tensors
-    std::unique_ptr<InferRequest> infer_request =
+    std::shared_ptr<InferRequest> infer_request =
         InferRequest::LoadFromSharedMemory(shm_pool_, request_shm_handle[i]);
     py_request_list.append(std::move(infer_request));
   }
@@ -694,7 +693,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(py::init<std::string>())
       .def("message", &PbError::Message);
 
-  py::class_<InferRequest, std::unique_ptr<InferRequest>>(
+  py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
           py::init<

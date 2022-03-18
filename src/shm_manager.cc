@@ -42,29 +42,43 @@ SharedMemoryManager::SharedMemoryManager(
   create_ = create;
   shm_growth_bytes_ = shm_growth_bytes;
 
-  if (create) {
-    shm_obj_ = std::make_unique<bi::shared_memory_object>(
-        bi::open_or_create, shm_region_name.c_str(), bi::read_write);
-    shm_obj_->truncate(shm_size);
-  } else {
-    shm_obj_ = std::make_unique<bi::shared_memory_object>(
-        bi::open_only, shm_region_name.c_str(), bi::read_write);
-  }
+  try {
+    if (create) {
+      shm_obj_ = std::make_unique<bi::shared_memory_object>(
+          bi::open_or_create, shm_region_name.c_str(), bi::read_write);
+      shm_obj_->truncate(shm_size);
+    } else {
+      shm_obj_ = std::make_unique<bi::shared_memory_object>(
+          bi::open_only, shm_region_name.c_str(), bi::read_write);
+    }
 
-  current_capacity_ = shm_size;
-  shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
-  old_shm_maps_.push_back(shm_map_);
-
-  // Only create the managed external buffer for the stub process.
-  if (create) {
-    managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
-        bi::create_only, shm_map_->get_address(), shm_size);
-  } else {
-    int64_t shm_size = 0;
-    shm_obj_->get_size(shm_size);
-    managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
-        bi::open_only, shm_map_->get_address(), shm_size);
     current_capacity_ = shm_size;
+    shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
+    old_shm_maps_.push_back(shm_map_);
+
+    // Only create the managed external buffer for the stub process.
+    if (create) {
+      managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+          bi::create_only, shm_map_->get_address(), shm_size);
+    } else {
+      int64_t shm_size = 0;
+      shm_obj_->get_size(shm_size);
+      managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+          bi::open_only, shm_map_->get_address(), shm_size);
+      current_capacity_ = shm_size;
+    }
+  }
+  catch (bi::interprocess_exception& ex) {
+    std::string error_message =
+        ("Unable to initialize shared memory key '" + shm_region_name +
+         "' to requested size (" + std::to_string(shm_size) +
+         " bytes). If you are running Triton inside docker, use '--shm-size' "
+         "flag to control the shared memory region size. Each Python backend "
+         "model instance requires at least 64MBs of shared memory. Error: " +
+         ex.what());
+    // Remove the shared memory region if there was an error.
+    bi::shared_memory_object::remove(shm_region_name.c_str());
+    throw PythonBackendException(std::move(error_message));
   }
 
   // Construct a mutex in shared memory.
