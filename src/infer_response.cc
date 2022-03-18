@@ -64,6 +64,7 @@ InferResponse::SaveToSharedMemory(
         sizeof(ResponseShm) +
         output_tensor_length * sizeof(bi::managed_external_buffer::handle_t));
   }
+
   ResponseShm* response_shm_ptr =
       reinterpret_cast<ResponseShm*>(response_shm_.data_.get());
   response_shm_ptr->has_error = false;
@@ -79,6 +80,7 @@ InferResponse::SaveToSharedMemory(
     response_shm_ptr->is_error_set = true;
     response_shm_ptr->error = Error()->ShmHandle();
     response_shm_ptr->outputs_size = 0;
+    std::cout << "Error is saved to shared memory" << std::endl;
   } else {
     bi::managed_external_buffer::handle_t* tensor_handle_shm_ptr =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(

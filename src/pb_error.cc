@@ -59,5 +59,6 @@ PbError::LoadFromSharedMemory(
 PbError::PbError(std::unique_ptr<PbString>& message_shm)
 {
   message_shm_ = std::move(message_shm);
+  message_ = message_shm_->String();
 }
 }}}  // namespace triton::backend::python

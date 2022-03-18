@@ -367,7 +367,6 @@ InferRequest::Exec()
       catch (const PythonBackendException& exception) {
         // We need to catch the exception here. Otherwise, we will not notify
         // the main process and it will wait for the resposne forever.
-        std::cout << "Has exception!" << (exception.what()) << std::endl;
         pb_exception = exception;
         has_exception = true;
       }
