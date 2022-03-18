@@ -69,6 +69,10 @@ class PbMemory {
       std::unique_ptr<BackendMemory>&& backend_memory, bool copy_gpu = true);
 #endif
 
+#ifdef TRITON_ENABLE_GPU
+  void SetCudaIpcHandle(cudaIpcMemHandle_t* cuda_ipc_handle);
+#endif
+
   // Copy the destination buffer to the source buffer.
   static void CopyBuffer(
       std::unique_ptr<PbMemory>& dst, std::unique_ptr<PbMemory>& src);
@@ -121,6 +125,7 @@ class PbMemory {
   bi::managed_external_buffer::handle_t memory_shm_handle_;
   bool opened_cuda_ipc_handle_;
 
+#ifdef TRITON_ENABLE_GPU
   /// Calculate the pointer offest from the base address.
   /// \return The offset of a device pointer.
   /// \throws PythonBackendException if the tensor is stored in CPU.
@@ -130,6 +135,8 @@ class PbMemory {
   /// \return The start address of a device pointer.
   /// \throws PythonBackendException if the tensor is stored in CPU.
   void* GetGPUStartAddress();
+
+#endif
 
   static void FillShmData(
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,

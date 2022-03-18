@@ -885,6 +885,7 @@ ModelInstanceState::GetInputTensor(
         TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
   } else {
 #ifdef TRITON_ENABLE_GPU
+
     // Retreiving GPU input tensors
     const void* buffer = nullptr;
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
@@ -893,14 +894,40 @@ ModelInstanceState::GetInputTensor(
         input_name, nullptr, 0, alloc_perference,
         reinterpret_cast<const char**>(&buffer), &input_byte_size,
         &src_memory_type, &src_memory_type_id));
+
+    // If the tensor is using the cuda shared memory, we need to extract the
+    // handle that was used to create the device pointer. This is because of a
+    // limitation in the legacy CUDA IPC API that doesn't allow getting the
+    // handle of an exported pointer. If the cuda handle exists, it indicates
+    // that the cuda shared memory was used and the input is in a single buffer.
+    // [FIXME] for the case where the input is in cuda shared memory and uses
+    // multiple input buffers this needs to be changed.
+    TRITONSERVER_BufferAttributes* buffer_attributes;
+
+    // This value is not used.
+    const void* buffer_p;
+    RETURN_IF_ERROR(TRITONBACKEND_InputBufferAttributes(
+        in, 0, &buffer_p, &buffer_attributes));
+
     input_tensor = std::make_shared<PbTensor>(
         std::string(input_name),
         std::vector<int64_t>(input_shape, input_shape + input_dims_count),
         input_dtype, src_memory_type, src_memory_type_id,
         const_cast<void*>(buffer), input_byte_size,
         nullptr /* DLManagedTensor */);
-    RETURN_IF_EXCEPTION(
-        input_tensor->SaveToSharedMemory(shm_pool_, true /* copy_gpu */));
+
+    cudaIpcMemHandle_t* cuda_ipc_handle;
+    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesCudaIpcHandle(
+        buffer_attributes, reinterpret_cast<void**>(&cuda_ipc_handle)));
+    if (cuda_ipc_handle != nullptr) {
+      RETURN_IF_EXCEPTION(
+          input_tensor->SaveToSharedMemory(shm_pool_, false /* copy_gpu */));
+      RETURN_IF_EXCEPTION(
+          input_tensor->Memory()->SetCudaIpcHandle(cuda_ipc_handle));
+    } else {
+      RETURN_IF_EXCEPTION(
+          input_tensor->SaveToSharedMemory(shm_pool_, true /* copy_gpu */));
+    }
 #else
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
@@ -1439,16 +1466,43 @@ ModelInstanceState::ProcessRequests(
               response_output, &buffer, output_tensor->ByteSize(),
               &actual_memory_type, &actual_memory_type_id));
 
+      TRITONSERVER_BufferAttributes* output_buffer_attributes;
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_OutputBufferAttributes(
+              response_output, &output_buffer_attributes));
+
       std::unique_ptr<PbMemory> output_buffer;
       if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
           actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-        GUARDED_RESPOND_IF_EXCEPTION(
-            responses, r,
-            output_buffer = PbMemory::Create(
-                shm_pool_, actual_memory_type, actual_memory_type_id,
-                output_tensor->ByteSize(), reinterpret_cast<char*>(buffer)));
+        if ((*responses)[r] != nullptr) {
+#ifdef TRITON_ENABLE_GPU
+          cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
+          GUARDED_RESPOND_IF_ERROR(
+              responses, r,
+              TRITONSERVER_BufferAttributesCudaIpcHandle(
+                  output_buffer_attributes,
+                  reinterpret_cast<void**>(&cuda_ipc_mem_handle_p)));
 
-        gpu_output_buffers.push_back({std::move(output_buffer), buffer});
+          if (cuda_ipc_mem_handle_p != nullptr) {
+            GUARDED_RESPOND_IF_EXCEPTION(
+                responses, r,
+                output_buffer = PbMemory::Create(
+                    shm_pool_, actual_memory_type, actual_memory_type_id,
+                    output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
+                    false /* copy_gpu */));
+            output_buffer->SetCudaIpcHandle(cuda_ipc_mem_handle_p);
+          } else {
+            GUARDED_RESPOND_IF_EXCEPTION(
+                responses, r,
+                output_buffer = PbMemory::Create(
+                    shm_pool_, actual_memory_type, actual_memory_type_id,
+                    output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
+                    true /* copy_gpu */));
+          }
+          gpu_output_buffers.push_back({std::move(output_buffer), buffer});
+#endif
+        }
       }
 
       // When we requested a GPU buffer but received a CPU buffer.
@@ -1511,8 +1565,8 @@ ModelInstanceState::ProcessRequests(
 
     bool cuda_copy = false;
 
-    // CPU tensors require an additional notification to the stub process. This
-    // is to ask the stub process to release the tensor.
+    // CPU tensors require an additional notification to the stub process.
+    // This is to ask the stub process to release the tensor.
     bool has_cpu_tensor = false;
     for (size_t i = 0; i < gpu_output_buffers.size(); i++) {
       if (gpu_output_buffers[i].first->MemoryType() ==
@@ -1603,8 +1657,8 @@ ModelInstanceState::~ModelInstanceState()
     waitpid(stub_pid_, &status, 0);
   }
 
-  // First destroy the IPCControl. This makes sure that IPCControl is destroyed
-  // before the shared memory manager goes out of scope.
+  // First destroy the IPCControl. This makes sure that IPCControl is
+  // destroyed before the shared memory manager goes out of scope.
   ipc_control_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();

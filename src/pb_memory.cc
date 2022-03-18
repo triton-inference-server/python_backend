@@ -193,7 +193,7 @@ PbMemory::LoadFromSharedMemory(
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
 
-  char* data_ptr;
+  char* data_ptr = nullptr;
   bool opened_cuda_ipc_handle = false;
   if (memory_shm_ptr->memory_type == TRITONSERVER_MEMORY_GPU &&
       open_cuda_handle) {
@@ -365,6 +365,14 @@ PbMemory::ShmStructSize(TRITONSERVER_MemoryType memory_type, uint64_t byte_size)
 
   return total_memory_size;
 }
+
+#ifdef TRITON_ENABLE_GPU
+void
+PbMemory::SetCudaIpcHandle(cudaIpcMemHandle_t* cuda_ipc_handle)
+{
+  *(reinterpret_cast<cudaIpcMemHandle_t*>(ShmData())) = *(cuda_ipc_handle);
+}
+#endif
 
 PbMemory::~PbMemory()
 {
