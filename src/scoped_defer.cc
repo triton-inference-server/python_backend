@@ -44,9 +44,7 @@ ScopedDefer::Complete()
 
 ScopedDefer::~ScopedDefer()
 {
-  if (!done_) {
-    task_();
-  }
+  Complete();
 }
 
 }}};  // namespace triton::backend::python

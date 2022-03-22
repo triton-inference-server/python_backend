@@ -68,13 +68,17 @@ class InferRequest {
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.
-  void SaveToSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
+  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
 
   /// Create an Inference Request object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param request_handle Shared memory handle of the request.
-  static std::shared_ptr<InferRequest> LoadFromSharedMemory(
+  /// \param open_cuda_handle Determines if the tensor in the infer request
+  /// object is a GPU tensor, to call the cudaIpcOpenMemHandle to obtain the
+  /// tensor or not.
+  /// \return Returns the infer request in the specified request_handle
+  /// location.
+  static std::unique_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t request_handle,
       bool open_cuda_handle);

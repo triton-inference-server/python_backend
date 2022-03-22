@@ -102,8 +102,7 @@ InferRequest::ShmHandle()
 }
 
 void
-InferRequest::SaveToSharedMemory(
-    std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu)
+InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<char> infer_request_shm = shm_pool->Construct<char>(
       sizeof(InferRequestShm) +
@@ -177,7 +176,7 @@ InferRequest::SaveToSharedMemory(
   requested_output_names_shm_ = std::move(requested_output_names_shm);
 }
 
-std::shared_ptr<InferRequest>
+std::unique_ptr<InferRequest>
 InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t request_handle, bool open_cuda_handle)
@@ -368,7 +367,7 @@ InferRequest::Exec()
       }
       catch (const PythonBackendException& exception) {
         // We need to catch the exception here. Otherwise, we will not notify
-        // the main process and it will wait for the resposne forever.
+        // the main process and it will wait for the response forever.
         pb_exception = exception;
         has_exception = true;
       }

@@ -138,8 +138,18 @@ class PbTensor {
   /// \param name Name of the tensor.
   void SetName(const std::string& name);
 
+  /// Get the shared memory handle corresponding to this tensor
+  /// \return returns the shared memory handle.
   bi::managed_external_buffer::handle_t ShmHandle();
 
+  /// Load the tensor object from shared memory.
+  /// \param shm_pool The shared memory manager object
+  /// \param tensor_handle The handle of the object in shared memory.
+  /// \param open_cuda_handle If the tensor is in GPU, setting this option to
+  /// true will call cudaIpcOpenMemHandle on it. In the main process this option
+  /// should be set to false because we never want to call cudaIpcOpenMemHandle
+  /// in the main process.
+  /// \return returns the tensor loaded from shared memory.
   static std::shared_ptr<PbTensor> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t tensor_handle,
