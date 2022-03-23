@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,47 +26,55 @@
 
 #pragma once
 
-#include "pb_error.h"
-#include "pb_tensor.h"
-#include "pb_utils.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
 
-struct ResponseShm {
-  uint32_t outputs_size;
-  bi::managed_external_buffer::handle_t error;
-  bool has_error;
-  // Indicates whether this error has a message or not.
-  bool is_error_set;
+struct StringShm {
+  bi::managed_external_buffer::handle_t data;
+  size_t length;
 };
 
-class InferResponse {
+class PbString {
  public:
-  InferResponse(
-      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error = nullptr);
-  std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
-  void SaveToSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
-  static std::unique_ptr<InferResponse> LoadFromSharedMemory(
+  static std::unique_ptr<PbString> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t response_handle,
-      bool open_cuda_handle);
-  bool HasError();
-  std::shared_ptr<PbError>& Error();
-  bi::managed_external_buffer::handle_t ShmHandle();
+      const std::string& string);
+  static std::unique_ptr<PbString> Create(
+      const std::string& string, char* data_shm,
+      bi::managed_external_buffer::handle_t handle);
+  static std::unique_ptr<PbString> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t handle);
+  static std::unique_ptr<PbString> LoadFromSharedMemory(
+      bi::managed_external_buffer::handle_t handle, char* data_shm);
+  static std::size_t ShmStructSize(const std::string& string);
 
-  // Disallow copying the inference response object.
-  DISALLOW_COPY_AND_ASSIGN(InferResponse);
+  char* MutableString() { return string_shm_ptr_; }
+  std::string String()
+  {
+    return std::string(
+        string_shm_ptr_, string_shm_ptr_ + string_container_shm_ptr_->length);
+  }
+  bi::managed_external_buffer::handle_t ShmHandle();
+  std::size_t Size();
 
  private:
-  InferResponse(
-      AllocatedSharedMemory<char>& response_shm,
-      std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error);
-  std::vector<std::shared_ptr<PbTensor>> output_tensors_;
-  std::shared_ptr<PbError> error_;
-  bi::managed_external_buffer::handle_t shm_handle_;
-  AllocatedSharedMemory<char> response_shm_;
+  AllocatedSharedMemory<StringShm> string_container_shm_;
+  StringShm* string_container_shm_ptr_;
+
+  AllocatedSharedMemory<char> string_shm_;
+  char* string_shm_ptr_;
+
+  bi::managed_external_buffer::handle_t string_handle_;
+
+  PbString(
+      AllocatedSharedMemory<StringShm>& string_container_shm,
+      AllocatedSharedMemory<char>& string_shm);
+
+  PbString(
+      StringShm* string_container_shm, char* string_shm,
+      bi::managed_external_buffer::handle_t handle);
 };
+
 }}}  // namespace triton::backend::python

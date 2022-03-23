@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -35,8 +35,8 @@
 #include <mutex>
 #include "infer_request.h"
 #include "infer_response.h"
+#include "ipc_message.h"
 #include "message_queue.h"
-#include "pb_tensor.h"
 #include "pb_utils.h"
 
 #pragma once
@@ -48,6 +48,53 @@ using namespace pybind11::literals;
 namespace triton { namespace backend { namespace python {
 
 class Stub {
+ public:
+  Stub(){};
+  static std::unique_ptr<Stub>& GetOrCreateInstance();
+
+  /// Instantiate a new Python backend Stub.
+  void Instantiate(
+      int64_t shm_growth_size, int64_t shm_default_size,
+      const std::string& shm_region_name, const std::string& model_path,
+      const std::string& model_version, const std::string& triton_install_path,
+      bi::managed_external_buffer::handle_t ipc_control_handle,
+      const std::string& model_instance_name);
+
+  /// Get the health of the stub process.
+  bool& Health();
+
+  /// Get the shared memory manager.
+  std::unique_ptr<SharedMemoryManager>& SharedMemory();
+
+  /// Run a single command from the shared memory.
+  bool RunCommand();
+
+  /// Initialize the user's Python code.
+  void Initialize(bi::managed_external_buffer::handle_t map_handle);
+
+  /// Send a message to the parent process.
+  void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
+
+  /// Receive a message from the parent process.
+  std::unique_ptr<IPCMessage> PopMessage();
+
+  /// Update the health variable in the stub process.
+  void UpdateHealth();
+
+  /// Finalize and terminate the stub process
+  void Finalize();
+
+  /// Execute a batch of requests.
+  py::list Execute(
+      RequestBatch* request_batch_shm_ptr,
+      ResponseBatch* response_batch_shm_ptr,
+      bi::managed_external_buffer::handle_t* responses_shm_handle);
+
+  void ProcessResponse(InferResponse* response);
+  void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
+  ~Stub();
+
+ private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
   bi::interprocess_mutex* parent_mutex_;
@@ -58,65 +105,19 @@ class Stub {
   std::string model_version_;
   std::string model_instance_name_;
   std::string triton_install_path_;
-  IPCControl* ipc_control_;
-  std::unique_ptr<SharedMemory> shm_pool_;
+  IPCControlShm* ipc_control_;
+  std::unique_ptr<SharedMemoryManager> shm_pool_;
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   std::unique_ptr<MessageQueue> stub_message_queue_;
   std::unique_ptr<MessageQueue> parent_message_queue_;
-  std::vector<std::shared_ptr<PbTensor>> output_gpu_tensors_;
-  std::vector<std::shared_ptr<PbTensor>> input_gpu_tensors_;
   std::mutex tensors_to_remove_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
   std::mutex messages_mutex_;
-  std::shared_ptr<std::mutex> cuda_ipc_open_mutex_;
-  std::shared_ptr<std::mutex> cuda_ipc_close_mutex_;
   std::condition_variable messages_cv_;
-  py::object thread_pool_;
-  bool require_cleanup_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
-
- public:
-  Stub(){};
-  static std::unique_ptr<Stub>& GetOrCreateInstance();
-
-  void Instantiate(
-      int64_t shm_growth_size, int64_t shm_default_size,
-      const std::string& shm_region_name, const std::string& model_path,
-      const std::string& model_version, const std::string& triton_install_path,
-      off_t ipc_control_offset, const std::string& model_instance_name);
-  py::object GetThreadPool();
-  void NotifyParent();
-  bool& Health();
-  std::unique_ptr<SharedMemory>& GetSharedMemory();
-  void SetErrorForResponse(Response* response, const char* err_message);
-  void SetErrorForResponseBatch(
-      ResponseBatch* response_batch, const char* err_message);
-  void ProcessResponse(
-      Response* response_shm, ResponseBatch* response_batch,
-      InferResponse* response);
-  std::shared_ptr<InferRequest> ProcessRequest(
-      off_t request_offset, ResponseBatch* response_batch);
-  void SetResponseFromException(
-      ResponseBatch* response_batch,
-      const PythonBackendException& pb_exception);
-  bool RunCommand();
-  std::unique_ptr<IPCMessage> Poll();
-  void Execute(RequestBatch* request_batch, ResponseBatch* response_batch);
-  void Initialize(off_t map_offset);
-  void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
-  std::unique_ptr<IPCMessage> PopMessage();
-  void AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor);
-  std::shared_ptr<std::mutex>& CudaIpcOpenMutex();
-  std::shared_ptr<std::mutex>& CudaIpcCloseMutex();
-
-  void Fetch();
-  void UpdateHealth();
-  void LoadGPUBuffers();
-  void Finalize();
-
-  ~Stub();
+  std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
 };
 }}}  // namespace triton::backend::python
