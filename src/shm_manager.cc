@@ -1,4 +1,4 @@
-// Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,165 +24,132 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "shm_manager.h"
+#include <boost/interprocess/managed_external_buffer.hpp>
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
+#include <iostream>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/vfs.h>
-#include <unistd.h>
-#include <boost/interprocess/sync/scoped_lock.hpp>
-#include <string>
 #include "pb_utils.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
 
-namespace bi = boost::interprocess;
-
-SharedMemory::SharedMemory(
-    const std::string& shm_key, int64_t default_byte_size,
-    int64_t shm_growth_bytes, bool truncate)
+SharedMemoryManager::SharedMemoryManager(
+    const std::string& shm_region_name, size_t shm_size,
+    size_t shm_growth_bytes, bool create)
 {
-  // `truncate` variable indicates whether the shared memory region has been
-  // created before the other process starts using it or not.
-  if (truncate) {
-    shm_obj_ = bi::shared_memory_object(
-        bi::open_or_create, shm_key.c_str(), bi::read_write);
-  } else {
-    shm_obj_ = bi::shared_memory_object(
-        bi::open_only, shm_key.c_str(), bi::read_write);
-  }
-
+  shm_region_name_ = shm_region_name;
+  create_ = create;
   shm_growth_bytes_ = shm_growth_bytes;
+
   try {
-    shm_obj_.truncate(default_byte_size);
+    if (create) {
+      shm_obj_ = std::make_unique<bi::shared_memory_object>(
+          bi::open_or_create, shm_region_name.c_str(), bi::read_write);
+      shm_obj_->truncate(shm_size);
+    } else {
+      shm_obj_ = std::make_unique<bi::shared_memory_object>(
+          bi::open_only, shm_region_name.c_str(), bi::read_write);
+    }
+
+    current_capacity_ = shm_size;
+    shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
+    old_shm_maps_.push_back(shm_map_);
+
+    // Only create the managed external buffer for the stub process.
+    if (create) {
+      managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+          bi::create_only, shm_map_->get_address(), shm_size);
+    } else {
+      int64_t shm_size = 0;
+      shm_obj_->get_size(shm_size);
+      managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+          bi::open_only, shm_map_->get_address(), shm_size);
+      current_capacity_ = shm_size;
+    }
   }
   catch (bi::interprocess_exception& ex) {
     std::string error_message =
-        ("Unable to initialize shared memory key '" + shm_key +
-         "' to requested size (" + std::to_string(default_byte_size) +
+        ("Unable to initialize shared memory key '" + shm_region_name +
+         "' to requested size (" + std::to_string(shm_size) +
          " bytes). If you are running Triton inside docker, use '--shm-size' "
          "flag to control the shared memory region size. Each Python backend "
          "model instance requires at least 64MBs of shared memory. Error: " +
          ex.what());
-
     // Remove the shared memory region if there was an error.
-    bi::shared_memory_object::remove(shm_key_.c_str());
+    bi::shared_memory_object::remove(shm_region_name.c_str());
     throw PythonBackendException(std::move(error_message));
   }
 
-  shm_map_ = std::make_unique<bi::mapped_region>(shm_obj_, bi::read_write);
-  shm_addr_ = (char*)shm_map_->get_address();
-
-  capacity_ = (size_t*)shm_addr_;
-  *capacity_ = default_byte_size;
-  current_capacity_ = *capacity_;
-
-  if (truncate) {
-    // Create the shared memory mutex.
-    shm_mutex_ = new ((char*)shm_addr_ + sizeof(size_t)) bi::interprocess_mutex;
-  } else {
-    // If the shared memory is already created, just fix the pointer.
-    char* shm_mutex = (char*)shm_addr_ + sizeof(size_t);
-    shm_mutex_ = reinterpret_cast<bi::interprocess_mutex*>(shm_mutex);
+  // Construct a mutex in shared memory.
+  shm_mutex_ =
+      managed_buffer_->find_or_construct<bi::interprocess_mutex>("shm_mutex")();
+  total_size_ = managed_buffer_->find_or_construct<uint64_t>("total size")();
+  if (create) {
+    *total_size_ = current_capacity_;
+    new (shm_mutex_) bi::interprocess_mutex;
   }
-
-  // Set offset address
-  offset_ =
-      (off_t*)((char*)shm_addr_ + sizeof(size_t) + sizeof(bi::interprocess_mutex));
-
-  if (truncate) {
-    *offset_ = 0;
-    *offset_ += sizeof(off_t);
-    *offset_ += sizeof(size_t);
-    *offset_ += sizeof(bi::interprocess_mutex);
-  }
-
-  shm_key_ = shm_key;
-}
-
-SharedMemory::~SharedMemory() noexcept(false)
-{
-  bi::shared_memory_object::remove(shm_key_.c_str());
 }
 
 void
-SharedMemory::Map(char** shm_addr, size_t byte_size, off_t& offset)
+SharedMemoryManager::GrowIfNeeded(uint64_t byte_size)
 {
-  bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
-
-  size_t shm_bytes_added = 0;
-  while (*offset_ + byte_size >= *capacity_) {
-    // Increase the shared memory pool size by the amount of bytes available.
-    *capacity_ += shm_growth_bytes_;
-    shm_bytes_added += shm_growth_bytes_;
+  if (*total_size_ != current_capacity_) {
+    shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
+    managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+        bi::open_only, shm_map_->get_address(), *total_size_);
+    old_shm_maps_.push_back(shm_map_);
+    current_capacity_ = *total_size_;
   }
 
-  if (shm_bytes_added > 0) {
+  if (byte_size != 0) {
+    uint64_t bytes_to_be_added =
+        shm_growth_bytes_ * (byte_size / shm_growth_bytes_ + 1);
+    uint64_t new_size = *total_size_ + bytes_to_be_added;
     try {
-      shm_obj_.truncate(*capacity_);
+      shm_obj_->truncate(new_size);
     }
     catch (bi::interprocess_exception& ex) {
-      *capacity_ -= shm_bytes_added;
       std::string error_message =
           ("Failed to increase the shared memory pool size for key '" +
-           shm_key_ + "' to " + std::to_string(*capacity_) +
+           shm_region_name_ + "' to " + std::to_string(*total_size_) +
            " bytes. If you are running Triton inside docker, use '--shm-size' "
            "flag to control the shared memory region size. Error: " +
            ex.what());
       throw PythonBackendException(error_message);
     }
-  }
 
-  UpdateSharedMemory();
-
-  *shm_addr = shm_addr_ + *offset_;
-  offset = *offset_;
-  *offset_ += byte_size;
-}
-
-void
-SharedMemory::UpdateSharedMemory()
-{
-  if (current_capacity_ != *capacity_) {
-    std::unique_ptr<bi::mapped_region> new_map;
     try {
-      new_map = std::make_unique<bi::mapped_region>(shm_obj_, bi::read_write);
+      shm_obj_->truncate(new_size);
+      shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
+      old_shm_maps_.push_back(shm_map_);
+      managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+          bi::open_only, shm_map_->get_address(), new_size);
+      managed_buffer_->grow(new_size - current_capacity_);
+      current_capacity_ = managed_buffer_->get_size();
+      *total_size_ = new_size;
     }
     catch (bi::interprocess_exception& ex) {
-      std::string error_message = std::string(
-                                      "unable to process address space or "
-                                      "shared-memory descriptor, err:") +
-                                  ex.what();
+      shm_obj_->truncate(*total_size_);
+      std::string error_message =
+          ("Failed to create new mapped region for the grown shared memory "
+           "region '" +
+           shm_region_name_ + "'. " + ex.what());
       throw PythonBackendException(error_message);
     }
-
-    old_shm_maps_.emplace_back(std::move(shm_map_));
-    current_capacity_ = *capacity_;
-    shm_map_ = std::move(new_map);
-    shm_addr_ = (char*)shm_map_->get_address();
   }
 }
 
-void
-SharedMemory::MapOffset(char** shm_addr, off_t offset)
+size_t
+SharedMemoryManager::FreeMemory()
 {
-  bi::scoped_lock<bi::interprocess_mutex> gaurd(*shm_mutex_);
-  // Update shared memory pointer and capacity if necessary.
-  UpdateSharedMemory();
-  *shm_addr = shm_addr_ + offset;
+  return managed_buffer_->get_free_memory();
 }
 
-void
-SharedMemory::SetOffset(off_t offset)
-{
-  *offset_ = offset;
-}
 
-off_t
-SharedMemory::Offset()
+SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
-  return *offset_;
+  bi::shared_memory_object::remove(shm_region_name_.c_str());
 }
 
 }}}  // namespace triton::backend::python

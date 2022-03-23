@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -29,7 +29,6 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
 #include <cstddef>
-#include "ipc_message.h"
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
@@ -38,55 +37,92 @@ namespace bi = boost::interprocess;
 /// Struct holding the represenation of a message queue inside the shared
 /// memory.
 /// \param size Total size of the message queue.
-/// \param mutex Offset of the mutex variable protecting index.
+/// \param mutex Handle of the mutex variable protecting index.
 /// \param index Used element index.
 /// \param sem_empty Semaphore object counting the number of empty buffer slots.
 /// \param sem_full Semaphore object counting the number of used buffer slots.
 struct MessageQueueShm {
   std::size_t size;
-  off_t buffer;
-  off_t mutex;
-  int index;
-  off_t sem_empty;
-  off_t sem_full;
+  bi::managed_external_buffer::handle_t buffer;
+  bi::interprocess_mutex mutex;
+  int head;
+  int tail;
+  bi::interprocess_semaphore sem_empty{0};
+  bi::interprocess_semaphore sem_full{0};
 };
 
 class MessageQueue {
-  std::size_t* size_;
-  off_t* buffer_;
-  bi::interprocess_mutex* mutex_;
-  int* index_;
-  bi::interprocess_semaphore* sem_empty_;
-  bi::interprocess_semaphore* sem_full_;
-  off_t shm_struct_;
-
  public:
-  /// Create a Message queue.
-  /// \param shm_pool Shared memory pool
-  /// \param number_of_messages Maximum number of messages that the
-  /// message queue can hold.
-  MessageQueue(
-      std::unique_ptr<SharedMemory>& shm_pool, std::size_t number_of_messages);
-  MessageQueue() {}
+  /// Create a new MessageQueue in the shared memory.
+  static std::unique_ptr<MessageQueue> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      uint32_t message_queue_size);
+
+  /// Load an already existing message queue from the shared memory.
+  static std::unique_ptr<MessageQueue> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t message_queue_handle);
 
   /// Push a message inside the message queue.
-  /// \param message The shared memory offset of the message.
-  void Push(off_t message);
-  void Push(off_t message, int const& duration, bool& success);
+  /// \param message The shared memory handle of the message.
+  void Push(bi::managed_external_buffer::handle_t message);
+  void Push(
+      bi::managed_external_buffer::handle_t message, int const& duration,
+      bool& success);
 
   /// Pop a message from the message queue. This call will block until there
-  /// is a message inside the message queue to return. \return the offset of
-  /// the new message.
-  off_t Pop();
-  off_t Pop(int const& duration, bool& success);
-
-  off_t ShmOffset();
-  static std::unique_ptr<MessageQueue> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t message_queue_offset);
+  /// is a message inside the message queue to return.
+  /// \return the handle of the new message.
+  bi::managed_external_buffer::handle_t Pop();
+  bi::managed_external_buffer::handle_t Pop(int const& duration, bool& success);
 
   /// Resets the semaphores for the message queue. This function is useful for
   /// when the stub process may have exited unexpectedly and the semaphores need
   /// to be restarted so that the message queue is in a proper state.
   void ResetSemaphores();
+
+  /// Get the shared memory handle of MessageQueue
+  bi::managed_external_buffer::handle_t ShmHandle();
+
+  /// Release the ownership of this object in shared memory.
+  void Release();
+
+ private:
+  std::size_t& Size() { return mq_shm_ptr_->size; }
+  const bi::interprocess_mutex& Mutex() { return mq_shm_ptr_->mutex; }
+  bi::interprocess_mutex* MutexMutable() { return &(mq_shm_ptr_->mutex); }
+  int& Head() { return mq_shm_ptr_->head; }
+  int& Tail() { return mq_shm_ptr_->tail; }
+  bi::managed_external_buffer::handle_t* Buffer() { return mq_buffer_shm_ptr_; }
+  const bi::interprocess_semaphore& SemEmpty()
+  {
+    return mq_shm_ptr_->sem_empty;
+  }
+  bi::interprocess_semaphore* SemEmptyMutable()
+  {
+    return &(mq_shm_ptr_->sem_empty);
+  }
+  const bi::interprocess_semaphore& SemFull() { return mq_shm_ptr_->sem_full; }
+  bi::interprocess_semaphore* SemFullMutable()
+  {
+    return &(mq_shm_ptr_->sem_full);
+  }
+
+  void HeadIncrement();
+  void TailIncrement();
+
+  AllocatedSharedMemory<MessageQueueShm> mq_shm_;
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_buffer_shm_;
+
+  MessageQueueShm* mq_shm_ptr_;
+  bi::managed_external_buffer::handle_t* mq_buffer_shm_ptr_;
+  bi::managed_external_buffer::handle_t mq_handle_;
+
+  /// Create/load a Message queue.
+  /// \param mq_shm Message queue representation in shared memory.
+  MessageQueue(
+      AllocatedSharedMemory<MessageQueueShm>& mq_shm,
+      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
+          mq_buffer_shm);
 };
 }}}  // namespace triton::backend::python

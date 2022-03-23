@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,25 +24,46 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <memory>
-#include "infer_request.h"
-#include "infer_response.h"
+#include <unordered_map>
+#include "pb_string.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
 
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-
- public:
-  std::unique_ptr<InferResponse> Infer(
-      const std::unique_ptr<InferRequest>& infer_request,
-      const std::unique_ptr<SharedMemory>& shm_pool,
-      TRITONSERVER_InferenceResponse** response);
-  RequestExecutor(TRITONSERVER_Server* server);
-  ~RequestExecutor();
+struct PairShm {
+  bi::managed_external_buffer::handle_t key;
+  bi::managed_external_buffer::handle_t value;
 };
 
+struct DictShm {
+  uint32_t length;
+  // `values` point to the location where there are `length` of Pair objects.
+  bi::managed_external_buffer::handle_t values;
+};
+
+
+class PbMap {
+ public:
+  static std::unique_ptr<PbMap> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      std::unordered_map<std::string, std::string>& map);
+  static std::unique_ptr<PbMap> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t handle);
+  const std::unordered_map<std::string, std::string>& UnorderedMap();
+  bi::managed_external_buffer::handle_t ShmHandle();
+
+ private:
+  PbMap(
+      std::vector<std::unique_ptr<PbString>>& strings,
+      AllocatedSharedMemory<DictShm>& dict_shm,
+      AllocatedSharedMemory<PairShm>& pair_shms,
+      std::unordered_map<std::string, std::string>& map);
+
+  std::vector<std::unique_ptr<PbString>> strings_;
+  AllocatedSharedMemory<DictShm> dict_shm_;
+  AllocatedSharedMemory<PairShm> pair_shms_;
+  bi::managed_external_buffer::handle_t dict_handle_;
+  std::unordered_map<std::string, std::string> map_;
+};
 }}}  // namespace triton::backend::python

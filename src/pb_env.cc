@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -36,6 +36,127 @@
 
 
 namespace triton { namespace backend { namespace python {
+
+void
+CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
+{
+  const void* buff;
+  size_t size;
+#if ARCHIVE_VERSION_NUMBER >= 3000000
+  int64_t offset;
+#else
+  off_t offset;
+#endif
+
+  for (;;) {
+    int return_status;
+    return_status =
+        archive_read_data_block(input_archive, &buff, &size, &offset);
+    if (return_status == ARCHIVE_EOF)
+      break;
+    if (return_status != ARCHIVE_OK)
+      throw PythonBackendException(
+          "archive_read_data_block() failed with error code = " +
+          std::to_string(return_status));
+
+    return_status =
+        archive_write_data_block(output_archive, buff, size, offset);
+    if (return_status != ARCHIVE_OK) {
+      throw PythonBackendException(
+          "archive_write_data_block() failed with error code = " +
+          std::to_string(return_status) + ", error message is " +
+          archive_error_string(output_archive));
+    }
+  }
+}
+
+
+void
+ExtractTarFile(std::string& archive_path, std::string& dst_path)
+{
+  char current_directory[PATH_MAX];
+  if (getcwd(current_directory, PATH_MAX) == nullptr) {
+    throw PythonBackendException(
+        (std::string("Failed to get the current working directory. Error: ") +
+         std::strerror(errno)));
+  }
+  if (chdir(dst_path.c_str()) == -1) {
+    throw PythonBackendException(
+        (std::string("Failed to change the directory to ") + dst_path +
+         " Error: " + std::strerror(errno))
+            .c_str());
+  }
+
+  struct archive_entry* entry;
+  int flags = ARCHIVE_EXTRACT_TIME;
+
+  struct archive* input_archive = archive_read_new();
+  struct archive* output_archive = archive_write_disk_new();
+  archive_write_disk_set_options(output_archive, flags);
+
+  archive_read_support_filter_gzip(input_archive);
+  archive_read_support_format_tar(input_archive);
+
+  if (archive_path.size() == 0) {
+    throw PythonBackendException("The archive path is empty.");
+  }
+
+  THROW_IF_ERROR(
+      "archive_read_open_filename() failed.",
+      archive_read_open_filename(
+          input_archive, archive_path.c_str(), 10240 /* block_size */));
+
+  while (true) {
+    int read_status = archive_read_next_header(input_archive, &entry);
+    if (read_status == ARCHIVE_EOF)
+      break;
+    if (read_status != ARCHIVE_OK) {
+      throw PythonBackendException(
+          std::string("archive_read_next_header() failed with error code = ") +
+          std::to_string(read_status) + std::string(" error message is ") +
+          archive_error_string(input_archive));
+    }
+
+    read_status = archive_write_header(output_archive, entry);
+    if (read_status != ARCHIVE_OK) {
+      throw PythonBackendException(std::string(
+          "archive_write_header() failed with error code = " +
+          std::to_string(read_status) + std::string(" error message is ") +
+          archive_error_string(output_archive)));
+    }
+
+    CopySingleArchiveEntry(input_archive, output_archive);
+
+    read_status = archive_write_finish_entry(output_archive);
+    if (read_status != ARCHIVE_OK) {
+      throw PythonBackendException(std::string(
+          "archive_write_finish_entry() failed with error code = " +
+          std::to_string(read_status) + std::string(" error message is ") +
+          archive_error_string(output_archive)));
+    }
+  }
+
+  archive_read_close(input_archive);
+  archive_read_free(input_archive);
+
+  archive_write_close(output_archive);
+  archive_write_free(output_archive);
+
+  // Revert the directory change.
+  if (chdir(current_directory) == -1) {
+    throw PythonBackendException(
+        (std::string("Failed to change the directory to ") + current_directory)
+            .c_str());
+  }
+}
+
+bool
+FileExists(std::string& path)
+{
+  struct stat buffer;
+  return stat(path.c_str(), &buffer) == 0;
+}
+
 
 void
 RecursiveDirectoryDelete(const char* dir)

@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,48 +25,18 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-
-#include "pb_error.h"
-#include "pb_tensor.h"
-#include "pb_utils.h"
+#include <functional>
 
 namespace triton { namespace backend { namespace python {
-
-struct ResponseShm {
-  uint32_t outputs_size;
-  bi::managed_external_buffer::handle_t error;
-  bool has_error;
-  // Indicates whether this error has a message or not.
-  bool is_error_set;
-};
-
-class InferResponse {
+class ScopedDefer {
  public:
-  InferResponse(
-      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error = nullptr);
-  std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
-  void SaveToSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
-  static std::unique_ptr<InferResponse> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t response_handle,
-      bool open_cuda_handle);
-  bool HasError();
-  std::shared_ptr<PbError>& Error();
-  bi::managed_external_buffer::handle_t ShmHandle();
-
-  // Disallow copying the inference response object.
-  DISALLOW_COPY_AND_ASSIGN(InferResponse);
+  ScopedDefer(std::function<void()> task);
+  ~ScopedDefer();
+  void Complete();
 
  private:
-  InferResponse(
-      AllocatedSharedMemory<char>& response_shm,
-      std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error);
-  std::vector<std::shared_ptr<PbTensor>> output_tensors_;
-  std::shared_ptr<PbError> error_;
-  bi::managed_external_buffer::handle_t shm_handle_;
-  AllocatedSharedMemory<char> response_shm_;
+  std::function<void()> task_;
+  bool done_;
 };
+
 }}}  // namespace triton::backend::python
