@@ -518,18 +518,53 @@ ModelInstanceState::IsStubProcessAlive()
 TRITONSERVER_Error*
 ModelInstanceState::StartStubProcess()
 {
+  // Destruct any in-use shared memory object before starting the stub process.
+  ipc_control_ = nullptr;
+  stub_message_queue_ = nullptr;
+  parent_message_queue_ = nullptr;
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  int64_t shm_default_size =
+      model_state->StateForBackend()->shm_default_byte_size;
+  int64_t shm_growth_byte_size =
+      model_state->StateForBackend()->shm_growth_byte_size;
+
+  try {
+    // It is necessary for restart to make sure that the previous shared memory
+    // pool is destructed before the new pool is created.
+    shm_pool_ = nullptr;
+    shm_pool_ = std::make_unique<SharedMemoryManager>(
+        shm_region_name_, shm_default_size, shm_growth_byte_size,
+        true /* create */);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+  }
+
+  AllocatedSharedMemory<IPCControlShm> ipc_control =
+      shm_pool_->Construct<IPCControlShm>();
+  ipc_control_ = std::move(ipc_control.data_);
+  ipc_control_handle_ = ipc_control.handle_;
+
+  auto message_queue_size =
+      model_state->StateForBackend()->shm_message_queue_size;
+
+  RETURN_IF_EXCEPTION(
+      stub_message_queue_ =
+          MessageQueue::Create(shm_pool_, message_queue_size));
+  RETURN_IF_EXCEPTION(
+      parent_message_queue_ =
+          MessageQueue::Create(shm_pool_, message_queue_size));
+  ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
+  ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
+
   new (&(ipc_control_->stub_health_mutex)) bi::interprocess_mutex;
   health_mutex_ = &(ipc_control_->stub_health_mutex);
+
   stub_message_queue_->ResetSemaphores();
   parent_message_queue_->ResetSemaphores();
 
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
-
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-  int64_t shm_growth_size =
-      model_state->StateForBackend()->shm_growth_byte_size;
-  int64_t shm_default_size =
-      model_state->StateForBackend()->shm_default_byte_size;
   const char* model_path = model_state->RepositoryPath().c_str();
 
   initialized_ = false;
@@ -575,7 +610,7 @@ ModelInstanceState::StartStubProcess()
          << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
          << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
          << " " << shm_region_name_ << " " << shm_default_size << " "
-         << shm_growth_size << " " << parent_pid_ << " "
+         << shm_growth_byte_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
          << ipc_control_handle_ << " " << Name();
       ipc_control_->uses_env = true;
@@ -584,7 +619,7 @@ ModelInstanceState::StartStubProcess()
       std::stringstream ss;
       ss << " exec " << python_backend_stub << " " << model_path_ << " "
          << shm_region_name_ << " " << shm_default_size << " "
-         << shm_growth_size << " " << parent_pid_ << " "
+         << shm_growth_byte_size << " " << parent_pid_ << " "
          << model_state->StateForBackend()->python_lib << " "
          << ipc_control_handle_ << " " << Name();
       bash_argument = ss.str();
@@ -623,7 +658,7 @@ ModelInstanceState::StartStubProcess()
          << "Python backend stub path: " << python_backend_stub << '\n'
          << "Shared Memory Region Name: " << shm_region_name_ << '\n'
          << "Shared Memory Default Byte Size: " << shm_default_size << '\n'
-         << "Shared Memory Growth Byte Size: " << shm_growth_size << '\n';
+         << "Shared Memory Growth Byte Size: " << shm_growth_byte_size << '\n';
       std::string log_message = ss.str();
       LOG_MESSAGE(TRITONSERVER_LOG_ERROR, log_message.c_str());
 
@@ -717,25 +752,6 @@ ModelInstanceState::SetupStubProcess()
   shm_region_name_ =
       model_state->StateForBackend()->shared_memory_region_prefix +
       std::to_string(model_state->StateForBackend()->number_of_instance_inits);
-  int64_t shm_default_size =
-      model_state->StateForBackend()->shm_default_byte_size;
-  int64_t shm_growth_byte_size =
-      model_state->StateForBackend()->shm_growth_byte_size;
-
-  try {
-    shm_pool_ = std::make_unique<SharedMemoryManager>(
-        shm_region_name_, shm_default_size, shm_growth_byte_size,
-        true /* create */);
-  }
-  catch (const PythonBackendException& pb_exception) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-  }
-
-  AllocatedSharedMemory<IPCControlShm> ipc_control =
-      shm_pool_->Construct<IPCControlShm>();
-  ipc_control_ = std::move(ipc_control.data_);
-  ipc_control_handle_ = ipc_control.handle_;
 
   uint64_t model_version = model_state->Version();
   const char* model_path = model_state->RepositoryPath().c_str();
@@ -791,17 +807,6 @@ ModelInstanceState::SetupStubProcess()
 
   parent_pid_ = getpid();
 
-  auto message_queue_size =
-      model_state->StateForBackend()->shm_message_queue_size;
-
-  RETURN_IF_EXCEPTION(
-      stub_message_queue_ =
-          MessageQueue::Create(shm_pool_, message_queue_size));
-  RETURN_IF_EXCEPTION(
-      parent_message_queue_ =
-          MessageQueue::Create(shm_pool_, message_queue_size));
-  ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
-  ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
 
   RETURN_IF_ERROR(StartStubProcess());
 
