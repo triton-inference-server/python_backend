@@ -417,6 +417,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   py::setattr(
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
+  c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   py::object TritonPythonModel =
       py::module_::import(
@@ -752,6 +753,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
 
+  // This class is not part of the public API for Python backend. This is only
+  // used for internal testing purposes.
+  py::class_<SharedMemoryManager>(module, "SharedMemory")
+      .def("free_memory", &SharedMemoryManager::FreeMemory);
 
   py::register_exception<PythonBackendException>(
       module, "TritonModelException");
