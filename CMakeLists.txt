@@ -251,6 +251,8 @@ set_target_properties(
   LINK_FLAGS "-Wl,--version-script libtriton_python.ldscript"
 )
 
+add_subdirectory(./src/shm_monitor)
+
 #
 # Install
 #
