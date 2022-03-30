@@ -292,11 +292,11 @@ InferRequest::Exec()
   std::unique_ptr<IPCMessage> ipc_message;
 
   AllocatedSharedMemory<char> request_batch;
-  ScopedDefer data_load_complete(std::bind([&ipc_message] {
+  ScopedDefer data_load_complete([&ipc_message] {
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
     ipc_message->ResponseCondition()->notify_all();
-  }));
+  });
 
   try {
     py::gil_scoped_release release;

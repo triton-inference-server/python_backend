@@ -248,10 +248,10 @@ Stub::RunCommand()
       // parent process sends a message to the stub process asking the stub
       // process to release any objects it has held in shared memory.
       ScopedDefer receive_initialize_finalize(
-          std::bind([this] { stub_message_queue_->Pop(); }));
-      ScopedDefer _(std::bind([this, &initialize_response_msg] {
+          [this] { stub_message_queue_->Pop(); });
+      ScopedDefer _([this, &initialize_response_msg] {
         SendIPCMessage(initialize_response_msg);
-      }));
+      });
 
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
@@ -314,10 +314,9 @@ Stub::RunCommand()
 
       execute_response->Args() = response_batch.handle_;
 
-      ScopedDefer execute_finalize(
-          std::bind([this] { stub_message_queue_->Pop(); }));
-      ScopedDefer _(std::bind(
-          [this, &execute_response] { SendIPCMessage(execute_response); }));
+      ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
+      ScopedDefer _(
+          [this, &execute_response] { SendIPCMessage(execute_response); });
 
       response_batch_shm_ptr->has_error = false;
       response_batch_shm_ptr->is_error_set = false;
@@ -498,14 +497,14 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
 
   // Pop a dummy message from the stub message queue indicating that the parent
   // has finished copying the tensors.
-  ScopedDefer _(std::bind([this, has_cpu_buffer] {
+  ScopedDefer _([this, has_cpu_buffer] {
     if (has_cpu_buffer) {
       stub_message_queue_->Pop();
     }
-  }));
+  });
 
   ScopedDefer load_gpu_buffer_response(
-      std::bind([this, has_cpu_buffer] { parent_message_queue_->Push(1000); }));
+      [this, has_cpu_buffer] { parent_message_queue_->Push(1000); });
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
