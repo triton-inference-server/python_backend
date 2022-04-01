@@ -162,6 +162,7 @@ PbMemory::FillShmData(
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
   memory_shm_ptr->is_cuda_handle_set = copy_gpu;
+  memory_shm_ptr->memory_release_id = 0;
 
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
@@ -327,6 +328,12 @@ PbMemory::MemoryType() const
   return memory_shm_ptr_->memory_type;
 }
 
+void
+PbMemory::SetMemoryReleaseId(uint64_t memory_release_id)
+{
+  memory_shm_ptr_->memory_release_id = memory_release_id;
+}
+
 int64_t
 PbMemory::MemoryTypeId() const
 {
@@ -383,6 +390,26 @@ PbMemory::~PbMemory()
         memory_shm_ptr_->memory_type_id, GetGPUStartAddress());
 #endif
   }
+
+  if (release_callback_) {
+    release_callback_();
+  }
+}
+
+void
+PbMemory::SetMemoryReleaseCallback(std::function<void(void)> release_callback)
+{
+  if (!release_callback_) {
+    release_callback_ = release_callback;
+  } else {
+    throw PythonBackendException("Release callback is already set.");
+  }
+}
+
+uint64_t
+PbMemory::MemoryReleaseId()
+{
+  return memory_shm_ptr_->memory_release_id;
 }
 
 }}}  // namespace triton::backend::python
