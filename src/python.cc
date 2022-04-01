@@ -669,12 +669,12 @@ ModelInstanceState::StartStubProcess()
     }
 
   } else {
-    ScopedDefer _(std::bind([this] {
+    ScopedDefer _([this] {
       // Push a dummy message to the message queue so that the stub
       // process is notified that it can release the object stored in
       // shared memory.
       stub_message_queue_->Push(1000);
-    }));
+    });
 
     stub_pid_ = pid;
     triton::common::TritonJson::WriteBuffer buffer;
@@ -1154,6 +1154,12 @@ ModelInstanceState::ProcessRequests(
     }
   }
 
+  // Wait for all the pending BLS requests to be completed.
+  ScopedDefer bls_defer([this] {
+    WaitForBLSRequestsToFinish();
+    CleanupBLSResponses();
+  });
+
   for (size_t i = 0; i < request_count; i++) {
     if (max_batch_size > 0) {
       // Retrieve the batch size from one of the inputs, if the model
@@ -1297,14 +1303,14 @@ ModelInstanceState::ProcessRequests(
   }
 
 
-  ScopedDefer execute_finalize(std::bind([this, &restart] {
+  ScopedDefer execute_finalize([this, &restart] {
     // Push a dummy message to the message queue so that
     // the stub process is notified that it can release
     // the object stored in shared memory.
     NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
     if (!restart)
       stub_message_queue_->Push(1000);
-  }));
+  });
   if (restart) {
     return;
   }
@@ -1609,6 +1615,7 @@ ModelInstanceState::ProcessRequests(
 #endif  // TRITON_ENABLE_GPU
   }
 
+  bls_defer.Complete();
   for (uint32_t r = 0; r < request_count; ++r) {
     // If error happens at this stage, we can only log it
     GUARDED_RESPOND_IF_ERROR(
@@ -2050,10 +2057,6 @@ TRITONBACKEND_ModelInstanceExecute(
   // unhealthy and needs a restart.
   bool restart = false;
   instance_state->ProcessRequests(requests, request_count, restart);
-
-  // Wait for all the pending BLS requests to be completed.
-  instance_state->WaitForBLSRequestsToFinish();
-  instance_state->CleanupBLSResponses();
 
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];

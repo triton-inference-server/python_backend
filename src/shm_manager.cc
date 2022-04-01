@@ -29,7 +29,6 @@
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <iostream>
 
-#include "pb_utils.h"
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
@@ -85,10 +84,36 @@ SharedMemoryManager::SharedMemoryManager(
   shm_mutex_ =
       managed_buffer_->find_or_construct<bi::interprocess_mutex>("shm_mutex")();
   total_size_ = managed_buffer_->find_or_construct<uint64_t>("total size")();
+  read_only_ = false;
   if (create) {
     *total_size_ = current_capacity_;
     new (shm_mutex_) bi::interprocess_mutex;
   }
+}
+
+SharedMemoryManager::SharedMemoryManager(const std::string& shm_region_name)
+{
+  shm_region_name_ = shm_region_name;
+  create_ = false;
+  shm_growth_bytes_ = 1024;
+
+  shm_obj_ = std::make_unique<bi::shared_memory_object>(
+      bi::open_only, shm_region_name.c_str(), bi::read_write);
+
+  shm_map_ = std::make_shared<bi::mapped_region>(*shm_obj_, bi::read_write);
+  old_shm_maps_.push_back(shm_map_);
+
+  int64_t shm_size = 0;
+  shm_obj_->get_size(shm_size);
+  managed_buffer_ = std::make_unique<bi::managed_external_buffer>(
+      bi::open_only, shm_map_->get_address(), shm_size);
+  current_capacity_ = shm_size;
+
+  // Construct a mutex in shared memory.
+  shm_mutex_ =
+      managed_buffer_->find_or_construct<bi::interprocess_mutex>("shm_mutex")();
+  total_size_ = managed_buffer_->find_or_construct<uint64_t>("total size")();
+  read_only_ = true;
 }
 
 void
@@ -143,13 +168,16 @@ SharedMemoryManager::GrowIfNeeded(uint64_t byte_size)
 size_t
 SharedMemoryManager::FreeMemory()
 {
+  GrowIfNeeded(0);
   return managed_buffer_->get_free_memory();
 }
 
 
 SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
-  bi::shared_memory_object::remove(shm_region_name_.c_str());
+  if (!read_only_) {
+    bi::shared_memory_object::remove(shm_region_name_.c_str());
+  }
 }
 
 }}}  // namespace triton::backend::python
