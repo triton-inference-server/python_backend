@@ -64,6 +64,8 @@ class SharedMemoryManager {
       const std::string& shm_region_name, size_t shm_size,
       size_t shm_growth_bytes, bool create);
 
+  SharedMemoryManager(const std::string& shm_region_name);
+
   template <typename T>
   AllocatedSharedMemory<T> Construct(uint64_t count = 1, bool aligned = false)
   {
@@ -156,6 +158,7 @@ class SharedMemoryManager {
   size_t shm_growth_bytes_;
   uint64_t* total_size_;
   bool create_;
+  bool read_only_;
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
