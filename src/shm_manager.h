@@ -145,6 +145,8 @@ class SharedMemoryManager {
   void GrowIfNeeded(uint64_t bytes);
   bi::interprocess_mutex* Mutex() { return shm_mutex_; }
 
+  void SetDeleteRegion(bool delete_region);
+
   ~SharedMemoryManager() noexcept(false);
 
  private:
@@ -158,7 +160,7 @@ class SharedMemoryManager {
   size_t shm_growth_bytes_;
   uint64_t* total_size_;
   bool create_;
-  bool read_only_;
+  bool delete_region_;
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(

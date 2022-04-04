@@ -281,6 +281,9 @@ Stub::RunCommand()
       }
 
       if (has_exception) {
+        // Do not delete the region. The region will be deleted by the parent
+        // process.
+        shm_pool_->SetDeleteRegion(false);
         LOG_INFO << "Failed to initialize Python stub: " << error_string;
         initialize_response.data_->response_has_error = true;
         initialize_response.data_->response_is_error_set = false;
@@ -661,7 +664,6 @@ Stub::Finalize()
   if (initialized_ && py::hasattr(model_instance_, "finalize")) {
     try {
       model_instance_.attr("finalize")();
-      model_instance_ = py::none();
     }
     catch (const py::error_already_set& e) {
       LOG_INFO << e.what();
@@ -680,12 +682,10 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
-  // stub_lock_ must be destroyed before the shared memory is deconstructed.
-  // Otherwise, the shared memory will be destructed first and lead to
-  // segfault.
-  stub_lock_.reset();
+  model_instance_ = py::none();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
+  memory_manager_message_queue_.reset();
 }
 
 std::unique_ptr<Stub> Stub::stub_instance_;

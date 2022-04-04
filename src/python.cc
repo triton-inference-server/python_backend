@@ -679,6 +679,15 @@ ModelInstanceState::StartStubProcess()
       // process is notified that it can release the object stored in
       // shared memory.
       stub_message_queue_->Push(1000);
+
+      // If the model is not initialized, wait for the stub process to exit.
+      if (!initialized_) {
+        int status;
+        stub_message_queue_.reset();
+        parent_message_queue_.reset();
+        memory_manager_.reset();
+        waitpid(stub_pid_, &status, 0);
+      }
     });
 
     stub_pid_ = pid;

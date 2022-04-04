@@ -103,7 +103,6 @@ class Stub {
   bi::interprocess_mutex* parent_mutex_;
   bi::interprocess_condition* parent_cond_;
   bi::interprocess_mutex* health_mutex_;
-  std::unique_ptr<bi::scoped_lock<bi::interprocess_mutex>> stub_lock_;
   std::string model_path_;
   std::string model_version_;
   std::string model_instance_name_;
