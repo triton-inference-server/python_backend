@@ -56,7 +56,7 @@ struct AllocatedSharedMemory {
 
 struct AllocatedShmOwnership {
   uint32_t ref_count_;
-};
+} __attribute__((aligned(16)));
 
 class SharedMemoryManager {
  public:
