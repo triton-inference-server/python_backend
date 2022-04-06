@@ -42,13 +42,13 @@ namespace bi = boost::interprocess;
 /// \param sem_empty Semaphore object counting the number of empty buffer slots.
 /// \param sem_full Semaphore object counting the number of used buffer slots.
 struct MessageQueueShm {
-  std::size_t size;
-  bi::managed_external_buffer::handle_t buffer;
-  bi::interprocess_mutex mutex;
-  int head;
-  int tail;
   bi::interprocess_semaphore sem_empty{0};
   bi::interprocess_semaphore sem_full{0};
+  bi::interprocess_mutex mutex;
+  std::size_t size;
+  bi::managed_external_buffer::handle_t buffer;
+  int head;
+  int tail;
 };
 
 class MessageQueue {

@@ -54,9 +54,16 @@ struct AllocatedSharedMemory {
   bi::managed_external_buffer::handle_t handle_;
 };
 
+// The alignment here is used to extend the size of the shared memory allocation
+// struct to 16 bytes. The reason for this change is that when an aligned shared
+// memory location is requested using the `Construct` method, the memory
+// alignment of the object will be incorrect since the shared memory ownership
+// info is placed in the beginning and the actual object is placed after that
+// (i.e. 4 plus the aligned address is not 16-bytes aligned). The aligned memory
+// is required by semaphore otherwise it may lead to SIGBUS error on ARM.
 struct AllocatedShmOwnership {
   uint32_t ref_count_;
-};
+} __attribute__((aligned(16)));
 
 class SharedMemoryManager {
  public:
