@@ -1088,12 +1088,14 @@ ModelInstanceState::ExecuteBLSRequest(
             // For GPU tensors we need to store the memory release id in memory
             // manager.
             if (!output_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
               std::unique_ptr<MemoryRecord> gpu_memory_record =
                   std::make_unique<GPUMemoryRecord>(
                       output_tensor->Memory()->DataPtr());
               uint64_t memory_release_id =
                   memory_manager_->AddRecord(std::move(gpu_memory_record));
               output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
+#endif
             }
           }
           *response_handle = infer_response->ShmHandle();

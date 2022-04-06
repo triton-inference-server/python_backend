@@ -45,7 +45,6 @@ GPUMemoryRecord::GPUMemoryRecord(void* ptr)
     }
   };
 }
-#endif
 
 void*
 GPUMemoryRecord::MemoryId()
@@ -58,6 +57,7 @@ GPUMemoryRecord::ReleaseCallback()
 {
   return release_callback_;
 }
+#endif
 
 MemoryManager::MemoryManager(
     std::unique_ptr<MessageQueue<uint64_t>>&& memory_message_queue)
