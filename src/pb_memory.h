@@ -49,6 +49,7 @@ struct MemoryShm {
   int64_t memory_type_id;
   uint64_t byte_size;
   bool is_cuda_handle_set;
+  uint64_t memory_release_id;
 };
 
 class PbMemory {
@@ -108,6 +109,14 @@ class PbMemory {
   /// \return The memory type id of the tensor.
   char* ShmData() const;
 
+  /// Set the memory release id
+  void SetMemoryReleaseId(uint64_t memory_release_id);
+
+  /// Memory Release ID
+  uint64_t MemoryReleaseId();
+
+  void SetMemoryReleaseCallback(std::function<void(void)> release_callback);
+
   ~PbMemory();
 
  private:
@@ -117,6 +126,8 @@ class PbMemory {
 #ifndef TRITON_PB_STUB
   std::unique_ptr<BackendMemory> backend_memory_;
 #endif
+
+  std::function<void()> release_callback_;
 
   // Refers to the pointer that can hold the data. For CPU pointers this will be
   // the same as memory_data_shm_ptr_.

@@ -132,7 +132,6 @@ set(
   src/infer_response.h
   src/infer_request.cc
   src/infer_request.h
-  src/message_queue.cc
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
@@ -162,6 +161,8 @@ set(
   src/pb_env.h
   src/pb_metric_reporter.cc
   src/pb_metric_reporter.h
+  src/memory_manager.cc
+  src/memory_manager.h
   src/request_executor.cc
   src/request_executor.h
 )

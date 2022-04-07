@@ -165,16 +165,7 @@ ResponseRelease(
       delete allocation_info;
     } break;
     case TRITONSERVER_MEMORY_GPU: {
-#ifdef TRITON_ENABLE_GPU
-      auto err = cudaSetDevice(memory_type_id);
-      if (err == cudaSuccess) {
-        err = cudaFree(buffer);
-      }
-      if (err != cudaSuccess) {
-        std::cerr << "error: failed to cudaFree " << buffer << ": "
-                  << cudaGetErrorString(err) << std::endl;
-      }
-#endif  // TRITON_ENABLE_GPU
+      // No action is required for the GPU tensors.
     } break;
   }
 

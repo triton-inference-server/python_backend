@@ -90,6 +90,9 @@ class Stub {
       ResponseBatch* response_batch_shm_ptr,
       bi::managed_external_buffer::handle_t* responses_shm_handle);
 
+  /// Get the memory manager message queue
+  std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
+
   void ProcessResponse(InferResponse* response);
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
   ~Stub();
@@ -100,7 +103,6 @@ class Stub {
   bi::interprocess_mutex* parent_mutex_;
   bi::interprocess_condition* parent_cond_;
   bi::interprocess_mutex* health_mutex_;
-  std::unique_ptr<bi::scoped_lock<bi::interprocess_mutex>> stub_lock_;
   std::string model_path_;
   std::string model_version_;
   std::string model_instance_name_;
@@ -110,8 +112,11 @@ class Stub {
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
-  std::unique_ptr<MessageQueue> stub_message_queue_;
-  std::unique_ptr<MessageQueue> parent_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      stub_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      parent_message_queue_;
+  std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   std::mutex tensors_to_remove_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
   std::mutex messages_mutex_;

@@ -53,6 +53,7 @@
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
+#include "memory_manager.h"
 #include "message_queue.h"
 #include "pb_env.h"
 #include "pb_map.h"
@@ -233,8 +234,11 @@ class ModelInstanceState : public BackendModelInstance {
 
   TRITONBACKEND_Model* triton_model_;
   bi::interprocess_mutex* health_mutex_;
-  std::unique_ptr<MessageQueue> stub_message_queue_;
-  std::unique_ptr<MessageQueue> parent_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      stub_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      parent_message_queue_;
+  std::unique_ptr<MemoryManager> memory_manager_;
   std::string model_path_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;
@@ -244,7 +248,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   std::string shm_region_name_;
-  std::vector<std::unique_ptr<RequestExecutor>> request_executors_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -480,19 +483,6 @@ ModelInstanceState::RespondErrorToAllRequests(
 }
 
 void
-ModelInstanceState::CleanupBLSResponses()
-{
-  for (auto& bls_inference_response : bls_inference_responses_) {
-    LOG_IF_ERROR(
-        TRITONSERVER_InferenceResponseDelete(bls_inference_response),
-        " failed to release BLS inference response.");
-  }
-
-  bls_inference_responses_.clear();
-  request_executors_.clear();
-}
-
-void
 ModelInstanceState::WaitForBLSRequestsToFinish()
 {
   bls_futures_.clear();
@@ -522,6 +512,7 @@ ModelInstanceState::StartStubProcess()
   ipc_control_ = nullptr;
   stub_message_queue_ = nullptr;
   parent_message_queue_ = nullptr;
+  memory_manager_ = nullptr;
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
@@ -551,10 +542,24 @@ ModelInstanceState::StartStubProcess()
 
   RETURN_IF_EXCEPTION(
       stub_message_queue_ =
-          MessageQueue::Create(shm_pool_, message_queue_size));
+          MessageQueue<bi::managed_external_buffer::handle_t>::Create(
+              shm_pool_, message_queue_size));
   RETURN_IF_EXCEPTION(
       parent_message_queue_ =
-          MessageQueue::Create(shm_pool_, message_queue_size));
+          MessageQueue<bi::managed_external_buffer::handle_t>::Create(
+              shm_pool_, message_queue_size));
+
+  std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue;
+  RETURN_IF_EXCEPTION(
+      memory_manager_message_queue =
+          MessageQueue<uint64_t>::Create(shm_pool_, message_queue_size));
+
+  memory_manager_message_queue->ResetSemaphores();
+  ipc_control_->memory_manager_message_queue =
+      memory_manager_message_queue->ShmHandle();
+
+  memory_manager_ =
+      std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
 
@@ -674,6 +679,15 @@ ModelInstanceState::StartStubProcess()
       // process is notified that it can release the object stored in
       // shared memory.
       stub_message_queue_->Push(1000);
+
+      // If the model is not initialized, wait for the stub process to exit.
+      if (!initialized_) {
+        int status;
+        stub_message_queue_.reset();
+        parent_message_queue_.reset();
+        memory_manager_.reset();
+        waitpid(stub_pid_, &status, 0);
+      }
     });
 
     stub_pid_ = pid;
@@ -1003,29 +1017,34 @@ ModelInstanceState::ExecuteBLSRequest(
       // stub process and the main process is required. The reason is that we
       // need to first allocate the GPU memory from the memory pool and then
       // ask the stub process to fill in those allocated buffers.
-      for (auto& input_tensor : infer_request->Inputs()) {
-        if (!input_tensor->IsCPU()) {
+      try {
+        for (auto& input_tensor : infer_request->Inputs()) {
+          if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-          gpu_buffers_count++;
-          BackendMemory* backend_memory;
-          std::unique_ptr<BackendMemory> lbackend_memory;
-          has_gpu_tensor = true;
-          TRITONSERVER_Error* error = BackendMemory::Create(
-              Model()->TritonMemoryManager(),
-              {BackendMemory::AllocationType::GPU_POOL,
-               BackendMemory::AllocationType::GPU},
-              input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
-              &backend_memory);
-          if (error != nullptr) {
-            LOG_MESSAGE(
-                TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(error));
-            break;
-          }
-          lbackend_memory.reset(backend_memory);
-          input_tensor->SetMemory(std::move(
-              PbMemory::Create(shm_pool_, std::move(lbackend_memory))));
+            gpu_buffers_count++;
+            BackendMemory* backend_memory;
+            std::unique_ptr<BackendMemory> lbackend_memory;
+            has_gpu_tensor = true;
+            TRITONSERVER_Error* error = BackendMemory::Create(
+                Model()->TritonMemoryManager(),
+                {BackendMemory::AllocationType::GPU_POOL,
+                 BackendMemory::AllocationType::GPU},
+                input_tensor->MemoryTypeId(), input_tensor->ByteSize(),
+                &backend_memory);
+            if (error != nullptr) {
+              LOG_MESSAGE(
+                  TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(error));
+              break;
+            }
+            lbackend_memory.reset(backend_memory);
+            input_tensor->SetMemory(std::move(
+                PbMemory::Create(shm_pool_, std::move(lbackend_memory))));
 #endif  // TRITON_ENABLE_GPU
+          }
         }
+      }
+      catch (const PythonBackendException& exception) {
+        pb_exception = exception;
       }
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t> gpu_handles;
 
@@ -1034,18 +1053,22 @@ ModelInstanceState::ExecuteBLSRequest(
       // trip must be still completed, otherwise the stub process will always be
       // waiting for a message from the parent process.
       if (has_gpu_tensor) {
-        gpu_handles =
-            shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
-                gpu_buffers_count);
-        request_batch_shm_ptr->gpu_buffers_count = gpu_buffers_count;
-        request_batch_shm_ptr->gpu_buffers_handle = gpu_handles.handle_;
-
-        size_t i = 0;
-        for (auto& input_tensor : infer_request->Inputs()) {
-          if (!input_tensor->IsCPU()) {
-            gpu_handles.data_.get()[i] = input_tensor->Memory()->ShmHandle();
-            ++i;
+        try {
+          gpu_handles =
+              shm_pool_->Construct<bi::managed_external_buffer::handle_t>(
+                  gpu_buffers_count);
+          request_batch_shm_ptr->gpu_buffers_count = gpu_buffers_count;
+          request_batch_shm_ptr->gpu_buffers_handle = gpu_handles.handle_;
+          size_t i = 0;
+          for (auto& input_tensor : infer_request->Inputs()) {
+            if (!input_tensor->IsCPU()) {
+              gpu_handles.data_.get()[i] = input_tensor->Memory()->ShmHandle();
+              ++i;
+            }
           }
+        }
+        catch (const PythonBackendException& exception) {
+          pb_exception = exception;
         }
 
         bi::scoped_lock<bi::interprocess_mutex> lock{
@@ -1058,13 +1081,26 @@ ModelInstanceState::ExecuteBLSRequest(
         infer_response = request_executor->Infer(
             infer_request, shm_pool_, &inference_response);
 
-        if (inference_response != nullptr) {
-          std::lock_guard<std::mutex> lock{bls_responses_mutex_};
-          bls_inference_responses_.push_back(inference_response);
+        if (infer_response) {
+          infer_response->SaveToSharedMemory(shm_pool_);
+
+          for (auto& output_tensor : infer_response->OutputTensors()) {
+            // For GPU tensors we need to store the memory release id in memory
+            // manager.
+            if (!output_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+              std::unique_ptr<MemoryRecord> gpu_memory_record =
+                  std::make_unique<GPUMemoryRecord>(
+                      output_tensor->Memory()->DataPtr());
+              uint64_t memory_release_id =
+                  memory_manager_->AddRecord(std::move(gpu_memory_record));
+              output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
+#endif
+            }
+          }
+          *response_handle = infer_response->ShmHandle();
         }
 
-        infer_response->SaveToSharedMemory(shm_pool_);
-        *response_handle = infer_response->ShmHandle();
       } else {
         throw pb_exception;
       }
@@ -1085,6 +1121,8 @@ ModelInstanceState::ExecuteBLSRequest(
     }
   }
 
+  // At this point, the stub has notified the parent process that it has
+  // finished loading the inference response from shared memory.
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
@@ -1092,7 +1130,11 @@ ModelInstanceState::ExecuteBLSRequest(
     ipc_message->ResponseCondition()->wait(lock);
   }
 
-  request_executors_.emplace_back(std::move(request_executor));
+  if (inference_response != nullptr) {
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceResponseDelete(inference_response),
+        " failed to release BLS inference response.");
+  }
 }
 
 void
@@ -1155,10 +1197,7 @@ ModelInstanceState::ProcessRequests(
   }
 
   // Wait for all the pending BLS requests to be completed.
-  ScopedDefer bls_defer([this] {
-    WaitForBLSRequestsToFinish();
-    CleanupBLSResponses();
-  });
+  ScopedDefer bls_defer([this] { WaitForBLSRequestsToFinish(); });
 
   for (size_t i = 0; i < request_count; i++) {
     if (max_batch_size > 0) {
@@ -1662,6 +1701,7 @@ ModelInstanceState::~ModelInstanceState()
 
       stub_message_queue_.reset();
       parent_message_queue_.reset();
+      memory_manager_.reset();
 
     } else {
       force_kill = true;
@@ -1679,6 +1719,7 @@ ModelInstanceState::~ModelInstanceState()
   ipc_control_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
+  memory_manager_.reset();
 }
 
 TRITONSERVER_Error*

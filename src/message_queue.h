@@ -28,6 +28,8 @@
 
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/interprocess_semaphore.hpp>
+#include <boost/interprocess/sync/scoped_lock.hpp>
+#include <boost/thread/thread_time.hpp>
 #include <cstddef>
 #include "shm_manager.h"
 
@@ -51,41 +53,194 @@ struct MessageQueueShm {
   int tail;
 };
 
+template <typename T>
 class MessageQueue {
  public:
   /// Create a new MessageQueue in the shared memory.
-  static std::unique_ptr<MessageQueue> Create(
+  static std::unique_ptr<MessageQueue<T>> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      uint32_t message_queue_size);
+      uint32_t message_queue_size)
+  {
+    AllocatedSharedMemory<MessageQueueShm> mq_shm =
+        shm_pool->Construct<MessageQueueShm>();
+    mq_shm.data_->size = message_queue_size;
+
+    AllocatedSharedMemory<T> mq_buffer_shm =
+        shm_pool->Construct<T>(message_queue_size /* count */);
+    mq_shm.data_->buffer = mq_buffer_shm.handle_;
+    mq_shm.data_->head = 0;
+    mq_shm.data_->tail = 0;
+
+    new (&(mq_shm.data_->mutex)) bi::interprocess_mutex{};
+    new (&(mq_shm.data_->sem_empty))
+        bi::interprocess_semaphore{message_queue_size};
+    new (&(mq_shm.data_->sem_full)) bi::interprocess_semaphore{0};
+
+    return std::unique_ptr<MessageQueue<T>>(
+        new MessageQueue<T>(mq_shm, mq_buffer_shm));
+  }
 
   /// Load an already existing message queue from the shared memory.
-  static std::unique_ptr<MessageQueue> LoadFromSharedMemory(
+  static std::unique_ptr<MessageQueue<T>> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t message_queue_handle);
+      bi::managed_external_buffer::handle_t message_queue_handle)
+  {
+    AllocatedSharedMemory<MessageQueueShm> mq_shm =
+        shm_pool->Load<MessageQueueShm>(message_queue_handle);
+    AllocatedSharedMemory<T> mq_shm_buffer =
+        shm_pool->Load<T>(mq_shm.data_->buffer);
+
+    return std::unique_ptr<MessageQueue<T>>(
+        new MessageQueue(mq_shm, mq_shm_buffer));
+  }
 
   /// Push a message inside the message queue.
   /// \param message The shared memory handle of the message.
-  void Push(bi::managed_external_buffer::handle_t message);
-  void Push(
-      bi::managed_external_buffer::handle_t message, int const& duration,
-      bool& success);
+  void Push(T message)
+  {
+    while (true) {
+      try {
+        SemEmptyMutable()->wait();
+        break;
+      }
+      catch (bi::interprocess_exception& ex) {
+      }
+    }
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
+      Buffer()[Head()] = message;
+      HeadIncrement();
+    }
+    SemFullMutable()->post();
+  }
+
+  void Push(T message, int const& duration, bool& success)
+  {
+    boost::system_time timeout =
+        boost::get_system_time() + boost::posix_time::milliseconds(duration);
+
+    while (true) {
+      try {
+        if (!SemEmptyMutable()->timed_wait(timeout)) {
+          success = false;
+          return;
+        } else {
+          break;
+        }
+      }
+      catch (bi::interprocess_exception& ex) {
+      }
+    }
+
+    {
+      timeout =
+          boost::get_system_time() + boost::posix_time::milliseconds(duration);
+      bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable(), timeout};
+      if (!lock) {
+        SemEmptyMutable()->post();
+        success = false;
+        return;
+      }
+      success = true;
+
+      Buffer()[Head()] = message;
+      HeadIncrement();
+    }
+    SemFullMutable()->post();
+  }
 
   /// Pop a message from the message queue. This call will block until there
   /// is a message inside the message queue to return.
   /// \return the handle of the new message.
-  bi::managed_external_buffer::handle_t Pop();
-  bi::managed_external_buffer::handle_t Pop(int const& duration, bool& success);
+  T Pop()
+  {
+    T message;
+
+    while (true) {
+      try {
+        SemFullMutable()->wait();
+        break;
+      }
+      catch (bi::interprocess_exception& ex) {
+      }
+    }
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
+
+      message = Buffer()[Tail()];
+      TailIncrement();
+    }
+    SemEmptyMutable()->post();
+
+    return message;
+  }
+
+  T Pop(int const& duration, bool& success)
+  {
+    T message = 0;
+    boost::system_time timeout =
+        boost::get_system_time() + boost::posix_time::milliseconds(duration);
+
+    while (true) {
+      try {
+        if (!SemFullMutable()->timed_wait(timeout)) {
+          success = false;
+          return message;
+        } else {
+          break;
+        }
+      }
+      catch (bi::interprocess_exception& ex) {
+      }
+    }
+
+    {
+      timeout =
+          boost::get_system_time() + boost::posix_time::milliseconds(duration);
+      bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable(), timeout};
+      if (!lock) {
+        SemFullMutable()->post();
+        success = false;
+        return message;
+      }
+      success = true;
+
+      message = Buffer()[Tail()];
+      TailIncrement();
+    }
+    SemEmptyMutable()->post();
+
+    return message;
+  }
 
   /// Resets the semaphores for the message queue. This function is useful for
   /// when the stub process may have exited unexpectedly and the semaphores need
   /// to be restarted so that the message queue is in a proper state.
-  void ResetSemaphores();
+  void ResetSemaphores()
+  {
+    new (SemFullMutable()) bi::interprocess_semaphore(0);
+    new (SemEmptyMutable()) bi::interprocess_semaphore(Size());
+    new (MutexMutable()) bi::interprocess_mutex;
+    mq_shm_ptr_->tail = 0;
+    mq_shm_ptr_->head = 0;
+  }
 
   /// Get the shared memory handle of MessageQueue
-  bi::managed_external_buffer::handle_t ShmHandle();
+  bi::managed_external_buffer::handle_t ShmHandle() { return mq_handle_; }
 
   /// Release the ownership of this object in shared memory.
-  void Release();
+  void Release()
+  {
+    if (mq_shm_.data_ != nullptr) {
+      mq_shm_.data_.release();
+    }
+
+    if (mq_buffer_shm_.data_ != nullptr) {
+      mq_buffer_shm_.data_.release();
+    }
+  }
 
  private:
   std::size_t& Size() { return mq_shm_ptr_->size; }
@@ -93,7 +248,7 @@ class MessageQueue {
   bi::interprocess_mutex* MutexMutable() { return &(mq_shm_ptr_->mutex); }
   int& Head() { return mq_shm_ptr_->head; }
   int& Tail() { return mq_shm_ptr_->tail; }
-  bi::managed_external_buffer::handle_t* Buffer() { return mq_buffer_shm_ptr_; }
+  T* Buffer() { return mq_buffer_shm_ptr_; }
   const bi::interprocess_semaphore& SemEmpty()
   {
     return mq_shm_ptr_->sem_empty;
@@ -108,21 +263,26 @@ class MessageQueue {
     return &(mq_shm_ptr_->sem_full);
   }
 
-  void HeadIncrement();
-  void TailIncrement();
+  void HeadIncrement() { mq_shm_ptr_->head = (mq_shm_ptr_->head + 1) % Size(); }
+  void TailIncrement() { mq_shm_ptr_->tail = (mq_shm_ptr_->tail + 1) % Size(); }
 
   AllocatedSharedMemory<MessageQueueShm> mq_shm_;
-  AllocatedSharedMemory<bi::managed_external_buffer::handle_t> mq_buffer_shm_;
+  AllocatedSharedMemory<T> mq_buffer_shm_;
 
   MessageQueueShm* mq_shm_ptr_;
-  bi::managed_external_buffer::handle_t* mq_buffer_shm_ptr_;
+  T* mq_buffer_shm_ptr_;
   bi::managed_external_buffer::handle_t mq_handle_;
 
   /// Create/load a Message queue.
   /// \param mq_shm Message queue representation in shared memory.
   MessageQueue(
       AllocatedSharedMemory<MessageQueueShm>& mq_shm,
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t>&
-          mq_buffer_shm);
+      AllocatedSharedMemory<T>& mq_buffer_shm)
+      : mq_shm_(std::move(mq_shm)), mq_buffer_shm_(std::move(mq_buffer_shm))
+  {
+    mq_buffer_shm_ptr_ = mq_buffer_shm_.data_.get();
+    mq_shm_ptr_ = mq_shm_.data_.get();
+    mq_handle_ = mq_shm_.handle_;
+  }
 };
 }}}  // namespace triton::backend::python

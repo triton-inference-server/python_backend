@@ -84,7 +84,7 @@ SharedMemoryManager::SharedMemoryManager(
   shm_mutex_ =
       managed_buffer_->find_or_construct<bi::interprocess_mutex>("shm_mutex")();
   total_size_ = managed_buffer_->find_or_construct<uint64_t>("total size")();
-  read_only_ = false;
+  delete_region_ = true;
   if (create) {
     *total_size_ = current_capacity_;
     new (shm_mutex_) bi::interprocess_mutex;
@@ -113,7 +113,7 @@ SharedMemoryManager::SharedMemoryManager(const std::string& shm_region_name)
   shm_mutex_ =
       managed_buffer_->find_or_construct<bi::interprocess_mutex>("shm_mutex")();
   total_size_ = managed_buffer_->find_or_construct<uint64_t>("total size")();
-  read_only_ = true;
+  delete_region_ = false;
 }
 
 void
@@ -175,9 +175,15 @@ SharedMemoryManager::FreeMemory()
 
 SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
-  if (!read_only_) {
+  if (delete_region_) {
     bi::shared_memory_object::remove(shm_region_name_.c_str());
   }
+}
+
+void
+SharedMemoryManager::SetDeleteRegion(bool delete_region)
+{
+  delete_region_ = delete_region;
 }
 
 }}}  // namespace triton::backend::python

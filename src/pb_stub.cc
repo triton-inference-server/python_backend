@@ -151,11 +151,16 @@ Stub::Instantiate(
 
     health_mutex_ = &(ipc_control_->stub_health_mutex);
 
-    stub_message_queue_ = MessageQueue::LoadFromSharedMemory(
-        shm_pool_, ipc_control_->stub_message_queue);
+    stub_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->stub_message_queue);
 
-    parent_message_queue_ = MessageQueue::LoadFromSharedMemory(
-        shm_pool_, ipc_control_->parent_message_queue);
+    parent_message_queue_ =
+        MessageQueue<bi::managed_external_buffer::handle_t>::
+            LoadFromSharedMemory(shm_pool_, ipc_control_->parent_message_queue);
+
+    memory_manager_message_queue_ =
+        MessageQueue<uint64_t>::LoadFromSharedMemory(
+            shm_pool_, ipc_control_->memory_manager_message_queue);
 
     // If the Python model is using an execution environment, we need to
     // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
@@ -195,6 +200,12 @@ Stub::Instantiate(
     LOG_INFO << pb_exception.what() << std::endl;
     exit(1);
   }
+}
+
+std::unique_ptr<MessageQueue<uint64_t>>&
+Stub::MemoryManagerQueue()
+{
+  return memory_manager_message_queue_;
 }
 
 bool&
@@ -270,6 +281,9 @@ Stub::RunCommand()
       }
 
       if (has_exception) {
+        // Do not delete the region. The region will be deleted by the parent
+        // process.
+        shm_pool_->SetDeleteRegion(false);
         LOG_INFO << "Failed to initialize Python stub: " << error_string;
         initialize_response.data_->response_has_error = true;
         initialize_response.data_->response_is_error_set = false;
@@ -668,12 +682,10 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
-  // stub_lock_ must be destroyed before the shared memory is deconstructed.
-  // Otherwise, the shared memory will be destructed first and lead to
-  // segfault.
-  stub_lock_.reset();
+  model_instance_ = py::none();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
+  memory_manager_message_queue_.reset();
 }
 
 std::unique_ptr<Stub> Stub::stub_instance_;
