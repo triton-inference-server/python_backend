@@ -38,7 +38,7 @@ namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 
 #ifdef TRITON_PB_STUB
-PbTensor::PbTensor(const std::string& name, py::object numpy_array)
+PbTensor::PbTensor(const std::string& name, py::array& numpy_array)
     : name_(name)
 {
   dtype_ = numpy_to_triton_type(numpy_array.attr("dtype"));
@@ -76,7 +76,7 @@ PbTensor::PbTensor(const std::string& name, py::object numpy_array)
 }
 
 PbTensor::PbTensor(
-    const std::string& name, py::object numpy_array,
+    const std::string& name, py::array& numpy_array,
     TRITONSERVER_DataType dtype)
     : name_(name)
 {
@@ -216,7 +216,7 @@ delete_unused_dltensor(PyObject* dlp)
 }
 
 std::shared_ptr<PbTensor>
-PbTensor::FromNumpy(const std::string& name, py::object numpy_array)
+PbTensor::FromNumpy(const std::string& name, py::array& numpy_array)
 {
   return std::make_shared<PbTensor>(name, numpy_array);
 }

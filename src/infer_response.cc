@@ -36,8 +36,16 @@ namespace triton { namespace backend { namespace python {
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
     std::shared_ptr<PbError> error)
-    : output_tensors_(std::move(output_tensors)), error_(error)
+    : error_(error)
 {
+  for (auto& output : output_tensors) {
+    if (!output) {
+      throw PythonBackendException(
+          "Output tensor for inference response should not be empty.");
+    }
+  }
+
+  output_tensors_ = output_tensors;
 }
 
 std::vector<std::shared_ptr<PbTensor>>&
