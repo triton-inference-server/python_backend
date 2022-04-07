@@ -1719,6 +1719,7 @@ ModelInstanceState::~ModelInstanceState()
   ipc_control_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
+  memory_manager_.reset();
 }
 
 TRITONSERVER_Error*
