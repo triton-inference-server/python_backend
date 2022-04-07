@@ -120,6 +120,7 @@ struct IPCControlShm {
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
   bi::managed_external_buffer::handle_t parent_message_queue;
+  bi::managed_external_buffer::handle_t memory_manager_message_queue;
 };
 
 struct ResponseBatch {

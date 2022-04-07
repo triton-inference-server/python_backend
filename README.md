@@ -1,5 +1,5 @@
 <!--
-# Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -679,6 +679,12 @@ class TritonPythonModel:
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
+Starting from the 22.04 release, the lifetime of the BLS output tensors have
+been improved such that if a tensor is no longer needed in your Python model it
+will be automatically deallocated. This can increase the number of BLS requests
+that you can execute in your model without running into the out of GPU or shared
+memory error.
+
 Note: Async BLS is not supported on Python 3.6 or lower due to the `async` keyword
 and `asyncio.run` being introduced in Python 3.7. 
 
@@ -710,10 +716,6 @@ flags = pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START | pb_utils.TRITONSERVE
 
 ## Limitations
 
-- The number of inference requests that can be executed as a part of your model
-execution is limited to the amount of shared memory available to the Triton
-server.  If you are using Docker to start the TritonServer, you can control the
-shared memory usage using the
 [`--shm-size`](https://docs.docker.com/engine/reference/run/) flag.
 - You need to make sure that the inference requests performed as a part of your model
 do not create a circular dependency. For example, if model A performs an inference request

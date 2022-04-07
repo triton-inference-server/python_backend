@@ -39,6 +39,7 @@
 namespace py = pybind11;
 #endif
 
+#include <functional>
 #include <string>
 #include "pb_memory.h"
 #include "pb_string.h"

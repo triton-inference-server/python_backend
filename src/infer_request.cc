@@ -423,6 +423,17 @@ InferRequest::Exec()
     std::unique_ptr<InferResponse> infer_response =
         InferResponse::LoadFromSharedMemory(
             shm_pool, *response_handle, true /* open cuda handle */);
+    auto& memory_manager_message_queue = stub->MemoryManagerQueue();
+
+    for (auto& output_tensor : infer_response->OutputTensors()) {
+      if (!output_tensor->IsCPU()) {
+        uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
+        output_tensor->Memory()->SetMemoryReleaseCallback(
+            [&memory_manager_message_queue, memory_release_id]() {
+              memory_manager_message_queue->Push(memory_release_id);
+            });
+      }
+    }
 
     return infer_response;
   } else {
