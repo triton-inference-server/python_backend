@@ -1739,7 +1739,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 }
 
 ModelState::ModelState(TRITONBACKEND_Model* triton_model)
-    : BackendModel(triton_model)
+    : BackendModel(triton_model, true /* allow_optional */)
 {
   TRITONBACKEND_Backend* backend;
   THROW_IF_BACKEND_MODEL_ERROR(
