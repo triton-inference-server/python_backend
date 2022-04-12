@@ -96,8 +96,7 @@ class PbTensor {
       const std::string& name, const std::vector<int64_t>& dims,
       TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
       int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
-      DLManagedTensor* dl_managed_tensor = nullptr,
-      bi::managed_external_buffer::handle_t shm_handle = 0);
+      DLManagedTensor* dl_managed_tensor = nullptr);
 
   /// This constructor is used when
   /// loading the tensor from shared memory.
