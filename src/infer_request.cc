@@ -59,6 +59,7 @@ InferRequest::InferRequest(
           "' and model name '" + model_name + "' should not be empty.");
     }
   }
+
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
 }

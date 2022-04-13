@@ -41,6 +41,10 @@ namespace triton { namespace backend { namespace python {
 PbTensor::PbTensor(const std::string& name, py::array& numpy_array)
     : name_(name)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   dtype_ = numpy_to_triton_type(numpy_array.attr("dtype"));
   memory_type_ = TRITONSERVER_MEMORY_CPU;
   memory_type_id_ = 0;
@@ -80,6 +84,10 @@ PbTensor::PbTensor(
     TRITONSERVER_DataType dtype)
     : name_(name)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   if (numpy_to_triton_type(numpy_array.attr("dtype")) != dtype) {
     numpy_array = numpy_array.attr("view")(triton_to_numpy_type(dtype));
   }
@@ -125,6 +133,10 @@ PbTensor::PbTensor(
     DLManagedTensor* dl_managed_tensor,
     bi::managed_external_buffer::handle_t shm_handle)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   name_ = name;
   memory_ptr_ = memory_ptr;
   memory_type_ = memory_type;
@@ -294,6 +306,10 @@ PbTensor::Memory()
 std::shared_ptr<PbTensor>
 PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 
