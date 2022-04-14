@@ -221,11 +221,15 @@ class ModelState : public BackendModel {
   // Force CPU only tensors
   bool ForceCPUOnlyInputTensors() { return force_cpu_only_input_tensors_; }
 
+  // Is decoupled API being used.
+  bool IsDecoupled() { return decoupled_; }
+
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
   BackendState* backend_state_;
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
+  bool decoupled_;
 };
 
 class ModelInstanceState : public BackendModelInstance {
@@ -260,6 +264,12 @@ class ModelInstanceState : public BackendModelInstance {
   std::string path_to_libpython_;
   std::string path_to_activate_;
 
+  // Decoupled monitor thread
+  std::thread decoupled_monitor_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  std::unique_ptr<IPCMessage> received_message_;
+
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -289,6 +299,11 @@ class ModelInstanceState : public BackendModelInstance {
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
+  // In the decoupled mode, the parent message queue is monitored only by this
+  // function during the execute phase. No other thread should pop any message
+  // from the message queue in the decoupled mode.
+  void DecoupledMessageQueueMonitor();
+
   // Kill stub process
   void KillStubProcess();
 
@@ -306,6 +321,10 @@ class ModelInstanceState : public BackendModelInstance {
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       bool& restart);
 
+  // Process all the requests in the decoupled mode.
+  TRITONSERVER_Error* ProcessRequestsDecoupled(
+      TRITONBACKEND_Request** requests, const uint32_t request_count);
+
   // Execute a BLS Request
   void ExecuteBLSRequest(bi::managed_external_buffer::handle_t message_offset);
 
@@ -314,6 +333,17 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Wait for BLS requests to complete
   void WaitForBLSRequestsToFinish();
+
+  // Check the incoming requests for errors
+  TRITONSERVER_Error* CheckIncomingRequests(
+      TRITONBACKEND_Request** requests, const uint32_t request_count,
+      size_t& total_batch_size);
+
+  TRITONSERVER_Error* SaveRequestsToSharedMemory(
+      TRITONBACKEND_Request** requests, const uint32_t request_count,
+      std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
+      AllocatedSharedMemory<char>& request_batch,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -347,6 +377,74 @@ ModelInstanceState::KillStubProcess()
   int status;
   waitpid(stub_pid_, &status, 0);
   stub_pid_ = 0;
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::CheckIncomingRequests(
+    TRITONBACKEND_Request** requests, const uint32_t request_count,
+    size_t& total_batch_size)
+{
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  int max_batch_size = model_state->MaxBatchSize();
+
+  // For each request collect the total batch size for this inference
+  // execution. The batch-size, number of inputs, and size of each
+  // input has already been checked so don't need to do that here.
+
+  total_batch_size = 0;
+  for (size_t i = 0; i < request_count; i++) {
+    // If we get a nullptr request then something is badly wrong. Fail
+    // and release all requests.
+    if (requests[i] == nullptr) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          std::string(
+              "null request given to Python backend for '" + Name() + "'")
+              .c_str());
+    }
+  }
+
+  for (size_t i = 0; i < request_count; i++) {
+    if (max_batch_size > 0) {
+      // Retrieve the batch size from one of the inputs, if the model
+      // supports batching, the first dimension size is batch size
+      TRITONBACKEND_Input* input;
+      TRITONSERVER_Error* err =
+          TRITONBACKEND_RequestInputByIndex(requests[i], 0 /* index */, &input);
+      if (err == nullptr) {
+        const int64_t* shape;
+        err = TRITONBACKEND_InputProperties(
+            input, nullptr, nullptr, &shape, nullptr, nullptr, nullptr);
+        total_batch_size += shape[0];
+      }
+      if (err != nullptr) {
+        return err;
+      }
+    } else {
+      ++total_batch_size;
+    }
+  }
+
+  // If there are no valid payloads then no need to run the inference.
+  if (total_batch_size == 0) {
+    return nullptr;
+  }
+
+  // Make sure the maximum batch size is not exceeded. The
+  // total_batch_size must be 1 for models that don't support batching
+  // (i.e. max_batch_size == 0). If max_batch_size is exceeded then
+  // scheduler has done something badly wrong so fail and release all
+  // requests.
+  if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        std::string(
+            "batch size " + std::to_string(total_batch_size) + " for '" +
+            Name() + "', max allowed is " + std::to_string(max_batch_size))
+            .c_str());
+  }
+
+  return nullptr;  // success
 }
 
 void
@@ -555,6 +653,7 @@ ModelInstanceState::StartStubProcess()
   memory_manager_message_queue->ResetSemaphores();
   ipc_control_->memory_manager_message_queue =
       memory_manager_message_queue->ShmHandle();
+  ipc_control_->decoupled = model_state->IsDecoupled();
 
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
@@ -676,7 +775,7 @@ ModelInstanceState::StartStubProcess()
       // Push a dummy message to the message queue so that the stub
       // process is notified that it can release the object stored in
       // shared memory.
-      stub_message_queue_->Push(1000);
+      stub_message_queue_->Push(DUMMY_MESSAGE);
 
       // If the model is not initialized, wait for the stub process to exit.
       if (!initialized_) {
@@ -753,6 +852,82 @@ ModelInstanceState::StartStubProcess()
 }
 
 TRITONSERVER_Error*
+ModelInstanceState::SaveRequestsToSharedMemory(
+    TRITONBACKEND_Request** requests, const uint32_t request_count,
+    std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
+    AllocatedSharedMemory<char>& request_batch,
+    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses)
+{
+  // Clear any existing items in the requests vector
+  pb_inference_requests.clear();
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  RETURN_IF_EXCEPTION(
+      request_batch = shm_pool_->Construct<char>(
+          sizeof(RequestBatch) +
+          request_count * sizeof(bi::managed_external_buffer::handle_t)));
+
+  RequestBatch* request_batch_shm_ptr =
+      reinterpret_cast<RequestBatch*>(request_batch.data_.get());
+  request_batch_shm_ptr->batch_size = request_count;
+
+  bi::managed_external_buffer::handle_t* requests_shm =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          request_batch.data_.get() + sizeof(RequestBatch));
+
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* request = requests[r];
+    uint32_t requested_input_count = 0;
+    RETURN_IF_EXCEPTION(
+        TRITONBACKEND_RequestInputCount(request, &requested_input_count));
+
+    uint32_t requested_output_count = 0;
+    RETURN_IF_EXCEPTION(
+        TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
+
+    std::vector<std::shared_ptr<PbTensor>> pb_input_tensors;
+    for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
+      std::shared_ptr<PbTensor> pb_input_tensor;
+
+      RETURN_IF_EXCEPTION(
+          GetInputTensor(iidx, pb_input_tensor, request, responses));
+      pb_input_tensors.emplace_back(std::move(pb_input_tensor));
+    }
+
+    std::vector<std::string> requested_output_names;
+    // Append the list of requested outputs to the inference_request
+    for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
+      const char* requested_output_name;
+      RETURN_IF_EXCEPTION(TRITONBACKEND_RequestOutputName(
+          request, iidx, &requested_output_name));
+      requested_output_names.emplace_back(requested_output_name);
+    }
+
+    // request id
+    const char* id;
+    RETURN_IF_EXCEPTION(TRITONBACKEND_RequestId(request, &id));
+
+    uint64_t correlation_id;
+    RETURN_IF_EXCEPTION(
+        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
+
+    uint32_t flags;
+    RETURN_IF_EXCEPTION(TRITONBACKEND_RequestFlags(request, &flags));
+
+    std::unique_ptr<InferRequest> infer_request =
+        std::make_unique<InferRequest>(
+            id, correlation_id, pb_input_tensors, requested_output_names,
+            model_state->Name(), model_state->Version(), flags);
+
+    RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(shm_pool_));
+    requests_shm[r] = infer_request->ShmHandle();
+    pb_inference_requests.emplace_back(std::move(infer_request));
+  }
+
+  return nullptr;  // success
+}
+
+TRITONSERVER_Error*
 ModelInstanceState::SetupStubProcess()
 {
   std::string kind = TRITONSERVER_InstanceGroupKindString(kind_);
@@ -818,9 +993,9 @@ ModelInstanceState::SetupStubProcess()
   }
 
   parent_pid_ = getpid();
-
-
   RETURN_IF_ERROR(StartStubProcess());
+  decoupled_monitor_ =
+      std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
 
   return nullptr;
 }
@@ -853,10 +1028,15 @@ ModelInstanceState::GetInputTensor(
       in, HostPolicyName().c_str(), &input_name, &input_dtype, &input_shape,
       &input_dims_count, &input_byte_size, &input_buffer_count));
 
-  BackendInputCollector collector(
-      &request, 1, responses.get(), Model()->TritonMemoryManager(),
-      false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
-      HostPolicyName().c_str());
+  // Only use input collector when a response array is provided.
+  std::unique_ptr<BackendInputCollector> collector;
+  if (responses) {
+    collector = std::make_unique<BackendInputCollector>(
+        &request, 1, responses.get(), Model()->TritonMemoryManager(),
+        false /* pinned_enable */, CudaStream(), nullptr, nullptr, 0,
+        HostPolicyName().c_str());
+  }
+
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   bool cpu_only_tensors = model_state->ForceCPUOnlyInputTensors();
@@ -897,9 +1077,19 @@ ModelInstanceState::GetInputTensor(
     RETURN_IF_EXCEPTION(
         input_tensor->SaveToSharedMemory(shm_pool_, false /* copy_gpu */));
     char* input_buffer = reinterpret_cast<char*>(input_tensor->DataPtr());
-    collector.ProcessTensor(
-        input_name, input_buffer, input_byte_size,
-        TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
+
+    if (collector) {
+      collector->ProcessTensor(
+          input_name, input_buffer, input_byte_size,
+          TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
+    } else {
+      bool cuda_used = false;
+      CopyBuffer(
+          "Failed to copy the output tensor to buffer.", src_memory_type,
+          src_memory_type_id, TRITONSERVER_MEMORY_CPU /* memory_type */,
+          0 /* memory type id */, input_byte_size, src_ptr, input_buffer,
+          CudaStream(), &cuda_used);
+    }
   } else {
 #ifdef TRITON_ENABLE_GPU
 
@@ -907,10 +1097,13 @@ ModelInstanceState::GetInputTensor(
     const void* buffer = nullptr;
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
     alloc_perference = {{TRITONSERVER_MEMORY_GPU, src_memory_type_id}};
-    RETURN_IF_ERROR(collector.ProcessTensor(
-        input_name, nullptr, 0, alloc_perference,
-        reinterpret_cast<const char**>(&buffer), &input_byte_size,
-        &src_memory_type, &src_memory_type_id));
+
+    if (collector) {
+      RETURN_IF_ERROR(collector->ProcessTensor(
+          input_name, nullptr, 0, alloc_perference,
+          reinterpret_cast<const char**>(&buffer), &input_byte_size,
+          &src_memory_type, &src_memory_type_id));
+    }
 
     // If the tensor is using the cuda shared memory, we need to extract the
     // handle that was used to create the device pointer. This is because of a
@@ -926,12 +1119,21 @@ ModelInstanceState::GetInputTensor(
     RETURN_IF_ERROR(TRITONBACKEND_InputBufferAttributes(
         in, 0, &buffer_p, &buffer_attributes));
 
-    input_tensor = std::make_shared<PbTensor>(
-        std::string(input_name),
-        std::vector<int64_t>(input_shape, input_shape + input_dims_count),
-        input_dtype, src_memory_type, src_memory_type_id,
-        const_cast<void*>(buffer), input_byte_size,
-        nullptr /* DLManagedTensor */);
+    if (collector) {
+      input_tensor = std::make_shared<PbTensor>(
+          std::string(input_name),
+          std::vector<int64_t>(input_shape, input_shape + input_dims_count),
+          input_dtype, src_memory_type, src_memory_type_id,
+          const_cast<void*>(buffer), input_byte_size,
+          nullptr /* DLManagedTensor */);
+    } else {
+      input_tensor = std::make_shared<PbTensor>(
+          std::string(input_name),
+          std::vector<int64_t>(input_shape, input_shape + input_dims_count),
+          input_dtype, src_memory_type, src_memory_type_id,
+          const_cast<void*>(buffer_p), input_byte_size,
+          nullptr /* DLManagedTensor */);
+    }
 
     cudaIpcMemHandle_t* cuda_ipc_handle;
     RETURN_IF_ERROR(TRITONSERVER_BufferAttributesCudaIpcHandle(
@@ -1135,13 +1337,88 @@ ModelInstanceState::ExecuteBLSRequest(
 }
 
 void
+ModelInstanceState::DecoupledMessageQueueMonitor()
+{
+  while (true) {
+    bi::managed_external_buffer::handle_t handle = parent_message_queue_->Pop();
+    std::unique_ptr<IPCMessage> message =
+        IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
+    if (message->Command() == PYTHONSTUB_ExecuteResposne) {
+      std::lock_guard<std::mutex> guard{mu_};
+      received_message_ = std::move(message);
+      cv_.notify_one();
+    }
+  }
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::ProcessRequestsDecoupled(
+    TRITONBACKEND_Request** requests, const uint32_t request_count)
+{
+  NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+
+  size_t total_batch_size = 0;
+  RETURN_IF_ERROR(
+      CheckIncomingRequests(requests, request_count, total_batch_size));
+
+  // No request to process
+  if (total_batch_size == 0) {
+    return nullptr;  // success
+  }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("model ") + model_state->Name() + ", instance " + Name() +
+       ", executing " + std::to_string(request_count) + " requests")
+          .c_str());
+
+  std::vector<std::unique_ptr<InferRequest>> pb_inference_requests;
+  AllocatedSharedMemory<char> request_batch;
+  std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses;
+
+  RETURN_IF_ERROR(SaveRequestsToSharedMemory(
+      requests, request_count, pb_inference_requests, request_batch,
+      responses));
+
+  std::unique_ptr<IPCMessage> ipc_message;
+  RETURN_IF_EXCEPTION(
+      ipc_message = IPCMessage::Create(shm_pool_, false /*inline_response*/));
+  ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
+  ipc_message->Args() = request_batch.handle_;
+  received_message_ = nullptr;
+  ScopedDefer _([this] { stub_message_queue_->Push(DUMMY_MESSAGE); });
+
+  {
+    std::unique_lock<std::mutex> guard{mu_};
+    stub_message_queue_->Push(ipc_message->ShmHandle());
+    cv_.wait(guard, [this] { return received_message_ != nullptr; });
+  }
+
+  AllocatedSharedMemory<ResponseBatch> response_batch =
+      shm_pool_->Load<ResponseBatch>(received_message_->Args());
+  if (response_batch.data_->has_error) {
+    if (response_batch.data_->is_error_set) {
+      auto error = PbString::LoadFromSharedMemory(
+          shm_pool_, response_batch.data_->error);
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
+    }
+
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "Failed to process the requests.");
+  }
+
+  return nullptr;  // success
+}
+
+void
 ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
     bool& restart)
 {
   NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-  int max_batch_size = model_state->MaxBatchSize();
   std::string name = model_state->Name();
 
   LOG_MESSAGE(
@@ -1152,26 +1429,6 @@ ModelInstanceState::ProcessRequests(
 
   uint64_t exec_start_ns = 0;
   SET_TIMESTAMP(exec_start_ns);
-
-  // For each request collect the total batch size for this inference
-  // execution. The batch-size, number of inputs, and size of each
-  // input has already been checked so don't need to do that here.
-
-  size_t total_batch_size = 0;
-  for (size_t i = 0; i < request_count; i++) {
-    // If we get a nullptr request then something is badly wrong. Fail
-    // and release all requests.
-    if (requests[i] == nullptr) {
-      RequestsRespondWithError(
-          requests, request_count,
-          TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL,
-              std::string(
-                  "null request given to Python backend for '" + name + "'")
-                  .c_str()));
-      return;
-    }
-  }
 
   // We take the responsibility of the responses.
   std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
@@ -1193,129 +1450,30 @@ ModelInstanceState::ProcessRequests(
     }
   }
 
-  // Wait for all the pending BLS requests to be completed.
-  ScopedDefer bls_defer([this] { WaitForBLSRequestsToFinish(); });
+  size_t total_batch_size = 0;
+  RESPOND_ALL_AND_RETURN_IF_ERROR(
+      responses, request_count,
+      CheckIncomingRequests(requests, request_count, total_batch_size));
 
-  for (size_t i = 0; i < request_count; i++) {
-    if (max_batch_size > 0) {
-      // Retrieve the batch size from one of the inputs, if the model
-      // supports batching, the first dimension size is batch size
-      TRITONBACKEND_Input* input;
-      TRITONSERVER_Error* err =
-          TRITONBACKEND_RequestInputByIndex(requests[i], 0 /* index */, &input);
-      if (err == nullptr) {
-        const int64_t* shape;
-        err = TRITONBACKEND_InputProperties(
-            input, nullptr, nullptr, &shape, nullptr, nullptr, nullptr);
-        total_batch_size += shape[0];
-      }
-      if (err != nullptr) {
-        RESPOND_ALL_AND_RETURN_IF_ERROR(responses, request_count, err);
-      }
-    } else {
-      ++total_batch_size;
-    }
-  }
-
-  // If there are no valid payloads then no need to run the inference.
+  // No request to process
   if (total_batch_size == 0) {
     return;
   }
 
-  // Make sure the maximum batch size is not exceeded. The
-  // total_batch_size must be 1 for models that don't support batching
-  // (i.e. max_batch_size == 0). If max_batch_size is exceeded then
-  // scheduler has done something badly wrong so fail and release all
-  // requests.
-  if ((total_batch_size != 1) && (total_batch_size > (size_t)max_batch_size)) {
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        responses, request_count,
-        TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
-            std::string(
-                "batch size " + std::to_string(total_batch_size) + " for '" +
-                name + "', max allowed is " + std::to_string(max_batch_size))
-                .c_str()));
-  }
+  // Wait for all the pending BLS requests to be completed.
+  ScopedDefer bls_defer([this] { WaitForBLSRequestsToFinish(); });
+  std::vector<std::unique_ptr<InferRequest>> pb_inference_requests;
+  AllocatedSharedMemory<char> request_batch;
+  RESPOND_ALL_AND_RETURN_IF_ERROR(
+      responses, request_count,
+      SaveRequestsToSharedMemory(
+          requests, request_count, pb_inference_requests, request_batch,
+          responses));
 
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, false /*inline_response*/);
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
-
-  AllocatedSharedMemory<char> request_batch;
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      responses, request_count,
-      request_batch = shm_pool_->Construct<char>(
-          sizeof(RequestBatch) +
-          request_count * sizeof(bi::managed_external_buffer::handle_t)));
-
-  RequestBatch* request_batch_shm_ptr =
-      reinterpret_cast<RequestBatch*>(request_batch.data_.get());
-  request_batch_shm_ptr->batch_size = request_count;
   ipc_message->Args() = request_batch.handle_;
-
-  bi::managed_external_buffer::handle_t* requests_shm =
-      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-          request_batch.data_.get() + sizeof(RequestBatch));
-
-  std::vector<std::unique_ptr<InferRequest>> pb_inference_requests;
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-    uint32_t requested_input_count = 0;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        responses, request_count,
-        TRITONBACKEND_RequestInputCount(request, &requested_input_count));
-
-    uint32_t requested_output_count = 0;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        responses, request_count,
-        TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-
-    std::vector<std::shared_ptr<PbTensor>> pb_input_tensors;
-    for (size_t iidx = 0; iidx < requested_input_count; ++iidx) {
-      std::shared_ptr<PbTensor> pb_input_tensor;
-
-      RESPOND_ALL_AND_RETURN_IF_ERROR(
-          responses, request_count,
-          GetInputTensor(iidx, pb_input_tensor, request, responses));
-      pb_input_tensors.emplace_back(std::move(pb_input_tensor));
-    }
-
-    std::vector<std::string> requested_output_names;
-    // Append the list of requested outputs to the inference_request
-    for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
-      const char* requested_output_name;
-      RESPOND_ALL_AND_RETURN_IF_ERROR(
-          responses, request_count,
-          TRITONBACKEND_RequestOutputName(
-              request, iidx, &requested_output_name));
-      requested_output_names.emplace_back(requested_output_name);
-    }
-
-    // request id
-    const char* id;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        responses, request_count, TRITONBACKEND_RequestId(request, &id));
-
-    uint64_t correlation_id;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        responses, request_count,
-        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
-
-    uint32_t flags;
-    RESPOND_ALL_AND_RETURN_IF_ERROR(
-        responses, request_count, TRITONBACKEND_RequestFlags(request, &flags));
-
-    std::unique_ptr<InferRequest> infer_request =
-        std::make_unique<InferRequest>(
-            id, correlation_id, pb_input_tensors, requested_output_names,
-            model_state->Name(), model_state->Version(), flags);
-
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        responses, request_count, infer_request->SaveToSharedMemory(shm_pool_));
-    requests_shm[r] = infer_request->ShmHandle();
-    pb_inference_requests.emplace_back(std::move(infer_request));
-  }
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
@@ -1345,7 +1503,7 @@ ModelInstanceState::ProcessRequests(
     // the object stored in shared memory.
     NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
     if (!restart)
-      stub_message_queue_->Push(1000);
+      stub_message_queue_->Push(DUMMY_MESSAGE);
   });
   if (restart) {
     return;
@@ -1640,8 +1798,7 @@ ModelInstanceState::ProcessRequests(
     }
 
     if (has_cpu_tensor) {
-      // Any number would work here.
-      stub_message_queue_->Push(1000);
+      stub_message_queue_->Push(DUMMY_MESSAGE);
     }
 
 #ifdef TRITON_ENABLE_GPU
@@ -1748,6 +1905,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
   python_execution_env_ = "";
   force_cpu_only_input_tensors_ = true;
+  decoupled_ = false;
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
@@ -1794,7 +1952,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
                          "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
                 .c_str());
       } else {
-        throw triton::backend::BackendModelException(TRITONSERVER_ErrorNew(
+        throw BackendModelException(TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_UNSUPPORTED,
             (std::string("Incorrect value for FORCE_CPU_ONLY_INPUT_TENSORS: ") +
              force_cpu_only_input_tensor + "'")
@@ -1806,8 +1964,20 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
     }
   }
 
+  triton::common::TritonJson::Value model_transaction_policy;
+  if (model_config_.Find(
+          "model_transaction_policy", &model_transaction_policy)) {
+    triton::common::TritonJson::Value decoupled;
+    if (model_transaction_policy.Find("decoupled", &decoupled)) {
+      auto error = decoupled.AsBool(&decoupled_);
+      if (error != nullptr) {
+        throw BackendModelException(error);
+      }
+    }
+  }
+
   if (artifact_type != TRITONBACKEND_ARTIFACT_FILESYSTEM) {
-    throw triton::backend::BackendModelException(TRITONSERVER_ErrorNew(
+    throw BackendModelException(TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_UNSUPPORTED,
         (std::string("unsupported artifact type for model '") + Name() + "'")
             .c_str()));
@@ -2094,30 +2264,39 @@ TRITONBACKEND_ModelInstanceExecute(
   // If restart is equal to true, it indicates that the stub process is
   // unhealthy and needs a restart.
   bool restart = false;
-  instance_state->ProcessRequests(requests, request_count, restart);
+  ModelState* model_state =
+      reinterpret_cast<ModelState*>(instance_state->Model());
+  if (model_state->IsDecoupled()) {
+    instance_state->ProcessRequests(requests, request_count, restart);
 
-  for (uint32_t r = 0; r < request_count; ++r) {
-    TRITONBACKEND_Request* request = requests[r];
-    LOG_IF_ERROR(
-        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
-        "failed releasing request");
-  }
+    for (uint32_t r = 0; r < request_count; ++r) {
+      TRITONBACKEND_Request* request = requests[r];
+      LOG_IF_ERROR(
+          TRITONBACKEND_RequestRelease(
+              request, TRITONSERVER_REQUEST_RELEASE_ALL),
+          "failed releasing request");
+    }
 
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
-       instance_state->Name() + " released " + std::to_string(request_count) +
-       " requests")
-          .c_str());
-
-  if (restart) {
     LOG_MESSAGE(
-        TRITONSERVER_LOG_ERROR,
-        "Stub process is unhealthy and it will be restarted.");
-    instance_state->KillStubProcess();
-    LOG_IF_ERROR(
-        instance_state->StartStubProcess(),
-        "Failed to restart the stub process.");
+        TRITONSERVER_LOG_VERBOSE,
+        (std::string(
+             "TRITONBACKEND_ModelInstanceExecute: model instance name ") +
+         instance_state->Name() + " released " + std::to_string(request_count) +
+         " requests")
+            .c_str());
+
+    if (restart) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          "Stub process is unhealthy and it will be restarted.");
+      instance_state->KillStubProcess();
+      LOG_IF_ERROR(
+          instance_state->StartStubProcess(),
+          "Failed to restart the stub process.");
+    }
+  } else {
+    RETURN_IF_ERROR(
+        instance_state->ProcessRequestsDecoupled(requests, request_count));
   }
 
   return nullptr;
