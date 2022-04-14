@@ -122,8 +122,7 @@ PbTensor::PbTensor(
     const std::string& name, const std::vector<int64_t>& dims,
     TRITONSERVER_DataType dtype, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
-    DLManagedTensor* dl_managed_tensor,
-    bi::managed_external_buffer::handle_t shm_handle)
+    DLManagedTensor* dl_managed_tensor)
 {
   name_ = name;
   memory_ptr_ = memory_ptr;
@@ -131,7 +130,6 @@ PbTensor::PbTensor(
   memory_type_id_ = memory_type_id;
   dtype_ = dtype;
   dims_ = dims;
-  // [FIXME] fix shm_handle
 
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
@@ -400,9 +398,16 @@ PbTensor::SaveToSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu)
 {
   if (!tensor_shm_.data_) {
-    uint64_t byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
-                         PbString::ShmStructSize(name_) +
-                         PbMemory::ShmStructSize(memory_type_, byte_size_);
+    uint64_t byte_size;
+    if (!pb_memory_) {
+      byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
+                  PbString::ShmStructSize(name_) +
+                  PbMemory::ShmStructSize(memory_type_, byte_size_);
+
+    } else {
+      byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
+                  PbString::ShmStructSize(name_);
+    }
     tensor_shm_ = shm_pool->Construct<char>(byte_size);
 
     tensor_shm_ptr_ = reinterpret_cast<TensorShm*>(tensor_shm_.data_.get());
@@ -425,13 +430,17 @@ PbTensor::SaveToSharedMemory(
         shm_handle_ + name_offset);
     std::size_t pb_memory_offset = name_offset + PbString::ShmStructSize(name_);
 
-    pb_memory_ = PbMemory::Create(
-        memory_type_, memory_type_id_, byte_size_,
-        reinterpret_cast<char*>(memory_ptr_),
-        reinterpret_cast<char*>(tensor_shm_ptr_) + pb_memory_offset,
-        shm_handle_ + pb_memory_offset, copy_gpu);
+    if (!pb_memory_) {
+      pb_memory_ = PbMemory::Create(
+          memory_type_, memory_type_id_, byte_size_,
+          reinterpret_cast<char*>(memory_ptr_),
+          reinterpret_cast<char*>(tensor_shm_ptr_) + pb_memory_offset,
+          shm_handle_ + pb_memory_offset, copy_gpu);
+      tensor_shm_ptr_->memory = 0;
+    } else {
+      tensor_shm_ptr_->memory = pb_memory_->ShmHandle();
+    }
 
-    tensor_shm_ptr_->memory = pb_memory_->ShmHandle();
     memory_ptr_ = pb_memory_->DataPtr();
   }
 }
@@ -449,10 +458,17 @@ PbTensor::LoadFromSharedMemory(
   std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(
       tensor_handle + name_offset, tensor_shm.data_.get() + name_offset);
 
-  std::size_t pb_memory_offset = name_offset + name_shm->Size();
-  std::unique_ptr<PbMemory> pb_memory = PbMemory::LoadFromSharedMemory(
-      pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
-      open_cuda_handle);
+  std::unique_ptr<PbMemory> pb_memory;
+  if (tensor_shm_ptr->memory == 0) {
+    std::size_t pb_memory_offset = name_offset + name_shm->Size();
+    pb_memory = PbMemory::LoadFromSharedMemory(
+        pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
+        open_cuda_handle);
+  } else {
+    pb_memory = PbMemory::LoadFromSharedMemory(
+        shm_pool, tensor_shm_ptr->memory, open_cuda_handle);
+  }
+
   return std::unique_ptr<PbTensor>(
       new PbTensor(tensor_shm, name_shm, pb_memory));
 }
