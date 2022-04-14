@@ -32,22 +32,19 @@ namespace triton { namespace backend { namespace python {
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
 
-
-struct AllocationInfo {
-  bi::managed_external_buffer::handle_t handle_;
-  SharedMemoryManager* shm_manager_;
-};
-
 class RequestExecutor {
   TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
   TRITONSERVER_Server* server_;
+  std::unique_ptr<SharedMemoryManager>& shm_pool_;
 
  public:
   std::unique_ptr<InferResponse> Infer(
       const std::shared_ptr<InferRequest>& infer_request,
-      const std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_InferenceResponse** response);
-  RequestExecutor(TRITONSERVER_Server* server);
+  RequestExecutor(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      TRITONSERVER_Server* server);
+
   ~RequestExecutor();
 };
 
