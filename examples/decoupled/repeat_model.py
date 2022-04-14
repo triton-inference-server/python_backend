@@ -138,6 +138,9 @@ class TritonPythonModel:
                                                 len(requests))
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> Initial decoupled implementation
         in_input = pb_utils.get_input_tensor_by_name(requests[0],
                                                      'IN').as_numpy()
         delay_input = pb_utils.get_input_tensor_by_name(requests[0],
@@ -147,6 +150,7 @@ class TritonPythonModel:
                 f"expected IN and DELAY shape to match, got {list(in_input.shape)} and {list(delay_input.shape)}."
             )
 
+<<<<<<< HEAD
         # Start a separate thread to send the responses for the request. The
         # sending back the responses is delegated to this thread.
         thread = threading.Thread(target=self.response_thread,
@@ -163,6 +167,13 @@ class TritonPythonModel:
                   pb_utils.get_input_tensor_by_name(requests[0],
                                                     'DELAY').as_numpy()))
 >>>>>>> Some examples for using decoupled API (#137)
+=======
+        # Start a separate thread to send the responses for the request. The
+        # sending back the responses is delegated to this thread.
+        thread = threading.Thread(target=self.response_thread,
+                                  args=(requests[0].get_response_sender(),
+                                        in_input, delay_input))
+>>>>>>> Initial decoupled implementation
 
         # A model using decoupled transaction policy is not required to send all
         # responses for the current request before returning from the execute.

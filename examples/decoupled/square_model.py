@@ -176,12 +176,17 @@ class TritonPythonModel:
 
         for idx in range(in_input[0]):
 <<<<<<< HEAD
+<<<<<<< HEAD
             out_output = pb_utils.Tensor("OUT", np.array([in_input[0]],
                                                          np.int32))
 =======
             out_output = pb_utils.Tensor("OUT",
                                          numpy.array([in_input[0]], np.int32))
 >>>>>>> Some examples for using decoupled API (#137)
+=======
+            out_output = pb_utils.Tensor("OUT", np.array([in_input[0]],
+                                                         np.int32))
+>>>>>>> Initial decoupled implementation
             response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
