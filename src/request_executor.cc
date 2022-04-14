@@ -28,6 +28,7 @@
 
 #include <future>
 #include "pb_utils.h"
+#include "scoped_defer.h"
 #include "triton/backend/backend_common.h"
 #include "triton/core/tritonserver.h"
 
@@ -72,7 +73,10 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
-  SharedMemoryManager* shm_pool = reinterpret_cast<SharedMemoryManager*>(userp);
+  std::unique_ptr<SharedMemoryManager> shm_pool(
+      reinterpret_cast<SharedMemoryManager*>(userp));
+
+  ScopedDefer _([&shm_pool] { shm_pool.release(); });
   *actual_memory_type = preferred_memory_type;
   *actual_memory_type_id = preferred_memory_type_id;
 
@@ -90,30 +94,20 @@ ResponseAlloc(
       case TRITONSERVER_MEMORY_CPU_PINNED: {
         *actual_memory_type = TRITONSERVER_MEMORY_CPU;
         *actual_memory_type_id = 0;
-        bi::managed_external_buffer::handle_t tensor_handle;
         try {
-          AllocatedSharedMemory<char> memory =
-              shm_pool->Construct<char>(byte_size);
-          *buffer = memory.data_.get();
-          tensor_handle = memory.handle_;
-
-          // Release the ownership to avoid deallocation. The buffer
-          // will be deallocated in ResponseRelease function.
-          memory.data_.release();
+          std::unique_ptr<PbMemory> pb_memory = PbMemory::Create(
+              shm_pool, *actual_memory_type, *actual_memory_type_id, byte_size,
+              nullptr /* data */, false /* copy_gpu */);
+          *buffer = pb_memory->DataPtr();
+          *buffer_userp = reinterpret_cast<void*>(pb_memory.get());
+          pb_memory.release();
         }
         catch (const PythonBackendException& pb_exception) {
           TRITONSERVER_Error* err =
               CreateTritonErrorFromException(pb_exception);
           return err;
         }
-        // Store the buffer offset in the userp; The userp is large enough to
-        // hold the shared memory offset and the address of the Shared memory
-        // manager
-        AllocationInfo* allocation_info = new AllocationInfo;
-        *buffer_userp = allocation_info;
 
-        allocation_info->handle_ = tensor_handle;
-        allocation_info->shm_manager_ = shm_pool;
       } break;
 #ifdef TRITON_ENABLE_GPU
       case TRITONSERVER_MEMORY_GPU: {
@@ -151,28 +145,12 @@ ResponseRelease(
     size_t byte_size, TRITONSERVER_MemoryType memory_type,
     int64_t memory_type_id)
 {
-  switch (memory_type) {
-    case TRITONSERVER_MEMORY_CPU:
-    case TRITONSERVER_MEMORY_CPU_PINNED: {
-      AllocationInfo* allocation_info =
-          reinterpret_cast<AllocationInfo*>(buffer_userp);
-      {
-        // Load the data so that it is deallocated automatically.
-        auto result = allocation_info->shm_manager_->Load<char>(
-            allocation_info->handle_, true /* unsafe */);
-      }
-
-      delete allocation_info;
-    } break;
-    case TRITONSERVER_MEMORY_GPU: {
-      // No action is required for the GPU tensors.
-    } break;
-  }
-
   return nullptr;  // Success
 }
 
-RequestExecutor::RequestExecutor(TRITONSERVER_Server* server) : server_(server)
+RequestExecutor::RequestExecutor(
+    std::unique_ptr<SharedMemoryManager>& shm_pool, TRITONSERVER_Server* server)
+    : server_(server), shm_pool_(shm_pool)
 {
   TRITONSERVER_ResponseAllocator* allocator;
   THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorNew(
@@ -183,7 +161,6 @@ RequestExecutor::RequestExecutor(TRITONSERVER_Server* server) : server_(server)
 std::unique_ptr<InferResponse>
 RequestExecutor::Infer(
     const std::shared_ptr<InferRequest>& infer_request,
-    const std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_InferenceResponse** triton_response)
 {
   std::unique_ptr<InferResponse> infer_response;
@@ -247,7 +224,7 @@ RequestExecutor::Infer(
       std::future<TRITONSERVER_InferenceResponse*> completed = p->get_future();
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
-          irequest, response_allocator_, shm_pool.get(), InferResponseComplete,
+          irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
           reinterpret_cast<void*>(p)));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
@@ -284,16 +261,21 @@ RequestExecutor::Infer(
         // userp is only set for the CPU tensors
         if (memory_type != TRITONSERVER_MEMORY_GPU) {
           if (byte_size != 0) {
-            output_tensors.push_back(std::make_shared<PbTensor>(
+            std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
                 sname, dims_vector, datatype, memory_type, memory_type_id,
                 const_cast<void*>(base), byte_size,
-                nullptr /* DLManagedTensor */,
-                *(reinterpret_cast<off_t*>(userp))));
+                nullptr /* DLManagedTensor */);
+
+            // Load the data so that it is deallocated automatically.
+            std::unique_ptr<PbMemory> pb_memory(
+                reinterpret_cast<PbMemory*>(userp));
+            pb_tensor->SetMemory(std::move(pb_memory));
+            output_tensors.push_back(pb_tensor);
           } else {
             output_tensors.push_back(std::make_shared<PbTensor>(
                 sname, dims_vector, datatype, memory_type, memory_type_id,
                 const_cast<void*>(base), byte_size,
-                nullptr /* DLManagedTensor */, 0 /* shared memory offest */));
+                nullptr /* DLManagedTensor */));
           }
         } else {
           output_tensors.push_back(std::make_shared<PbTensor>(
