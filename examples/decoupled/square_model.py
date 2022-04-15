@@ -26,6 +26,7 @@
 
 import json
 import threading
+import numpy as np
 
 # triton_python_backend_utils is available in every Triton Python model. You
 # need to use this module to create inference requests and responses. It also
@@ -41,26 +42,15 @@ class TritonPythonModel:
     This model demonstrates how to write a decoupled model where each
     request can generate 0 to many responses.
 
-    This model has three inputs and two outputs. The model does not support batching.
+    This model has one input and one output. The model can support batching,
+    with constraint that each request must be batch-1 request, but the shapes
+    described here refer to the non-batch portion of the shape.
     
-      - Input 'IN' can have any vector shape (e.g. [4] or [12]), datatype must be INT32.
-      - Input 'DELAY' must have the same shape as IN, datatype must be UINT32.
-      - Input 'WAIT' must have shape [1] and datatype UINT32.
-      - For each response, output 'OUT' must have shape [1] and datatype INT32.
-      - For each response, output 'IDX' must have shape [1] and datatype UINT32.
+      - Input 'IN' must have shape [1] and datatype INT32.
+      - Output 'OUT' must have shape [1] and datatype INT32.
          
-    For a request, the model will send 'n' responses where 'n' is the number of elements in IN. 
-    For the i'th response, OUT will equal the i'th element of IN and IDX will equal the zero-based
-    count of this response for the request. For example, the first response for a request will
-    have IDX = 0 and OUT = IN[0], the second will have IDX = 1 and OUT = IN[1], etc. The model
-    will wait the i'th DELAY, in milliseconds, before sending the i'th response. If IN shape is [0]
-    then no responses will be sent.
-    
-    After WAIT milliseconds the model will return from the execute function so that Triton can call
-    execute again with another request. WAIT can be less than the sum of DELAY so that execute
-    returns before all responses are sent. Thus, even if there is only one instance of the model,
-    multiple requests can be processed at the same time, and the responses for multiple requests
-    can be intermixed, depending on the values of DELAY and WAIT.
+    For a request, the backend will sent 'n' responses where 'n' is the
+    element in IN. For each response, OUT will equal the element of IN.
     """
 
     def initialize(self, args):
@@ -91,17 +81,35 @@ class TritonPythonModel:
                 enable decoupled transaction policy in model configuration to 
                 serve this model""".format(args['model_name']))
 
+        # Get IN configuration
+        in_config = pb_utils.get_input_config_by_name(model_config, "IN")
+
+        # Validate the shape and data type of IN
+        in_shape = in_config['dims']
+        if (len(in_shape) != 1) or (in_shape[0] != 1):
+            raise pb_utils.TritonModelException(
+                """the model `{}` requires the shape of 'IN' to be
+                [1], got {}""".format(args['model_name'], in_shape))
+        if in_config['data_type'] != 'TYPE_INT32':
+            raise pb_utils.TritonModelException(
+                """the model `{}` requires the data_type of 'IN' to be
+                'TYPE_INT32', got {}""".format(args['model_name'],
+                                               in_config['data_type']))
+
         # Get OUT configuration
         out_config = pb_utils.get_output_config_by_name(model_config, "OUT")
 
-        # Get IDX configuration
-        idx_config = pb_utils.get_output_config_by_name(model_config, "IDX")
-
-        # Convert Triton types to numpy types
-        self.out_dtype = pb_utils.triton_string_to_numpy(
-            out_config['data_type'])
-        self.idx_dtype = pb_utils.triton_string_to_numpy(
-            idx_config['data_type'])
+        # Validate the shape and data type of OUT
+        out_shape = out_config['dims']
+        if (len(out_shape) != 1) or (out_shape[0] != 1):
+            raise pb_utils.TritonModelException(
+                """the model `{}` requires the shape of 'OUT' to be
+                [1], got {}""".format(args['model_name'], out_shape))
+        if out_config['data_type'] != 'TYPE_INT32':
+            raise pb_utils.TritonModelException(
+                """the model `{}` requires the data_type of 'OUT' to be
+                'TYPE_INT32', got {}""".format(args['model_name'],
+                                               out_config['data_type']))
 
         self.inflight_thread_count = 0
         self.inflight_thread_count_lck = threading.Lock()
@@ -127,21 +135,16 @@ class TritonPythonModel:
         None
         """
 
-        # This model does not support batching, so 'request_count' should always be 1.
-        if len(requests) != 1:
-            raise pb_utils.TritonModelException("unsupported batch size " +
-                                                len(requests))
+        for request in requests:
+            self.process_request(request)
 
-        # Start a separate thread to send the responses for the request. In a full implementation we
-        # would need to keep track of any running threads so that we could delay finalizing the
-        # model until all response_thread threads have completed.
-        thread = threading.Thread(
-            target=response_thread,
-            args=(self, requests[0].get_response_sender(),
-                  pb_utils.get_input_tensor_by_name(requests[0],
-                                                    'IN').as_numpy(),
-                  pb_utils.get_input_tensor_by_name(requests[0],
-                                                    'DELAY').as_numpy()))
+        return None
+
+    def process_request(self, request):
+        thread = threading.Thread(target=response_thread,
+                                  args=(self, request.get_response_sender(),
+                                        pb_utils.get_input_tensor_by_name(
+                                            request, 'IN').as_numpy()))
         thread.daemon = True
 
         with self.inflight_thread_count_lck:
@@ -149,33 +152,13 @@ class TritonPythonModel:
 
         thread.start()
 
-        # Read WAIT input for wait time, then return so that Triton can call execute again with
-        # another request.
-        wait_input = pb_utils.get_input_tensor_by_name(requests[0],
-                                                       'WAIT').as_numpy()
-        time.sleep(wait_input[0] / 1000)
-
-        return None
-
-    def response_thread(self, response_sender, in_input, delay_input):
+    def response_thread(self, response_sender, in_input):
         # The response_sender is used to send response(s) associated with the corresponding request.
-        # Iterate over input/delay pairs. Wait for DELAY milliseconds and then create and
-        # send a response.
 
-        idx_dtype = self.idx_dtype
-        out_dtype = self.out_dtype
-
-        for idx in range(in_input.size):
-            in_value = in_input[idx]
-            delay_value = delay_input[idx]
-
-            time.sleep(delay_value / 1000)
-
-            idx_output = pb_utils.Tensor("IDX", numpy.array([idx], idx_dtype))
+        for idx in range(in_input[0]):
             out_output = pb_utils.Tensor("OUT",
-                                         numpy.array([in_value], out_dtype))
-            response = pb_utils.InferenceResponse(
-                output_tensors=[idx_output, out_output])
+                                         numpy.array([in_input[0]], np.int32))
+            response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
         # We must close the response sender to indicate to Triton that we are done sending
@@ -191,6 +174,7 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
+
         print('Finalize invoked')
 
         inflight_threads = True
