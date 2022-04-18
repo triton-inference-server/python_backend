@@ -213,7 +213,7 @@ def get_output_config_by_name(model_config, name):
     return None
 
 def using_decoupled_model_transaction_policy(model_config):
-    """Whether or not the model is using decoupled model
+    """Whether or not the model is configured with decoupled
     transaction policy.
     Parameters
     ----------
@@ -222,9 +222,9 @@ def using_decoupled_model_transaction_policy(model_config):
 
     Returns
     -------
-    dict
-        A dictionary containing all the properties for a given output
-        name, or None if no output with this name exists
+    bool
+        True if the model is configured with decoupled transaction
+        policy.
     """
     if 'model_transaction_policy' in model_config:
         return model_config['model_transaction_policy']['decoupled']

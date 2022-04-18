@@ -103,6 +103,9 @@ class TritonPythonModel:
         self.idx_dtype = pb_utils.triton_string_to_numpy(
             idx_config['data_type'])
 
+        # To keep track of response threads so that we can delay
+        # the finalizing the model until all response threads
+        # have completed.
         self.inflight_thread_count = 0
         self.inflight_thread_count_lck = threading.Lock()
 
@@ -112,7 +115,7 @@ class TritonPythonModel:
         argument. This function is called when an inference request is made
         for this model. The request.get_response_sender() must be used to
         get an InferenceResponseSender object associated with the request.
-        Use the InferenceResponseSender.send() and InferenceResponseSender.end()
+        Use the InferenceResponseSender.send() and InferenceResponseSender.close()
         calls to send responses and indicate no responses will be sent for
         the corresponding request respectively. If there is an error, you can
         set the error argument when creating a pb_utils.InferenceResponse
@@ -132,9 +135,7 @@ class TritonPythonModel:
             raise pb_utils.TritonModelException("unsupported batch size " +
                                                 len(requests))
 
-        # Start a separate thread to send the responses for the request. In a full implementation we
-        # would need to keep track of any running threads so that we could delay finalizing the
-        # model until all response_thread threads have completed.
+        # Start a separate thread to send the responses for the request.
         thread = threading.Thread(
             target=response_thread,
             args=(self, requests[0].get_response_sender(),
@@ -190,6 +191,8 @@ class TritonPythonModel:
         """`finalize` is called only once when the model is being unloaded.
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
+        Here we will wait for all response threads to complete sending
+        responses.
         """
         print('Finalize invoked')
 

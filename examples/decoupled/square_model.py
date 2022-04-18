@@ -173,6 +173,8 @@ class TritonPythonModel:
         """`finalize` is called only once when the model is being unloaded.
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
+        Here we will wait for all response threads to complete sending
+        responses.
         """
 
         print('Finalize invoked')
