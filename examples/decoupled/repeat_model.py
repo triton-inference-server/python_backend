@@ -118,7 +118,7 @@ class TritonPythonModel:
         Use the InferenceResponseSender.send() and InferenceResponseSender.close()
         calls to send responses and indicate no responses will be sent for
         the corresponding request respectively. If there is an error, you can
-        set the error argument when creating a pb_utils.InferenceResponse
+        set the error argument when creating a pb_utils.InferenceResponse.
 
         Parameters
         ----------
@@ -135,7 +135,16 @@ class TritonPythonModel:
             raise pb_utils.TritonModelException("unsupported batch size " +
                                                 len(requests))
 
-        # Start a separate thread to send the responses for the request.
+        # Start a separate thread to send the responses for the request. A model using
+        # decoupled transaction policy is not required to send all responses for the
+        # current request before returning from the execute. The sending the responses
+        # is delegated to this thread.
+        # This means the model can process multiple requests at the same time in
+        # the same model instance, as it defers responding to requests in an
+        # earlier invocation until after responding to requests from a later request.
+        # Even though this demonstrates the flexibility the decoupled API,
+        # it can lead to many requests into pipeline whose responses are being
+        # processed. A model developer should be mindful of this.
         thread = threading.Thread(
             target=response_thread,
             args=(self, requests[0].get_response_sender(),
@@ -156,6 +165,9 @@ class TritonPythonModel:
                                                        'WAIT').as_numpy()
         time.sleep(wait_input[0] / 1000)
 
+        # Unlike in non-decoupled model transaction policy, execute function here returns no
+        # response. A return from this function only indicates Triton that the model instance
+        # is ready to receive another request.
         return None
 
     def response_thread(self, response_sender, in_input, delay_input):
@@ -197,10 +209,20 @@ class TritonPythonModel:
         print('Finalize invoked')
 
         inflight_threads = True
+        print_status = False
+        cycles = 0
+        logging_time_sec = 5
+        sleep_time_sec = 0.1
+        cycle_to_log = (logging_time_sec / sleep_time_sec)
         while inflight_threads:
             with self.inflight_thread_count_lck:
                 inflight_threads = (self.inflight_thread_count != 0)
+                if (cycles % cycle_to_log == 0):
+                    print(
+                        "Still waiting for {} response threads to complete...".
+                        format(self.inflight_thread_count))
             if inflight_threads:
-                time.sleep(0.1)
+                time.sleep(sleep_time_sec)
+                cycles += 1
 
         print('Finalize complete...')
