@@ -135,16 +135,8 @@ class TritonPythonModel:
             raise pb_utils.TritonModelException("unsupported batch size " +
                                                 len(requests))
 
-        # Start a separate thread to send the responses for the request. A model using
-        # decoupled transaction policy is not required to send all responses for the
-        # current request before returning from the execute. The sending the responses
-        # is delegated to this thread.
-        # This means the model can process multiple requests at the same time in
-        # the same model instance, as it defers responding to requests in an
-        # earlier invocation until after responding to requests from a later request.
-        # Even though this demonstrates the flexibility the decoupled API,
-        # it can lead to many requests into pipeline whose responses are being
-        # processed. A model developer should be mindful of this.
+        # Start a separate thread to send the responses for the request. The
+        # sending back the responses is delegated to this thread.
         thread = threading.Thread(
             target=response_thread,
             args=(self, requests[0].get_response_sender(),
@@ -152,6 +144,11 @@ class TritonPythonModel:
                                                     'IN').as_numpy(),
                   pb_utils.get_input_tensor_by_name(requests[0],
                                                     'DELAY').as_numpy()))
+
+        # A model using decoupled transaction policy is not required to send all
+        # responses for the current request before returning from the execute.
+        # To demonstrate the flexibility of the decoupled API, we are running
+        # response thread entirely independent of the execute thread.
         thread.daemon = True
 
         with self.inflight_thread_count_lck:
@@ -166,8 +163,13 @@ class TritonPythonModel:
         time.sleep(wait_input[0] / 1000)
 
         # Unlike in non-decoupled model transaction policy, execute function here returns no
-        # response. A return from this function only indicates Triton that the model instance
-        # is ready to receive another request.
+        # response. A return from this function only notifies Triton that the model instance
+        # is ready to receive another request. As we are not waiting for the response thread
+        # to complete here, it is possible that at any give time the model may be processing
+        # multiple requests. Depending upon the request workload, this may lead to a lot of
+        # requests being processed by a single model instance at a time. In real-world models,
+        # the developer should be mindful of when to return from execute and be willing to
+        # accept next request.
         return None
 
     def response_thread(self, response_sender, in_input, delay_input):
@@ -219,8 +221,8 @@ class TritonPythonModel:
                 inflight_threads = (self.inflight_thread_count != 0)
                 if (cycles % cycle_to_log == 0):
                     print(
-                        "Still waiting for {} response threads to complete...".
-                        format(self.inflight_thread_count))
+                        f"Waiting for {self.inflight_thread_count} response threads to complete..."
+                    )
             if inflight_threads:
                 time.sleep(sleep_time_sec)
                 cycles += 1

@@ -135,28 +135,34 @@ class TritonPythonModel:
         None
         """
 
-        # A model using  decoupled transaction policy is not required to send all
-        # responses for the current batch of requests before returning from the
-        # execute.
-        # This means the model can process multiple batches at the same time in
-        # the same model instance, as it defers responding to requests in an
-        # earlier batch until after responding to requests from a later batch.
-        # Even though this demonstrates the flexibility the decoupled API,
-        # it can lead to many requests into pipeline whose responses are being
-        # processed. A model developer should be mindful of this.
+        # Visit individual request to start processing them. Note that execute function is
+        # not required to wait for all the requests of the current batch to be processed
+        # before returning.
         for request in requests:
             self.process_request(request)
 
         # Unlike in non-decoupled model transaction policy, execute function here returns no
-        # response. A return from this function only indicates Triton that the model instance
-        # is ready to receive another batch of requests.
+        # response. A return from this function only notifies Triton that the model instance
+        # is ready to receive another batch of requests. As we are not waiting for the
+        # response thread to complete here, it is possible that at any give time the model
+        # may be processing multiple batches of requests. Depending upon the request workload,
+        # this may lead to a lot of requests being processed by a single model instance at a
+        # time. In real-world models, the developer should be mindful of when to return from
+        # execute and be willing to accept next request batch.
         return None
 
     def process_request(self, request):
+        # Start a separate thread to send the responses for the request. The
+        # sending back the responses is delegated to this thread.
         thread = threading.Thread(target=response_thread,
                                   args=(self, request.get_response_sender(),
                                         pb_utils.get_input_tensor_by_name(
                                             request, 'IN').as_numpy()))
+
+        # A model using decoupled transaction policy is not required to send all
+        # responses for the current request before returning from the execute.
+        # To demonstrate the flexibility of the decoupled API, we are running
+        # response thread entirely independent of the execute thread.
         thread.daemon = True
 
         with self.inflight_thread_count_lck:
@@ -202,8 +208,8 @@ class TritonPythonModel:
                 inflight_threads = (self.inflight_thread_count != 0)
                 if (cycles % cycle_to_log == 0):
                     print(
-                        "Still waiting for {} response threads to complete...".
-                        format(self.inflight_thread_count))
+                        f"Waiting for {self.inflight_thread_count} response threads to complete..."
+                    )
             if inflight_threads:
                 time.sleep(sleep_time_sec)
                 cycles += 1
