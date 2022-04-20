@@ -97,6 +97,7 @@ class Stub {
 
   void ProcessResponse(InferResponse* response);
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
+  bool IsDecoupled();
   ~Stub();
 
  private:

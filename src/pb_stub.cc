@@ -44,6 +44,7 @@
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
+#include "response_sender.h"
 #include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/common/nvtx.h"
@@ -233,6 +234,12 @@ Stub::PopMessage()
   ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
   return ipc_message;
+}
+
+bool
+Stub::IsDecoupled()
+{
+  return ipc_control_->decoupled;
 }
 
 bool
@@ -514,7 +521,7 @@ Stub::LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr)
     std::shared_ptr<InferRequest> infer_request =
         InferRequest::LoadFromSharedMemory(
             shm_pool_, request_shm_handle[i], true /* open_cuda_handle */);
-    py_request_list.append(std::move(infer_request));
+    py_request_list.append(infer_request);
   }
 
   return py_request_list;
@@ -546,8 +553,6 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     response_batch_shm_ptr->has_error = false;
     response_batch_shm_ptr->is_error_set = false;
 
-    py::list py_request_list =
-        LoadRequestsFromSharedMemory(request_batch_shm_ptr);
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_path_ +
                             " does not implement `execute` method.";
@@ -558,7 +563,8 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
       NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
 
       // [FIXME] check the execute return to make sure it is None. It could also
-      // be a coroutine that doesn't anything in case of async BLS, async Send.
+      // be a coroutine that doesn't do anything in case of async BLS, async
+      // Send.
       model_instance_.attr("execute")(py_request_list);
     }
   }
@@ -823,7 +829,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           })
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def("get_response_sender", &InferRequest::GetResponseSender);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
@@ -846,6 +853,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::return_value_policy::reference)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
+
+  py::class_<ResponseSender>(module, "InferenceResponseSender")
+      .def("send", &ResponseSender::Send);
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

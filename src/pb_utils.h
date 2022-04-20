@@ -30,6 +30,8 @@
 #include <cuda.h>
 #endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
+#include <boost/interprocess/sync/interprocess_condition.hpp>
+#include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <climits>
 #include <memory>
 #include <mutex>
@@ -136,6 +138,14 @@ struct ResponseBatch {
 
   // Indicates whether this error has a message or not.
   bool is_error_set;
+};
+
+struct ResponseSendMessage {
+  bi::interprocess_mutex mu;
+  bi::interprocess_condition cv;
+  bool is_stub_turn;
+  bi::managed_external_buffer::handle_t response;
+  long long request_address;
 };
 
 struct RequestBatch {

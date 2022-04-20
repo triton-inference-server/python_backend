@@ -280,6 +280,7 @@ class ModelInstanceState : public BackendModelInstance {
   // Create the stub process.
   TRITONSERVER_Error* SetupStubProcess();
   TRITONSERVER_Error* SendMessageToStub(off_t message);
+  void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
 
   // Checks whether the stub process is live
   bool IsStubProcessAlive();
@@ -769,7 +770,6 @@ ModelInstanceState::StartStubProcess()
           (std::string("Failed to initialize model instance ") + Name())
               .c_str());
     }
-
   } else {
     ScopedDefer _([this] {
       // Push a dummy message to the message queue so that the stub
@@ -917,7 +917,8 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     std::unique_ptr<InferRequest> infer_request =
         std::make_unique<InferRequest>(
             id, correlation_id, pb_input_tensors, requested_output_names,
-            model_state->Name(), model_state->Version(), flags);
+            model_state->Name(), model_state->Version(), flags,
+            reinterpret_cast<long long>(request));
 
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(shm_pool_));
     requests_shm[r] = infer_request->ShmHandle();
@@ -994,8 +995,10 @@ ModelInstanceState::SetupStubProcess()
 
   parent_pid_ = getpid();
   RETURN_IF_ERROR(StartStubProcess());
-  decoupled_monitor_ =
-      std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
+
+  if (model_state->IsDecoupled())
+    decoupled_monitor_ =
+        std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
 
   return nullptr;
 }
@@ -1343,12 +1346,52 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
     bi::managed_external_buffer::handle_t handle = parent_message_queue_->Pop();
     std::unique_ptr<IPCMessage> message =
         IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
+
+    // Need to notify the model instance thread that the execute response has
+    // been received.
     if (message->Command() == PYTHONSTUB_ExecuteResposne) {
       std::lock_guard<std::mutex> guard{mu_};
       received_message_ = std::move(message);
       cv_.notify_one();
+    } else if (message->Command() == PYTHONSTUB_ResponseSend) {
+      std::shared_ptr<IPCMessage> response_send_message = std::move(message);
+      std::async(std::launch::async, [this, response_send_message]() {
+        ResponseSendDecoupled(response_send_message);
+      });
+    } else if (message->Command() == PYTHONSTUB_ResponseClose) {
+      std::shared_ptr<IPCMessage> response_send_message = std::move(message);
+      std::async(std::launch::async, [this, response_send_message]() {
+        ResponseSendDecoupled(response_send_message);
+      });
     }
   }
+}
+
+void
+ModelInstanceState::ResponseSendDecoupled(
+    std::shared_ptr<IPCMessage> response_send_message)
+{
+  AllocatedSharedMemory<ResponseSendMessage> send_message =
+      shm_pool_->Load<ResponseSendMessage>(response_send_message->Args());
+
+  ResponseSendMessage* send_message_payload =
+      reinterpret_cast<ResponseSendMessage*>(send_message.data_.get());
+  ScopedDefer _([send_message_payload] {
+    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+    send_message_payload->is_stub_turn = true;
+    send_message_payload->cv.notify_all();
+  });
+
+  std::unique_ptr<InferResponse> infer_response =
+      InferResponse::LoadFromSharedMemory(
+          shm_pool_, send_message_payload->response,
+          false /* open cuda ipc handle */);
+  std::cout << "Request address on the server side is "
+            << send_message_payload->request_address << std::endl;
+
+  TRITONBACKEND_Request* request = reinterpret_cast<TRITONBACKEND_Request*>(
+      send_message_payload->request_address);
+  infer_response->Send(request, CudaStream());
 }
 
 TRITONSERVER_Error*
@@ -1475,6 +1518,8 @@ ModelInstanceState::ProcessRequests(
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
 
+  std::cout << "Hello....." << std::endl;
+
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
   reporter.SetComputeStartNs(compute_start_ns);
@@ -1525,7 +1570,7 @@ ModelInstanceState::ProcessRequests(
     // Launch the BLS request in a future.
     bls_futures_.emplace_back(
         std::async(std::launch::async, [this, current_message]() {
-          this->ExecuteBLSRequest(current_message);
+          ExecuteBLSRequest(this->shm_pool_, current_message);
         }));
 
     auto error = ReceiveMessageFromStub(response_message);
@@ -2266,7 +2311,7 @@ TRITONBACKEND_ModelInstanceExecute(
   bool restart = false;
   ModelState* model_state =
       reinterpret_cast<ModelState*>(instance_state->Model());
-  if (model_state->IsDecoupled()) {
+  if (!model_state->IsDecoupled()) {
     instance_state->ProcessRequests(requests, request_count, restart);
 
     for (uint32_t r = 0; r < request_count; ++r) {
