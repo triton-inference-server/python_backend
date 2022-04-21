@@ -67,7 +67,7 @@ class PbTensor {
   /// Create a PbTensor using a numpy array
   /// \param name The name of the tensor
   /// \param numpy_array Numpy array to use for the initialization of the tensor
-  PbTensor(const std::string& name, py::object numpy_array);
+  PbTensor(const std::string& name, py::array& numpy_array);
 
   /// Create a PbTensor using a numpy array. This constructor is used for types
   /// that are not natively available in C++ such as float16. This constructor
@@ -76,7 +76,7 @@ class PbTensor {
   /// \param numpy_array Numpy array to use for the initialization of the tensor
   /// \param dtype The triton dtype
   PbTensor(
-      const std::string& name, py::object numpy_array,
+      const std::string& name, py::array& numpy_array,
       TRITONSERVER_DataType dtype);
 #endif
 
@@ -123,7 +123,7 @@ class PbTensor {
   /// \param numpy_array Numpy array
   /// \param name name of the tensor
   static std::shared_ptr<PbTensor> FromNumpy(
-      const std::string& name, py::object numpy_array);
+      const std::string& name, py::array& numpy_array);
 
   /// Get a PyCapsule object containing the DLPack representation of the tensor.
   /// \return Capsule object containing pointer to a DLPack object.

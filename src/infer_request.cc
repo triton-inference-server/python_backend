@@ -41,10 +41,27 @@ InferRequest::InferRequest(
     const std::vector<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
     const uint32_t flags)
-    : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
-      requested_output_names_(requested_output_names), model_name_(model_name),
-      model_version_(model_version), flags_(flags)
+    : request_id_(request_id), correlation_id_(correlation_id),
+      model_name_(model_name), model_version_(model_version), flags_(flags)
 {
+  for (auto& input : inputs) {
+    if (!input) {
+      throw PythonBackendException(
+          "Input tensor for request with id '" + request_id +
+          "' and model name '" + model_name + "' should not be empty.");
+    }
+  }
+
+  for (auto& requested_output_name : requested_output_names) {
+    if (requested_output_name == "") {
+      throw PythonBackendException(
+          "Requested output name for request with id '" + request_id +
+          "' and model name '" + model_name + "' should not be empty.");
+    }
+  }
+
+  inputs_ = inputs;
+  requested_output_names_ = requested_output_names;
 }
 
 const std::vector<std::shared_ptr<PbTensor>>&
