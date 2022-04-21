@@ -25,7 +25,9 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import json
+import numpy
 import threading
+import time
 
 # triton_python_backend_utils is available in every Triton Python model. You
 # need to use this module to create inference requests and responses. It also
@@ -138,7 +140,7 @@ class TritonPythonModel:
         # Start a separate thread to send the responses for the request. The
         # sending back the responses is delegated to this thread.
         thread = threading.Thread(
-            target=response_thread,
+            target=self.response_thread,
             args=(self, requests[0].get_response_sender(),
                   pb_utils.get_input_tensor_by_name(requests[0],
                                                     'IN').as_numpy(),
