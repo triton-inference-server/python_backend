@@ -49,6 +49,7 @@
 #include <future>
 #include <memory>
 #include <numeric>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -259,6 +260,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
+  common::TritonJson::Value model_config_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -362,6 +364,8 @@ class ModelInstanceState : public BackendModelInstance {
       std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
       AllocatedSharedMemory<char>& request_batch,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
+  // Correct the string to the right json string format
+  void CorrectStringFormat(std::string* str);
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -627,6 +631,14 @@ ModelInstanceState::WaitForBLSRequestsToFinish()
   futures_.clear();
 }
 
+void
+ModelInstanceState::CorrectStringFormat(std::string* str)
+{
+  *str = std::regex_replace(*str, std::regex("\'"), "\"");
+  *str = std::regex_replace(*str, std::regex("False"), "false");
+  *str = std::regex_replace(*str, std::regex("True"), "true");
+}
+
 bool
 ModelInstanceState::IsStubProcessAlive()
 {
@@ -889,6 +901,14 @@ ModelInstanceState::StartStubProcess()
       }
     }
 
+    if (initialize_response->response_has_model_config) {
+      std::unique_ptr<PbString> model_config = PbString::LoadFromSharedMemory(
+          shm_pool_, initialize_response->response_model_config);
+      std::string model_config_string = model_config->String();
+      CorrectStringFormat(&model_config_string);
+      model_config_.Parse(model_config_string);
+    }
+
     initialized_ = true;
   }
 
@@ -1058,7 +1078,6 @@ ModelInstanceState::SetupStubProcess()
 
   return nullptr;
 }
-
 
 TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(

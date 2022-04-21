@@ -1,4 +1,4 @@
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -57,6 +57,27 @@ class TritonPythonModel:
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
+        inputs = [{
+            "name": "INPUT0",
+            "dims": [8],
+            "data_type": "TYPE_FP32",
+        }, {
+            "dims": [3],
+            "data_type": "TYPE_FP32",
+            "name": "INPUT1",
+        }]
+        outputs = [{
+            "name": "OUTPUT0",
+            "dims": [8],
+            "data_type": "TYPE_FP32",
+        }, {
+            "dims": [3],
+            "data_type": "TYPE_FP32",
+            "name": "OUTPUT1",
+        }]
+        pb_utils.set_max_batch_size(model_config, 9)
+        pb_utils.set_inputs(model_config, inputs)
+        pb_utils.set_outputs(model_config, outputs)
 
         # Get OUTPUT0 configuration
         output0_config = pb_utils.get_output_config_by_name(
@@ -71,6 +92,8 @@ class TritonPythonModel:
             output0_config['data_type'])
         self.output1_dtype = pb_utils.triton_string_to_numpy(
             output1_config['data_type'])
+
+        return model_config
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`

@@ -111,6 +111,10 @@ struct InitializeResponseShm {
   bool response_is_error_set;
   // Contains the error message.
   bi::managed_external_buffer::handle_t response_error;
+  // Indicates whether the response has model config or not.
+  bool response_has_model_config;
+  // Contains the model config
+  bi::managed_external_buffer::handle_t response_model_config;
 };
 
 // Control data structure for the communication between the Python stub and the

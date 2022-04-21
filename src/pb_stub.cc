@@ -198,11 +198,13 @@ Stub::RunCommand()
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
       std::string error_string;
+      std::string model_config;
 
       std::unique_ptr<IPCMessage> initialize_response_msg =
           IPCMessage::Create(shm_pool_, false /* inline_response */);
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
       std::unique_ptr<PbString> error_string_shm;
+      std::unique_ptr<PbString> model_config_shm;
       AllocatedSharedMemory<InitializeResponseShm> initialize_response =
           shm_pool_->Construct<InitializeResponseShm>();
 
@@ -220,10 +222,11 @@ Stub::RunCommand()
 
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
+      initialize_response.data_->response_has_model_config = false;
       initialize_response_msg->Args() = initialize_response.handle_;
 
       try {
-        Initialize(ipc_message->Args());
+        Initialize(ipc_message->Args(), &model_config);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -251,6 +254,15 @@ Stub::RunCommand()
         }
 
         return true;  // Terminate the stub process.
+      }
+      if (model_config != "None") {
+        LOG_IF_EXCEPTION(
+            model_config_shm = PbString::Create(shm_pool_, model_config));
+        if (model_config_shm != nullptr) {
+          initialize_response.data_->response_has_model_config = true;
+          initialize_response.data_->response_model_config =
+              model_config_shm->ShmHandle();
+        }
       }
 
     } break;
@@ -289,7 +301,8 @@ Stub::RunCommand()
 }
 
 void
-Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
+Stub::Initialize(
+    bi::managed_external_buffer::handle_t map_handle, std::string* model_config)
 {
   py::module sys = py::module_::import("sys");
 
@@ -359,7 +372,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
-    model_instance_.attr("initialize")(model_config_params);
+    *model_config = std::string(
+        py::str(model_instance_.attr("initialize")(model_config_params)));
   }
 
   initialized_ = true;
@@ -888,7 +902,7 @@ main(int argc, char** argv)
 
   // The stub process will always keep listening for new notifications from the
   // parent process. After the notification is received the stub process will
-  // run the appropriate comamnd and wait for new notifications.
+  // run the appropriate command and wait for new notifications.
   bool finalize = false;
   while (true) {
     if (finalize) {

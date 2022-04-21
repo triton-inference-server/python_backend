@@ -135,7 +135,9 @@ class Stub {
   bool RunCommand();
 
   /// Initialize the user's Python code.
-  void Initialize(bi::managed_external_buffer::handle_t map_handle);
+  void Initialize(
+      bi::managed_external_buffer::handle_t map_handle,
+      std::string* model_config);
 
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);

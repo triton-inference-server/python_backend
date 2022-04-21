@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -293,6 +293,111 @@ def numpy_to_triton_type(data_type):
 
 def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
+
+
+def set_max_batch_size(model_config, value):
+    """Set max_batch_size for the model configuration
+    Parameters
+    ----------
+    model_config : dict
+        dictionary object containing the model configuration
+    value : int
+        value of the max batch size
+    Returns
+    -------
+    None
+        If the value of max_batch_size is set without error
+    Raises
+    ------
+    ValueError
+        If the type of the value is not an integer.
+    """
+    if isinstance(value, int):
+        model_config['max_batch_size'] = value
+        return None
+    else:
+        raise ValueError("max_batch_size should be an integer.")
+
+
+def set_ios_helper(model_config, type, ios):
+    """Helper function for setting inputs/outputs
+    Parameters
+    ----------
+    model_config : dict
+        dictionary object containing the model configuration
+    type : string
+        determine if the type is 'input' or 'output'
+    ios : list
+        list object containing the inputs/outputs we want to set
+        for model configuration
+    Returns
+    -------
+    None
+        If inputs/outputs are set without error
+    Raises
+    ------
+    ValueError
+        If required properties are missing.
+    """
+    if not ios:
+        raise ValueError(type + " is empty")
+    for properties in ios:
+        if 'name' not in properties:
+            raise ValueError("missing name property in " + type)
+        elif 'data_type' not in properties:
+            raise ValueError("missing data_type property in " + type)
+        elif ('dims' not in properties) and ('reshape' not in properties):
+            raise ValueError("missing shape property in " + type)
+
+    model_config[type] = ios
+
+    return None
+
+
+def set_inputs(model_config, inputs):
+    """Set inputs for the model configuration
+    Parameters
+    ----------
+    model_config : dict
+        dictionary object containing the model configuration
+    inputs : list
+        list object containing the inputs we want to set
+        for the model configuration
+    Returns
+    -------
+    None
+        If no error occurs in function 'set_ios_helper'
+    Raises
+    ------
+    ValueError
+        Raised in function 'set_ios_helper'
+    
+    """
+
+    return set_ios_helper(model_config, "input", inputs)
+
+
+def set_outputs(model_config, outputs):
+    """Set outputs for the model configuration
+    Parameters
+    ----------
+    model_config : dict
+        dictionary object containing the model configuration
+    outputs : list
+        list object containing the outputs we want to set
+        for the model configuration
+    Returns
+    -------
+    None
+        If no error occurs in function 'set_ios_helper'
+    Raises
+    ------
+    ValueError
+        Raised in function 'set_ios_helper'
+    
+    """
+
+    return set_ios_helper(model_config, "output", outputs)
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
