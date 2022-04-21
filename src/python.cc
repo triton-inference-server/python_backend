@@ -366,6 +366,9 @@ class ModelInstanceState : public BackendModelInstance {
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
   // Correct the string to the right json string format
   void CorrectStringFormat(std::string* str);
+
+  // Correct the string to the right json string format
+  common::TritonJson::Value& GetModelConfig() { return this->model_config_; };
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -2393,6 +2396,21 @@ TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
 }
 
 TRITONSERVER_Error*
+UpdateMaxBatchSize(ModelInstanceState* instance_state)
+{
+  triton::common::TritonJson::Value mbs_value;
+  triton::common::TritonJson::Value new_mbs;
+  instance_state->GetModelConfig().Find("max_batch_size", &new_mbs);
+  long int new_max_batch_size = 0;
+  new_mbs.AsInt(&new_max_batch_size);
+  instance_state->Model()->ModelConfig().Find("max_batch_size", &mbs_value);
+  mbs_value.SetInt(new_max_batch_size);
+  instance_state->Model()->SetMaxBatchSize(new_max_batch_size);
+
+  return nullptr;
+}
+
+TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
 {
   const char* cname;
@@ -2425,6 +2443,9 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
       instance, reinterpret_cast<void*>(instance_state)));
 
   RETURN_IF_ERROR(instance_state->SetupStubProcess());
+
+  // Update the model configuration set in model.py
+  RETURN_IF_ERROR(UpdateMaxBatchSize(instance_state));
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       (std::string("TRITONBACKEND_ModelInstanceInitialize: instance "
