@@ -140,13 +140,22 @@ struct ResponseBatch {
   bool is_error_set;
 };
 
-struct ResponseSendMessage {
+struct ResponseSenderBase {
   bi::interprocess_mutex mu;
   bi::interprocess_condition cv;
   bool is_stub_turn;
-  bi::managed_external_buffer::handle_t response;
-  long long request_address;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  intptr_t request_address;
+  intptr_t response_factory_address;
 };
+
+struct ResponseSendMessage : ResponseSenderBase {
+  bi::managed_external_buffer::handle_t response;
+};
+
+using ResponseCloseMessage = ResponseSenderBase;
 
 struct RequestBatch {
   uint32_t batch_size;

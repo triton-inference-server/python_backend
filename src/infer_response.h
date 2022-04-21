@@ -43,8 +43,10 @@ struct ResponseShm {
 #define SET_ERROR_AND_RETURN(E, X)           \
   do {                                       \
     TRITONSERVER_Error* raasnie_err__ = (X); \
-    E = raasnie_err__;                       \
-    return E;                                \
+    if (raasnie_err__ != nullptr) {          \
+      E = raasnie_err__;                     \
+      return E;                              \
+    }                                        \
   } while (false)
 
 class InferResponse {
@@ -65,7 +67,8 @@ class InferResponse {
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response
-  TRITONSERVER_Error* Send(TRITONBACKEND_Request* request, void* cuda_stream);
+  TRITONSERVER_Error* Send(
+      TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream);
 #endif
 
   // Disallow copying the inference response object.

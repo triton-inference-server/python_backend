@@ -165,42 +165,43 @@ InferResponse::Error()
 
 #ifndef TRITON_PB_STUB
 TRITONSERVER_Error*
-InferResponse::Send(TRITONBACKEND_Request* request, void* cuda_stream)
+InferResponse::Send(
+    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream)
 {
   // [FIXME] Use this code to send responses in non-decoupled mode.
   TRITONBACKEND_Response* response = nullptr;
-  TRITONSERVER_Error* response_error;
+  TRITONSERVER_Error* response_error = nullptr;
   ScopedDefer response_error_handling([&response, &response_error] {
     if (response != nullptr) {
       LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(
-              response, TRITONSERVER_RESPONSE_COMPLETE_FINAL, response_error),
+          TRITONBACKEND_ResponseSend(response, 0 /* flags */, response_error),
           "failed to send the response.");
     }
   });
 
-  RETURN_IF_ERROR(TRITONBACKEND_ResponseNew(&response, request));
+  RETURN_IF_ERROR(
+      TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
 
-  uint32_t requested_output_count = 0;
-  SET_ERROR_AND_RETURN(
-      response_error,
-      TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
+  // uint32_t requested_output_count = 0;
+  // SET_ERROR_AND_RETURN(
+  //     response_error,
+  //     TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
 
-  std::set<std::string> requested_output_names;
-  for (size_t j = 0; j < requested_output_count; ++j) {
-    const char* output_name;
-    SET_ERROR_AND_RETURN(
-        response_error,
-        TRITONBACKEND_RequestOutputName(request, j, &output_name));
-    requested_output_names.insert(output_name);
-  }
+  // std::set<std::string> requested_output_names;
+  // for (size_t j = 0; j < requested_output_count; ++j) {
+  //   const char* output_name;
+  //   SET_ERROR_AND_RETURN(
+  //       response_error,
+  //       TRITONBACKEND_RequestOutputName(request, j, &output_name));
+  //   requested_output_names.insert(output_name);
+  // }
 
   bool cuda_copy = false;
   for (auto& output_tensor : OutputTensors()) {
-    if (requested_output_names.find(output_tensor->Name()) ==
-        requested_output_names.end()) {
-      continue;
-    }
+    // if (requested_output_names.find(output_tensor->Name()) ==
+    //     requested_output_names.end()) {
+    //   continue;
+    // }
 
     TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
     int64_t src_memory_type_id = output_tensor->MemoryTypeId();
@@ -250,12 +251,6 @@ InferResponse::Send(TRITONBACKEND_Request* request, void* cuda_stream)
   }
 #endif  // TRITON_ENABLE_GPU
 
-  SET_ERROR_AND_RETURN(
-      response_error,
-      TRITONBACKEND_ResponseSend(
-          response, TRITONSERVER_RESPONSE_COMPLETE_FINAL, nullptr));
-
-  response = nullptr;
   return response_error;
 }
 #endif

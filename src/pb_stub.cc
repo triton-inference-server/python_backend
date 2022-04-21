@@ -246,7 +246,14 @@ bool
 Stub::RunCommand()
 {
   NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
-  std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
+  std::unique_ptr<IPCMessage> ipc_message;
+  {
+    // Release the GIL lock when waiting for new message. Without this line, the
+    // other threads in the user's Python model cannot make progress if they
+    // give up GIL.
+    py::gil_scoped_release release;
+    ipc_message = this->PopMessage();
+  }
   switch (ipc_message->Command()) {
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
@@ -540,11 +547,11 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
       shm_pool_->Construct<ResponseBatch>();
   ResponseBatch* response_batch_shm_ptr =
       reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+  execute_response->Args() = response_batch.handle_;
   bool has_exception = false;
   std::string error_string;
   std::unique_ptr<PbString> error_string_shm;
 
-  // Notifying the stub should be after responses.
   ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
   ScopedDefer _(
       [this, &execute_response] { SendIPCMessage(execute_response); });
@@ -841,7 +848,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("is_cpu", &PbTensor::IsCPU)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
-  py::class_<InferResponse>(module, "InferenceResponse")
+  py::class_<InferResponse, std::shared_ptr<InferResponse>>(
+      module, "InferenceResponse")
       .def(
           py::init<
               const std::vector<std::shared_ptr<PbTensor>>&,
@@ -854,8 +862,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
 
-  py::class_<ResponseSender>(module, "InferenceResponseSender")
-      .def("send", &ResponseSender::Send);
+  py::class_<ResponseSender, std::shared_ptr<ResponseSender>>(
+      module, "InferenceResponseSender")
+      .def("send", &ResponseSender::Send)
+      .def("close", &ResponseSender::Close);
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

@@ -45,7 +45,8 @@ struct InferRequestShm {
   uint32_t requested_output_count;
   int64_t model_version;
   uint32_t flags;
-  long long address;
+  intptr_t address;
+  intptr_t response_factory_address;
 };
 
 class InferRequest {
@@ -55,7 +56,8 @@ class InferRequest {
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::vector<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
-      const uint32_t flags = 0, long long request_address = 0);
+      const uint32_t flags = 0, const intptr_t response_factory_address = 0,
+      const intptr_t request_addres = 0);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
@@ -109,7 +111,8 @@ class InferRequest {
   std::string model_name_;
   int64_t model_version_;
   uint32_t flags_;
-  long long request_address_;
+  intptr_t response_factory_address_;
+  intptr_t request_address_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;
