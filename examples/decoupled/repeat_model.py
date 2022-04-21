@@ -137,6 +137,7 @@ class TritonPythonModel:
             raise pb_utils.TritonModelException("unsupported batch size " +
                                                 len(requests))
 
+<<<<<<< HEAD
         in_input = pb_utils.get_input_tensor_by_name(requests[0],
                                                      'IN').as_numpy()
         delay_input = pb_utils.get_input_tensor_by_name(requests[0],
@@ -151,6 +152,17 @@ class TritonPythonModel:
         thread = threading.Thread(target=self.response_thread,
                                   args=(requests[0].get_response_sender(),
                                         in_input, delay_input))
+=======
+        # Start a separate thread to send the responses for the request. The
+        # sending back the responses is delegated to this thread.
+        thread = threading.Thread(
+            target=self.response_thread,
+            args=(self, requests[0].get_response_sender(),
+                  pb_utils.get_input_tensor_by_name(requests[0],
+                                                    'IN').as_numpy(),
+                  pb_utils.get_input_tensor_by_name(requests[0],
+                                                    'DELAY').as_numpy()))
+>>>>>>> Some examples for using decoupled API (#137)
 
         # A model using decoupled transaction policy is not required to send all
         # responses for the current request before returning from the execute.

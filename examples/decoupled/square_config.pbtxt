@@ -45,4 +45,7 @@ output [
   }
 ]
 instance_group [{ kind: KIND_CPU }]
+<<<<<<< HEAD
 
+=======
+>>>>>>> Some examples for using decoupled API (#137)
