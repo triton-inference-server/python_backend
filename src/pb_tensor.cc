@@ -38,9 +38,13 @@ namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 
 #ifdef TRITON_PB_STUB
-PbTensor::PbTensor(const std::string& name, py::object numpy_array)
+PbTensor::PbTensor(const std::string& name, py::array& numpy_array)
     : name_(name)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   dtype_ = numpy_to_triton_type(numpy_array.attr("dtype"));
   memory_type_ = TRITONSERVER_MEMORY_CPU;
   memory_type_id_ = 0;
@@ -76,10 +80,14 @@ PbTensor::PbTensor(const std::string& name, py::object numpy_array)
 }
 
 PbTensor::PbTensor(
-    const std::string& name, py::object numpy_array,
+    const std::string& name, py::array& numpy_array,
     TRITONSERVER_DataType dtype)
     : name_(name)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   if (numpy_to_triton_type(numpy_array.attr("dtype")) != dtype) {
     numpy_array = numpy_array.attr("view")(triton_to_numpy_type(dtype));
   }
@@ -124,6 +132,10 @@ PbTensor::PbTensor(
     int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
     DLManagedTensor* dl_managed_tensor)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   name_ = name;
   memory_ptr_ = memory_ptr;
   memory_type_ = memory_type;
@@ -214,7 +226,7 @@ delete_unused_dltensor(PyObject* dlp)
 }
 
 std::shared_ptr<PbTensor>
-PbTensor::FromNumpy(const std::string& name, py::object numpy_array)
+PbTensor::FromNumpy(const std::string& name, py::array& numpy_array)
 {
   return std::make_shared<PbTensor>(name, numpy_array);
 }
@@ -292,6 +304,10 @@ PbTensor::Memory()
 std::shared_ptr<PbTensor>
 PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 {
+  if (name == "") {
+    throw PythonBackendException("Tensor name cannot be an empty string.");
+  }
+
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 

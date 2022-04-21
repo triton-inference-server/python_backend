@@ -714,10 +714,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               const std::vector<std::shared_ptr<PbTensor>>&,
               const std::vector<std::string>&, const std::string&,
               const int64_t, const uint32_t>(),
-          py::arg("request_id") = "", py::arg("correlation_id") = 0,
-          py::arg("inputs"), py::arg("requested_output_names"),
-          py::arg("model_name"), py::arg("model_version") = -1,
-          py::arg("flags") = 0)
+          py::arg("request_id").none(false) = "",
+          py::arg("correlation_id").none(false) = 0,
+          py::arg("inputs").none(false),
+          py::arg("requested_output_names").none(false),
+          py::arg("model_name").none(false),
+          py::arg("model_version").none(false) = -1,
+          py::arg("flags").none(false) = 0)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
@@ -757,7 +760,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::init<
               const std::vector<std::shared_ptr<PbTensor>>&,
               std::shared_ptr<PbError>>(),
-          py::arg("output_tensors"), py::arg("error") = nullptr)
+          py::arg("output_tensors").none(false),
+          py::arg("error") = static_cast<std::shared_ptr<PbError>>(nullptr))
       .def(
           "output_tensors", &InferResponse::OutputTensors,
           py::return_value_policy::reference)
