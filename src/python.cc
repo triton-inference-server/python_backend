@@ -307,9 +307,7 @@ class ModelInstanceState : public BackendModelInstance {
       bool& restart);
 
   // Execute a BLS Request
-  void ExecuteBLSRequest(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t message_offset);
+  void ExecuteBLSRequest(bi::managed_external_buffer::handle_t message_offset);
 
   // Cleanup BLS responses
   void CleanupBLSResponses();
@@ -959,14 +957,13 @@ ModelInstanceState::GetInputTensor(
 
 void
 ModelInstanceState::ExecuteBLSRequest(
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t message_offset)
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   auto request_executor =
-      std::make_unique<RequestExecutor>(model_state->TritonServer());
+      std::make_unique<RequestExecutor>(shm_pool_, model_state->TritonServer());
   std::unique_ptr<IPCMessage> ipc_message =
-      IPCMessage::LoadFromSharedMemory(shm_pool, message_offset);
+      IPCMessage::LoadFromSharedMemory(shm_pool_, message_offset);
   bool is_response_batch_set = false;
   std::unique_ptr<InferResponse> infer_response;
   ResponseBatch* response_batch;
@@ -1078,8 +1075,8 @@ ModelInstanceState::ExecuteBLSRequest(
       }
 
       if (pb_exception.what() != nullptr) {
-        infer_response = request_executor->Infer(
-            infer_request, shm_pool_, &inference_response);
+        infer_response =
+            request_executor->Infer(infer_request, &inference_response);
 
         if (infer_response) {
           infer_response->SaveToSharedMemory(shm_pool_);
@@ -1110,7 +1107,7 @@ ModelInstanceState::ExecuteBLSRequest(
     if (is_response_batch_set) {
       response_batch->has_error = true;
       LOG_IF_EXCEPTION(
-          pb_error_message = PbString::Create(shm_pool, pb_exception.what()));
+          pb_error_message = PbString::Create(shm_pool_, pb_exception.what()));
 
       if (pb_error_message != nullptr) {
         response_batch->is_error_set = true;
@@ -1370,7 +1367,7 @@ ModelInstanceState::ProcessRequests(
     // Launch the BLS request in a future.
     bls_futures_.emplace_back(
         std::async(std::launch::async, [this, current_message]() {
-          this->ExecuteBLSRequest(this->shm_pool_, current_message);
+          this->ExecuteBLSRequest(current_message);
         }));
 
     auto error = ReceiveMessageFromStub(response_message);
