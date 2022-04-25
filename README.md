@@ -658,7 +658,7 @@ class TritonPythonModel:
         # async_exec function returns an
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
-        inference_response_awaits.append(inference_request.async_exec())
+        infer_response_awaits.append(inference_request.async_exec())
 
       # Wait for all of the inference requests to complete.
       infer_responses = await asyncio.gather(*infer_response_awaits)
