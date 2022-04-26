@@ -92,7 +92,6 @@ ResponseSender::Send(std::shared_ptr<InferResponse>& infer_response)
     }
   }
 
-
   if (send_message_payload->has_error) {
     if (send_message_payload->is_error_set) {
       std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(

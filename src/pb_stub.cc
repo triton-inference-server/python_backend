@@ -569,10 +569,15 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     {
       NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
 
-      // [FIXME] check the execute return to make sure it is None. It could also
-      // be a coroutine that doesn't do anything in case of async BLS, async
-      // Send.
-      model_instance_.attr("execute")(py_request_list);
+      py::object execute_return =
+          model_instance_.attr("execute")(py_request_list);
+
+      if (!py::isinstance<py::none>(execute_return)) {
+        throw PythonBackendException(
+            "Python model '" + model_instance_name_ +
+            "' is using the decoupled mode and the execute function must "
+            "return None.");
+      }
     }
   }
   catch (const PythonBackendException& pb_exception) {

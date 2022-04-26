@@ -115,6 +115,12 @@ InferRequest::Flags()
   return flags_;
 }
 
+intptr_t
+InferRequest::RequestAddress()
+{
+  return request_address_;
+}
+
 void
 InferRequest::SetFlags(uint32_t flags)
 {
@@ -314,6 +320,20 @@ InferRequest::InferRequest(
 #endif
 }
 
+#ifndef TRITON_PB_STUB
+TRITONSERVER_Error*
+InferRequest::DeleteResposneFactory()
+{
+  TRITONBACKEND_ResponseFactory* response_factory =
+      reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+          response_factory_address_);
+  TRITONSERVER_Error* error =
+      TRITONBACKEND_ResponseFactoryDelete(response_factory);
+
+  return error;
+}
+#endif
+
 #ifdef TRITON_PB_STUB
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
@@ -327,6 +347,7 @@ InferRequest::GetResponseSender()
 
   return response_sender_;
 }
+
 
 std::unique_ptr<InferResponse>
 InferRequest::Exec()

@@ -252,6 +252,8 @@ class ModelInstanceState : public BackendModelInstance {
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   std::string shm_region_name_;
+  std::vector<intptr_t> closed_requests_;
+  std::mutex closed_requests_mutex_;
 
   // Stub process pid
   pid_t stub_pid_;
@@ -267,7 +269,6 @@ class ModelInstanceState : public BackendModelInstance {
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
   bool decoupled_thread_;
-  TRITONBACKEND_ResponseFactory* response_factor_;
   std::mutex mu_;
   std::condition_variable cv_;
   std::unique_ptr<IPCMessage> received_message_;
@@ -328,7 +329,10 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process all the requests in the decoupled mode.
   TRITONSERVER_Error* ProcessRequestsDecoupled(
-      TRITONBACKEND_Request** requests, const uint32_t request_count);
+      TRITONBACKEND_Request** requests, const uint32_t request_count,
+      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests);
+
+  bool ExistsInClosedRequests(intptr_t closed_request);
 
   // Execute a BLS Request
   void ExecuteBLSRequest(bi::managed_external_buffer::handle_t message_offset);
@@ -450,6 +454,15 @@ ModelInstanceState::CheckIncomingRequests(
   }
 
   return nullptr;  // success
+}
+
+bool
+ModelInstanceState::ExistsInClosedRequests(intptr_t closed_request)
+{
+  std::lock_guard<std::mutex> guard{closed_requests_mutex_};
+  return std::find(
+             closed_requests_.begin(), closed_requests_.end(),
+             closed_request) != closed_requests_.end();
 }
 
 void
@@ -920,16 +933,17 @@ ModelInstanceState::SaveRequestsToSharedMemory(
 
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
-      TRITONBACKEND_ResponseFactory* factor_ptr;
-      RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factor_ptr, request));
+      TRITONBACKEND_ResponseFactory* factory_ptr;
+      RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), flags,
-          reinterpret_cast<intptr_t>(factor_ptr));
+          reinterpret_cast<intptr_t>(factory_ptr),
+          reinterpret_cast<intptr_t>(request));
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), flags,
+          model_state->Name(), model_state->Version(), flags, 0,
           reinterpret_cast<intptr_t>(request));
     }
 
@@ -1449,8 +1463,14 @@ ModelInstanceState::ResponseCloseDecoupled(
       TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
   response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
       close_message_payload->response_factory_address));
+
   TRITONSERVER_Error* error = TRITONBACKEND_ResponseFactorySendFlags(
       response_factory.get(), TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+
+  {
+    std::lock_guard<std::mutex> guard{closed_requests_mutex_};
+    closed_requests_.push_back(close_message_payload->request_address);
+  }
 
   if (error != nullptr) {
     close_message_payload->has_error = true;
@@ -1459,14 +1479,17 @@ ModelInstanceState::ResponseCloseDecoupled(
             PbString::Create(shm_pool_, TRITONSERVER_ErrorMessage(error)));
     close_message_payload->error = error_message->ShmHandle();
     close_message_payload->is_error_set = true;
+    return;
   }
 }
 
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequestsDecoupled(
-    TRITONBACKEND_Request** requests, const uint32_t request_count)
+    TRITONBACKEND_Request** requests, const uint32_t request_count,
+    std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests)
 {
   NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
+  closed_requests_ = {};
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
 
   size_t total_batch_size = 0;
@@ -1484,7 +1507,6 @@ ModelInstanceState::ProcessRequestsDecoupled(
        ", executing " + std::to_string(request_count) + " requests")
           .c_str());
 
-  std::vector<std::unique_ptr<InferRequest>> pb_inference_requests;
   AllocatedSharedMemory<char> request_batch;
   std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses;
 
@@ -2378,6 +2400,8 @@ TRITONBACKEND_ModelInstanceExecute(
   RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(
       instance, reinterpret_cast<void**>(&instance_state)));
 
+  TRITONSERVER_Error* error = nullptr;
+
   // If restart is equal to true, it indicates that the stub process is
   // unhealthy and needs a restart.
   bool restart = false;
@@ -2385,22 +2409,6 @@ TRITONBACKEND_ModelInstanceExecute(
       reinterpret_cast<ModelState*>(instance_state->Model());
   if (!model_state->IsDecoupled()) {
     instance_state->ProcessRequests(requests, request_count, restart);
-
-    for (uint32_t r = 0; r < request_count; ++r) {
-      TRITONBACKEND_Request* request = requests[r];
-      LOG_IF_ERROR(
-          TRITONBACKEND_RequestRelease(
-              request, TRITONSERVER_REQUEST_RELEASE_ALL),
-          "failed releasing request");
-    }
-
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_VERBOSE,
-        (std::string(
-             "TRITONBACKEND_ModelInstanceExecute: model instance name ") +
-         instance_state->Name() + " released " + std::to_string(request_count) +
-         " requests")
-            .c_str());
 
     if (restart) {
       LOG_MESSAGE(
@@ -2412,9 +2420,50 @@ TRITONBACKEND_ModelInstanceExecute(
           "Failed to restart the stub process.");
     }
   } else {
-    RETURN_IF_ERROR(
-        instance_state->ProcessRequestsDecoupled(requests, request_count));
+    std::vector<std::unique_ptr<InferRequest>> infer_requests;
+    error = instance_state->ProcessRequestsDecoupled(
+        requests, request_count, infer_requests);
+
+    if (error != nullptr) {
+      for (auto& infer_request : infer_requests) {
+        // We should only delete the response factory for the requests that have
+        // not been closed.
+        if (!instance_state->ExistsInClosedRequests(
+                infer_request->RequestAddress())) {
+          LOG_IF_ERROR(
+              infer_request->DeleteResposneFactory(),
+              "Failed to delete the response factory.");
+          TRITONBACKEND_Response* response = nullptr;
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseNew(
+                  &response, reinterpret_cast<TRITONBACKEND_Request*>(
+                                 infer_request->RequestAddress())),
+              "Failed to create a new resposne.");
+
+          if (response != nullptr) {
+            LOG_IF_ERROR(
+                TRITONBACKEND_ResponseSend(
+                    response, TRITONSERVER_RESPONSE_COMPLETE_FINAL, error),
+                "Failed to send the error resposne.");
+          }
+        }
+      }
+    }
   }
+
+  for (uint32_t r = 0; r < request_count; ++r) {
+    TRITONBACKEND_Request* request = requests[r];
+    LOG_IF_ERROR(
+        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
+        "failed releasing request");
+  }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("TRITONBACKEND_ModelInstanceExecute: model instance name ") +
+       instance_state->Name() + " released " + std::to_string(request_count) +
+       " requests")
+          .c_str());
 
   return nullptr;
 }

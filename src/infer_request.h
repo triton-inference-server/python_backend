@@ -94,7 +94,12 @@ class InferRequest {
   /// Disallow copying the inference request object.
   DISALLOW_COPY_AND_ASSIGN(InferRequest);
 
+  intptr_t RequestAddress();
   ~InferRequest() {}
+
+#ifndef TRITON_PB_STUB
+  TRITONSERVER_Error* DeleteResposneFactory();
+#endif
 
  private:
   InferRequest(

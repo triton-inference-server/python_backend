@@ -179,30 +179,18 @@ InferResponse::Send(
     }
   });
 
-  RETURN_IF_ERROR(
+  SET_ERROR_AND_RETURN(
+      response_error,
       TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
 
-  // uint32_t requested_output_count = 0;
-  // SET_ERROR_AND_RETURN(
-  //     response_error,
-  //     TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-
-  // std::set<std::string> requested_output_names;
-  // for (size_t j = 0; j < requested_output_count; ++j) {
-  //   const char* output_name;
-  //   SET_ERROR_AND_RETURN(
-  //       response_error,
-  //       TRITONBACKEND_RequestOutputName(request, j, &output_name));
-  //   requested_output_names.insert(output_name);
-  // }
+  if (HasError()) {
+    response_error = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
+    return nullptr;
+  }
 
   bool cuda_copy = false;
   for (auto& output_tensor : OutputTensors()) {
-    // if (requested_output_names.find(output_tensor->Name()) ==
-    //     requested_output_names.end()) {
-    //   continue;
-    // }
-
     TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
     int64_t src_memory_type_id = output_tensor->MemoryTypeId();
 
