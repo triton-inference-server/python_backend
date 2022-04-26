@@ -175,8 +175,8 @@ class TritonPythonModel:
         # The response_sender is used to send response(s) associated with the corresponding request.
 
         for idx in range(in_input[0]):
-            out_output = pb_utils.Tensor("OUT",
-                                         numpy.array([in_input[0]], np.int32))
+            out_output = pb_utils.Tensor("OUT", np.array([in_input[0]],
+                                                         np.int32))
             response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
