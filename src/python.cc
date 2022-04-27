@@ -2431,7 +2431,7 @@ TRITONBACKEND_ModelInstanceExecute(
         if (!instance_state->ExistsInClosedRequests(
                 infer_request->RequestAddress())) {
           LOG_IF_ERROR(
-              infer_request->DeleteResposneFactory(),
+              infer_request->DeleteResponseFactory(),
               "Failed to delete the response factory.");
           TRITONBACKEND_Response* response = nullptr;
           LOG_IF_ERROR(

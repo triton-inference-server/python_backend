@@ -57,7 +57,7 @@ class InferRequest {
       const std::vector<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
       const uint32_t flags = 0, const intptr_t response_factory_address = 0,
-      const intptr_t request_addres = 0);
+      const intptr_t request_address = 0);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
@@ -98,7 +98,7 @@ class InferRequest {
   ~InferRequest() {}
 
 #ifndef TRITON_PB_STUB
-  TRITONSERVER_Error* DeleteResposneFactory();
+  TRITONSERVER_Error* DeleteResponseFactory();
 #endif
 
  private:

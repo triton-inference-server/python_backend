@@ -322,7 +322,7 @@ InferRequest::InferRequest(
 
 #ifndef TRITON_PB_STUB
 TRITONSERVER_Error*
-InferRequest::DeleteResposneFactory()
+InferRequest::DeleteResponseFactory()
 {
   TRITONBACKEND_ResponseFactory* response_factory =
       reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
