@@ -779,7 +779,11 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
-  model_instance_ = py::none();
+  {
+    py::gil_scoped_acquire acquire;
+    model_instance_ = py::none();
+  }
+
   stub_message_queue_.reset();
   parent_message_queue_.reset();
   memory_manager_message_queue_.reset();

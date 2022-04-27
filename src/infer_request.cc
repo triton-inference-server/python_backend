@@ -349,7 +349,7 @@ InferRequest::GetResponseSender()
 }
 
 
-std::unique_ptr<InferResponse>
+std::shared_ptr<InferResponse>
 InferRequest::Exec()
 {
   ResponseBatch* response_batch = nullptr;

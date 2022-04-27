@@ -70,7 +70,7 @@ class InferRequest {
   bi::managed_external_buffer::handle_t ShmHandle();
 
 #ifdef TRITON_PB_STUB
-  std::unique_ptr<InferResponse> Exec();
+  std::shared_ptr<InferResponse> Exec();
   std::shared_ptr<ResponseSender> GetResponseSender();
 #endif
 
