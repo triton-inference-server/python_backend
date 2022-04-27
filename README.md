@@ -54,7 +54,7 @@ any C++ code.
   - [Multiple Model Instance Support](#multiple-model-instance-support)
 - [Business Logic Scripting](#business-logic-scripting)
   - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
-  - [Limitations](#limitations)
+  - [Limitation](#limitation)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
   - [`pb_utils.Tensor.from_dlpack() -> Tensor`](#pb_utilstensorfrom_dlpack---tensor)
@@ -714,9 +714,8 @@ flags:
 flags = pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START | pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END
 ```
 
-## Limitations
+## Limitation
 
-[`--shm-size`](https://docs.docker.com/engine/reference/run/) flag.
 - You need to make sure that the inference requests performed as a part of your model
 do not create a circular dependency. For example, if model A performs an inference request
 on itself and there are no more model instances ready to execute the inference request, the
