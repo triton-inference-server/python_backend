@@ -166,6 +166,8 @@ triton_to_pybind_dtype(TRITONSERVER_DataType data_type)
       // Will be reinterpreted in the python code.
       dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
       break;
+    case TRITONSERVER_TYPE_BF16:
+      throw PythonBackendException("TYPE_BF16 not currently supported.");
     case TRITONSERVER_TYPE_INVALID:
       throw PythonBackendException("Dtype is invalid.");
     default:
