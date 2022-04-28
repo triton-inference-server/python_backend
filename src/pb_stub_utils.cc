@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -166,9 +166,12 @@ triton_to_pybind_dtype(TRITONSERVER_DataType data_type)
       // Will be reinterpreted in the python code.
       dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
       break;
+    case TRITONSERVER_TYPE_BF16:
+      throw PythonBackendException("TYPE_BF16 not currently supported.");
     case TRITONSERVER_TYPE_INVALID:
       throw PythonBackendException("Dtype is invalid.");
-      break;
+    default:
+      throw PythonBackendException("Unsupported triton dtype.");
   }
 
   return dtype_numpy;
@@ -242,7 +245,6 @@ triton_to_dlpack_type(TRITONSERVER_DataType triton_dtype)
           std::string("DType code \"") +
           std::to_string(static_cast<int>(triton_dtype)) +
           "\" is not supported.");
-      break;
   }
 
   dl_dtype.code = dl_code;
