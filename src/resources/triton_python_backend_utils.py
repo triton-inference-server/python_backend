@@ -295,109 +295,231 @@ def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
 
 
-def set_max_batch_size(model_config, value):
+def set_max_batch_size(config, value):
     """Set max_batch_size for the model configuration
     Parameters
     ----------
-    model_config : dict
-        dictionary object containing the model configuration
+    config : AutoCompleteConfig object
+        object containing the model configuration
     value : int
-        value of the max batch size
-    Returns
-    -------
-    None
-        If the value of max_batch_size is set without error
-    Raises
-    ------
-    ValueError
-        If the type of the value is not an integer.
+        value of max_batch_size
     """
-    if isinstance(value, int):
-        model_config['max_batch_size'] = value
-        return None
-    else:
-        raise ValueError("max_batch_size should be an integer.")
+    config.set_max_batch_size(value)
 
 
-def set_ios_helper(model_config, type, ios):
-    """Helper function for setting inputs/outputs
+def set_input(config, new_input):
+    """Set input for the model configuration
     Parameters
     ----------
-    model_config : dict
-        dictionary object containing the model configuration
-    type : string
-        determine if the type is 'input' or 'output'
-    ios : list
-        list object containing the inputs/outputs we want to set
-        for model configuration
-    Returns
-    -------
-    None
-        If inputs/outputs are set without error
-    Raises
-    ------
-    ValueError
-        If required properties are missing.
-    """
-    if not ios:
-        raise ValueError(type + " is empty")
-    for properties in ios:
-        if 'name' not in properties:
-            raise ValueError("missing name property in " + type)
-        elif 'data_type' not in properties:
-            raise ValueError("missing data_type property in " + type)
-        elif ('dims' not in properties) and ('reshape' not in properties):
-            raise ValueError("missing shape property in " + type)
-
-    model_config[type] = ios
-
-    return None
-
-
-def set_inputs(model_config, inputs):
-    """Set inputs for the model configuration
-    Parameters
-    ----------
-    model_config : dict
-        dictionary object containing the model configuration
-    inputs : list
-        list object containing the inputs we want to set
+    config : AutoCompleteConfig object
+        object containing the model configuration
+    new_input : InferInputConfig
+        object containing the input we want to set
         for the model configuration
-    Returns
-    -------
-    None
-        If no error occurs in function 'set_ios_helper'
-    Raises
-    ------
-    ValueError
-        Raised in function 'set_ios_helper'
-    
     """
+    config.set_input(new_input)
 
-    return set_ios_helper(model_config, "input", inputs)
+
+def set_output(config, output):
+    """Set output for the model configuration
+    Parameters
+    ----------
+    config :AutoCompleteConfig object
+        object containing the model configuration
+    output : InferOutputConfig
+        object containing the output we want to set
+        for the model configuration
+    """
+    config.set_output(output)
 
 
-def set_outputs(model_config, outputs):
-    """Set outputs for the model configuration
+class ModelConfig:
+    """An object of ModelConfig class is used to describe
+    model configuration for autocomplete.
     Parameters
     ----------
     model_config : dict
         dictionary object containing the model configuration
-    outputs : list
-        list object containing the outputs we want to set
-        for the model configuration
-    Returns
-    -------
-    None
-        If no error occurs in function 'set_ios_helper'
-    Raises
-    ------
-    ValueError
-        Raised in function 'set_ios_helper'
-    
     """
 
-    return set_ios_helper(model_config, "output", outputs)
+    def __init__(self, model_config):
+        self._model_config = model_config
+
+    def __str__(self):
+        return str(self._model_config)
+
+    def set_max_batch_size(self, new_max_batch_size):
+        """Set the value of max_batch_size.
+        Parameters
+        ----------
+        new_max_batch_size : int
+            The max_batch_size to be set.
+        """
+        self._model_config["max_batch_size"] = new_max_batch_size
+
+    def set_input(self, new_input):
+        """Set the input of model.
+        Parameters
+        ----------
+        new_input : list
+            The input to be set.
+        """
+        new_input = new_input._get_input()
+        for current_input in self._model_config["input"]:
+            if new_input["name"] == current_input["name"]:
+                if (new_input["dims"] == current_input["dims"] and
+                    (new_input["data_type"] == current_input["data_type"])):
+                    return
+                elif new_input["dims"] != current_input["dims"]:
+                    raise ValueError("Input name '" + new_input["name"] +
+                                     "' exists and has a conflicting dims")
+                elif new_input["data_type"] != current_input["data_type"]:
+                    raise ValueError("Input name '" + new_input["name"] +
+                                     "' exists and has a conflicting data_type")
+
+        self._model_config["input"].append(new_input)
+
+    def set_output(self, new_output):
+        """Set the output of model.
+        Parameters
+        ----------
+        new_output : list
+            The output to be set.
+        """
+        new_output = new_output._get_output()
+        for current_output in self._model_config["output"]:
+            if new_output["name"] == current_output["name"]:
+                if (new_output["dims"] == current_output["dims"] and
+                    (new_output["data_type"] == current_output["data_type"])):
+                    return
+                if new_output["dims"] != current_output["dims"]:
+                    raise ValueError("Output name '" + new_output["name"] +
+                                     "' exists and has a conflicting dims")
+                elif new_output["data_type"] != current_output["data_type"]:
+                    raise ValueError("Output name '" + new_output["name"] +
+                                     "' exists and has a conflicting data_type")
+
+        self._model_config["output"].append(new_output)
+
+
+class InferInputConfig:
+    """An object of InferInputConfig class is used to describe
+    input configuration for autocomplete.
+    Parameters
+    ----------
+    name : str
+        The name of input whose data will be described by this object
+    dims : list
+        The dims of the associated input.
+    data_type : str
+        The data_type of the associated input.
+    """
+
+    def __init__(self, name, dims, data_type):
+        self._name = name
+        self._dims = dims
+        self._data_type = data_type
+
+    def set_name(self, name):
+        """Set the name of input.
+        Parameters
+        ----------
+        name : str
+            The name of the associated input.
+        """
+        self._name = name
+
+    def set_dims(self, dims):
+        """Set the dims of input.
+        Parameters
+        ----------
+        dims : list
+            The dims of the associated input.
+        """
+        self._dims = dims
+
+    def set_datatype(self, data_type):
+        """Set the datatype of input.
+        Parameters
+        ----------
+        datatype : str
+            The datatype of the associated input.
+        """
+        self._data_type = data_type
+
+    def _get_input(self):
+        """Retrieve the underlying input as json dict.
+        Returns
+        -------
+        dict
+            The underlying input specification as dict
+        """
+        infer_input = {
+            'name': self._name,
+            'dims': self._dims,
+            'data_type': self._data_type
+        }
+        return infer_input
+
+
+class InferOutputConfig:
+    """An object of InferOutputConfig class is used to describe
+    output configuration for autocomplete.
+    Parameters
+    ----------
+    name : str
+        The name of output whose data will be described by this object
+    dims : list
+        The dims of the associated output.
+    datatype : str
+        The datatype of the associated output.
+    """
+
+    def __init__(self, name, dims, data_type):
+        self._name = name
+        self._dims = dims
+        self._data_type = data_type
+
+    def set_name(self, name):
+        """Set the name of output.
+        Parameters
+        ----------
+        name : str
+            The name of the associated output.
+        """
+        self._name = name
+
+    def set_dims(self, dims):
+        """Set the dims of output.
+        Parameters
+        ----------
+        shape : list
+            The dims of the associated output.
+        """
+        self._dims = dims
+
+    def set_datatype(self, data_type):
+        """Set the datatype of output.
+        Parameters
+        ----------
+        data_type : str
+            The data_type of the associated output.
+        """
+        self._data_type = data_type
+
+    def _get_output(self):
+        """Retrieve the underlying output as json dict.
+        Returns
+        -------
+        dict
+            The underlying output specification as dict
+        """
+        infer_output = {
+            'name': self._name,
+            'dims': self._dims,
+            'data_type': self._data_type
+        }
+        return infer_output
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
