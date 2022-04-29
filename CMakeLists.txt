@@ -155,7 +155,7 @@ set(
 )
 
 set(
-  PYTHNON_BACKEND_SRCS
+  PYTHON_BACKEND_SRCS
   src/python.cc
   src/pb_env.cc
   src/pb_env.h
@@ -168,17 +168,17 @@ set(
 )
 
 list(APPEND
-  PYTHNON_BACKEND_SRCS
+  PYTHON_BACKEND_SRCS
   ${COMMON_SRCS}
 )
 
 add_library(
   triton-python-backend SHARED
-  ${PYTHNON_BACKEND_SRCS}
+  ${PYTHON_BACKEND_SRCS}
 )
 
 set(
-  PYTHNON_BACKEND_STUB_SRCS
+  PYTHON_BACKEND_STUB_SRCS
   src/pb_stub_utils.h
   src/pb_stub_utils.cc
   src/response_sender.cc
@@ -188,13 +188,13 @@ set(
 )
 
 list(APPEND
-  PYTHNON_BACKEND_STUB_SRCS
+  PYTHON_BACKEND_STUB_SRCS
   ${COMMON_SRCS}
 )
 
 add_executable(
   triton-python-backend-stub
-  ${PYTHNON_BACKEND_STUB_SRCS}
+  ${PYTHON_BACKEND_STUB_SRCS}
 )
 
 add_dependencies(triton-python-backend boostorg)

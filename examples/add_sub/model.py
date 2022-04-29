@@ -38,6 +38,47 @@ class TritonPythonModel:
     that is created must have "TritonPythonModel" as the class name.
     """
 
+    def auto_complete_config(self, args):
+        """`auto_complete_config` is called only once when the server is started
+        with `--strict-model-config=false`. Implementing `auto_complete_config`
+        function is required when using auto-complete for the model configuration.
+        This function allows us to set `max_batch_size`, `input` and `output`
+        properties of the model using `pb_utils.set_max_batch_size`,
+        `pb_utils.set_input`, and `pb_utils.set_output`.
+        There are three objects for setting the model configuration for auto-complete:
+          `pb_utils.InferInputConfig`: describe input configuration
+          `pb_utils.InferOutputConfig`: describe output configuration
+          `pb_utils.ModelConfig`: describe the model configuration
+        Must return a `pb_utils.ModelConfig` object which contains the updated
+        model configuration.
+
+        Parameters
+        ----------
+        args : dict
+          Both keys and values are strings. The dictionary keys and values are:
+          * model_config: A JSON string containing the current model configuration
+
+        Returns
+        -------
+        pb_utils.ModelConfig
+          An object containing the updated model configuration
+        """
+        self.model_config = model_config = pb_utils.ModelConfig(
+            json.loads(args['model_config']))
+
+        input0 = pb_utils.InferInputConfig("INPUT0", [4], "TYPE_FP32")
+        input1 = pb_utils.InferInputConfig("INPUT1", [4], "TYPE_FP32")
+        output0 = pb_utils.InferOutputConfig("OUTPUT0", [4], "TYPE_FP32")
+        output1 = pb_utils.InferOutputConfig("OUTPUT1", [4], "TYPE_FP32")
+
+        pb_utils.set_max_batch_size(model_config, 0)
+        pb_utils.set_input(model_config, input0)
+        pb_utils.set_input(model_config, input1)
+        pb_utils.set_output(model_config, output0)
+        pb_utils.set_output(model_config, output1)
+
+        return model_config
+
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
@@ -57,27 +98,6 @@ class TritonPythonModel:
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
-        inputs = [{
-            "name": "INPUT0",
-            "dims": [8],
-            "data_type": "TYPE_FP32",
-        }, {
-            "dims": [3],
-            "data_type": "TYPE_FP32",
-            "name": "INPUT1",
-        }]
-        outputs = [{
-            "name": "OUTPUT0",
-            "dims": [8],
-            "data_type": "TYPE_FP32",
-        }, {
-            "dims": [3],
-            "data_type": "TYPE_FP32",
-            "name": "OUTPUT1",
-        }]
-        pb_utils.set_max_batch_size(model_config, 9)
-        pb_utils.set_inputs(model_config, inputs)
-        pb_utils.set_outputs(model_config, outputs)
 
         # Get OUTPUT0 configuration
         output0_config = pb_utils.get_output_config_by_name(
@@ -92,8 +112,6 @@ class TritonPythonModel:
             output0_config['data_type'])
         self.output1_dtype = pb_utils.triton_string_to_numpy(
             output1_config['data_type'])
-
-        return model_config
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`

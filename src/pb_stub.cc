@@ -73,12 +73,12 @@ Stub::Instantiate(
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
     bi::managed_external_buffer::handle_t ipc_control_handle,
-    const std::string& model_instance_name)
+    const std::string& name)
 {
   model_path_ = model_path;
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
-  model_instance_name_ = model_instance_name;
+  name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
 
@@ -185,7 +185,7 @@ Stub::IsDecoupled()
 bool
 Stub::RunCommand()
 {
-  NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
+  NVTX_RANGE(nvtx_, "RunCommand " + name_);
   std::unique_ptr<IPCMessage> ipc_message;
   {
     // Release the GIL lock when waiting for new message. Without this line, the
@@ -195,16 +195,85 @@ Stub::RunCommand()
     ipc_message = this->PopMessage();
   }
   switch (ipc_message->Command()) {
+    case PYTHONSTUB_CommandType::PYTHONSTUB_AutoCompleteRequest: {
+      // Only run this case when Triton Server is started with
+      // '--strict-model-config=false'
+      bool has_exception = false;
+      std::string error_string;
+      std::string auto_complete_config;
+
+      std::unique_ptr<IPCMessage> auto_complete_response_msg =
+          IPCMessage::Create(shm_pool_, false /* inline_response */);
+      auto_complete_response_msg->Command() = PYTHONSTUB_AutoCompleteResponse;
+      std::unique_ptr<PbString> error_string_shm;
+      std::unique_ptr<PbString> auto_complete_config_shm;
+      AllocatedSharedMemory<AutoCompleteResponseShm> auto_complete_response =
+          shm_pool_->Construct<AutoCompleteResponseShm>();
+
+      ScopedDefer receive_autocomplete_finalize(
+          [this] { stub_message_queue_->Pop(); });
+      ScopedDefer _([this, &auto_complete_response_msg] {
+        SendIPCMessage(auto_complete_response_msg);
+      });
+
+      auto_complete_response.data_->response_has_error = false;
+      auto_complete_response.data_->response_is_error_set = false;
+      auto_complete_response.data_->response_has_model_config = false;
+      auto_complete_response_msg->Args() = auto_complete_response.handle_;
+
+      try {
+        AutoCompleteModelConfig(ipc_message->Args(), &auto_complete_config);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        has_exception = true;
+        error_string = pb_exception.what();
+      }
+      catch (const py::error_already_set& error) {
+        has_exception = true;
+        error_string = error.what();
+      }
+
+      if (has_exception) {
+        // Do not delete the region. The region will be deleted by the parent
+        // process.
+        shm_pool_->SetDeleteRegion(false);
+        LOG_INFO << "Failed to initialize Python stub for auto-complete: "
+                 << error_string;
+        auto_complete_response.data_->response_has_error = true;
+        auto_complete_response.data_->response_is_error_set = false;
+
+        LOG_IF_EXCEPTION(
+            error_string_shm = PbString::Create(shm_pool_, error_string));
+        if (error_string_shm != nullptr) {
+          auto_complete_response.data_->response_is_error_set = true;
+          auto_complete_response.data_->response_error =
+              error_string_shm->ShmHandle();
+        }
+
+        return true;  // Terminate the stub process.
+      }
+
+      if (auto_complete_config != "None" || auto_complete_config.size() != 0) {
+        LOG_IF_EXCEPTION(
+            auto_complete_config_shm =
+                PbString::Create(shm_pool_, auto_complete_config));
+        if (auto_complete_config_shm != nullptr) {
+          auto_complete_response.data_->response_has_model_config = true;
+          auto_complete_response.data_->response_model_config =
+              auto_complete_config_shm->ShmHandle();
+        }
+      }
+
+      return true;  // Terminate the stub process.
+    } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
       std::string error_string;
-      std::string model_config;
 
       std::unique_ptr<IPCMessage> initialize_response_msg =
           IPCMessage::Create(shm_pool_, false /* inline_response */);
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
       std::unique_ptr<PbString> error_string_shm;
-      std::unique_ptr<PbString> model_config_shm;
       AllocatedSharedMemory<InitializeResponseShm> initialize_response =
           shm_pool_->Construct<InitializeResponseShm>();
 
@@ -222,11 +291,10 @@ Stub::RunCommand()
 
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
-      initialize_response.data_->response_has_model_config = false;
       initialize_response_msg->Args() = initialize_response.handle_;
 
       try {
-        Initialize(ipc_message->Args(), &model_config);
+        Initialize(ipc_message->Args());
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -255,16 +323,6 @@ Stub::RunCommand()
 
         return true;  // Terminate the stub process.
       }
-      if (model_config != "None") {
-        LOG_IF_EXCEPTION(
-            model_config_shm = PbString::Create(shm_pool_, model_config));
-        if (model_config_shm != nullptr) {
-          initialize_response.data_->response_has_model_config = true;
-          initialize_response.data_->response_model_config =
-              model_config_shm->ShmHandle();
-        }
-      }
-
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
       AllocatedSharedMemory<char> request_batch =
@@ -301,8 +359,77 @@ Stub::RunCommand()
 }
 
 void
-Stub::Initialize(
-    bi::managed_external_buffer::handle_t map_handle, std::string* model_config)
+Stub::AutoCompleteModelConfig(
+    bi::managed_external_buffer::handle_t map_handle,
+    std::string* auto_complete_config)
+{
+  py::module sys = py::module_::import("sys");
+
+  std::string model_name =
+      model_path_.substr(model_path_.find_last_of("/") + 1);
+
+  // Model name without the .py extension
+  auto dotpy_pos = model_name.find_last_of(".py");
+  if (dotpy_pos == std::string::npos || dotpy_pos != model_name.size() - 1) {
+    throw PythonBackendException(
+        "Model name must end with '.py'. Model name is \"" + model_name +
+        "\".");
+  }
+
+  // The position of last character of the string that is searched for is
+  // returned by 'find_last_of'. Need to manually adjust the position.
+  std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
+  std::string model_path_parent =
+      model_path_.substr(0, model_path_.find_last_of("/"));
+  std::string model_path_parent_parent =
+      model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+  std::string python_backend_folder = triton_install_path_;
+  sys.attr("path").attr("append")(model_path_parent);
+  sys.attr("path").attr("append")(model_path_parent_parent);
+  sys.attr("path").attr("append")(python_backend_folder);
+
+  py::module python_backend_utils =
+      py::module_::import("triton_python_backend_utils");
+  py::module c_python_backend_utils =
+      py::module_::import("c_python_backend_utils");
+  py::setattr(
+      python_backend_utils, "TritonError",
+      c_python_backend_utils.attr("TritonError"));
+  py::setattr(
+      python_backend_utils, "TritonModelException",
+      c_python_backend_utils.attr("TritonModelException"));
+  c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
+
+  py::object TritonPythonModel =
+      py::module_::import(
+          (std::string(model_version_) + "." + model_name_trimmed).c_str())
+          .attr("TritonPythonModel");
+  model_ = TritonPythonModel();
+
+  std::unordered_map<std::string, std::string> map;
+  std::unique_ptr<PbMap> pb_map_shm =
+      PbMap::LoadFromSharedMemory(shm_pool_, map_handle);
+
+  // Get the unordered_map representation of the map in shared memory.
+  map = pb_map_shm->UnorderedMap();
+
+  py::dict model_config_params;
+
+  for (const auto& pair : map) {
+    model_config_params[pair.first.c_str()] = pair.second;
+  }
+
+  if (!py::hasattr(model_, "auto_complete_config")) {
+    std::string message = "Python model " + model_path_ +
+                          " does not implement `auto_complete_config` method.";
+    throw PythonBackendException(message);
+  }
+  *auto_complete_config = std::string(
+      py::str(model_.attr("auto_complete_config")(model_config_params)));
+}
+
+void
+Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 {
   py::module sys = py::module_::import("sys");
 
@@ -372,8 +499,7 @@ Stub::Initialize(
 
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
-    *model_config = std::string(
-        py::str(model_instance_.attr("initialize")(model_config_params)));
+    model_instance_.attr("initialize")(model_config_params);
   }
 
   initialized_ = true;
@@ -489,13 +615,13 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     }
 
     {
-      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+      NVTX_RANGE(nvtx_, "PyExecute " + name_);
 
       py::object execute_return =
           model_instance_.attr("execute")(py_request_list);
       if (!py::isinstance<py::none>(execute_return)) {
         throw PythonBackendException(
-            "Python model '" + model_instance_name_ +
+            "Python model '" + name_ +
             "' is using the decoupled mode and the execute function must "
             "return None.");
       }
@@ -514,7 +640,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     std::string err_message =
         std::string(
             "Failed to process the request(s) for model '" +
-            model_instance_name_ + "', message: ") +
+            name_ + "', message: ") +
         error_string;
     LOG_INFO << err_message.c_str();
     response_batch_shm_ptr->has_error = true;
@@ -584,7 +710,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     bool is_coroutine;
 
     {
-      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+      NVTX_RANGE(nvtx_, "PyExecute " + name_);
       execute_return = model_instance_.attr("execute")(request_list);
       is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
     }
@@ -658,7 +784,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     std::string err_message =
         std::string(
             "Failed to process the request(s) for model '" +
-            model_instance_name_ + "', message: ") +
+            name_ + "', message: ") +
         error_string;
     LOG_INFO << err_message.c_str();
     error_string_shm = PbString::Create(shm_pool_, error_string);
@@ -857,14 +983,14 @@ main(int argc, char** argv)
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
   std::string triton_install_path = argv[6];
-  std::string model_instance_name = argv[8];
+  std::string name = argv[8];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl handle */, model_instance_name);
+        std::stoi(argv[7]) /* IPCControl handle */, name);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();

@@ -134,10 +134,13 @@ class Stub {
   /// Run a single command from the shared memory.
   bool RunCommand();
 
-  /// Initialize the user's Python code.
-  void Initialize(
+  /// Set the model configuration for auto-complete
+  void AutoCompleteModelConfig(
       bi::managed_external_buffer::handle_t map_handle,
-      std::string* model_config);
+      std::string* auto_complete_config);
+
+  /// Initialize the user's Python code.
+  void Initialize(bi::managed_external_buffer::handle_t map_handle);
 
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
@@ -175,7 +178,7 @@ class Stub {
   bi::interprocess_mutex* health_mutex_;
   std::string model_path_;
   std::string model_version_;
-  std::string model_instance_name_;
+  std::string name_;
   std::string triton_install_path_;
   IPCControlShm* ipc_control_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
@@ -194,5 +197,6 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
+  py::object model_;
 };
 }}}  // namespace triton::backend::python

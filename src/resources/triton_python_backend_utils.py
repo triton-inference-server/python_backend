@@ -296,46 +296,46 @@ def triton_string_to_numpy(triton_type_string):
 
 
 def set_max_batch_size(config, value):
-    """Set max_batch_size for the model configuration
+    """Set the max batch size for the model
     Parameters
     ----------
     config : AutoCompleteConfig object
         object containing the model configuration
     value : int
-        value of max_batch_size
+        the max_batch_size we want to set for the model
     """
     config.set_max_batch_size(value)
 
 
 def set_input(config, new_input):
-    """Set input for the model configuration
+    """Set the input for the model
     Parameters
     ----------
     config : AutoCompleteConfig object
         object containing the model configuration
     new_input : InferInputConfig
         object containing the input we want to set
-        for the model configuration
+        for the model
     """
     config.set_input(new_input)
 
 
 def set_output(config, output):
-    """Set output for the model configuration
+    """Set the output for the model
     Parameters
     ----------
     config :AutoCompleteConfig object
         object containing the model configuration
     output : InferOutputConfig
         object containing the output we want to set
-        for the model configuration
+        for the model
     """
     config.set_output(output)
 
 
 class ModelConfig:
     """An object of ModelConfig class is used to describe
-    model configuration for autocomplete.
+    the model configuration for autocomplete.
     Parameters
     ----------
     model_config : dict
@@ -349,7 +349,7 @@ class ModelConfig:
         return str(self._model_config)
 
     def set_max_batch_size(self, new_max_batch_size):
-        """Set the value of max_batch_size.
+        """Set the max batch size for the model.
         Parameters
         ----------
         new_max_batch_size : int
@@ -358,11 +358,16 @@ class ModelConfig:
         self._model_config["max_batch_size"] = new_max_batch_size
 
     def set_input(self, new_input):
-        """Set the input of model.
+        """Set the input for the model.
         Parameters
         ----------
         new_input : list
             The input to be set.
+        Raises
+        ------
+        ValueError
+            If an input with the same name already exists in the model
+            configuration and has a conflicting property. 
         """
         new_input = new_input._get_input()
         for current_input in self._model_config["input"]:
@@ -371,20 +376,27 @@ class ModelConfig:
                     (new_input["data_type"] == current_input["data_type"])):
                     return
                 elif new_input["dims"] != current_input["dims"]:
-                    raise ValueError("Input name '" + new_input["name"] +
-                                     "' exists and has a conflicting dims")
+                    raise ValueError(
+                        "Input name '" + new_input["name"] +
+                        "' exists and has conflicting dims property.")
                 elif new_input["data_type"] != current_input["data_type"]:
-                    raise ValueError("Input name '" + new_input["name"] +
-                                     "' exists and has a conflicting data_type")
+                    raise ValueError(
+                        "Input name '" + new_input["name"] +
+                        "' exists and has conflicting data_type property.")
 
         self._model_config["input"].append(new_input)
 
     def set_output(self, new_output):
-        """Set the output of model.
+        """Set the output for the model.
         Parameters
         ----------
         new_output : list
             The output to be set.
+        Raises
+        ------
+        ValueError
+            If an output with the same name already exists in the model
+            configuration and has a conflicting property.
         """
         new_output = new_output._get_output()
         for current_output in self._model_config["output"]:
