@@ -45,12 +45,15 @@ class TritonPythonModel:
         This function allows us to set `max_batch_size`, `input` and `output`
         properties of the model using `pb_utils.set_max_batch_size`,
         `pb_utils.set_input`, and `pb_utils.set_output`.
-        There are three objects for setting the model configuration for auto-complete:
+        There are three objects for setting the model configuration for
+        auto-complete:
           `pb_utils.InferInputConfig`: describe input configuration
           `pb_utils.InferOutputConfig`: describe output configuration
           `pb_utils.ModelConfig`: describe the model configuration
         Must return a `pb_utils.ModelConfig` object which contains the updated
         model configuration.
+        Note: All the objects in this function will go out of scope after exiting.
+        Should not store any objects in this function.
 
         Parameters
         ----------
