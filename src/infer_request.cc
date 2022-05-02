@@ -40,9 +40,13 @@ InferRequest::InferRequest(
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::vector<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
-    const uint32_t flags)
-    : request_id_(request_id), correlation_id_(correlation_id),
-      model_name_(model_name), model_version_(model_version), flags_(flags)
+    const uint32_t flags, const intptr_t response_factory_address,
+    const intptr_t request_address)
+    : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
+      requested_output_names_(requested_output_names), model_name_(model_name),
+      model_version_(model_version), flags_(flags),
+      response_factory_address_(response_factory_address),
+      request_address_(request_address)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -62,6 +66,11 @@ InferRequest::InferRequest(
 
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
+#ifdef TRITON_PB_STUB
+  response_sender_ = std::make_shared<ResponseSender>(
+      request_address_, response_factory_address_,
+      Stub::GetOrCreateInstance()->SharedMemory());
+#endif
 }
 
 const std::vector<std::shared_ptr<PbTensor>>&
@@ -106,6 +115,12 @@ InferRequest::Flags()
   return flags_;
 }
 
+intptr_t
+InferRequest::RequestAddress()
+{
+  return request_address_;
+}
+
 void
 InferRequest::SetFlags(uint32_t flags)
 {
@@ -137,6 +152,8 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->requested_output_count =
       RequestedOutputNames().size();
   infer_request_shm_ptr_->flags = Flags();
+  infer_request_shm_ptr_->address = request_address_;
+  infer_request_shm_ptr_->response_factory_address = response_factory_address_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -293,15 +310,56 @@ InferRequest::InferRequest(
   flags_ = infer_request_shm_ptr_->flags;
   model_version_ = infer_request_shm_ptr_->model_version;
   correlation_id_ = infer_request_shm_ptr_->correlation_id;
-}
+  request_address_ = infer_request_shm_ptr_->address;
+  response_factory_address_ = infer_request_shm_ptr_->response_factory_address;
 
 #ifdef TRITON_PB_STUB
-std::unique_ptr<InferResponse>
+  response_sender_ = std::make_shared<ResponseSender>(
+      request_address_, response_factory_address_,
+      Stub::GetOrCreateInstance()->SharedMemory());
+#endif
+}
+
+#ifndef TRITON_PB_STUB
+TRITONSERVER_Error*
+InferRequest::DeleteResponseFactory()
+{
+  TRITONBACKEND_ResponseFactory* response_factory =
+      reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+          response_factory_address_);
+  TRITONSERVER_Error* error =
+      TRITONBACKEND_ResponseFactoryDelete(response_factory);
+
+  return error;
+}
+#endif
+
+#ifdef TRITON_PB_STUB
+std::shared_ptr<ResponseSender>
+InferRequest::GetResponseSender()
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (!stub->IsDecoupled()) {
+    throw PythonBackendException(
+        "'get_response_sender' function must be called only when the model is "
+        "using the decoupled transaction policy.");
+  }
+
+  return response_sender_;
+}
+
+
+std::shared_ptr<InferResponse>
 InferRequest::Exec()
 {
   ResponseBatch* response_batch = nullptr;
   bool responses_is_set = false;
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (stub->IsDecoupled()) {
+    throw PythonBackendException(
+        "Running BLS requests is not supported in the decoupled transaction "
+        "policy.");
+  }
   std::unique_ptr<SharedMemoryManager>& shm_pool = stub->SharedMemory();
   bi::managed_external_buffer::handle_t* response_handle = nullptr;
 

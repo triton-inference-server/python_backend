@@ -84,17 +84,20 @@ class Stub {
   /// Finalize and terminate the stub process
   void Finalize();
 
+  /// Load all the requests from shared memory
+  py::list LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr);
+
   /// Execute a batch of requests.
-  py::list Execute(
-      RequestBatch* request_batch_shm_ptr,
-      ResponseBatch* response_batch_shm_ptr,
-      bi::managed_external_buffer::handle_t* responses_shm_handle);
+  void ProcessRequests(RequestBatch* request_batch_shm_ptr);
+
+  void ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr);
 
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
   void ProcessResponse(InferResponse* response);
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
+  bool IsDecoupled();
   ~Stub();
 
  private:

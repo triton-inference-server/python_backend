@@ -30,6 +30,8 @@
 #include <cuda.h>
 #endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
+#include <boost/interprocess/sync/interprocess_condition.hpp>
+#include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <climits>
 #include <memory>
 #include <mutex>
@@ -95,6 +97,7 @@ namespace bi = boost::interprocess;
   } while (false)
 
 
+#define DUMMY_MESSAGE 0
 #define DISALLOW_COPY(TypeName) TypeName(const TypeName&) = delete;
 #define DISALLOW_ASSIGN(TypeName) void operator=(const TypeName&) = delete;
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
@@ -116,6 +119,7 @@ struct IPCControlShm {
   bool stub_health;
   bool parent_health;
   bool uses_env;
+  bool decoupled;
   bi::interprocess_mutex parent_health_mutex;
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
@@ -135,6 +139,23 @@ struct ResponseBatch {
   // Indicates whether this error has a message or not.
   bool is_error_set;
 };
+
+struct ResponseSenderBase {
+  bi::interprocess_mutex mu;
+  bi::interprocess_condition cv;
+  bool is_stub_turn;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  intptr_t request_address;
+  intptr_t response_factory_address;
+};
+
+struct ResponseSendMessage : ResponseSenderBase {
+  bi::managed_external_buffer::handle_t response;
+};
+
+using ResponseCloseMessage = ResponseSenderBase;
 
 struct RequestBatch {
   uint32_t batch_size;

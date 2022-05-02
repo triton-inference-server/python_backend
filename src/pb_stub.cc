@@ -44,6 +44,7 @@
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
+#include "response_sender.h"
 #include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/common/nvtx.h"
@@ -236,10 +237,23 @@ Stub::PopMessage()
 }
 
 bool
+Stub::IsDecoupled()
+{
+  return ipc_control_->decoupled;
+}
+
+bool
 Stub::RunCommand()
 {
   NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
-  std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
+  std::unique_ptr<IPCMessage> ipc_message;
+  {
+    // Release the GIL lock when waiting for new message. Without this line, the
+    // other threads in the user's Python model cannot make progress if they
+    // give up GIL.
+    py::gil_scoped_release release;
+    ipc_message = this->PopMessage();
+  }
   switch (ipc_message->Command()) {
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
@@ -301,64 +315,14 @@ Stub::RunCommand()
 
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
-      bool has_exception = false;
-      std::string error_string;
-
-      std::unique_ptr<IPCMessage> execute_response =
-          IPCMessage::Create(shm_pool_, false /* Inline response */);
-      execute_response->Command() = PYTHONSTUB_ExecuteResposne;
-
       AllocatedSharedMemory<char> request_batch =
           shm_pool_->Load<char>(ipc_message->Args());
       RequestBatch* request_batch_shm_ptr =
           reinterpret_cast<RequestBatch*>(request_batch.data_.get());
-      AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
-          request_batch_shm_ptr->batch_size *
-              sizeof(bi::managed_external_buffer::handle_t) +
-          sizeof(ResponseBatch));
-      ResponseBatch* response_batch_shm_ptr =
-          reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
-
-      std::unique_ptr<PbString> error_string_shm;
-      py::list inference_responses;
-
-      bi::managed_external_buffer::handle_t* responses_shm_handle =
-          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-              response_batch.data_.get() + sizeof(ResponseBatch));
-
-      execute_response->Args() = response_batch.handle_;
-
-      ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
-      ScopedDefer _(
-          [this, &execute_response] { SendIPCMessage(execute_response); });
-
-      response_batch_shm_ptr->has_error = false;
-      response_batch_shm_ptr->is_error_set = false;
-      try {
-        inference_responses = Execute(
-            request_batch_shm_ptr, response_batch_shm_ptr,
-            responses_shm_handle);
-      }
-      catch (const PythonBackendException& pb_exception) {
-        has_exception = true;
-        error_string = pb_exception.what();
-      }
-      catch (const py::error_already_set& error) {
-        has_exception = true;
-        error_string = error.what();
-      }
-
-      if (has_exception) {
-        std::string err_message =
-            std::string(
-                "Failed to process the request(s) for model '" +
-                model_instance_name_ + "', message: ") +
-            error_string;
-        LOG_INFO << err_message.c_str();
-        error_string_shm = PbString::Create(shm_pool_, error_string);
-        response_batch_shm_ptr->has_error = true;
-        response_batch_shm_ptr->is_error_set = true;
-        response_batch_shm_ptr->error = error_string_shm->ShmHandle();
+      if (!ipc_control_->decoupled) {
+        ProcessRequests(request_batch_shm_ptr);
+      } else {
+        ProcessRequestsDecoupled(request_batch_shm_ptr);
       }
 
     } break;
@@ -518,7 +482,7 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
   });
 
   ScopedDefer load_gpu_buffer_response(
-      [this, has_cpu_buffer] { parent_message_queue_->Push(1000); });
+      [this, has_cpu_buffer] { parent_message_queue_->Push(DUMMY_MESSAGE); });
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
@@ -546,18 +510,15 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
 }
 
 py::list
-Stub::Execute(
-    RequestBatch* request_batch_shm_ptr, ResponseBatch* response_batch_shm_ptr,
-    bi::managed_external_buffer::handle_t* responses_shm_handle)
+Stub::LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr)
 {
   uint32_t batch_size = request_batch_shm_ptr->batch_size;
-  py::list responses;
+  py::list py_request_list;
 
   if (batch_size == 0) {
-    return responses;
+    return py_request_list;
   }
 
-  py::list py_request_list;
   bi::managed_external_buffer::handle_t* request_shm_handle =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
           reinterpret_cast<char*>(request_batch_shm_ptr) +
@@ -567,87 +528,223 @@ Stub::Execute(
     std::shared_ptr<InferRequest> infer_request =
         InferRequest::LoadFromSharedMemory(
             shm_pool_, request_shm_handle[i], true /* open_cuda_handle */);
-    py_request_list.append(std::move(infer_request));
+    py_request_list.append(infer_request);
   }
 
-  if (!py::hasattr(model_instance_, "execute")) {
-    std::string message =
-        "Python model " + model_path_ + " does not implement `execute` method.";
-    throw PythonBackendException(message);
-  }
+  return py_request_list;
+}
 
-  py::object request_list = py_request_list;
-  py::module asyncio = py::module::import("asyncio");
+void
+Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
+{
+  py::list py_request_list =
+      LoadRequestsFromSharedMemory(request_batch_shm_ptr);
+  std::unique_ptr<IPCMessage> execute_response =
+      IPCMessage::Create(shm_pool_, false /* Inline response */);
+  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
 
-  // Execute Response
-  py::object execute_return;
-  py::object responses_obj;
-  bool is_coroutine;
+  AllocatedSharedMemory<ResponseBatch> response_batch =
+      shm_pool_->Construct<ResponseBatch>();
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+  execute_response->Args() = response_batch.handle_;
+  bool has_exception = false;
+  std::string error_string;
+  std::unique_ptr<PbString> error_string_shm;
 
-  {
-    NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
-    execute_return = model_instance_.attr("execute")(request_list);
-    is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
-  }
+  ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
+  ScopedDefer _(
+      [this, &execute_response] { SendIPCMessage(execute_response); });
 
-  if (is_coroutine) {
-    responses_obj = asyncio.attr("run")(execute_return);
-  } else {
-    responses_obj = execute_return;
-  }
+  try {
+    response_batch_shm_ptr->has_error = false;
+    response_batch_shm_ptr->is_error_set = false;
 
-  // Check the return type of execute function.
-  if (!py::isinstance<py::list>(responses_obj)) {
-    std::string str = py::str(execute_return.get_type());
-    throw PythonBackendException(
-        std::string("Expected a list in the execute return, found type '") +
-        str + "'.");
-  }
-
-  responses = responses_obj;
-  size_t response_size = py::len(responses);
-
-  // If the number of request objects do not match the number of
-  // resposne objects throw an error.
-  if (response_size != batch_size) {
-    std::string err =
-        "Number of InferenceResponse objects do not match the number "
-        "of "
-        "InferenceRequest objects. InferenceRequest(s) size is:" +
-        std::to_string(batch_size) +
-        ", and InferenceResponse(s) size is:" + std::to_string(response_size) +
-        "\n";
-    throw PythonBackendException(err);
-  }
-  for (auto& response : responses) {
-    // Check the return type of execute function.
-    if (!py::isinstance<InferResponse>(response)) {
-      std::string str = py::str(response.get_type());
-      throw PythonBackendException(
-          std::string("Expected an 'InferenceResponse' object in the execute "
-                      "function return list, found type '") +
-          str + "'.");
+    if (!py::hasattr(model_instance_, "execute")) {
+      std::string message = "Python model " + model_path_ +
+                            " does not implement `execute` method.";
+      throw PythonBackendException(message);
     }
-  }
 
-  response_batch_shm_ptr->batch_size = response_size;
+    {
+      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
 
-  std::vector<std::shared_ptr<PbTensor>> gpu_tensors;
+      py::object execute_return =
+          model_instance_.attr("execute")(py_request_list);
 
-  size_t i = 0;
-  for (auto& response : responses) {
-    InferResponse* infer_response = response.cast<InferResponse*>();
-    ProcessResponse(infer_response);
-    for (auto output_tensor : infer_response->OutputTensors()) {
-      if (!output_tensor->IsCPU()) {
-        gpu_tensors.push_back(output_tensor);
+      if (!py::isinstance<py::none>(execute_return)) {
+        throw PythonBackendException(
+            "Python model '" + model_instance_name_ +
+            "' is using the decoupled mode and the execute function must "
+            "return None.");
       }
     }
-    responses_shm_handle[i] = infer_response->ShmHandle();
-    i += 1;
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    has_exception = true;
+    error_string = error.what();
   }
 
-  return responses;
+  if (has_exception) {
+    std::string err_message =
+        std::string(
+            "Failed to process the request(s) for model '" +
+            model_instance_name_ + "', message: ") +
+        error_string;
+    LOG_INFO << err_message.c_str();
+    response_batch_shm_ptr->has_error = true;
+    error_string_shm = PbString::Create(shm_pool_, error_string);
+    response_batch_shm_ptr->error = error_string_shm->ShmHandle();
+    response_batch_shm_ptr->is_error_set = true;
+  }
+}
+
+void
+Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
+{
+  std::unique_ptr<IPCMessage> execute_response =
+      IPCMessage::Create(shm_pool_, false /* Inline response */);
+  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+
+  AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
+      request_batch_shm_ptr->batch_size *
+          sizeof(bi::managed_external_buffer::handle_t) +
+      sizeof(ResponseBatch));
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+
+  std::unique_ptr<PbString> error_string_shm;
+  py::list inference_responses;
+
+  bi::managed_external_buffer::handle_t* responses_shm_handle =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          response_batch.data_.get() + sizeof(ResponseBatch));
+
+  py::list responses;
+
+  // Notifying the stub should be after responses.
+  ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
+  ScopedDefer _(
+      [this, &execute_response] { SendIPCMessage(execute_response); });
+
+  execute_response->Args() = response_batch.handle_;
+
+  bool has_exception = false;
+  std::string error_string;
+  try {
+    response_batch_shm_ptr->has_error = false;
+    response_batch_shm_ptr->is_error_set = false;
+
+    uint32_t batch_size = request_batch_shm_ptr->batch_size;
+
+    if (batch_size == 0) {
+      return;
+    }
+
+    py::list py_request_list =
+        LoadRequestsFromSharedMemory(request_batch_shm_ptr);
+
+    if (!py::hasattr(model_instance_, "execute")) {
+      std::string message = "Python model " + model_path_ +
+                            " does not implement `execute` method.";
+      throw PythonBackendException(message);
+    }
+
+    py::object request_list = py_request_list;
+    py::module asyncio = py::module::import("asyncio");
+
+    // Execute Response
+    py::object execute_return;
+    py::object responses_obj;
+    bool is_coroutine;
+
+    {
+      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+      execute_return = model_instance_.attr("execute")(request_list);
+      is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+    }
+
+    if (is_coroutine) {
+      responses_obj = asyncio.attr("run")(execute_return);
+    } else {
+      responses_obj = execute_return;
+    }
+
+    // Check the return type of execute function.
+    if (!py::isinstance<py::list>(responses_obj)) {
+      std::string str = py::str(execute_return.get_type());
+      throw PythonBackendException(
+          std::string("Expected a list in the execute return, found type '") +
+          str + "'.");
+    }
+
+    responses = responses_obj;
+    size_t response_size = py::len(responses);
+
+    // If the number of request objects do not match the number of
+    // resposne objects throw an error.
+    if (response_size != batch_size) {
+      std::string err =
+          "Number of InferenceResponse objects do not match the number "
+          "of "
+          "InferenceRequest objects. InferenceRequest(s) size is:" +
+          std::to_string(batch_size) + ", and InferenceResponse(s) size is:" +
+          std::to_string(response_size) + "\n";
+      throw PythonBackendException(err);
+    }
+    for (auto& response : responses) {
+      // Check the return type of execute function.
+      if (!py::isinstance<InferResponse>(response)) {
+        std::string str = py::str(response.get_type());
+        throw PythonBackendException(
+            std::string("Expected an 'InferenceResponse' object in the execute "
+                        "function return list, found type '") +
+            str + "'.");
+      }
+    }
+
+    response_batch_shm_ptr->batch_size = response_size;
+
+    std::vector<std::shared_ptr<PbTensor>> gpu_tensors;
+
+    size_t i = 0;
+    for (auto& response : responses) {
+      InferResponse* infer_response = response.cast<InferResponse*>();
+      ProcessResponse(infer_response);
+      for (auto output_tensor : infer_response->OutputTensors()) {
+        if (!output_tensor->IsCPU()) {
+          gpu_tensors.push_back(output_tensor);
+        }
+      }
+      responses_shm_handle[i] = infer_response->ShmHandle();
+      i += 1;
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    has_exception = true;
+    error_string = error.what();
+  }
+
+  if (has_exception) {
+    std::string err_message =
+        std::string(
+            "Failed to process the request(s) for model '" +
+            model_instance_name_ + "', message: ") +
+        error_string;
+    LOG_INFO << err_message.c_str();
+    error_string_shm = PbString::Create(shm_pool_, error_string);
+    response_batch_shm_ptr->has_error = true;
+    response_batch_shm_ptr->is_error_set = true;
+    response_batch_shm_ptr->error = error_string_shm->ShmHandle();
+  }
 }
 
 void
@@ -682,7 +779,11 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
-  model_instance_ = py::none();
+  {
+    py::gil_scoped_acquire acquire;
+    model_instance_ = py::none();
+  }
+
   stub_message_queue_.reset();
   parent_message_queue_.reset();
   memory_manager_message_queue_.reset();
@@ -744,7 +845,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           })
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def("get_response_sender", &InferRequest::GetResponseSender);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
@@ -755,7 +857,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("is_cpu", &PbTensor::IsCPU)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
-  py::class_<InferResponse>(module, "InferenceResponse")
+  py::class_<InferResponse, std::shared_ptr<InferResponse>>(
+      module, "InferenceResponse")
       .def(
           py::init<
               const std::vector<std::shared_ptr<PbTensor>>&,
@@ -767,6 +870,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::return_value_policy::reference)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
+
+  py::class_<ResponseSender, std::shared_ptr<ResponseSender>>(
+      module, "InferenceResponseSender")
+      .def("send", &ResponseSender::Send)
+      .def("close", &ResponseSender::Close);
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

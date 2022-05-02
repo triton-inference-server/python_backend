@@ -181,6 +181,8 @@ set(
   PYTHNON_BACKEND_STUB_SRCS
   src/pb_stub_utils.h
   src/pb_stub_utils.cc
+  src/response_sender.cc
+  src/response_sender.h
   src/pb_stub.h
   src/pb_stub.cc
 )
