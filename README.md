@@ -147,7 +147,7 @@ as the Python backend repository branch that you are trying to compile.
 
 * triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=\<GIT\_BRANCH\_NAME\>
 * triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
-* triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/core: -DTRITON_CORE_REPO_TAG=\<GIT\_BRANCH\_NAME\>
 
 Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
 this location is `/opt/tritonserver`.
