@@ -339,11 +339,13 @@ class ModelConfig:
     Parameters
     ----------
     model_config : dict
-        dictionary object containing the model configuration
+        dictionary object containing the modified model configuration
     """
 
-    def __init__(self, model_config):
-        self._model_config = model_config
+    def __init__(self):
+        self._model_config = {}
+        self._model_config["input"] = []
+        self._model_config["output"] = []
 
     def __str__(self):
         return str(self._model_config)
@@ -363,28 +365,8 @@ class ModelConfig:
         ----------
         new_input : list
             The input to be set.
-        Raises
-        ------
-        ValueError
-            If an input with the same name already exists in the model
-            configuration and has a conflicting property. 
         """
-        new_input = new_input._get_input()
-        for current_input in self._model_config["input"]:
-            if new_input["name"] == current_input["name"]:
-                if (new_input["dims"] == current_input["dims"] and
-                    (new_input["data_type"] == current_input["data_type"])):
-                    return
-                elif new_input["dims"] != current_input["dims"]:
-                    raise ValueError(
-                        "Input name '" + new_input["name"] +
-                        "' exists and has conflicting dims property.")
-                elif new_input["data_type"] != current_input["data_type"]:
-                    raise ValueError(
-                        "Input name '" + new_input["name"] +
-                        "' exists and has conflicting data_type property.")
-
-        self._model_config["input"].append(new_input)
+        self._model_config["input"].append(new_input._get_input())
 
     def set_output(self, new_output):
         """Set the output for the model.
@@ -392,26 +374,8 @@ class ModelConfig:
         ----------
         new_output : list
             The output to be set.
-        Raises
-        ------
-        ValueError
-            If an output with the same name already exists in the model
-            configuration and has a conflicting property.
         """
-        new_output = new_output._get_output()
-        for current_output in self._model_config["output"]:
-            if new_output["name"] == current_output["name"]:
-                if (new_output["dims"] == current_output["dims"] and
-                    (new_output["data_type"] == current_output["data_type"])):
-                    return
-                if new_output["dims"] != current_output["dims"]:
-                    raise ValueError("Output name '" + new_output["name"] +
-                                     "' exists and has a conflicting dims")
-                elif new_output["data_type"] != current_output["data_type"]:
-                    raise ValueError("Output name '" + new_output["name"] +
-                                     "' exists and has a conflicting data_type")
-
-        self._model_config["output"].append(new_output)
+        self._model_config["output"].append(new_output._get_output())
 
 
 class InferInputConfig:

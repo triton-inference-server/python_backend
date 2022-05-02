@@ -135,9 +135,7 @@ class Stub {
   bool RunCommand();
 
   /// Set the model configuration for auto-complete
-  void AutoCompleteModelConfig(
-      bi::managed_external_buffer::handle_t map_handle,
-      std::string* auto_complete_config);
+  void AutoCompleteModelConfig(std::string* auto_complete_config);
 
   /// Initialize the user's Python code.
   void Initialize(bi::managed_external_buffer::handle_t map_handle);

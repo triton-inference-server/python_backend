@@ -222,7 +222,7 @@ Stub::RunCommand()
       auto_complete_response_msg->Args() = auto_complete_response.handle_;
 
       try {
-        AutoCompleteModelConfig(ipc_message->Args(), &auto_complete_config);
+        AutoCompleteModelConfig(&auto_complete_config);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -359,9 +359,7 @@ Stub::RunCommand()
 }
 
 void
-Stub::AutoCompleteModelConfig(
-    bi::managed_external_buffer::handle_t map_handle,
-    std::string* auto_complete_config)
+Stub::AutoCompleteModelConfig(std::string* auto_complete_config)
 {
   py::module sys = py::module_::import("sys");
 
@@ -406,26 +404,14 @@ Stub::AutoCompleteModelConfig(
           .attr("TritonPythonModel");
   model_ = TritonPythonModel();
 
-  std::unordered_map<std::string, std::string> map;
-  std::unique_ptr<PbMap> pb_map_shm =
-      PbMap::LoadFromSharedMemory(shm_pool_, map_handle);
-
-  // Get the unordered_map representation of the map in shared memory.
-  map = pb_map_shm->UnorderedMap();
-
-  py::dict model_config_params;
-
-  for (const auto& pair : map) {
-    model_config_params[pair.first.c_str()] = pair.second;
-  }
-
   if (!py::hasattr(model_, "auto_complete_config")) {
-    std::string message = "Python model " + model_path_ +
+    std::string message = "Unable to use auto-complete: Python model " +
+                          model_path_ +
                           " does not implement `auto_complete_config` method.";
     throw PythonBackendException(message);
   }
-  *auto_complete_config = std::string(
-      py::str(model_.attr("auto_complete_config")(model_config_params)));
+  *auto_complete_config =
+      std::string(py::str(model_.attr("auto_complete_config")()));
 }
 
 void
@@ -639,8 +625,8 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
   if (has_exception) {
     std::string err_message =
         std::string(
-            "Failed to process the request(s) for model '" +
-            name_ + "', message: ") +
+            "Failed to process the request(s) for model '" + name_ +
+            "', message: ") +
         error_string;
     LOG_INFO << err_message.c_str();
     response_batch_shm_ptr->has_error = true;
@@ -783,8 +769,8 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   if (has_exception) {
     std::string err_message =
         std::string(
-            "Failed to process the request(s) for model '" +
-            name_ + "', message: ") +
+            "Failed to process the request(s) for model '" + name_ +
+            "', message: ") +
         error_string;
     LOG_INFO << err_message.c_str();
     error_string_shm = PbString::Create(shm_pool_, error_string);

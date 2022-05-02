@@ -230,6 +230,7 @@ class ModelState : public BackendModel {
 
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
+
   // Create the model stub process.
   TRITONSERVER_Error* SetupModelStubProcess();
   // Start stub process
@@ -237,9 +238,19 @@ class ModelState : public BackendModel {
 
   // Auto-complete the model configuration
   TRITONSERVER_Error* AutoCompleteConfig();
+  TRITONSERVER_Error* FixIO(
+      triton::common::TritonJson::Value& reference_ios,
+      triton::common::TritonJson::Value* mutable_ios);
+  TRITONSERVER_Error* CheckModelConfigMismatch();
+  TRITONSERVER_Error* ValidateModelConfig();
 
   // Correct the string to the right json string format
   void CorrectStringFormat(std::string* str);
+
+  common::TritonJson::Value& GetAutoCompleteConfig()
+  {
+    return auto_complete_config_;
+  }
 
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
@@ -401,11 +412,6 @@ class ModelInstanceState : public BackendModelInstance {
       std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
       AllocatedSharedMemory<char>& request_batch,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
-  // Correct the string to the right json string format
-  void CorrectStringFormat(std::string* str);
-
-  // Correct the string to the right json string format
-  common::TritonJson::Value& GetModelConfig() { return this->model_config_; };
 };
 
 ModelInstanceState::ModelInstanceState(
@@ -2094,6 +2100,8 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
         triton_model, 1 /* config_version */, message));
   }
 
+  RETURN_IF_ERROR((*state)->ValidateModelConfig());
+
   return nullptr;  // success
 }
 
@@ -2426,7 +2434,7 @@ ModelState::StartModelStubProcess()
       // Push a dummy message to the message queue so that the stub
       // process is notified that it can release the object stored in
       // shared memory.
-      stub_message_queue_->Push(1000);
+      stub_message_queue_->Push(DUMMY_MESSAGE);
 
       // If the model is not initialized, wait for the stub process to exit.
       if (!initialized_) {
@@ -2439,21 +2447,10 @@ ModelState::StartModelStubProcess()
     });
 
     stub_pid_ = pid;
-    triton::common::TritonJson::WriteBuffer buffer;
-    ModelConfig().Write(&buffer);
-
-    std::unordered_map<std::string, std::string> initialize_map = {
-        {"model_config", buffer.MutableContents()}};
 
     std::unique_ptr<IPCMessage> auto_complete_message =
         IPCMessage::Create(shm_pool_, false /* inline_response */);
     auto_complete_message->Command() = PYTHONSTUB_AutoCompleteRequest;
-
-    std::unique_ptr<PbMap> pb_map = PbMap::Create(shm_pool_, initialize_map);
-    bi::managed_external_buffer::handle_t initialize_map_handle =
-        pb_map->ShmHandle();
-
-    auto_complete_message->Args() = initialize_map_handle;
     stub_message_queue_->Push(auto_complete_message->ShmHandle());
 
     std::unique_ptr<IPCMessage> auto_complete_response_message =
@@ -2497,7 +2494,7 @@ ModelState::StartModelStubProcess()
       std::string auto_complete_config_string = auto_complete_config->String();
       // Need to corret the string for the right json format
       CorrectStringFormat(&auto_complete_config_string);
-      auto_complete_config_.Parse(auto_complete_config_string);
+      RETURN_IF_ERROR(auto_complete_config_.Parse(auto_complete_config_string));
       triton::common::TritonJson::WriteBuffer buf;
       auto_complete_config_.Write(&buf);
     }
@@ -2519,7 +2516,321 @@ ModelState::CorrectStringFormat(std::string* str)
 TRITONSERVER_Error*
 ModelState::AutoCompleteConfig()
 {
-  // TODO: Add checking and fix config here
+  RETURN_IF_ERROR(CheckModelConfigMismatch());
+
+  // If the model configuration already specifies inputs and outputs
+  // then don't perform any auto-completion.
+  size_t input_cnt = 0;
+  size_t output_cnt = 0;
+  {
+    triton::common::TritonJson::Value inputs;
+    if (ModelConfig().Find("input", &inputs)) {
+      input_cnt = inputs.ArraySize();
+    }
+
+    triton::common::TritonJson::Value config_batch_inputs;
+    if (ModelConfig().Find("batch_input", &config_batch_inputs)) {
+      input_cnt += config_batch_inputs.ArraySize();
+    }
+
+    triton::common::TritonJson::Value outputs;
+    if (ModelConfig().Find("output", &outputs)) {
+      output_cnt = outputs.ArraySize();
+    }
+  }
+
+  // For batching support, the number of dimensions specified in model config
+  // should be 1 less than the number of dimensions present in model.
+  // Will use that as a hint to ascertain whether or not to enable batching.
+  // However, ragged batching is an exception to this rule. A tensor
+  // allowing ragged batch is in itself a batching hint.
+  bool config_batch_hint = false;
+  // The number of IO Tensors with shape specification in config
+  int tensors_with_config_shape_cnt = 0;
+
+  if ((input_cnt != 0) || (output_cnt != 0)) {
+    std::vector<std::string> io_types{"input", "output"};
+    std::map<std::string, std::set<std::string>> allowed_tensors;
+
+    bool io_allow_ragged_batch = false;
+    triton::common::TritonJson::Value& auto_complete_model_config =
+        GetAutoCompleteConfig();
+
+    for (const auto& io_type : io_types) {
+      triton::common::TritonJson::Value model_io;
+      if (auto_complete_model_config.Find(io_type.c_str(), &model_io)) {
+        for (size_t i = 0; i < model_io.ArraySize(); i++) {
+          triton::common::TritonJson::Value io;
+          RETURN_IF_ERROR(model_io.IndexAsObject(i, &io));
+          std::string io_name;
+          RETURN_IF_ERROR(io.MemberAsString("name", &io_name));
+          allowed_tensors[io_type].emplace(io_name);
+        }
+        triton::common::TritonJson::Value config_io;
+        RETURN_IF_ERROR(
+            ModelConfig().MemberAsArray(io_type.c_str(), &config_io));
+        for (size_t i = 0;
+             ((i < config_io.ArraySize()) && (!io_allow_ragged_batch)); i++) {
+          triton::common::TritonJson::Value io;
+          RETURN_IF_ERROR(config_io.IndexAsObject(i, &io));
+          io.MemberAsBool("allow_ragged_batch", &io_allow_ragged_batch);
+          if (io_allow_ragged_batch) {
+            // Treat the presence of tensor allowing ragged batch as
+            // a hint for batching.
+            config_batch_hint = true;
+          } else {
+            common::TritonJson::Value model_config_dims;
+            common::TritonJson::Value reshape;
+            if (io.Find("reshape", &reshape)) {
+              reshape.MemberAsArray("shape", &model_config_dims);
+            } else {
+              io.MemberAsArray("dims", &model_config_dims);
+            }
+            if (model_config_dims.ArraySize() != 0) {
+              tensors_with_config_shape_cnt++;
+            }
+            std::string name;
+            RETURN_IF_ERROR(io.MemberAsString("name", &name));
+            if (io_type.compare("input") == 0) {
+              RETURN_IF_ERROR(
+                  CheckAllowedModelInput(io, allowed_tensors[io_type]));
+            } else {
+              RETURN_IF_ERROR(
+                  CheckAllowedModelOutput(io, allowed_tensors[io_type]));
+            }
+            if (model_config_dims.ArraySize() != 0) {
+              int64_t dim = 0;
+              RETURN_IF_ERROR(model_config_dims.IndexAsInt(0, &dim));
+              if (dim == -1) {
+                config_batch_hint = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  int64_t max_batch_size = 0;
+  bool has_implicit_batch_dim = false;
+  // If model has implicit batch dimension then retrieve the value and exit
+  triton::common::TritonJson::Value ref_mbs_value;
+  if (GetAutoCompleteConfig().Find("max_batch_size", &ref_mbs_value)) {
+    RETURN_IF_ERROR(ref_mbs_value.AsInt(&max_batch_size));
+    has_implicit_batch_dim = true;
+  }
+
+  if (config_batch_hint && max_batch_size == 0) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("autofill failed for model '") + Name() +
+         "': model tensor shape configuration hints for dynamic batching "
+         "but the underlying model doesn't support batching.")
+            .c_str());
+  } else if (
+      (tensors_with_config_shape_cnt != 0) && (!config_batch_hint) &&
+      (!has_implicit_batch_dim)) {
+    // if no hint for batching in config io
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_WARN,
+        (std::string("The specified dimensions in model config for ") + Name() +
+         " hints that batching is unavailable")
+            .c_str());
+    max_batch_size = 0;
+  }
+
+  if (MaxBatchSize() == 0) {
+    triton::common::TritonJson::Value mbs_value;
+    ModelConfig().Find("max_batch_size", &mbs_value);
+    mbs_value.SetInt(max_batch_size);
+    SetMaxBatchSize(max_batch_size);
+  } else if (MaxBatchSize() > max_batch_size) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("autofill failed for model '") + Name() +
+         "': configuration specified max-batch " +
+         std::to_string(MaxBatchSize()) +
+         " but Python model only supports max-batch " +
+         std::to_string(max_batch_size))
+            .c_str());
+  }
+
+  triton::common::TritonJson::Value ref_inputs(
+      GetAutoCompleteConfig(), triton::common::TritonJson::ValueType::ARRAY);
+  triton::common::TritonJson::Value mutable_inputs(
+      ModelConfig(), triton::common::TritonJson::ValueType::ARRAY);
+  GetAutoCompleteConfig().Find("input", &ref_inputs);
+  bool found_inputs = ModelConfig().Find("input", &mutable_inputs);
+  RETURN_IF_ERROR(FixIO(ref_inputs, &mutable_inputs));
+  if (!found_inputs) {
+    ModelConfig().Add("input", std::move(mutable_inputs));
+  }
+
+  triton::common::TritonJson::Value ref_outputs(
+      GetAutoCompleteConfig(), triton::common::TritonJson::ValueType::ARRAY);
+  triton::common::TritonJson::Value mutable_outputs(
+      ModelConfig(), triton::common::TritonJson::ValueType::ARRAY);
+  GetAutoCompleteConfig().Find("output", &ref_outputs);
+  bool found_outputs = ModelConfig().Find("output", &mutable_outputs);
+  RETURN_IF_ERROR(FixIO(ref_outputs, &mutable_outputs));
+  if (!found_outputs) {
+    ModelConfig().Add("output", std::move(mutable_outputs));
+  }
+
+  return nullptr;
+}
+
+TRITONSERVER_Error*
+ModelState::CheckModelConfigMismatch()
+{
+  triton::common::TritonJson::Value& ref_model_config = GetAutoCompleteConfig();
+  triton::common::TritonJson::Value& initial_model_config = ModelConfig();
+  std::vector<std::string> io_types{"input", "output"};
+  for (const auto& io_type : io_types) {
+    triton::common::TritonJson::Value ref_model_io, initial_model_io;
+    if (ref_model_config.Find(io_type.c_str(), &ref_model_io)) {
+      for (size_t i = 0; i < ref_model_io.ArraySize(); i++) {
+        triton::common::TritonJson::Value ref_io;
+        RETURN_IF_ERROR(ref_model_io.IndexAsObject(i, &ref_io));
+        std::string ref_io_name;
+        RETURN_IF_ERROR(ref_io.MemberAsString("name", &ref_io_name));
+        if (initial_model_config.Find(io_type.c_str(), &initial_model_io)) {
+          for (size_t i = 0; i < initial_model_io.ArraySize(); i++) {
+            triton::common::TritonJson::Value initial_io;
+            RETURN_IF_ERROR(initial_model_io.IndexAsObject(i, &initial_io));
+            std::string initial_io_name;
+            RETURN_IF_ERROR(
+                initial_io.MemberAsString("name", &initial_io_name));
+            if (ref_io_name == initial_io_name) {
+              // Check if 'data_type' mismatch
+              triton::common::TritonJson::Value datatype;
+              if (ref_io.Find("data_type", &datatype)) {
+                std::string ref_datatype, initial_datatype;
+                RETURN_IF_ERROR(datatype.AsString(&ref_datatype));
+                RETURN_IF_ERROR(
+                    initial_io.MemberAsString("data_type", &initial_datatype));
+                if (!initial_datatype.empty() &&
+                    (initial_datatype.compare("TYPE_INVALID") != 0)) {
+                  if (ref_datatype != initial_datatype) {
+                    return TRITONSERVER_ErrorNew(
+                        TRITONSERVER_ERROR_INTERNAL,
+                        (io_type + " name '" + ref_io_name +
+                         "' has a conflicting data_type property.")
+                            .c_str());
+                  }
+                }
+              }
+              // Check if 'dims' mismatch
+              triton::common::TritonJson::Value ref_dims, initial_dims;
+              if (ref_io.Find("dims", &ref_dims)) {
+                RETURN_IF_ERROR(
+                    initial_io.MemberAsArray("dims", &initial_dims));
+                if (initial_dims.ArraySize() != 0) {
+                  if (ref_dims.ArraySize() == initial_dims.ArraySize()) {
+                    for (size_t i = 0; i < ref_dims.ArraySize(); i++) {
+                      int64_t ref_dim = 0, initial_dim = 0;
+                      RETURN_IF_ERROR(ref_dims.IndexAsInt(i, &ref_dim));
+                      RETURN_IF_ERROR(initial_dims.IndexAsInt(i, &initial_dim));
+                      if (ref_dim != initial_dim) {
+                        return TRITONSERVER_ErrorNew(
+                            TRITONSERVER_ERROR_INTERNAL,
+                            (io_type + " name '" + ref_io_name +
+                             "' has a conflicting dims property.")
+                                .c_str());
+                      }
+                    }
+                  } else {
+                    return TRITONSERVER_ErrorNew(
+                        TRITONSERVER_ERROR_INTERNAL,
+                        (io_type + " name '" + ref_io_name +
+                         "' has a conflicting dims property.")
+                            .c_str());
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+TRITONSERVER_Error*
+ModelState::FixIO(
+    triton::common::TritonJson::Value& reference_ios,
+    triton::common::TritonJson::Value* mutable_ios)
+{
+  if (mutable_ios->ArraySize() == 0) {
+    RETURN_IF_ERROR(mutable_ios->Swap(reference_ios));
+  } else {
+    for (size_t i = 0; i < mutable_ios->ArraySize(); i++) {
+      triton::common::TritonJson::Value mutable_io;
+      RETURN_IF_ERROR(mutable_ios->IndexAsObject(i, &mutable_io));
+      std::string io_name;
+      RETURN_IF_ERROR(mutable_io.MemberAsString("name", &io_name));
+      for (size_t j = 0; j < reference_ios.ArraySize(); j++) {
+        triton::common::TritonJson::Value io_ref;
+        RETURN_IF_ERROR(reference_ios.IndexAsObject(j, &io_ref));
+        std::string ref_name;
+        RETURN_IF_ERROR(io_ref.MemberAsString("name", &ref_name));
+        if (io_name.compare(ref_name) == 0) {
+          // only set type and shape if they are not set
+          common::TritonJson::Value data_type;
+          if (mutable_io.Find("data_type", &data_type)) {
+            std::string dt_str;
+            RETURN_IF_ERROR(data_type.AsString(&dt_str));
+            if (dt_str.empty() || (dt_str.compare("TYPE_INVALID") == 0)) {
+              std::string ref_data_type;
+              RETURN_IF_ERROR(
+                  io_ref.MemberAsString("data_type", &ref_data_type));
+              RETURN_IF_ERROR(data_type.SetString(ref_data_type));
+            }
+          } else {
+            std::string ref_data_type;
+            RETURN_IF_ERROR(io_ref.MemberAsString("data_type", &ref_data_type));
+            RETURN_IF_ERROR(mutable_io.AddString("data_type", ref_data_type));
+          }
+
+          common::TritonJson::Value dims;
+          if (mutable_io.Find("dims", &dims)) {
+            if (dims.ArraySize() == 0) {
+              common::TritonJson::Value ref_dims;
+              RETURN_IF_ERROR(io_ref.MemberAsArray("dims", &ref_dims));
+              RETURN_IF_ERROR(dims.Swap(ref_dims));
+              common::TritonJson::Value reshape;
+              if (io_ref.Find("reshape", &reshape)) {
+                mutable_io.Add("reshape", std::move(reshape));
+              }
+            }
+          } else {
+            common::TritonJson::Value ref_dims;
+            RETURN_IF_ERROR(io_ref.MemberAsArray("dims", &ref_dims));
+            RETURN_IF_ERROR(mutable_io.Add("dims", std::move(ref_dims)));
+            common::TritonJson::Value reshape;
+            if (io_ref.Find("reshape", &reshape)) {
+              mutable_io.Add("reshape", std::move(reshape));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return nullptr;
+}
+
+TRITONSERVER_Error*
+ModelState::ValidateModelConfig()
+{
+  // We have the json DOM for the model configuration...
+  triton::common::TritonJson::WriteBuffer buffer;
+  RETURN_IF_ERROR(ModelConfig().PrettyWrite(&buffer));
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("model configuration:\n") + buffer.Contents()).c_str());
 
   return nullptr;
 }
