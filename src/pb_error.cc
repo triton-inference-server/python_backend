@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,5 +31,34 @@ const std::string&
 PbError::Message()
 {
   return message_;
+}
+
+bi::managed_external_buffer::handle_t
+PbError::ShmHandle()
+{
+  return shm_handle_;
+}
+
+void
+PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+{
+  message_shm_ = PbString::Create(shm_pool, message_);
+  shm_handle_ = message_shm_->ShmHandle();
+}
+
+std::shared_ptr<PbError>
+PbError::LoadFromSharedMemory(
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bi::managed_external_buffer::handle_t shm_handle)
+{
+  std::unique_ptr<PbString> message_shm =
+      PbString::LoadFromSharedMemory(shm_pool, shm_handle);
+  return std::shared_ptr<PbError>(new PbError(message_shm));
+}
+
+PbError::PbError(std::unique_ptr<PbString>& message_shm)
+{
+  message_shm_ = std::move(message_shm);
+  message_ = message_shm_->String();
 }
 }}}  // namespace triton::backend::python

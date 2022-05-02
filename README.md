@@ -1,5 +1,5 @@
 <!--
-# Copyright 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -51,8 +51,10 @@ any C++ code.
     - [Important Notes](#important-notes)
   - [Error Handling](#error-handling)
   - [Managing Shared Memory](#managing-shared-memory)
+  - [Multiple Model Instance Support](#multiple-model-instance-support)
 - [Business Logic Scripting](#business-logic-scripting)
-  - [Limitations](#limitations)
+  - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
+  - [Limitation](#limitation)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
   - [`pb_utils.Tensor.from_dlpack() -> Tensor`](#pb_utilstensorfrom_dlpack---tensor)
@@ -119,14 +121,15 @@ $ python3 python_backend/examples/add_sub/client.py
 * numpy
 * rapidjson-dev
 * libarchive-dev
+* zlib1g-dev
 
 ```
 pip3 install numpy
 ```
 
-On Ubuntu or Debian you can use the command below to install `rapidjson` and `libarchive`:
+On Ubuntu or Debian you can use the command below to install `rapidjson`, `libarchive`, and `zlib`:
 ```
-sudo apt-get install rapidjson-dev libarchive-dev
+sudo apt-get install rapidjson-dev libarchive-dev zlib1g-dev
 ```
 
 2. Build Python backend. Replace \<GIT\_BRANCH\_NAME\> with the GitHub branch
@@ -148,6 +151,7 @@ as the Python backend repository branch that you are trying to compile.
 * triton-inference-server/backend: -DTRITON_BACKEND_REPO_TAG=\<GIT\_BRANCH\_NAME\>
 * triton-inference-server/common: -DTRITON_COMMON_REPO_TAG=\<GIT\_BRANCH\_NAME\>
 * triton-inference-server/core: -DTRITON_CORE_REPO_TAG=\<GIT\_BRANCH\_NAME\>
+
 
 Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
 this location is `/opt/tritonserver`.
@@ -336,6 +340,10 @@ model.
 
 ### 1. Building Custom Python Backend Stub
 
+**Important Note: If your Python model and its dependencies use Python 3.8,
+you can skip this section and start from section 2 since the Python backend stub
+shipped in Triton containers uses Python 3.8 by default.**
+
 Python backend uses a *stub* process to connect your `model.py` file to the
 Triton C++ core. This stub process has an embedded Python interpreter with
 a fixed Python version. If you intend to use a Python interpreter with
@@ -491,6 +499,12 @@ default version of the stub is Python 3.8.
 provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
 `config.pbtxt` of all the models that want to use the execution environment.
 
+4. If you need to compile the Python backend stub, it is recommended that you
+compile it in the official Triton NGC containers. Otherwise, your compiled stub
+may use dependencies that are not available in the Triton container that you are
+using for deployment. For example, compiling the Python backend stub on an OS
+other than Ubuntu 20.04 can lead to unexpected errors.
+
 ## Error Handling
 
 If there is an error that affects the `initialize`, `execute`, or `finalize`
@@ -537,6 +551,22 @@ properly set the `--shm-size` flag depending on the size of your inputs and
 outputs. The default value for docker run command is `64MB` which is very
 small.
 
+## Multiple Model Instance Support
+
+Python interpreter uses a global lock known as
+[GIL](https://docs.python.org/3/c-api/init.html#thread-state-and-the-global-interpreter-lock).
+Because of GIL, it is not possible have multiple threads running in the same
+Python interpreter simultaneously as each thread requires to acquire the GIL
+when accessing Python objects which will serialize all the operations. In order
+to work around this issue, Python backend spawns a separate process for each
+[model instance](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#multiple-model-instances).
+This is in contrast with how other Triton backends such as
+[ONNXRuntime](https://github.com/triton-inference-server/onnxruntime_backend),
+[TensorFlow](https://github.com/triton-inference-server/tensorflow_backend), and
+[PyTorch](https://github.com/triton-inference-server/pytorch_backend) handle
+multiple instances. Increasing the instance count for these backends will create
+additional threads instead of spawning separate processes.
+
 # Business Logic Scripting
 
 Triton's
@@ -577,7 +607,7 @@ class TritonPythonModel:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0)
 
       # Execute the inference_request and wait for the response
       inference_response = inference_request.exec()
@@ -629,7 +659,7 @@ class TritonPythonModel:
         # async_exec function returns an
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
-        inference_response_awaits.append(inference_request.async_exec())
+        infer_response_awaits.append(inference_request.async_exec())
 
       # Wait for all of the inference requests to complete.
       infer_responses = await asyncio.gather(*infer_response_awaits)
@@ -650,13 +680,43 @@ class TritonPythonModel:
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
-## Limitations
+Starting from the 22.04 release, the lifetime of the BLS output tensors have
+been improved such that if a tensor is no longer needed in your Python model it
+will be automatically deallocated. This can increase the number of BLS requests
+that you can execute in your model without running into the out of GPU or shared
+memory error.
 
-- The number of inference requests that can be executed as a part of your model
-execution is limited to the amount of shared memory available to the Triton
-server.  If you are using Docker to start the TritonServer, you can control the
-shared memory usage using the
-[`--shm-size`](https://docs.docker.com/engine/reference/run/) flag.
+Note: Async BLS is not supported on Python 3.6 or lower due to the `async` keyword
+and `asyncio.run` being introduced in Python 3.7. 
+
+## Using BLS with Stateful Models
+
+[Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#stateful-models)
+require setting additional flags in the inference request to indicate the
+start and of a sequence. The `flags` argument in the `pb_utils.InferenceRequest`
+object can be used to indicate whether the request is the first or last request
+in the sequence. An example indicating that the request is starting the
+sequence:
+
+```python
+inference_request = pb_utils.InferenceRequest(model_name='model_name',
+  requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+  inputs=[<list of pb_utils.Tensor objects>],
+  request_id="1", correlation_id=4, flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
+```
+
+For indicating the ending of the sequence you can use the 
+`pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END` flag. If the request is both
+starting and ending a sequence at the same time (i.e. the sequence has only a
+single request), you can use the bitwise OR operator to enable both of the
+flags:
+
+```
+flags = pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START | pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END
+```
+
+## Limitation
+
 - You need to make sure that the inference requests performed as a part of your model
 do not create a circular dependency. For example, if model A performs an inference request
 on itself and there are no more model instances ready to execute the inference request, the

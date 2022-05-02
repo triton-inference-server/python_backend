@@ -212,6 +212,25 @@ def get_output_config_by_name(model_config, name):
 
     return None
 
+def using_decoupled_model_transaction_policy(model_config):
+    """Whether or not the model is configured with decoupled
+    transaction policy.
+    Parameters
+    ----------
+    model_config : dict
+        dictionary object containing the model configuration
+
+    Returns
+    -------
+    bool
+        True if the model is configured with decoupled transaction
+        policy.
+    """
+    if 'model_transaction_policy' in model_config:
+        return model_config['model_transaction_policy']['decoupled']
+
+    return False
+
 
 def triton_to_numpy_type(data_type):
     if data_type == 1:
@@ -273,3 +292,7 @@ def numpy_to_triton_type(data_type):
 
 def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
+
+
+TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
+TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2

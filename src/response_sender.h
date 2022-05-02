@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,32 +25,24 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
+
+#include "infer_response.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::string> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
-
+class ResponseSender {
  public:
-  EnvironmentManager();
+  ResponseSender(
+      intptr_t request_address, intptr_t response_factory_address,
+      std::unique_ptr<SharedMemoryManager>& shm_pool);
+  void Send(std::shared_ptr<InferResponse>& infer_response);
+  void Close();
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+ private:
+  intptr_t request_address_;
+  intptr_t response_factory_address_;
+  std::unique_ptr<SharedMemoryManager>& shm_pool_;
+  bool closed_;
 };
-
 }}}  // namespace triton::backend::python

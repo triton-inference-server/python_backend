@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -30,14 +30,23 @@
 #include <pybind11/embed.h>
 namespace py = pybind11;
 #endif
+#include "scoped_defer.h"
 
 namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
     std::shared_ptr<PbError> error)
-    : output_tensors_(std::move(output_tensors)), error_(error)
+    : error_(error)
 {
+  for (auto& output : output_tensors) {
+    if (!output) {
+      throw PythonBackendException(
+          "Output tensor for inference response should not be empty.");
+    }
+  }
+
+  output_tensors_ = output_tensors;
 }
 
 std::vector<std::shared_ptr<PbTensor>>&
@@ -52,87 +61,100 @@ InferResponse::HasError()
   return error_.get() != nullptr;
 }
 
-bool
-InferResponse::IsErrorMessageSet()
-{
-  return is_message_set_;
-}
-
 void
 InferResponse::SaveToSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, Response* response_shm,
-    bool copy_cpu, bool copy_gpu)
+    std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu)
 {
   size_t output_tensor_length = output_tensors_.size();
-  response_shm->has_error = false;
-  response_shm->is_error_set = false;
+  if (HasError()) {
+    response_shm_ = shm_pool->Construct<char>(sizeof(ResponseShm));
+  } else {
+    response_shm_ = shm_pool->Construct<char>(
+        sizeof(ResponseShm) +
+        output_tensor_length * sizeof(bi::managed_external_buffer::handle_t));
+  }
+
+  ResponseShm* response_shm_ptr =
+      reinterpret_cast<ResponseShm*>(response_shm_.data_.get());
+  response_shm_ptr->has_error = false;
+  response_shm_ptr->is_error_set = false;
+  shm_handle_ = response_shm_.handle_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
-  if (this->HasError()) {
-    response_shm->has_error = true;
-    off_t error_offset;
-    SaveStringToSharedMemory(
-        shm_pool, error_offset, this->Error()->Message().c_str());
-    response_shm->is_error_set = true;
-    response_shm->error = error_offset;
-    response_shm->outputs_size = 0;
+  if (HasError()) {
+    response_shm_ptr->has_error = true;
+    Error()->SaveToSharedMemory(shm_pool);
+
+    response_shm_ptr->is_error_set = true;
+    response_shm_ptr->error = Error()->ShmHandle();
+    response_shm_ptr->outputs_size = 0;
   } else {
-    Tensor* output_tensors_shm;
-    off_t output_tensors_offset;
-    shm_pool->Map(
-        (char**)&output_tensors_shm, sizeof(Tensor) * output_tensor_length,
-        output_tensors_offset);
-    response_shm->outputs = output_tensors_offset;
-    response_shm->outputs_size = output_tensor_length;
+    bi::managed_external_buffer::handle_t* tensor_handle_shm_ptr =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_shm_.data_.get() + sizeof(ResponseShm));
+    response_shm_ptr->outputs_size = output_tensor_length;
 
     size_t j = 0;
     for (auto& output_tensor : output_tensors_) {
-      Tensor* output_tensor_shm = &output_tensors_shm[j];
-      output_tensor->SaveToSharedMemory(
-          shm_pool, output_tensor_shm, copy_cpu, copy_gpu);
+      output_tensor->SaveToSharedMemory(shm_pool, copy_gpu);
+      tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
   }
 }
 
+bi::managed_external_buffer::handle_t
+InferResponse::ShmHandle()
+{
+  return shm_handle_;
+}
+
 std::unique_ptr<InferResponse>
 InferResponse::LoadFromSharedMemory(
-    std::unique_ptr<SharedMemory>& shm_pool, off_t response_offset,
-    std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
-    std::shared_ptr<std::mutex>& cuda_ipc_close_mutex)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bi::managed_external_buffer::handle_t response_handle,
+    bool open_cuda_handle)
 {
-  Response* response;
-  shm_pool->MapOffset((char**)&response, response_offset);
-  uint32_t requested_output_count = response->outputs_size;
+  AllocatedSharedMemory<char> response_shm =
+      shm_pool->Load<char>(response_handle);
+  ResponseShm* response_shm_ptr =
+      reinterpret_cast<ResponseShm*>(response_shm.data_.get());
+  uint32_t requested_output_count = response_shm_ptr->outputs_size;
 
   std::shared_ptr<PbError> pb_error;
-  std::vector<std::shared_ptr<PbTensor>> py_output_tensors;
+  std::vector<std::shared_ptr<PbTensor>> output_tensors;
 
   // If the error field is set, do not load output tensors from shared memory.
-  if (response->has_error) {
-    pb_error = std::make_shared<PbError>("");
-
-    char* error_string;
-    if (response->is_error_set) {
-      LoadStringFromSharedMemory(shm_pool, response->error, error_string);
-      pb_error = std::make_shared<PbError>(error_string);
-    }
+  if (response_shm_ptr->has_error && response_shm_ptr->is_error_set) {
+    pb_error = PbError::LoadFromSharedMemory(shm_pool, response_shm_ptr->error);
+  } else if (response_shm_ptr->has_error && !response_shm_ptr->is_error_set) {
+    pb_error =
+        std::make_shared<PbError>("Failed to retrieve the response error.");
   } else {
+    bi::managed_external_buffer::handle_t* tensor_handle_shm =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_shm.data_.get() + sizeof(ResponseShm));
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
       std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
-          shm_pool, response->outputs + sizeof(Tensor) * idx,
-          cuda_ipc_open_mutex, cuda_ipc_close_mutex);
-      py_output_tensors.emplace_back(std::move(pb_tensor));
+          shm_pool, tensor_handle_shm[idx], open_cuda_handle);
+      output_tensors.emplace_back(std::move(pb_tensor));
     }
   }
 
-  std::unique_ptr<InferResponse> infer_response =
-      std::make_unique<InferResponse>(py_output_tensors, pb_error);
-  if (response->is_error_set)
-    infer_response->is_message_set_ = true;
+  return std::unique_ptr<InferResponse>(
+      new InferResponse(response_shm, output_tensors, pb_error));
+}
 
-  return infer_response;
+InferResponse::InferResponse(
+    AllocatedSharedMemory<char>& response_shm,
+    std::vector<std::shared_ptr<PbTensor>>& output_tensors,
+    std::shared_ptr<PbError>& pb_error)
+{
+  response_shm_ = std::move(response_shm);
+  output_tensors_ = std::move(output_tensors);
+  error_ = std::move(pb_error);
+  shm_handle_ = response_shm_.handle_;
 }
 
 std::shared_ptr<PbError>&
@@ -140,5 +162,85 @@ InferResponse::Error()
 {
   return error_;
 }
+
+#ifndef TRITON_PB_STUB
+TRITONSERVER_Error*
+InferResponse::Send(
+    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream)
+{
+  // [FIXME] Use this code to send responses in non-decoupled mode.
+  TRITONBACKEND_Response* response = nullptr;
+  TRITONSERVER_Error* response_error = nullptr;
+  ScopedDefer response_error_handling([&response, &response_error] {
+    if (response != nullptr) {
+      LOG_IF_ERROR(
+          TRITONBACKEND_ResponseSend(response, 0 /* flags */, response_error),
+          "failed to send the response.");
+    }
+  });
+
+  SET_ERROR_AND_RETURN(
+      response_error,
+      TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
+
+  if (HasError()) {
+    response_error = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
+    return nullptr;
+  }
+
+  bool cuda_copy = false;
+  for (auto& output_tensor : OutputTensors()) {
+    TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
+    int64_t src_memory_type_id = output_tensor->MemoryTypeId();
+
+    TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
+    int64_t actual_memory_type_id = src_memory_type_id;
+
+    // [FIXME] GPU tensors are not supported in the decoupled API mode.
+    if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+      response_error = TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          "GPU tensors are not supported in decoupled API.");
+      return response_error;
+    }
+
+    TRITONBACKEND_Output* response_output;
+    SET_ERROR_AND_RETURN(
+        response_error,
+        TRITONBACKEND_ResponseOutput(
+            response, &response_output, output_tensor->Name().c_str(),
+            static_cast<TRITONSERVER_DataType>(output_tensor->TritonDtype()),
+            output_tensor->Dims().data(), output_tensor->Dims().size()));
+
+    void* buffer;
+    bool cuda_used = false;
+    SET_ERROR_AND_RETURN(
+        response_error, TRITONBACKEND_OutputBuffer(
+                            response_output, &buffer, output_tensor->ByteSize(),
+                            &actual_memory_type, &actual_memory_type_id));
+
+    if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
+      SET_ERROR_AND_RETURN(
+          response_error,
+          CopyBuffer(
+              "Failed to copy the output tensor to buffer.", src_memory_type,
+              src_memory_type_id, actual_memory_type, actual_memory_type_id,
+              output_tensor->ByteSize(), output_tensor->DataPtr(), buffer,
+              reinterpret_cast<cudaStream_t>(cuda_stream), &cuda_used));
+    }
+
+    cuda_copy |= cuda_used;
+  }
+
+#ifdef TRITON_ENABLE_GPU
+  if (cuda_copy) {
+    cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(cuda_stream));
+  }
+#endif  // TRITON_ENABLE_GPU
+
+  return response_error;
+}
+#endif
 
 }}}  // namespace triton::backend::python

@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,28 +24,58 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include "message_queue.h"
+#include "triton/backend/backend_common.h"
+#include "triton/core/tritonserver.h"
 
-#include <string>
-#include "pb_string.h"
-#include "pb_utils.h"
+#ifdef TRITON_ENABLE_GPU
+#include <cuda_runtime_api.h>
+#endif  // TRITON_ENABLE_GPU
+
 
 namespace triton { namespace backend { namespace python {
-class PbError {
+
+class MemoryRecord {
  public:
-  PbError(const std::string& message) : message_(message) {}
-  const std::string& Message();
-  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
-  bi::managed_external_buffer::handle_t ShmHandle();
-  static std::shared_ptr<PbError> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t handle);
-  DISALLOW_COPY_AND_ASSIGN(PbError);
+  virtual const std::function<void(void*)>& ReleaseCallback() = 0;
+  virtual void* MemoryId() = 0;
+};
+
+#ifdef TRITON_ENABLE_GPU
+class GPUMemoryRecord : public MemoryRecord {
+ public:
+  GPUMemoryRecord(void* ptr);
+  const std::function<void(void*)>& ReleaseCallback() override;
+  void* MemoryId() override;
 
  private:
-  PbError(std::unique_ptr<PbString>& pb_error);
-  std::string message_;
-  std::shared_ptr<PbString> message_shm_;
-  bi::managed_external_buffer::handle_t shm_handle_;
+  void* ptr_;
+  std::function<void(void*)> release_callback_;
+};
+#endif
+
+/// Memory manager class is used primarily for managing the lifetime of GPU
+/// tensors in BLS. It mainly consists of a background thread that monitors a
+/// message queue in shared memory. Whenever a GPU tensor is created, it will
+/// be pushed to the memory manager. The stub process must send a message to the
+/// message queue asking the memory manager to deallocate the GPU tensor.
+class MemoryManager {
+ public:
+  MemoryManager(std::unique_ptr<MessageQueue<uint64_t>>&& memory_message_queue);
+  uint64_t AddRecord(std::unique_ptr<MemoryRecord>&& memory_record);
+  TRITONSERVER_Error* ResetCounter();
+  ~MemoryManager();
+
+ private:
+  std::thread thread_;
+  std::unordered_map<uint64_t, std::unique_ptr<MemoryRecord>> records_;
+  uint64_t record_count_;
+  std::unique_ptr<MessageQueue<uint64_t>> message_queue_;
+  void QueueMonitorThread();
+  std::mutex mu_;
 };
 }}};  // namespace triton::backend::python

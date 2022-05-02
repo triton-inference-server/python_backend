@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@ project(tritonpythonbackend LANGUAGES C CXX)
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
+option(TRITON_ENABLE_NVTX "Include nvtx markers collection in backend." OFF)
 
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
@@ -57,19 +58,16 @@ FetchContent_Declare(
   repo-common
   GIT_REPOSITORY https://github.com/triton-inference-server/common.git
   GIT_TAG ${TRITON_COMMON_REPO_TAG}
-  GIT_SHALLOW ON
 )
 FetchContent_Declare(
   repo-core
   GIT_REPOSITORY https://github.com/triton-inference-server/core.git
   GIT_TAG ${TRITON_CORE_REPO_TAG}
-  GIT_SHALLOW ON
 )
 FetchContent_Declare(
   repo-backend
   GIT_REPOSITORY https://github.com/triton-inference-server/backend.git
   GIT_TAG ${TRITON_BACKEND_REPO_TAG}
-  GIT_SHALLOW ON
 )
 FetchContent_MakeAvailable(repo-common repo-core repo-backend)
 
@@ -114,7 +112,13 @@ if(${TRITON_ENABLE_GPU})
   find_package(CUDAToolkit REQUIRED)
   message(STATUS "Using CUDA ${CUDA_VERSION}")
   set(CUDA_NVCC_FLAGS -std=c++11)
+elseif()
+  message(WARNING "TRITON_ENABLE_GPU is OFF, GPU Tensor support will be disabled")
 endif() # TRITON_ENABLE_GPU
+
+if(${TRITON_ENABLE_NVTX})
+  add_definitions(-DTRITON_ENABLE_NVTX=1)
+endif() # TRITON_ENABLE_NVTX
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -128,18 +132,26 @@ set(
   src/infer_response.h
   src/infer_request.cc
   src/infer_request.h
-  src/message_queue.cc
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
+  src/pb_string.cc
+  src/pb_string.h
+  src/pb_map.cc
+  src/pb_map.h
+  src/scoped_defer.cc
+  src/scoped_defer.h
   src/pb_error.cc
   src/pb_error.h
+  src/pb_memory.cc
+  src/pb_memory.h
   src/pb_tensor.cc
   src/pb_tensor.h
   src/pb_utils.cc
   src/pb_utils.h
   src/shm_manager.cc
   src/shm_manager.h
+  src/pb_exception.h
 )
 
 set(
@@ -147,8 +159,12 @@ set(
   src/python.cc
   src/pb_env.cc
   src/pb_env.h
-  src/pb_main_utils.cc
-  src/pb_main_utils.h
+  src/pb_metric_reporter.cc
+  src/pb_metric_reporter.h
+  src/memory_manager.cc
+  src/memory_manager.h
+  src/request_executor.cc
+  src/request_executor.h
 )
 
 list(APPEND
@@ -163,10 +179,12 @@ add_library(
 
 set(
   PYTHNON_BACKEND_STUB_SRCS
-  src/pb_stub_utils.cc
   src/pb_stub_utils.h
-  src/pb_stub.cc
+  src/pb_stub_utils.cc
+  src/response_sender.cc
+  src/response_sender.h
   src/pb_stub.h
+  src/pb_stub.cc
 )
 
 list(APPEND
@@ -235,6 +253,8 @@ set_target_properties(
   LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_python.ldscript
   LINK_FLAGS "-Wl,--version-script libtriton_python.ldscript"
 )
+
+add_subdirectory(./src/shm_monitor)
 
 #
 # Install

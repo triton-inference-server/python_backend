@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,32 +25,34 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <climits>
-#include <map>
-#include <mutex>
+
+#include <memory>
 #include <string>
+#include <vector>
+#include "triton/core/tritonbackend.h"
 
 namespace triton { namespace backend { namespace python {
-
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::string> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
+class PbMetricReporter {
+  TRITONBACKEND_ModelInstance* instance_;
+  TRITONBACKEND_Request** requests_;
+  uint32_t request_count_;
+  std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses_;
+  size_t total_batch_size_;
+  uint64_t exec_start_ns_;
+  uint64_t compute_start_ns_;
+  uint64_t compute_end_ns_;
+  uint64_t exec_end_ns_;
 
  public:
-  EnvironmentManager();
-
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+  PbMetricReporter(
+      TRITONBACKEND_ModelInstance* instance, TRITONBACKEND_Request** requests,
+      const uint32_t request_count,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses);
+  ~PbMetricReporter();
+  void SetBatchStatistics(size_t total_batch_size);
+  void SetExecStartNs(const uint64_t exec_start_ns);
+  void SetComputeStartNs(const uint64_t compute_start_ns);
+  void SetComputeEndNs(const uint64_t compute_end_ns);
+  void SetExecEndNs(const uint64_t exec_end_ns);
 };
-
-}}}  // namespace triton::backend::python
+}}};  // namespace triton::backend::python

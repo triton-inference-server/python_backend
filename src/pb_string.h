@@ -26,26 +26,55 @@
 
 #pragma once
 
-#include <string>
-#include "pb_string.h"
-#include "pb_utils.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
-class PbError {
+
+struct StringShm {
+  bi::managed_external_buffer::handle_t data;
+  size_t length;
+};
+
+class PbString {
  public:
-  PbError(const std::string& message) : message_(message) {}
-  const std::string& Message();
-  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
-  bi::managed_external_buffer::handle_t ShmHandle();
-  static std::shared_ptr<PbError> LoadFromSharedMemory(
+  static std::unique_ptr<PbString> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      const std::string& string);
+  static std::unique_ptr<PbString> Create(
+      const std::string& string, char* data_shm,
+      bi::managed_external_buffer::handle_t handle);
+  static std::unique_ptr<PbString> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
-  DISALLOW_COPY_AND_ASSIGN(PbError);
+  static std::unique_ptr<PbString> LoadFromSharedMemory(
+      bi::managed_external_buffer::handle_t handle, char* data_shm);
+  static std::size_t ShmStructSize(const std::string& string);
+
+  char* MutableString() { return string_shm_ptr_; }
+  std::string String()
+  {
+    return std::string(
+        string_shm_ptr_, string_shm_ptr_ + string_container_shm_ptr_->length);
+  }
+  bi::managed_external_buffer::handle_t ShmHandle();
+  std::size_t Size();
 
  private:
-  PbError(std::unique_ptr<PbString>& pb_error);
-  std::string message_;
-  std::shared_ptr<PbString> message_shm_;
-  bi::managed_external_buffer::handle_t shm_handle_;
+  AllocatedSharedMemory<StringShm> string_container_shm_;
+  StringShm* string_container_shm_ptr_;
+
+  AllocatedSharedMemory<char> string_shm_;
+  char* string_shm_ptr_;
+
+  bi::managed_external_buffer::handle_t string_handle_;
+
+  PbString(
+      AllocatedSharedMemory<StringShm>& string_container_shm,
+      AllocatedSharedMemory<char>& string_shm);
+
+  PbString(
+      StringShm* string_container_shm, char* string_shm,
+      bi::managed_external_buffer::handle_t handle);
 };
-}}};  // namespace triton::backend::python
+
+}}}  // namespace triton::backend::python

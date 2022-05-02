@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -30,45 +30,108 @@
 #include "infer_response.h"
 #include "pb_tensor.h"
 
-namespace triton { namespace backend { namespace python {
-class InferRequest {
-  std::string request_id_;
-  uint64_t correlation_id_;
-  std::vector<std::shared_ptr<PbTensor>> inputs_;
-  std::vector<std::string> requested_output_names_;
-  std::string model_name_;
-  int64_t model_version_;
+#ifdef TRITON_PB_STUB
+#include "response_sender.h"
+#endif
 
+namespace triton { namespace backend { namespace python {
+
+//
+// Inference Request
+//
+struct InferRequestShm {
+  uint64_t correlation_id;
+  uint32_t input_count;
+  uint32_t requested_output_count;
+  int64_t model_version;
+  uint32_t flags;
+  intptr_t address;
+  intptr_t response_factory_address;
+};
+
+class InferRequest {
  public:
   InferRequest(
       const std::string& request_id, uint64_t correlation_id,
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::vector<std::string>& requested_output_names,
-      const std::string& model_name, const int64_t model_version);
+      const std::string& model_name, const int64_t model_version,
+      const uint32_t flags = 0, const intptr_t response_factory_address = 0,
+      const intptr_t request_address = 0);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   uint64_t CorrelationId();
   const std::string& ModelName();
   int64_t ModelVersion();
+  uint32_t Flags();
+  void SetFlags(uint32_t flags);
   const std::vector<std::string>& RequestedOutputNames();
+  bi::managed_external_buffer::handle_t ShmHandle();
+
+#ifdef TRITON_PB_STUB
+  std::shared_ptr<InferResponse> Exec();
+  std::shared_ptr<ResponseSender> GetResponseSender();
+#endif
 
   /// Save an Inference Request to shared memory.
   /// \param shm_pool Shared memory pool to save the inference request.
-  /// \param request_shm A pointer to a location in shared memory with enough
-  /// space to save the inference request.
-  void SaveToSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, Request* request_shm);
+  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
 
   /// Create an Inference Request object from shared memory.
   /// \param shm_pool Shared memory pool
-  /// \param request_offset Shared memory offset of the request.
+  /// \param request_handle Shared memory handle of the request.
+  /// \param open_cuda_handle Determines if the tensor in the infer request
+  /// object is a GPU tensor, to call the cudaIpcOpenMemHandle to obtain the
+  /// tensor or not.
+  /// \return Returns the infer request in the specified request_handle
+  /// location.
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemory>& shm_pool, off_t request_offset,
-      std::shared_ptr<std::mutex>& cuda_ipc_open_mutex,
-      std::shared_ptr<std::mutex>& cuda_ipc_close_mutex);
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t request_handle,
+      bool open_cuda_handle);
+
+  /// Disallow copying the inference request object.
+  DISALLOW_COPY_AND_ASSIGN(InferRequest);
+
+  intptr_t RequestAddress();
+  ~InferRequest() {}
+
+#ifndef TRITON_PB_STUB
+  TRITONSERVER_Error* DeleteResponseFactory();
+#endif
+
+ private:
+  InferRequest(
+      AllocatedSharedMemory<char>& infer_request_shm,
+      std::unique_ptr<PbString>& request_id_shm,
+      std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
+      std::unique_ptr<PbString>& model_name_shm,
+      std::vector<std::shared_ptr<PbTensor>>& input_tensors);
+
+  std::string request_id_;
+  uint64_t correlation_id_;
+  std::vector<std::shared_ptr<PbTensor>> inputs_;
+  std::vector<std::string> requested_output_names_;
+  std::string model_name_;
+  int64_t model_version_;
+  uint32_t flags_;
+  intptr_t response_factory_address_;
+  intptr_t request_address_;
+
+  // Shared Memory Data Structures
+  AllocatedSharedMemory<char> infer_request_shm_;
+  InferRequestShm* infer_request_shm_ptr_;
+
+  std::unique_ptr<PbString> request_id_shm_;
+  std::vector<std::unique_ptr<PbString>> requested_output_names_shm_;
+  std::unique_ptr<PbString> model_name_shm_;
+  bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
+  bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
+  bi::managed_external_buffer::handle_t shm_handle_;
+
 #ifdef TRITON_PB_STUB
-  std::unique_ptr<InferResponse> Exec();
+  std::shared_ptr<ResponseSender> response_sender_;
 #endif
 };
 }}};  // namespace triton::backend::python

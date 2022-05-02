@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,33 +24,28 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
+#include <memory>
+#include "infer_request.h"
+#include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
+TRITONSERVER_Error* CreateTritonErrorFromException(
+    const PythonBackendException& pb_exception);
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::string> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
+class RequestExecutor {
+  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
+  TRITONSERVER_Server* server_;
+  std::unique_ptr<SharedMemoryManager>& shm_pool_;
 
  public:
-  EnvironmentManager();
+  std::unique_ptr<InferResponse> Infer(
+      const std::shared_ptr<InferRequest>& infer_request,
+      TRITONSERVER_InferenceResponse** response);
+  RequestExecutor(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      TRITONSERVER_Server* server);
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+  ~RequestExecutor();
 };
 
 }}}  // namespace triton::backend::python

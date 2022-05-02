@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,32 +25,22 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
+
+#include <exception>
 
 namespace triton { namespace backend { namespace python {
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
 //
-// A class that manages Python environments
+// PythonBackendException
 //
-class EnvironmentManager {
-  std::map<std::string, std::string> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
+// Exception thrown if error occurs in PythonBackend.
+//
+struct PythonBackendException : std::exception {
+  PythonBackendException(const std::string& message) : message_(message) {}
 
- public:
-  EnvironmentManager();
+  const char* what() const throw() { return message_.c_str(); }
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+  std::string message_;
 };
 
 }}}  // namespace triton::backend::python

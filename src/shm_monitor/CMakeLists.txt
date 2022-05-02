@@ -1,4 +1,4 @@
-# Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -24,37 +24,26 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import torch
-import torchvision.models as models
-import argparse
-import os
+cmake_minimum_required (VERSION 3.18)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--save", default="model.onnx")
-    args = parser.parse_args()
+pybind11_add_module(
+  triton-shm-monitor
+  EXCLUDE_FROM_ALL
+  ./shm_monitor.cc
+  ../shm_manager.h
+  ../shm_manager.cc
+)
 
-    resnet50 = models.resnet50(pretrained=True)
-    dummy_input = torch.randn(1, 3, 224, 224)
-    resnet50 = resnet50.eval()
+target_link_libraries(
+  triton-shm-monitor
+  PRIVATE
+    -lrt # shared memory
+)
 
-    torch.onnx.export(resnet50,
-                      dummy_input,
-                      args.save,
-                      export_params=True,
-                      opset_version=10,
-                      do_constant_folding=True,
-                      input_names=['input'],
-                      output_names=['output'],
-                      dynamic_axes={
-                          'input': {
-                              0: 'batch_size',
-                              2: "height",
-                              3: 'width'
-                          },
-                          'output': {
-                              0: 'batch_size'
-                          }
-                      })
+set_property(TARGET triton-shm-monitor PROPERTY OUTPUT_NAME triton_shm_monitor)
 
-    print("Saved {}".format(args.save))
+install(
+  TARGETS
+    triton-shm-monitor
+  LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/backends/python OPTIONAL
+)

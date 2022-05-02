@@ -1,4 +1,4 @@
-// Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -40,12 +40,15 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
-#include "infer_request.h"
 #include "infer_response.h"
-#include "message_queue.h"
-#include "pb_tensor.h"
-#include "pb_utils.h"
+#include "pb_error.h"
+#include "pb_map.h"
+#include "pb_string.h"
+#include "response_sender.h"
+#include "scoped_defer.h"
 #include "shm_manager.h"
+#include "triton/common/nvtx.h"
+
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
@@ -54,7 +57,6 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 namespace bi = boost::interprocess;
-
 namespace triton { namespace backend { namespace python {
 
 #define LOG_IF_EXCEPTION(X)                              \
@@ -130,7 +132,8 @@ Stub::Instantiate(
     int64_t shm_growth_size, int64_t shm_default_size,
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
-    off_t ipc_control_offset, const std::string& model_instance_name)
+    bi::managed_external_buffer::handle_t ipc_control_handle,
+    const std::string& model_instance_name)
 {
   model_path_ = model_path;
   model_version_ = model_version;
@@ -138,24 +141,27 @@ Stub::Instantiate(
   model_instance_name_ = model_instance_name;
   health_mutex_ = nullptr;
   initialized_ = false;
-  cuda_ipc_open_mutex_ = std::make_shared<std::mutex>();
-  cuda_ipc_close_mutex_ = std::make_shared<std::mutex>();
 
   try {
-    shm_pool_ = std::make_unique<SharedMemory>(
-        shm_region_name, shm_default_size, shm_growth_size);
+    shm_pool_ = std::make_unique<SharedMemoryManager>(
+        shm_region_name, shm_default_size, shm_growth_size, false /* create */);
 
-    shm_pool_->MapOffset((char**)&ipc_control_, ipc_control_offset);
+    AllocatedSharedMemory<IPCControlShm> ipc_control =
+        shm_pool_->Load<IPCControlShm>(ipc_control_handle);
+    ipc_control_ = ipc_control.data_.get();
 
-    bi::interprocess_mutex* health_mutex;
-    shm_pool_->MapOffset(
-        (char**)&health_mutex, ipc_control_->stub_health_mutex);
-    health_mutex_ = health_mutex;
+    health_mutex_ = &(ipc_control_->stub_health_mutex);
 
-    stub_message_queue_ = MessageQueue::LoadFromSharedMemory(
-        shm_pool_, ipc_control_->stub_message_queue);
-    parent_message_queue_ = MessageQueue::LoadFromSharedMemory(
-        shm_pool_, ipc_control_->parent_message_queue);
+    stub_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->stub_message_queue);
+
+    parent_message_queue_ =
+        MessageQueue<bi::managed_external_buffer::handle_t>::
+            LoadFromSharedMemory(shm_pool_, ipc_control_->parent_message_queue);
+
+    memory_manager_message_queue_ =
+        MessageQueue<uint64_t>::LoadFromSharedMemory(
+            shm_pool_, ipc_control_->memory_manager_message_queue);
 
     // If the Python model is using an execution environment, we need to
     // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
@@ -197,112 +203,22 @@ Stub::Instantiate(
   }
 }
 
+std::unique_ptr<MessageQueue<uint64_t>>&
+Stub::MemoryManagerQueue()
+{
+  return memory_manager_message_queue_;
+}
+
 bool&
 Stub::Health()
 {
   return ipc_control_->stub_health;
 }
 
-std::unique_ptr<SharedMemory>&
-Stub::GetSharedMemory()
+std::unique_ptr<SharedMemoryManager>&
+Stub::SharedMemory()
 {
   return shm_pool_;
-}
-
-void
-Stub::SetErrorForResponse(Response* response, const char* err_message)
-{
-  off_t err_string_offset = 0;
-  response->is_error_set = false;
-  response->has_error = true;
-  LOG_IF_EXCEPTION(
-      SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
-
-  if (err_string_offset != 0) {
-    response->error = err_string_offset;
-    response->is_error_set = true;
-  }
-}
-
-void
-Stub::SetErrorForResponseBatch(
-    ResponseBatch* response_batch, const char* err_message)
-{
-  off_t err_string_offset = 0;
-  response_batch->is_error_set = false;
-  response_batch->has_error = true;
-  LOG_IF_EXCEPTION(
-      SaveStringToSharedMemory(shm_pool_, err_string_offset, err_message));
-
-  if (err_string_offset != 0) {
-    response_batch->error = err_string_offset;
-    response_batch->is_error_set = true;
-  }
-}
-
-void
-Stub::ProcessResponse(
-    Response* response_shm, ResponseBatch* response_batch,
-    InferResponse* response)
-{
-  // Initialize has_error to false
-  response_shm->has_error = false;
-
-  bool has_error = response->HasError();
-
-  if (has_error) {
-    response_shm->has_error = true;
-    py::str py_string_err = response->Error()->Message();
-    std::string response_error = py_string_err;
-    SetErrorForResponse(response_shm, response_error.c_str());
-
-    // Skip the response value when the response has error.
-    return;
-  }
-
-  std::vector<std::shared_ptr<PbTensor>>& output_tensors =
-      response->OutputTensors();
-  for (auto& output_tensor : output_tensors) {
-    if (!output_tensor->IsCPU()) {
-#ifdef TRITON_ENABLE_GPU
-      AddToTensorsToRemove(output_tensor);
-#else
-      throw PythonBackendException("GPU tensors is not supported.");
-#endif
-    }
-  }
-  response->SaveToSharedMemory(
-      shm_pool_, response_shm, true /* copy_cpu */, false /* copy_gpu */);
-}
-
-void
-Stub::AddToTensorsToRemove(std::shared_ptr<PbTensor> tensor)
-{
-  std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-  output_gpu_tensors_.push_back(tensor);
-}
-
-std::shared_ptr<InferRequest>
-Stub::ProcessRequest(off_t request_offset, ResponseBatch* response_batch)
-{
-  std::shared_ptr<InferRequest> infer_request =
-      InferRequest::LoadFromSharedMemory(
-          shm_pool_, request_offset, cuda_ipc_open_mutex_,
-          cuda_ipc_close_mutex_);
-
-  for (auto& tensor : infer_request->Inputs()) {
-    if (!tensor->IsCPU())
-      input_gpu_tensors_.push_back(tensor);
-  }
-
-  return infer_request;
-}
-
-void
-Stub::SetResponseFromException(
-    ResponseBatch* response_batch, const PythonBackendException& pb_exception)
-{
-  SetErrorForResponseBatch(response_batch, pb_exception.what());
 }
 
 std::unique_ptr<IPCMessage>
@@ -310,7 +226,7 @@ Stub::PopMessage()
 {
   bool success = false;
   std::unique_ptr<IPCMessage> ipc_message;
-  off_t message;
+  bi::managed_external_buffer::handle_t message;
   while (!success) {
     message = stub_message_queue_->Pop(1000, success);
   }
@@ -320,38 +236,51 @@ Stub::PopMessage()
   return ipc_message;
 }
 
-std::shared_ptr<std::mutex>&
-Stub::CudaIpcCloseMutex()
+bool
+Stub::IsDecoupled()
 {
-  return cuda_ipc_close_mutex_;
-}
-
-std::shared_ptr<std::mutex>&
-Stub::CudaIpcOpenMutex()
-{
-  return cuda_ipc_open_mutex_;
+  return ipc_control_->decoupled;
 }
 
 bool
 Stub::RunCommand()
 {
-  std::unique_ptr<IPCMessage> ipc_message = this->PopMessage();
-
+  NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
+  std::unique_ptr<IPCMessage> ipc_message;
+  {
+    // Release the GIL lock when waiting for new message. Without this line, the
+    // other threads in the user's Python model cannot make progress if they
+    // give up GIL.
+    py::gil_scoped_release release;
+    ipc_message = this->PopMessage();
+  }
   switch (ipc_message->Command()) {
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
       std::string error_string;
 
       std::unique_ptr<IPCMessage> initialize_response_msg =
-          std::make_unique<IPCMessage>(shm_pool_, false);
+          IPCMessage::Create(shm_pool_, false /* inline_response */);
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
+      std::unique_ptr<PbString> error_string_shm;
+      AllocatedSharedMemory<InitializeResponseShm> initialize_response =
+          shm_pool_->Construct<InitializeResponseShm>();
 
-      InitializeResponse* initialize_response;
-      shm_pool_->Map(
-          (char**)&initialize_response, sizeof(InitializeResponse),
-          initialize_response_msg->Args());
-      initialize_response->response_has_error = false;
-      initialize_response->response_is_error_set = false;
+      // The initialization is done in three steps. First the main process sends
+      // a message to the stub process asking to begin to initilize the Python
+      // model. After that is finished stub process sends a message to the
+      // parent process that the initialization is finished.  Finally, the
+      // parent process sends a message to the stub process asking the stub
+      // process to release any objects it has held in shared memory.
+      ScopedDefer receive_initialize_finalize(
+          [this] { stub_message_queue_->Pop(); });
+      ScopedDefer _([this, &initialize_response_msg] {
+        SendIPCMessage(initialize_response_msg);
+      });
+
+      initialize_response.data_->response_has_error = false;
+      initialize_response.data_->response_is_error_set = false;
+      initialize_response_msg->Args() = initialize_response.handle_;
 
       try {
         Initialize(ipc_message->Args());
@@ -366,76 +295,44 @@ Stub::RunCommand()
       }
 
       if (has_exception) {
+        // Do not delete the region. The region will be deleted by the parent
+        // process.
+        shm_pool_->SetDeleteRegion(false);
         LOG_INFO << "Failed to initialize Python stub: " << error_string;
-        initialize_response->response_has_error = true;
-        initialize_response->response_is_error_set = false;
-        off_t err_string_offset;
-        LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-            shm_pool_, err_string_offset, error_string.c_str()));
-        if (err_string_offset != 0) {
-          initialize_response->response_is_error_set = true;
-          initialize_response->response_error = err_string_offset;
+        initialize_response.data_->response_has_error = true;
+        initialize_response.data_->response_is_error_set = false;
+
+        LOG_IF_EXCEPTION(
+            error_string_shm = PbString::Create(shm_pool_, error_string));
+        if (error_string_shm != nullptr) {
+          initialize_response.data_->response_is_error_set = true;
+          initialize_response.data_->response_error =
+              error_string_shm->ShmHandle();
         }
 
-        this->SendIPCMessage(initialize_response_msg);
-        return true;
+        return true;  // Terminate the stub process.
       }
 
-      this->SendIPCMessage(initialize_response_msg);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
-      RequestBatch* request_batch;
-      bool has_exception = false;
-      std::string error_string;
-
-      std::unique_ptr<IPCMessage> execute_response =
-          std::make_unique<IPCMessage>(shm_pool_, false /* Inline response */);
-      execute_response->Command() = PYTHONSTUB_ExecuteResposne;
-
-      shm_pool_->MapOffset((char**)&request_batch, ipc_message->Args());
-      ResponseBatch* response_batch;
-      shm_pool_->Map(
-          (char**)&response_batch, sizeof(ResponseBatch),
-          execute_response->Args());
-      response_batch->has_error = false;
-      try {
-        Execute(request_batch, response_batch);
-      }
-      catch (const PythonBackendException& pb_exception) {
-        has_exception = true;
-        error_string = pb_exception.what();
-      }
-      catch (const py::error_already_set& error) {
-        has_exception = true;
-        error_string = error.what();
+      AllocatedSharedMemory<char> request_batch =
+          shm_pool_->Load<char>(ipc_message->Args());
+      RequestBatch* request_batch_shm_ptr =
+          reinterpret_cast<RequestBatch*>(request_batch.data_.get());
+      if (!ipc_control_->decoupled) {
+        ProcessRequests(request_batch_shm_ptr);
+      } else {
+        ProcessRequestsDecoupled(request_batch_shm_ptr);
       }
 
-      if (has_exception) {
-        std::string err_message =
-            std::string(
-                "Failed to process the request(s) for model '" +
-                model_instance_name_ + "', message: ") +
-            error_string;
-        LOG_INFO << err_message.c_str();
-        response_batch->has_error = true;
-        response_batch->is_error_set = false;
-        off_t err_string_offset = 0;
-        LOG_IF_EXCEPTION(SaveStringToSharedMemory(
-            shm_pool_, err_string_offset, error_string.c_str()));
-        if (err_string_offset != 0) {
-          response_batch->is_error_set = true;
-          response_batch->error = err_string_offset;
-        }
-      }
-      this->SendIPCMessage(execute_response);
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
-      this->SendIPCMessage(ipc_message);
-      return true;
+      SendIPCMessage(ipc_message);
+      return true;  // Terminate the stub process
     case PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers:
       try {
-        LoadGPUBuffers();
+        LoadGPUBuffers(ipc_message);
       }
       catch (const PythonBackendException& pb_exception) {
         LOG_INFO << "An error occurred while trying to load GPU buffers in the "
@@ -443,8 +340,6 @@ Stub::RunCommand()
                  << pb_exception.what() << std::endl;
       }
 
-      ipc_message->Command() = PYTHONSTUB_LoadGPUBuffers;
-      this->SendIPCMessage(ipc_message);
       break;
     default:
       break;
@@ -454,68 +349,7 @@ Stub::RunCommand()
 }
 
 void
-Stub::Execute(RequestBatch* request_batch, ResponseBatch* response_batch)
-{
-  uint32_t batch_size = request_batch->batch_size;
-
-  if (batch_size == 0) {
-    return;
-  }
-
-  py::list py_request_list;
-  for (size_t i = 0; i < batch_size; i++) {
-    off_t request_offset = request_batch->requests + i * sizeof(Request);
-    py_request_list.append(ProcessRequest(request_offset, response_batch));
-  }
-
-  if (!py::hasattr(model_instance_, "execute")) {
-    std::string message =
-        "Python model " + model_path_ + " does not implement `execute` method.";
-    throw PythonBackendException(message);
-  }
-  py::object request_list = py_request_list;
-  py::module asyncio = py::module::import("asyncio");
-
-  // Execute Response
-  py::object execute_return = model_instance_.attr("execute")(request_list);
-  py::list responses;
-  bool is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
-
-  if (is_coroutine) {
-    responses = asyncio.attr("run")(execute_return);
-  } else {
-    responses = execute_return;
-  }
-
-  Response* responses_shm;
-  off_t responses_shm_offset;
-  size_t response_size = py::len(responses);
-
-  // If the number of request objects do not match the number of resposne
-  // objects throw an error.
-  if (response_size != batch_size) {
-    throw PythonBackendException(
-        "Number of InferenceResponse objects do not match the number of "
-        "InferenceRequest objects.");
-  }
-
-  shm_pool_->Map(
-      (char**)&responses_shm, sizeof(Response) * response_size,
-      responses_shm_offset);
-  response_batch->responses = responses_shm_offset;
-  response_batch->batch_size = response_size;
-
-  size_t i = 0;
-  for (auto& response : responses) {
-    InferResponse* infer_response = response.cast<InferResponse*>();
-    Response* response_shm = &responses_shm[i];
-    ProcessResponse(response_shm, response_batch, infer_response);
-    i += 1;
-  }
-}
-
-void
-Stub::Initialize(off_t map_offset)
+Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 {
   py::module sys = py::module_::import("sys");
 
@@ -547,6 +381,12 @@ Stub::Initialize(off_t map_offset)
   py::module c_python_backend_utils =
       py::module_::import("c_python_backend_utils");
   py::setattr(
+      python_backend_utils, "TritonError",
+      c_python_backend_utils.attr("TritonError"));
+  py::setattr(
+      python_backend_utils, "TritonModelException",
+      c_python_backend_utils.attr("TritonModelException"));
+  py::setattr(
       python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
   py::setattr(
       python_backend_utils, "InferenceRequest",
@@ -554,12 +394,7 @@ Stub::Initialize(off_t map_offset)
   py::setattr(
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
-  py::setattr(
-      python_backend_utils, "TritonError",
-      c_python_backend_utils.attr("TritonError"));
-  py::setattr(
-      python_backend_utils, "TritonModelException",
-      c_python_backend_utils.attr("TritonModelException"));
+  c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   py::object TritonPythonModel =
       py::module_::import(
@@ -570,7 +405,12 @@ Stub::Initialize(off_t map_offset)
   model_instance_ = TritonPythonModel();
 
   std::unordered_map<std::string, std::string> map;
-  LoadMapFromSharedMemory(shm_pool_, map_offset, map);
+  std::unique_ptr<PbMap> pb_map_shm =
+      PbMap::LoadFromSharedMemory(shm_pool_, map_handle);
+
+  // Get the unordered_map representation of the map in shared memory.
+  map = pb_map_shm->UnorderedMap();
+
   py::dict model_config_params;
 
   for (const auto& pair : map) {
@@ -586,29 +426,332 @@ Stub::Initialize(off_t map_offset)
 }
 
 void
+Stub::ProcessResponse(InferResponse* response)
+{
+  response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
+
+  for (auto& output_tensor : response->OutputTensors()) {
+    if (!output_tensor->IsCPU()) {
+      gpu_tensors_.push_back(output_tensor);
+    }
+  }
+}
+
+void
+Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  AllocatedSharedMemory<char> gpu_buffers_handle =
+      shm_pool_->Load<char>(ipc_message->Args());
+
+  uint64_t* gpu_buffer_count =
+      reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
+  bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          gpu_buffers_handle.data_.get() + sizeof(uint64_t));
+
+  if (gpu_tensors_.size() != *gpu_buffer_count) {
+    LOG_INFO
+        << (std::string(
+                "GPU buffers size does not match the provided buffers: ") +
+            std::to_string(gpu_tensors_.size()) +
+            " != " + std::to_string(*gpu_buffer_count));
+    return;
+  }
+
+  // We need to hold the cpu_buffers until the main process makes a copy from
+  // them.
+  std::vector<std::unique_ptr<PbMemory>> cpu_buffers;
+  std::vector<std::unique_ptr<PbMemory>> dst_buffers;
+
+  bool has_cpu_buffer = false;
+  for (size_t i = 0; i < gpu_tensors_.size(); i++) {
+    std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
+        shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
+    if (dst_buffer->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+      has_cpu_buffer = true;
+    }
+    dst_buffers.emplace_back(std::move(dst_buffer));
+  }
+
+  // Pop a dummy message from the stub message queue indicating that the parent
+  // has finished copying the tensors.
+  ScopedDefer _([this, has_cpu_buffer] {
+    if (has_cpu_buffer) {
+      stub_message_queue_->Pop();
+    }
+  });
+
+  ScopedDefer load_gpu_buffer_response(
+      [this, has_cpu_buffer] { parent_message_queue_->Push(DUMMY_MESSAGE); });
+
+  for (size_t i = 0; i < gpu_tensors_.size(); i++) {
+    std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
+
+    // If the memory type is CPU, the buffer is empty and we need to create
+    // a buffer.
+    if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+      dst_buffers[i] = PbMemory::Create(
+          shm_pool_, dst_buffers[i]->MemoryType(),
+          dst_buffers[i]->MemoryTypeId(), src_buffer->ByteSize(),
+          nullptr /* buffer */);
+
+      // Update the handle so that the main process can load it.
+      gpu_buffers_handle_shm[i] = dst_buffers[i]->ShmHandle();
+    }
+
+    PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
+
+    if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+      cpu_buffers.push_back(std::move(dst_buffers[i]));
+    }
+  }
+
+  gpu_tensors_.clear();
+}
+
+py::list
+Stub::LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr)
+{
+  uint32_t batch_size = request_batch_shm_ptr->batch_size;
+  py::list py_request_list;
+
+  if (batch_size == 0) {
+    return py_request_list;
+  }
+
+  bi::managed_external_buffer::handle_t* request_shm_handle =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          reinterpret_cast<char*>(request_batch_shm_ptr) +
+          sizeof(RequestBatch));
+
+  for (size_t i = 0; i < batch_size; i++) {
+    std::shared_ptr<InferRequest> infer_request =
+        InferRequest::LoadFromSharedMemory(
+            shm_pool_, request_shm_handle[i], true /* open_cuda_handle */);
+    py_request_list.append(infer_request);
+  }
+
+  return py_request_list;
+}
+
+void
+Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
+{
+  py::list py_request_list =
+      LoadRequestsFromSharedMemory(request_batch_shm_ptr);
+  std::unique_ptr<IPCMessage> execute_response =
+      IPCMessage::Create(shm_pool_, false /* Inline response */);
+  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+
+  AllocatedSharedMemory<ResponseBatch> response_batch =
+      shm_pool_->Construct<ResponseBatch>();
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+  execute_response->Args() = response_batch.handle_;
+  bool has_exception = false;
+  std::string error_string;
+  std::unique_ptr<PbString> error_string_shm;
+
+  ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
+  ScopedDefer _(
+      [this, &execute_response] { SendIPCMessage(execute_response); });
+
+  try {
+    response_batch_shm_ptr->has_error = false;
+    response_batch_shm_ptr->is_error_set = false;
+
+    if (!py::hasattr(model_instance_, "execute")) {
+      std::string message = "Python model " + model_path_ +
+                            " does not implement `execute` method.";
+      throw PythonBackendException(message);
+    }
+
+    {
+      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+
+      py::object execute_return =
+          model_instance_.attr("execute")(py_request_list);
+
+      if (!py::isinstance<py::none>(execute_return)) {
+        throw PythonBackendException(
+            "Python model '" + model_instance_name_ +
+            "' is using the decoupled mode and the execute function must "
+            "return None.");
+      }
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    has_exception = true;
+    error_string = error.what();
+  }
+
+  if (has_exception) {
+    std::string err_message =
+        std::string(
+            "Failed to process the request(s) for model '" +
+            model_instance_name_ + "', message: ") +
+        error_string;
+    LOG_INFO << err_message.c_str();
+    response_batch_shm_ptr->has_error = true;
+    error_string_shm = PbString::Create(shm_pool_, error_string);
+    response_batch_shm_ptr->error = error_string_shm->ShmHandle();
+    response_batch_shm_ptr->is_error_set = true;
+  }
+}
+
+void
+Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
+{
+  std::unique_ptr<IPCMessage> execute_response =
+      IPCMessage::Create(shm_pool_, false /* Inline response */);
+  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+
+  AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
+      request_batch_shm_ptr->batch_size *
+          sizeof(bi::managed_external_buffer::handle_t) +
+      sizeof(ResponseBatch));
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+
+  std::unique_ptr<PbString> error_string_shm;
+  py::list inference_responses;
+
+  bi::managed_external_buffer::handle_t* responses_shm_handle =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          response_batch.data_.get() + sizeof(ResponseBatch));
+
+  py::list responses;
+
+  // Notifying the stub should be after responses.
+  ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
+  ScopedDefer _(
+      [this, &execute_response] { SendIPCMessage(execute_response); });
+
+  execute_response->Args() = response_batch.handle_;
+
+  bool has_exception = false;
+  std::string error_string;
+  try {
+    response_batch_shm_ptr->has_error = false;
+    response_batch_shm_ptr->is_error_set = false;
+
+    uint32_t batch_size = request_batch_shm_ptr->batch_size;
+
+    if (batch_size == 0) {
+      return;
+    }
+
+    py::list py_request_list =
+        LoadRequestsFromSharedMemory(request_batch_shm_ptr);
+
+    if (!py::hasattr(model_instance_, "execute")) {
+      std::string message = "Python model " + model_path_ +
+                            " does not implement `execute` method.";
+      throw PythonBackendException(message);
+    }
+
+    py::object request_list = py_request_list;
+    py::module asyncio = py::module::import("asyncio");
+
+    // Execute Response
+    py::object execute_return;
+    py::object responses_obj;
+    bool is_coroutine;
+
+    {
+      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+      execute_return = model_instance_.attr("execute")(request_list);
+      is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+    }
+
+    if (is_coroutine) {
+      responses_obj = asyncio.attr("run")(execute_return);
+    } else {
+      responses_obj = execute_return;
+    }
+
+    // Check the return type of execute function.
+    if (!py::isinstance<py::list>(responses_obj)) {
+      std::string str = py::str(execute_return.get_type());
+      throw PythonBackendException(
+          std::string("Expected a list in the execute return, found type '") +
+          str + "'.");
+    }
+
+    responses = responses_obj;
+    size_t response_size = py::len(responses);
+
+    // If the number of request objects do not match the number of
+    // resposne objects throw an error.
+    if (response_size != batch_size) {
+      std::string err =
+          "Number of InferenceResponse objects do not match the number "
+          "of "
+          "InferenceRequest objects. InferenceRequest(s) size is:" +
+          std::to_string(batch_size) + ", and InferenceResponse(s) size is:" +
+          std::to_string(response_size) + "\n";
+      throw PythonBackendException(err);
+    }
+    for (auto& response : responses) {
+      // Check the return type of execute function.
+      if (!py::isinstance<InferResponse>(response)) {
+        std::string str = py::str(response.get_type());
+        throw PythonBackendException(
+            std::string("Expected an 'InferenceResponse' object in the execute "
+                        "function return list, found type '") +
+            str + "'.");
+      }
+    }
+
+    response_batch_shm_ptr->batch_size = response_size;
+
+    std::vector<std::shared_ptr<PbTensor>> gpu_tensors;
+
+    size_t i = 0;
+    for (auto& response : responses) {
+      InferResponse* infer_response = response.cast<InferResponse*>();
+      ProcessResponse(infer_response);
+      for (auto output_tensor : infer_response->OutputTensors()) {
+        if (!output_tensor->IsCPU()) {
+          gpu_tensors.push_back(output_tensor);
+        }
+      }
+      responses_shm_handle[i] = infer_response->ShmHandle();
+      i += 1;
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    has_exception = true;
+    error_string = error.what();
+  }
+
+  if (has_exception) {
+    std::string err_message =
+        std::string(
+            "Failed to process the request(s) for model '" +
+            model_instance_name_ + "', message: ") +
+        error_string;
+    LOG_INFO << err_message.c_str();
+    error_string_shm = PbString::Create(shm_pool_, error_string);
+    response_batch_shm_ptr->has_error = true;
+    response_batch_shm_ptr->is_error_set = true;
+    response_batch_shm_ptr->error = error_string_shm->ShmHandle();
+  }
+}
+
+void
 Stub::UpdateHealth()
 {
   bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
   ipc_control_->stub_health = true;
-}
-
-void
-Stub::LoadGPUBuffers()
-{
-  std::lock_guard<std::mutex> guard{tensors_to_remove_mutex_};
-#ifdef TRITON_ENABLE_GPU
-  for (auto& tensor : output_gpu_tensors_) {
-    if (tensor->RawDataShm()->memory_type == TRITONSERVER_MEMORY_GPU) {
-      tensor->SetCudaIpcMutexes(CudaIpcOpenMutex(), CudaIpcCloseMutex());
-      tensor->LoadGPUData(shm_pool_);
-    } else {
-      tensor->CopyToCPU(shm_pool_);
-    }
-  }
-#endif  // TRITON_ENABLE_GPU
-
-  output_gpu_tensors_.clear();
-  input_gpu_tensors_.clear();
 }
 
 void
@@ -630,19 +773,20 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
   while (!success) {
-    parent_message_queue_->Push(
-        ipc_message->SharedMemoryOffset(), 1000, success);
+    parent_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
   }
 }
 
 Stub::~Stub()
 {
-  // stub_lock_ must be destroyed before the shared memory is deconstructed.
-  // Otherwise, the shared memory will be destructed first and lead to
-  // segfault.
-  stub_lock_.reset();
+  {
+    py::gil_scoped_acquire acquire;
+    model_instance_ = py::none();
+  }
+
   stub_message_queue_.reset();
   parent_message_queue_.reset();
+  memory_manager_message_queue_.reset();
 }
 
 std::unique_ptr<Stub> Stub::stub_instance_;
@@ -650,7 +794,7 @@ std::unique_ptr<Stub> Stub::stub_instance_;
 std::unique_ptr<Stub>&
 Stub::GetOrCreateInstance()
 {
-  if (stub_instance_.get() == nullptr) {
+  if (Stub::stub_instance_.get() == nullptr) {
     Stub::stub_instance_ = std::make_unique<Stub>();
   }
 
@@ -659,14 +803,9 @@ Stub::GetOrCreateInstance()
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
-  py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
-      .def(py::init(&PbTensor::FromNumpy))
-      .def("name", &PbTensor::Name)
-      .def("as_numpy", &PbTensor::AsNumpy)
-      .def("triton_dtype", &PbTensor::TritonDtype)
-      .def("to_dlpack", &PbTensor::ToDLPack)
-      .def("is_cpu", &PbTensor::IsCPU)
-      .def("from_dlpack", &PbTensor::FromDLPack);
+  py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
+      .def(py::init<std::string>())
+      .def("message", &PbError::Message);
 
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
@@ -675,15 +814,21 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               const std::string&, uint64_t,
               const std::vector<std::shared_ptr<PbTensor>>&,
               const std::vector<std::string>&, const std::string&,
-              const int64_t>(),
-          py::arg("request_id") = "", py::arg("correlation_id") = 0,
-          py::arg("inputs"), py::arg("requested_output_names"),
-          py::arg("model_name"), py::arg("model_version") = -1)
+              const int64_t, const uint32_t>(),
+          py::arg("request_id").none(false) = "",
+          py::arg("correlation_id").none(false) = 0,
+          py::arg("inputs").none(false),
+          py::arg("requested_output_names").none(false),
+          py::arg("model_name").none(false),
+          py::arg("model_version").none(false) = -1,
+          py::arg("flags").none(false) = 0)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
+      .def("flags", &InferRequest::Flags)
+      .def("set_flags", &InferRequest::SetFlags)
       .def("exec", &InferRequest::Exec)
       .def(
           "async_exec",
@@ -700,23 +845,41 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           })
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def("get_response_sender", &InferRequest::GetResponseSender);
 
-  py::class_<InferResponse>(module, "InferenceResponse")
+  py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
+      .def(py::init(&PbTensor::FromNumpy))
+      .def("name", &PbTensor::Name)
+      .def("as_numpy", &PbTensor::AsNumpy)
+      .def("triton_dtype", &PbTensor::TritonDtype)
+      .def("to_dlpack", &PbTensor::ToDLPack)
+      .def("is_cpu", &PbTensor::IsCPU)
+      .def("from_dlpack", &PbTensor::FromDLPack);
+
+  py::class_<InferResponse, std::shared_ptr<InferResponse>>(
+      module, "InferenceResponse")
       .def(
           py::init<
               const std::vector<std::shared_ptr<PbTensor>>&,
               std::shared_ptr<PbError>>(),
-          py::arg("output_tensors"), py::arg("error") = nullptr)
+          py::arg("output_tensors").none(false),
+          py::arg("error") = static_cast<std::shared_ptr<PbError>>(nullptr))
       .def(
           "output_tensors", &InferResponse::OutputTensors,
           py::return_value_policy::reference)
       .def("has_error", &InferResponse::HasError)
       .def("error", &InferResponse::Error);
 
-  py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
-      .def(py::init<std::string>())
-      .def("message", &PbError::Message);
+  py::class_<ResponseSender, std::shared_ptr<ResponseSender>>(
+      module, "InferenceResponseSender")
+      .def("send", &ResponseSender::Send)
+      .def("close", &ResponseSender::Close);
+
+  // This class is not part of the public API for Python backend. This is only
+  // used for internal testing purposes.
+  py::class_<SharedMemoryManager>(module, "SharedMemory")
+      .def("free_memory", &SharedMemoryManager::FreeMemory);
 
   py::register_exception<PythonBackendException>(
       module, "TritonModelException");
@@ -767,7 +930,7 @@ main(int argc, char** argv)
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl offset */, model_instance_name);
+        std::stoi(argv[7]) /* IPCControl handle */, model_instance_name);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
@@ -786,7 +949,7 @@ main(int argc, char** argv)
           // shared memory and will be set to false by the parent process.
           // The parent process expects that the stub process sets this
           // variable to true within 1 second.
-          sleep(0.3);
+          std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
           stub->UpdateHealth();
 
@@ -803,11 +966,9 @@ main(int argc, char** argv)
         }
       });
 
-  // This is the only place where NotifyParent() and WaitForNotification() are
-  // allowed to be called. The stub process will always keep listening for new
-  // notifications from the parent process. After the notification is received
-  // the stub process will run the appropriate comamnd and wait for new
-  // notifications.
+  // The stub process will always keep listening for new notifications from the
+  // parent process. After the notification is received the stub process will
+  // run the appropriate comamnd and wait for new notifications.
   bool finalize = false;
   while (true) {
     if (finalize) {
