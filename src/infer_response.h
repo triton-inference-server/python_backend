@@ -40,6 +40,15 @@ struct ResponseShm {
   bool is_error_set;
 };
 
+#define SET_ERROR_AND_RETURN(E, X)           \
+  do {                                       \
+    TRITONSERVER_Error* raasnie_err__ = (X); \
+    if (raasnie_err__ != nullptr) {          \
+      E = raasnie_err__;                     \
+      return E;                              \
+    }                                        \
+  } while (false)
+
 class InferResponse {
  public:
   InferResponse(
@@ -55,6 +64,12 @@ class InferResponse {
   bool HasError();
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();
+
+#ifndef TRITON_PB_STUB
+  /// Send an inference response
+  TRITONSERVER_Error* Send(
+      TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream);
+#endif
 
   // Disallow copying the inference response object.
   DISALLOW_COPY_AND_ASSIGN(InferResponse);

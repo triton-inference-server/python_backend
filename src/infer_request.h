@@ -30,6 +30,10 @@
 #include "infer_response.h"
 #include "pb_tensor.h"
 
+#ifdef TRITON_PB_STUB
+#include "response_sender.h"
+#endif
+
 namespace triton { namespace backend { namespace python {
 
 //
@@ -41,6 +45,8 @@ struct InferRequestShm {
   uint32_t requested_output_count;
   int64_t model_version;
   uint32_t flags;
+  intptr_t address;
+  intptr_t response_factory_address;
 };
 
 class InferRequest {
@@ -50,7 +56,8 @@ class InferRequest {
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::vector<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
-      const uint32_t flags = 0);
+      const uint32_t flags = 0, const intptr_t response_factory_address = 0,
+      const intptr_t request_address = 0);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
@@ -63,7 +70,8 @@ class InferRequest {
   bi::managed_external_buffer::handle_t ShmHandle();
 
 #ifdef TRITON_PB_STUB
-  std::unique_ptr<InferResponse> Exec();
+  std::shared_ptr<InferResponse> Exec();
+  std::shared_ptr<ResponseSender> GetResponseSender();
 #endif
 
   /// Save an Inference Request to shared memory.
@@ -86,7 +94,12 @@ class InferRequest {
   /// Disallow copying the inference request object.
   DISALLOW_COPY_AND_ASSIGN(InferRequest);
 
+  intptr_t RequestAddress();
   ~InferRequest() {}
+
+#ifndef TRITON_PB_STUB
+  TRITONSERVER_Error* DeleteResponseFactory();
+#endif
 
  private:
   InferRequest(
@@ -103,6 +116,8 @@ class InferRequest {
   std::string model_name_;
   int64_t model_version_;
   uint32_t flags_;
+  intptr_t response_factory_address_;
+  intptr_t request_address_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;
@@ -114,5 +129,9 @@ class InferRequest {
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
+
+#ifdef TRITON_PB_STUB
+  std::shared_ptr<ResponseSender> response_sender_;
+#endif
 };
 }}};  // namespace triton::backend::python

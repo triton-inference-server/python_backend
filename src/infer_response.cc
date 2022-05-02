@@ -30,6 +30,7 @@
 #include <pybind11/embed.h>
 namespace py = pybind11;
 #endif
+#include "scoped_defer.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -161,5 +162,85 @@ InferResponse::Error()
 {
   return error_;
 }
+
+#ifndef TRITON_PB_STUB
+TRITONSERVER_Error*
+InferResponse::Send(
+    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream)
+{
+  // [FIXME] Use this code to send responses in non-decoupled mode.
+  TRITONBACKEND_Response* response = nullptr;
+  TRITONSERVER_Error* response_error = nullptr;
+  ScopedDefer response_error_handling([&response, &response_error] {
+    if (response != nullptr) {
+      LOG_IF_ERROR(
+          TRITONBACKEND_ResponseSend(response, 0 /* flags */, response_error),
+          "failed to send the response.");
+    }
+  });
+
+  SET_ERROR_AND_RETURN(
+      response_error,
+      TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
+
+  if (HasError()) {
+    response_error = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
+    return nullptr;
+  }
+
+  bool cuda_copy = false;
+  for (auto& output_tensor : OutputTensors()) {
+    TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
+    int64_t src_memory_type_id = output_tensor->MemoryTypeId();
+
+    TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
+    int64_t actual_memory_type_id = src_memory_type_id;
+
+    // [FIXME] GPU tensors are not supported in the decoupled API mode.
+    if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+      response_error = TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          "GPU tensors are not supported in decoupled API.");
+      return response_error;
+    }
+
+    TRITONBACKEND_Output* response_output;
+    SET_ERROR_AND_RETURN(
+        response_error,
+        TRITONBACKEND_ResponseOutput(
+            response, &response_output, output_tensor->Name().c_str(),
+            static_cast<TRITONSERVER_DataType>(output_tensor->TritonDtype()),
+            output_tensor->Dims().data(), output_tensor->Dims().size()));
+
+    void* buffer;
+    bool cuda_used = false;
+    SET_ERROR_AND_RETURN(
+        response_error, TRITONBACKEND_OutputBuffer(
+                            response_output, &buffer, output_tensor->ByteSize(),
+                            &actual_memory_type, &actual_memory_type_id));
+
+    if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
+      SET_ERROR_AND_RETURN(
+          response_error,
+          CopyBuffer(
+              "Failed to copy the output tensor to buffer.", src_memory_type,
+              src_memory_type_id, actual_memory_type, actual_memory_type_id,
+              output_tensor->ByteSize(), output_tensor->DataPtr(), buffer,
+              reinterpret_cast<cudaStream_t>(cuda_stream), &cuda_used));
+    }
+
+    cuda_copy |= cuda_used;
+  }
+
+#ifdef TRITON_ENABLE_GPU
+  if (cuda_copy) {
+    cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(cuda_stream));
+  }
+#endif  // TRITON_ENABLE_GPU
+
+  return response_error;
+}
+#endif
 
 }}}  // namespace triton::backend::python
