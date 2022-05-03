@@ -32,6 +32,7 @@
 #include <unistd.h>
 #include <array>
 #include <atomic>
+#include <boost/asio.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/functional/hash.hpp>
@@ -250,7 +251,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;
   bi::managed_external_buffer::handle_t ipc_control_handle_;
-  std::vector<std::future<void>> bls_futures_;
+  std::vector<std::future<void>> futures_;
   std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
@@ -603,7 +604,7 @@ ModelInstanceState::RespondErrorToAllRequests(
 void
 ModelInstanceState::WaitForBLSRequestsToFinish()
 {
-  thread_pool_->join();
+  futures_.clear();
 }
 
 bool
@@ -1390,19 +1391,27 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
       cv_.notify_one();
     } else if (message->Command() == PYTHONSTUB_ResponseSend) {
       std::shared_ptr<IPCMessage> response_send_message = std::move(message);
-      boost::asio::post(*thread_pool_, [this, response_send_message]() {
+      std::packaged_task<void()> task([this, response_send_message] {
         ResponseSendDecoupled(response_send_message);
       });
+      std::future<void> future =
+          boost::asio::post(*thread_pool_, std::move(task));
+      futures_.emplace_back(std::move(future));
     } else if (message->Command() == PYTHONSTUB_ResponseClose) {
       std::shared_ptr<IPCMessage> response_close_message = std::move(message);
-      boost::asio::post(*thread_pool_, [this, response_close_message]() {
+      std::packaged_task<void()> task([this, response_close_message] {
         ResponseCloseDecoupled(response_close_message);
       });
+      std::future<void> future =
+          boost::asio::post(*thread_pool_, std::move(task));
+      futures_.emplace_back(std::move(future));
     } else if (message->Command() == PYTHONSTUB_InferExecRequest) {
       std::shared_ptr<IPCMessage> bls_execute = std::move(message);
-      boost::asio::post(*thread_pool_, [this, bls_execute]() {
-        ExecuteBLSRequest(bls_execute);
-      });
+      std::packaged_task<void()> task(
+          [this, bls_execute] { ExecuteBLSRequest(bls_execute); });
+      std::future<void> future =
+          boost::asio::post(*thread_pool_, std::move(task));
+      futures_.emplace_back(std::move(future));
     }
   }
 }
@@ -1665,9 +1674,11 @@ ModelInstanceState::ProcessRequests(
   // BLS requests pushed to the message queue.
   while (ipc_message->Command() ==
          PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
-    boost::asio::post(*thread_pool_, [this, ipc_message]() {
-      ExecuteBLSRequest(ipc_message);
-    });
+    std::packaged_task<void()> task(
+        [this, ipc_message] { ExecuteBLSRequest(ipc_message); });
+    std::future<void> future =
+        boost::asio::post(*thread_pool_, std::move(task));
+    futures_.emplace_back(std::move(future));
 
     auto error = ReceiveMessageFromStub(response_message);
     if (error != nullptr) {
@@ -1994,11 +2005,10 @@ ModelInstanceState::~ModelInstanceState()
       if (model_state->IsDecoupled()) {
         parent_message_queue_->Push(DUMMY_MESSAGE);
         decoupled_monitor_.join();
-
-        // Wait for all the inflight decoupled response send/close or BLS
-        // requests to finish
-        thread_pool_->join();
       }
+
+      // Wait for all the futures to be finished.
+      thread_pool_->wait();
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
       stub_message_queue_->Push(ipc_message->ShmHandle());
