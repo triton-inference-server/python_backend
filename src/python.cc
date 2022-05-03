@@ -2539,9 +2539,8 @@ ModelState::AutoCompleteConfig()
     }
   }
 
-  // For batching support, the number of dimensions specified in model config
-  // should be 1 less than the number of dimensions present in model.
-  // Will use that as a hint to ascertain whether or not to enable batching.
+  // Determine if the model can potentially support batching. All
+  // input and output tensors must have a variable first dimension.
   // However, ragged batching is an exception to this rule. A tensor
   // allowing ragged batch is in itself a batching hint.
   bool config_batch_hint = false;
