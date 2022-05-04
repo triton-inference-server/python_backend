@@ -2003,6 +2003,7 @@ ModelInstanceState::~ModelInstanceState()
 
       ModelState* model_state = reinterpret_cast<ModelState*>(Model());
       if (model_state->IsDecoupled()) {
+        futures_.clear();
         parent_message_queue_->Push(DUMMY_MESSAGE);
         decoupled_monitor_.join();
       }
