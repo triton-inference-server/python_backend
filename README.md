@@ -148,9 +148,10 @@ the build. If the CMake variables below are not specified, "main" branch
 of those repositories will be used. \<GIT\_BRANCH\_NAME\> should be the same
 as the Python backend repository branch that you are trying to compile.
 
-* triton-inference-server/backend: -DTRITON\_BACKEND\_REPO\_TAG=\<GIT\_BRANCH\_NAME\>
-* triton-inference-server/common: -DTRITON\_COMMON\_REPO\_TAG=\<GIT\_BRANCH\_NAME\>
-* triton-inference-server/common: -DTRITON\_COMMON\_REPO\_TAG=\<GIT\_BRANCH\_NAME\>
+* triton-inference-server/backend: `-DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME>`
+* triton-inference-server/common: `-DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME>`
+* triton-inference-server/core: `-DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME>`
+
 
 Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
 this location is `/opt/tritonserver`.
