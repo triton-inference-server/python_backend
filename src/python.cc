@@ -289,8 +289,6 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* SetupStubProcess();
   TRITONSERVER_Error* SendMessageToStub(off_t message);
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
-  void ResponseCloseDecoupled(
-      std::shared_ptr<IPCMessage> response_close_message);
 
   // Checks whether the stub process is live
   bool IsStubProcessAlive();
@@ -352,6 +350,11 @@ class ModelInstanceState : public BackendModelInstance {
   TRITONSERVER_Error* CheckIncomingRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       size_t& total_batch_size);
+
+  // Set error for response send message
+  void SetErrorForResponseSendMessage(
+      ResponseSendMessage* response_send_message, TRITONSERVER_Error* error,
+      std::unique_ptr<PbString>& error_message);
 
   TRITONSERVER_Error* SaveRequestsToSharedMemory(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -468,6 +471,21 @@ ModelInstanceState::ExistsInClosedRequests(intptr_t closed_request)
   return std::find(
              closed_requests_.begin(), closed_requests_.end(),
              closed_request) != closed_requests_.end();
+}
+
+void
+ModelInstanceState::SetErrorForResponseSendMessage(
+    ResponseSendMessage* response_send_message, TRITONSERVER_Error* error,
+    std::unique_ptr<PbString>& error_message)
+{
+  if (error != nullptr) {
+    response_send_message->has_error = true;
+    LOG_IF_EXCEPTION(
+        error_message =
+            PbString::Create(shm_pool_, TRITONSERVER_ErrorMessage(error)));
+    response_send_message->error = error_message->ShmHandle();
+    response_send_message->is_error_set = true;
+  }
 }
 
 void
@@ -1397,14 +1415,6 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
       std::future<void> future =
           boost::asio::post(*thread_pool_, std::move(task));
       futures_.emplace_back(std::move(future));
-    } else if (message->Command() == PYTHONSTUB_ResponseClose) {
-      std::shared_ptr<IPCMessage> response_close_message = std::move(message);
-      std::packaged_task<void()> task([this, response_close_message] {
-        ResponseCloseDecoupled(response_close_message);
-      });
-      std::future<void> future =
-          boost::asio::post(*thread_pool_, std::move(task));
-      futures_.emplace_back(std::move(future));
     } else if (message->Command() == PYTHONSTUB_InferExecRequest) {
       std::shared_ptr<IPCMessage> bls_execute = std::move(message);
       std::packaged_task<void()> task(
@@ -1438,69 +1448,33 @@ ModelInstanceState::ResponseSendDecoupled(
     }
   });
 
-  std::unique_ptr<InferResponse> infer_response =
-      InferResponse::LoadFromSharedMemory(
-          shm_pool_, send_message_payload->response,
-          false /* open cuda ipc handle */);
-
   TRITONBACKEND_ResponseFactory* response_factory =
       reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
           send_message_payload->response_factory_address);
-  TRITONSERVER_Error* error =
-      infer_response->Send(response_factory, CudaStream());
-  if (error != nullptr) {
-    send_message_payload->has_error = true;
-    LOG_IF_EXCEPTION(
-        error_message =
-            PbString::Create(shm_pool_, TRITONSERVER_ErrorMessage(error)));
-    send_message_payload->error = error_message->ShmHandle();
-    send_message_payload->is_error_set = true;
-  }
-}
-
-void
-ModelInstanceState::ResponseCloseDecoupled(
-    std::shared_ptr<IPCMessage> response_close_message)
-{
-  AllocatedSharedMemory<ResponseCloseMessage> close_message =
-      shm_pool_->Load<ResponseCloseMessage>(response_close_message->Args());
-
-  ResponseCloseMessage* close_message_payload =
-      reinterpret_cast<ResponseCloseMessage*>(close_message.data_.get());
-  std::unique_ptr<PbString> error_message;
-  ScopedDefer _([close_message_payload] {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{close_message_payload->mu};
-      close_message_payload->is_stub_turn = true;
-      close_message_payload->cv.notify_all();
-
-      while (close_message_payload->is_stub_turn) {
-        close_message_payload->cv.wait(guard);
-      }
-    }
-  });
-
-  std::unique_ptr<
-      TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-  response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-      close_message_payload->response_factory_address));
-
-  TRITONSERVER_Error* error = TRITONBACKEND_ResponseFactorySendFlags(
-      response_factory.get(), TRITONSERVER_RESPONSE_COMPLETE_FINAL);
-
-  {
+  if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
     std::lock_guard<std::mutex> guard{closed_requests_mutex_};
-    closed_requests_.push_back(close_message_payload->request_address);
+    closed_requests_.push_back(send_message_payload->request_address);
   }
 
-  if (error != nullptr) {
-    close_message_payload->has_error = true;
-    LOG_IF_EXCEPTION(
-        error_message =
-            PbString::Create(shm_pool_, TRITONSERVER_ErrorMessage(error)));
-    close_message_payload->error = error_message->ShmHandle();
-    close_message_payload->is_error_set = true;
-    return;
+  if (send_message_payload->response != 0) {
+    std::unique_ptr<InferResponse> infer_response =
+        InferResponse::LoadFromSharedMemory(
+            shm_pool_, send_message_payload->response,
+            false /* open cuda ipc handle */);
+    TRITONSERVER_Error* error = infer_response->Send(
+        response_factory, CudaStream(), send_message_payload->flags);
+    SetErrorForResponseSendMessage(send_message_payload, error, error_message);
+  } else {
+    TRITONSERVER_Error* error = TRITONBACKEND_ResponseFactorySendFlags(
+        response_factory, send_message_payload->flags);
+    SetErrorForResponseSendMessage(send_message_payload, error, error_message);
+
+    if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      std::unique_ptr<
+          TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+      response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+          send_message_payload->response_factory_address));
+    }
   }
 }
 

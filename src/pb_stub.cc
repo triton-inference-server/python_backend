@@ -880,8 +880,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<ResponseSender, std::shared_ptr<ResponseSender>>(
       module, "InferenceResponseSender")
-      .def("send", &ResponseSender::Send)
-      .def("close", &ResponseSender::Close);
+      .def(
+          "send", &ResponseSender::Send, py::arg("response") = nullptr,
+          py::arg("flags") = 0);
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

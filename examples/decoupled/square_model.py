@@ -183,10 +183,11 @@ class TritonPythonModel:
             response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
-        # We must close the response sender to indicate to Triton that we are
-        # done sending responses for the corresponding request. We can't use the
-        # response sender after closing it.
-        response_sender.close()
+        # We must close the response sender to indicate to Triton that we are done sending
+        # responses for the corresponding request. We can't use the response sender after
+        # closing it.
+        response_sender.send(
+            flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
         with self.inflight_thread_count_lck:
             self.inflight_thread_count -= 1
