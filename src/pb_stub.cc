@@ -222,7 +222,7 @@ Stub::RunCommand()
       auto_complete_response_msg->Args() = auto_complete_response.handle_;
 
       try {
-        AutoCompleteModelConfig(&auto_complete_config);
+        AutoCompleteModelConfig(ipc_message->Args(), &auto_complete_config);
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -358,64 +358,8 @@ Stub::RunCommand()
   return false;
 }
 
-void
-Stub::AutoCompleteModelConfig(std::string* auto_complete_config)
-{
-  py::module sys = py::module_::import("sys");
-
-  std::string model_name =
-      model_path_.substr(model_path_.find_last_of("/") + 1);
-
-  // Model name without the .py extension
-  auto dotpy_pos = model_name.find_last_of(".py");
-  if (dotpy_pos == std::string::npos || dotpy_pos != model_name.size() - 1) {
-    throw PythonBackendException(
-        "Model name must end with '.py'. Model name is \"" + model_name +
-        "\".");
-  }
-
-  // The position of last character of the string that is searched for is
-  // returned by 'find_last_of'. Need to manually adjust the position.
-  std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
-  std::string model_path_parent =
-      model_path_.substr(0, model_path_.find_last_of("/"));
-  std::string model_path_parent_parent =
-      model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-  std::string python_backend_folder = triton_install_path_;
-  sys.attr("path").attr("append")(model_path_parent);
-  sys.attr("path").attr("append")(model_path_parent_parent);
-  sys.attr("path").attr("append")(python_backend_folder);
-
-  py::module python_backend_utils =
-      py::module_::import("triton_python_backend_utils");
-  py::module c_python_backend_utils =
-      py::module_::import("c_python_backend_utils");
-  py::setattr(
-      python_backend_utils, "TritonError",
-      c_python_backend_utils.attr("TritonError"));
-  py::setattr(
-      python_backend_utils, "TritonModelException",
-      c_python_backend_utils.attr("TritonModelException"));
-  c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
-
-  py::object TritonPythonModel =
-      py::module_::import(
-          (std::string(model_version_) + "." + model_name_trimmed).c_str())
-          .attr("TritonPythonModel");
-  model_ = TritonPythonModel();
-
-  if (!py::hasattr(model_, "auto_complete_config")) {
-    std::string message = "Unable to use auto-complete: Python model " +
-                          model_path_ +
-                          " does not implement `auto_complete_config` method.";
-    throw PythonBackendException(message);
-  }
-  *auto_complete_config =
-      std::string(py::str(model_.attr("auto_complete_config")()));
-}
-
-void
-Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
+py::object
+Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
 
@@ -468,7 +412,32 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
           .attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
-  model_instance_ = TritonPythonModel();
+
+  return TritonPythonModel();
+}
+
+void
+Stub::AutoCompleteModelConfig(
+    bi::managed_external_buffer::handle_t string_handle,
+    std::string* auto_complete_config)
+{
+  model_ = StubSetup();
+
+  py::str model_config;
+  std::unique_ptr<PbString> pb_string_shm =
+      PbString::LoadFromSharedMemory(shm_pool_, string_handle);
+  model_config = pb_string_shm->String();
+
+  if (py::hasattr(model_, "auto_complete_config")) {
+    *auto_complete_config =
+        std::string(py::str(model_.attr("auto_complete_config")(model_config)));
+  }
+}
+
+void
+Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
+{
+  model_instance_ = StubSetup();
 
   std::unordered_map<std::string, std::string> map;
   std::unique_ptr<PbMap> pb_map_shm =

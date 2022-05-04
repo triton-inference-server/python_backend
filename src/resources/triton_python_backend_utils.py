@@ -313,24 +313,62 @@ def set_input(config, new_input):
     ----------
     config : AutoCompleteConfig object
         object containing the model configuration
-    new_input : InferInputConfig
-        object containing the input we want to set
-        for the model
+    new_input : dict
+        containing the input we want to set for the model
+    Raises
+    ------
+    ValueError
+        If 'new_input' contains property other than 'name',
+        'data_type' and 'dims' or any of the properties is
+        not set.
     """
+    valid_properties = ['name', 'data_type', 'dims']
+    for current_property in new_input:
+        if current_property not in valid_properties:
+            raise ValueError(
+                "input contains property other than 'name', 'data_type' and 'dims'."
+            )
+
+    if 'name' not in new_input:
+        raise ValueError("input is missing 'name' property.")
+    elif 'data_type' not in new_input:
+        raise ValueError("input is missing 'data_type' property.")
+    elif 'dims' not in new_input:
+        raise ValueError("input is missing 'dims' property.")
+
     config.set_input(new_input)
 
 
-def set_output(config, output):
+def set_output(config, new_output):
     """Set the output for the model
     Parameters
     ----------
     config :AutoCompleteConfig object
         object containing the model configuration
-    output : InferOutputConfig
-        object containing the output we want to set
-        for the model
+    new_output : dict
+        containing the output we want to set for the model
+    Raises
+    ------
+    ValueError
+        If 'new_output' contains property other than 'name',
+        'data_type' and 'dims' or any of the properties is
+        not set.
     """
-    config.set_output(output)
+    valid_properties = ['name', 'data_type', 'dims']
+    for current_property in new_output:
+        if current_property not in valid_properties:
+            raise ValueError(
+                "output contains property other than 'name', 'data_type' and 'dims'."
+            )
+
+    if 'name' not in new_output:
+        raise ValueError("output is missing 'name' property.")
+    elif 'data_type' not in new_output:
+        raise ValueError("output is missing 'data_type' property.")
+    elif 'dims' not in new_output:
+        raise ValueError("output is missing 'dims' property.")
+
+    config.set_output(new_output)
 
 
 class ModelConfig:
@@ -339,7 +377,8 @@ class ModelConfig:
     Parameters
     ----------
     model_config : dict
-        dictionary object containing the modified model configuration
+        dictionary object containing the auto-complete
+        model configuration
     """
 
     def __init__(self):
@@ -363,139 +402,19 @@ class ModelConfig:
         """Set the input for the model.
         Parameters
         ----------
-        new_input : list
+        new_input : dict
             The input to be set.
         """
-        self._model_config["input"].append(new_input._get_input())
+        self._model_config["input"].append(new_input)
 
     def set_output(self, new_output):
         """Set the output for the model.
         Parameters
         ----------
-        new_output : list
+        new_output : dict
             The output to be set.
         """
-        self._model_config["output"].append(new_output._get_output())
-
-
-class InferInputConfig:
-    """An object of InferInputConfig class is used to describe
-    input configuration for autocomplete.
-    Parameters
-    ----------
-    name : str
-        The name of input whose data will be described by this object
-    dims : list
-        The dims of the associated input.
-    data_type : str
-        The data_type of the associated input.
-    """
-
-    def __init__(self, name, dims, data_type):
-        self._name = name
-        self._dims = dims
-        self._data_type = data_type
-
-    def set_name(self, name):
-        """Set the name of input.
-        Parameters
-        ----------
-        name : str
-            The name of the associated input.
-        """
-        self._name = name
-
-    def set_dims(self, dims):
-        """Set the dims of input.
-        Parameters
-        ----------
-        dims : list
-            The dims of the associated input.
-        """
-        self._dims = dims
-
-    def set_datatype(self, data_type):
-        """Set the datatype of input.
-        Parameters
-        ----------
-        datatype : str
-            The datatype of the associated input.
-        """
-        self._data_type = data_type
-
-    def _get_input(self):
-        """Retrieve the underlying input as json dict.
-        Returns
-        -------
-        dict
-            The underlying input specification as dict
-        """
-        infer_input = {
-            'name': self._name,
-            'dims': self._dims,
-            'data_type': self._data_type
-        }
-        return infer_input
-
-
-class InferOutputConfig:
-    """An object of InferOutputConfig class is used to describe
-    output configuration for autocomplete.
-    Parameters
-    ----------
-    name : str
-        The name of output whose data will be described by this object
-    dims : list
-        The dims of the associated output.
-    datatype : str
-        The datatype of the associated output.
-    """
-
-    def __init__(self, name, dims, data_type):
-        self._name = name
-        self._dims = dims
-        self._data_type = data_type
-
-    def set_name(self, name):
-        """Set the name of output.
-        Parameters
-        ----------
-        name : str
-            The name of the associated output.
-        """
-        self._name = name
-
-    def set_dims(self, dims):
-        """Set the dims of output.
-        Parameters
-        ----------
-        shape : list
-            The dims of the associated output.
-        """
-        self._dims = dims
-
-    def set_datatype(self, data_type):
-        """Set the datatype of output.
-        Parameters
-        ----------
-        data_type : str
-            The data_type of the associated output.
-        """
-        self._data_type = data_type
-
-    def _get_output(self):
-        """Retrieve the underlying output as json dict.
-        Returns
-        -------
-        dict
-            The underlying output specification as dict
-        """
-        infer_output = {
-            'name': self._name,
-            'dims': self._dims,
-            'data_type': self._data_type
-        }
-        return infer_output
+        self._model_config["output"].append(new_output)
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1

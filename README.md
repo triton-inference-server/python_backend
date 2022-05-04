@@ -193,44 +193,59 @@ class TritonPythonModel:
     that is created must have "TritonPythonModel" as the class name.
     """
 
-    def auto_complete_config(self):
+    @staticmethod
+    def auto_complete_config(model_config):
         """`auto_complete_config` is called only once when the server is started
-        with `--strict-model-config=false`. Implementing `auto_complete_config`
-        function is required when using auto-complete for the model configuration.
-        This function allows us to override `max_batch_size`, `input` and `output`
-        properties of the model using `pb_utils.set_max_batch_size`,
-        `pb_utils.set_input`, and `pb_utils.set_output`.
-        There are three objects for setting the model configuration for
-        auto-complete:
-          `pb_utils.InferInputConfig`: describe input configuration
-          `pb_utils.InferOutputConfig`: describe output configuration
-          `pb_utils.ModelConfig`: describe the initial and updated model
-                                  configuration
+        with `--strict-model-config=false`. This function allows us to set
+        `max_batch_size`, `input` and `output` properties of the model using
+        `pb_utils.set_max_batch_size`, `pb_utils.set_input`, and
+        `pb_utils.set_output`.
         In this function, your `auto_complete_config` function must return a
         `pb_utils.ModelConfig` object, and the updated model configuration will be
         returned.
         Note: All the objects in this function will go out of scope after exiting.
         Should not store any objects in this function.
 
+        Parameters
+        ----------
+        model_config : string
+          A JSON string contains the model configuration.
+
         Returns
         -------
         pb_utils.ModelConfig
           An object containing the initial and updated model configuration
         """
-        self.model_config = model_config = pb_utils.ModelConfig()
+        auto_complete_model_config = pb_utils.ModelConfig()
 
-        input0 = pb_utils.InferInputConfig("INPUT0", [4], "TYPE_FP32")
-        input1 = pb_utils.InferInputConfig("INPUT1", [4], "TYPE_FP32")
-        output0 = pb_utils.InferOutputConfig("OUTPUT0", [4], "TYPE_FP32")
-        output1 = pb_utils.InferOutputConfig("OUTPUT1", [4], "TYPE_FP32")
+        input0 = {
+          'name' : 'INPUT0',
+          'data_type' : 'TYPE_FP32',
+          'dims' : [ 4 ]
+        }
+        input1 = {
+          'name' : 'INPUT1',
+          'data_type' : 'TYPE_FP32',
+          'dims' : [ 4 ],
+        }
+        output0 = {
+          'name' : 'OUTPUT0',
+          'data_type' : 'TYPE_FP32',
+          'dims' : [ 4 ]
+        }
+        output1 = {
+          'name' : 'OUTPUT1',
+          'data_type' : 'TYPE_FP32',
+          'dims' : [ 4 ]
+        }
 
-        pb_utils.set_max_batch_size(model_config, 0)
-        pb_utils.set_input(model_config, input0)
-        pb_utils.set_input(model_config, input1)
-        pb_utils.set_output(model_config, output0)
-        pb_utils.set_output(model_config, output1)
+        pb_utils.set_max_batch_size(auto_complete_model_config, 0)
+        pb_utils.set_input(auto_complete_model_config, input0)
+        pb_utils.set_input(auto_complete_model_config, input1)
+        pb_utils.set_output(auto_complete_model_config, output0)
+        pb_utils.set_output(auto_complete_model_config, output1)
 
-        return model_config
+        return auto_complete_model_config
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
@@ -297,16 +312,9 @@ Every Python backend can implement four main functions:
 ### `auto_complete_config`
 
 `auto_complete_config` is called only once when the server is started
-with `--strict-model-config=false`. Implementing `auto_complete_config`
-function is required when using auto-complete for the model configuration.
-This function allows us to override `max_batch_size`, `input` and `output`
-properties of the model using `pb_utils.set_max_batch_size`,
-`pb_utils.set_input`, and `pb_utils.set_output`. \
-There are three objects for setting the model configuration for auto-complete:
-* `pb_utils.InferInputConfig`: describe input configuration
-* `pb_utils.InferOutputConfig`: describe output configuration
-* `pb_utils.ModelConfig`: describe the initial and updated model configuration
-
+with `--strict-model-config=false`. This function allows us to set
+`max_batch_size`, `input` and `output` properties of the model using
+`pb_utils.set_max_batch_size`, `pb_utils.set_input`, and `pb_utils.set_output`. \
 In this function, your `auto_complete_config` function must return a
 `pb_utils.ModelConfig` object, and the updated model configuration
 will be returned. \

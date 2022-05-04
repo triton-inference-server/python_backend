@@ -134,8 +134,13 @@ class Stub {
   /// Run a single command from the shared memory.
   bool RunCommand();
 
+  /// Setup for the stub process
+  py::object StubSetup();
+
   /// Set the model configuration for auto-complete
-  void AutoCompleteModelConfig(std::string* auto_complete_config);
+  void AutoCompleteModelConfig(
+      bi::managed_external_buffer::handle_t string_handle,
+      std::string* auto_complete_config);
 
   /// Initialize the user's Python code.
   void Initialize(bi::managed_external_buffer::handle_t map_handle);
