@@ -27,6 +27,7 @@
 import sys
 from functools import partial
 import numpy as np
+import queue
 
 from tritonclient.utils import *
 import tritonclient.grpc as grpcclient
@@ -58,13 +59,15 @@ in_values = [4, 2, 0, 1]
 inputs = [grpcclient.InferInput("IN", [1], np_to_triton_dtype(np.int32))]
 outputs = [grpcclient.InferRequestedOutput("OUT")]
 
+user_data = UserData()
+
 with grpcclient.InferenceServerClient(url="localhost:8001",
                                       verbose=True) as triton_client:
     # Establish stream
     triton_client.start_stream(callback=partial(callback, user_data))
 
     # Send specified many requests in parallel
-    for i in range(in_values.size):
+    for i in range(len(in_values)):
         in_data = np.array([in_values[i]], dtype=np.int32)
         inputs[0].set_data_from_numpy(in_data)
 
@@ -90,7 +93,7 @@ with grpcclient.InferenceServerClient(url="localhost:8001",
         recv_count += 1
 
     # Validate results...
-    for i in range(in_values.size):
+    for i in range(len(in_values)):
         this_id = str(i)
         if in_values[i] != 0 and this_id not in result_dict.keys():
             print("response for request id {} not received".format(this_id))
@@ -104,14 +107,16 @@ with grpcclient.InferenceServerClient(url="localhost:8001",
                 print("expected {} many responses for request id {}, got {}".
                       format(in_values[i], this_id, result_dict[this_id]))
                 sys.exit(1)
-        result_list = result_dict[this_id]
-        expected_data = np.array([in_values[i]], dtype=np.int32)
-        for j in range(len(result_list)):
-            this_data = result_list[j][1].as_numpy('OUT')
-            if not np.array_equal(expected_data, this_data):
-                print("incorrect data: expected {}, got {}".format(
-                    expected_data, this_data))
-                sys.exit(1)
+
+        if in_values[i] != 0:
+            result_list = result_dict[this_id]
+            expected_data = np.array([in_values[i]], dtype=np.int32)
+            for j in range(len(result_list)):
+                this_data = result_list[j][1].as_numpy('OUT')
+                if not np.array_equal(expected_data, this_data):
+                    print("incorrect data: expected {}, got {}".format(
+                        expected_data, this_data))
+                    sys.exit(1)
 
     print('PASS: square_int32')
     sys.exit(0)
