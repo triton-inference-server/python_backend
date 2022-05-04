@@ -61,6 +61,12 @@ ResponseSender::Send(
         "Unable to send response. Unsupported flag provided.");
   }
 
+  if (flags == 0 && infer_response == nullptr) {
+    throw PythonBackendException(
+        "Inference Response object must be provided when the response flags is "
+        "set to zero.");
+  }
+
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
   AllocatedSharedMemory<ResponseSendMessage> response_send_message =

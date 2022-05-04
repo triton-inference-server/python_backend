@@ -121,10 +121,17 @@ class TritonPythonModel:
         argument. This function is called when an inference request is made
         for this model. The request.get_response_sender() must be used to
         get an InferenceResponseSender object associated with the request.
-        Use the InferenceResponseSender.send() and InferenceResponseSender.end()
-        calls to send responses and indicate no responses will be sent for the
-        corresponding request respectively. If there is an error, you can set
-        the error argument when creating a pb_utils.InferenceResponse.
+        Use the InferenceResponseSender.send(response=<infer response object>,
+        flags=<flags>) to send responses.
+
+        In the final response sent using the response sender object, you must
+        set the flags argument to TRITONSERVER_RESPONSE_COMPLETE_FINAL to
+        indicate no responses will be sent for the corresponding request. If
+        there is an error, you can set the error argument when creating a
+        pb_utils.InferenceResponse. Setting the flags argument is optional and
+        defaults to zero. When the flags argument is set to
+        TRITONSERVER_RESPONSE_COMPLETE_FINAL providing the response argument is
+        optional.
 
         Parameters
         ----------
@@ -183,9 +190,10 @@ class TritonPythonModel:
             response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
-        # We must close the response sender to indicate to Triton that we are done sending
-        # responses for the corresponding request. We can't use the response sender after
-        # closing it.
+        # We must close the response sender to indicate to Triton that we are
+        # done sending responses for the corresponding request. We can't use the
+        # response sender after closing it. The response sender is closed by
+        # setting the TRITONSERVER_RESPONSE_COMPLETE_FINAL.
         response_sender.send(
             flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
