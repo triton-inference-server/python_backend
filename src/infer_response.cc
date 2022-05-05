@@ -166,16 +166,24 @@ InferResponse::Error()
 #ifndef TRITON_PB_STUB
 TRITONSERVER_Error*
 InferResponse::Send(
-    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream)
+    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
+    const uint32_t flags)
 {
   // [FIXME] Use this code to send responses in non-decoupled mode.
   TRITONBACKEND_Response* response = nullptr;
   TRITONSERVER_Error* response_error = nullptr;
-  ScopedDefer response_error_handling([&response, &response_error] {
+  ScopedDefer response_error_handling([&response, &response_error, flags,
+                                       response_factory] {
     if (response != nullptr) {
       LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(response, 0 /* flags */, response_error),
+          TRITONBACKEND_ResponseSend(response, flags, response_error),
           "failed to send the response.");
+      if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+        std::unique_ptr<
+            TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+        response_factory_ptr(
+            reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
+      }
     }
   });
 

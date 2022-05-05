@@ -355,11 +355,6 @@ InferRequest::Exec()
   ResponseBatch* response_batch = nullptr;
   bool responses_is_set = false;
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  if (stub->IsDecoupled()) {
-    throw PythonBackendException(
-        "Running BLS requests is not supported in the decoupled transaction "
-        "policy.");
-  }
   std::unique_ptr<SharedMemoryManager>& shm_pool = stub->SharedMemory();
   bi::managed_external_buffer::handle_t* response_handle = nullptr;
 

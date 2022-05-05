@@ -36,8 +36,7 @@ class ResponseSender {
   ResponseSender(
       intptr_t request_address, intptr_t response_factory_address,
       std::unique_ptr<SharedMemoryManager>& shm_pool);
-  void Send(std::shared_ptr<InferResponse>& infer_response);
-  void Close();
+  void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
 
  private:
   intptr_t request_address_;

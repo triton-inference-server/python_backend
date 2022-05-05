@@ -212,6 +212,7 @@ def get_output_config_by_name(model_config, name):
 
     return None
 
+
 def using_decoupled_model_transaction_policy(model_config):
     """Whether or not the model is configured with decoupled
     transaction policy.
@@ -296,3 +297,4 @@ def triton_string_to_numpy(triton_type_string):
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2
+TRITONSERVER_RESPONSE_COMPLETE_FINAL = 1

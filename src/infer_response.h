@@ -68,7 +68,8 @@ class InferResponse {
 #ifndef TRITON_PB_STUB
   /// Send an inference response
   TRITONSERVER_Error* Send(
-      TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream);
+      TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
+      const uint32_t flags);
 #endif
 
   // Disallow copying the inference response object.

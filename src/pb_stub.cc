@@ -551,6 +551,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
   bool has_exception = false;
   std::string error_string;
   std::unique_ptr<PbString> error_string_shm;
+  bool is_coroutine;
 
   ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
   ScopedDefer _(
@@ -571,6 +572,12 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
 
       py::object execute_return =
           model_instance_.attr("execute")(py_request_list);
+      py::module asyncio = py::module::import("asyncio");
+
+      is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
+      if (is_coroutine) {
+        execute_return = asyncio.attr("run")(execute_return);
+      }
 
       if (!py::isinstance<py::none>(execute_return)) {
         throw PythonBackendException(
@@ -873,8 +880,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<ResponseSender, std::shared_ptr<ResponseSender>>(
       module, "InferenceResponseSender")
-      .def("send", &ResponseSender::Send)
-      .def("close", &ResponseSender::Close);
+      .def(
+          "send", &ResponseSender::Send, py::arg("response") = nullptr,
+          py::arg("flags") = 0);
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
