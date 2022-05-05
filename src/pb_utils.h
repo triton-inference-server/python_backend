@@ -153,9 +153,8 @@ struct ResponseSenderBase {
 
 struct ResponseSendMessage : ResponseSenderBase {
   bi::managed_external_buffer::handle_t response;
+  uint32_t flags;
 };
-
-using ResponseCloseMessage = ResponseSenderBase;
 
 struct RequestBatch {
   uint32_t batch_size;

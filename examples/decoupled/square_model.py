@@ -46,10 +46,10 @@ class TritonPythonModel:
     This model has one input and one output. The model can support batching,
     with constraint that each request must be batch-1 request, but the shapes
     described here refer to the non-batch portion of the shape.
-    
+
       - Input 'IN' must have shape [1] and datatype INT32.
       - Output 'OUT' must have shape [1] and datatype INT32.
-         
+
     For a request, the backend will sent 'n' responses where 'n' is the
     element in IN. For each response, OUT will equal the element of IN.
     """
@@ -79,7 +79,7 @@ class TritonPythonModel:
         if not using_decoupled:
             raise pb_utils.TritonModelException(
                 """the model `{}` can generate any number of responses per request,
-                enable decoupled transaction policy in model configuration to 
+                enable decoupled transaction policy in model configuration to
                 serve this model""".format(args['model_name']))
 
         # Get IN configuration
@@ -121,10 +121,17 @@ class TritonPythonModel:
         argument. This function is called when an inference request is made
         for this model. The request.get_response_sender() must be used to
         get an InferenceResponseSender object associated with the request.
-        Use the InferenceResponseSender.send() and InferenceResponseSender.end()
-        calls to send responses and indicate no responses will be sent for
-        the corresponding request respectively. If there is an error, you can
-        set the error argument when creating a pb_utils.InferenceResponse.
+        Use the InferenceResponseSender.send(response=<infer response object>,
+        flags=<flags>) to send responses.
+
+        In the final response sent using the response sender object, you must
+        set the flags argument to TRITONSERVER_RESPONSE_COMPLETE_FINAL to
+        indicate no responses will be sent for the corresponding request. If
+        there is an error, you can set the error argument when creating a
+        pb_utils.InferenceResponse. Setting the flags argument is optional and
+        defaults to zero. When the flags argument is set to
+        TRITONSERVER_RESPONSE_COMPLETE_FINAL providing the response argument is
+        optional.
 
         Parameters
         ----------
@@ -136,20 +143,22 @@ class TritonPythonModel:
         None
         """
 
-        # Visit individual request to start processing them. Note that execute function is
-        # not required to wait for all the requests of the current batch to be processed
-        # before returning.
+        # Visit individual request to start processing them. Note that execute
+        # function is not required to wait for all the requests of the current
+        # batch to be processed before returning.
         for request in requests:
             self.process_request(request)
 
-        # Unlike in non-decoupled model transaction policy, execute function here returns no
-        # response. A return from this function only notifies Triton that the model instance
-        # is ready to receive another batch of requests. As we are not waiting for the
-        # response thread to complete here, it is possible that at any give time the model
-        # may be processing multiple batches of requests. Depending upon the request workload,
-        # this may lead to a lot of requests being processed by a single model instance at a
-        # time. In real-world models, the developer should be mindful of when to return from
-        # execute and be willing to accept next request batch.
+        # Unlike in non-decoupled model transaction policy, execute function
+        # here returns no response. A return from this function only notifies
+        # Triton that the model instance is ready to receive another batch of
+        # requests. As we are not waiting for the response thread to complete
+        # here, it is possible that at any give time the model may be processing
+        # multiple batches of requests. Depending upon the request workload,
+        # this may lead to a lot of requests being processed by a single model
+        # instance at a time. In real-world models, the developer should be
+        # mindful of when to return from execute and be willing to accept next
+        # request batch.
         return None
 
     def process_request(self, request):
@@ -172,7 +181,8 @@ class TritonPythonModel:
         thread.start()
 
     def response_thread(self, response_sender, in_input):
-        # The response_sender is used to send response(s) associated with the corresponding request.
+        # The response_sender is used to send response(s) associated with the
+        # corresponding request.
 
         for idx in range(in_input[0]):
             out_output = pb_utils.Tensor("OUT", np.array([in_input[0]],
@@ -180,10 +190,12 @@ class TritonPythonModel:
             response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
-        # We must close the response sender to indicate to Triton that we are done sending
-        # responses for the corresponding request. We can't use the response sender after
-        # closing it.
-        response_sender.close()
+        # We must close the response sender to indicate to Triton that we are
+        # done sending responses for the corresponding request. We can't use the
+        # response sender after closing it. The response sender is closed by
+        # setting the TRITONSERVER_RESPONSE_COMPLETE_FINAL.
+        response_sender.send(
+            flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
         with self.inflight_thread_count_lck:
             self.inflight_thread_count -= 1
@@ -199,7 +211,6 @@ class TritonPythonModel:
         print('Finalize invoked')
 
         inflight_threads = True
-        print_status = False
         cycles = 0
         logging_time_sec = 5
         sleep_time_sec = 0.1

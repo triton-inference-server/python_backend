@@ -43,26 +43,30 @@ class TritonPythonModel:
     This model demonstrates how to write a decoupled model where each
     request can generate 0 to many responses.
 
-    This model has three inputs and two outputs. The model does not support batching.
-    
-      - Input 'IN' can have any vector shape (e.g. [4] or [12]), datatype must be INT32.
+    This model has three inputs and two outputs. The model does not support
+    batching.
+
+      - Input 'IN' can have any vector shape (e.g. [4] or [12]), datatype must
+      be INT32.
       - Input 'DELAY' must have the same shape as IN, datatype must be UINT32.
       - Input 'WAIT' must have shape [1] and datatype UINT32.
       - For each response, output 'OUT' must have shape [1] and datatype INT32.
       - For each response, output 'IDX' must have shape [1] and datatype UINT32.
-         
-    For a request, the model will send 'n' responses where 'n' is the number of elements in IN. 
-    For the i'th response, OUT will equal the i'th element of IN and IDX will equal the zero-based
-    count of this response for the request. For example, the first response for a request will
-    have IDX = 0 and OUT = IN[0], the second will have IDX = 1 and OUT = IN[1], etc. The model
-    will wait the i'th DELAY, in milliseconds, before sending the i'th response. If IN shape is [0]
-    then no responses will be sent.
-    
-    After WAIT milliseconds the model will return from the execute function so that Triton can call
-    execute again with another request. WAIT can be less than the sum of DELAY so that execute
-    returns before all responses are sent. Thus, even if there is only one instance of the model,
-    multiple requests can be processed at the same time, and the responses for multiple requests
-    can be intermixed, depending on the values of DELAY and WAIT.
+
+    For a request, the model will send 'n' responses where 'n' is the number of
+    elements in IN.  For the i'th response, OUT will equal the i'th element of
+    IN and IDX will equal the zero-based count of this response for the request.
+    For example, the first response for a request will have IDX = 0 and OUT =
+    IN[0], the second will have IDX = 1 and OUT = IN[1], etc. The model will
+    wait the i'th DELAY, in milliseconds, before sending the i'th response. If
+    IN shape is [0] then no responses will be sent.
+
+    After WAIT milliseconds the model will return from the execute function so
+    that Triton can call execute again with another request. WAIT can be less
+    than the sum of DELAY so that execute returns before all responses are sent.
+    Thus, even if there is only one instance of the model, multiple requests can
+    be processed at the same time, and the responses for multiple requests can
+    be intermixed, depending on the values of DELAY and WAIT.
     """
 
     def initialize(self, args):
@@ -90,7 +94,7 @@ class TritonPythonModel:
         if not using_decoupled:
             raise pb_utils.TritonModelException(
                 """the model `{}` can generate any number of responses per request,
-                enable decoupled transaction policy in model configuration to 
+                enable decoupled transaction policy in model configuration to
                 serve this model""".format(args['model_name']))
 
         # Get OUT configuration
@@ -117,10 +121,17 @@ class TritonPythonModel:
         argument. This function is called when an inference request is made
         for this model. The request.get_response_sender() must be used to
         get an InferenceResponseSender object associated with the request.
-        Use the InferenceResponseSender.send() and InferenceResponseSender.close()
-        calls to send responses and indicate no responses will be sent for
-        the corresponding request respectively. If there is an error, you can
-        set the error argument when creating a pb_utils.InferenceResponse.
+        Use the InferenceResponseSender.send(response=<infer response object>,
+        flags=<flags>) to send responses.
+
+        In the final response sent using the response sender object, you must
+        set the flags argument to TRITONSERVER_RESPONSE_COMPLETE_FINAL to
+        indicate no responses will be sent for the corresponding request. If
+        there is an error, you can set the error argument when creating a
+        pb_utils.InferenceResponse. Setting the flags argument is optional and
+        defaults to zero. When the flags argument is set to
+        TRITONSERVER_RESPONSE_COMPLETE_FINAL providing the response argument is
+        optional.
 
         Parameters
         ----------
@@ -132,7 +143,8 @@ class TritonPythonModel:
         None
         """
 
-        # This model does not support batching, so 'request_count' should always be 1.
+        # This model does not support batching, so 'request_count' should always
+        # be 1.
         if len(requests) != 1:
             raise pb_utils.TritonModelException("unsupported batch size " +
                                                 len(requests))
@@ -163,26 +175,27 @@ class TritonPythonModel:
 
         thread.start()
 
-        # Read WAIT input for wait time, then return so that Triton can call execute again with
-        # another request.
+        # Read WAIT input for wait time, then return so that Triton can call
+        # execute again with another request.
         wait_input = pb_utils.get_input_tensor_by_name(requests[0],
                                                        'WAIT').as_numpy()
         time.sleep(wait_input[0] / 1000)
 
-        # Unlike in non-decoupled model transaction policy, execute function here returns no
-        # response. A return from this function only notifies Triton that the model instance
-        # is ready to receive another request. As we are not waiting for the response thread
-        # to complete here, it is possible that at any give time the model may be processing
-        # multiple requests. Depending upon the request workload, this may lead to a lot of
-        # requests being processed by a single model instance at a time. In real-world models,
-        # the developer should be mindful of when to return from execute and be willing to
-        # accept next request.
+        # Unlike in non-decoupled model transaction policy, execute function
+        # here returns no response. A return from this function only notifies
+        # Triton that the model instance is ready to receive another request. As
+        # we are not waiting for the response thread to complete here, it is
+        # possible that at any give time the model may be processing multiple
+        # requests. Depending upon the request workload, this may lead to a lot
+        # of requests being processed by a single model instance at a time. In
+        # real-world models, the developer should be mindful of when to return
+        # from execute and be willing to accept next request.
         return None
 
     def response_thread(self, response_sender, in_input, delay_input):
-        # The response_sender is used to send response(s) associated with the corresponding request.
-        # Iterate over input/delay pairs. Wait for DELAY milliseconds and then create and
-        # send a response.
+        # The response_sender is used to send response(s) associated with the
+        # corresponding request.  Iterate over input/delay pairs. Wait for DELAY
+        # milliseconds and then create and send a response.
 
         idx_dtype = self.idx_dtype
         out_dtype = self.out_dtype
@@ -200,10 +213,12 @@ class TritonPythonModel:
                 output_tensors=[idx_output, out_output])
             response_sender.send(response)
 
-        # We must close the response sender to indicate to Triton that we are done sending
-        # responses for the corresponding request. We can't use the response sender after
-        # closing it.
-        response_sender.close()
+        # We must close the response sender to indicate to Triton that we are
+        # done sending responses for the corresponding request. We can't use the
+        # response sender after closing it. The response sender is closed by
+        # setting the TRITONSERVER_RESPONSE_COMPLETE_FINAL.
+        response_sender.send(
+            flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
         with self.inflight_thread_count_lck:
             self.inflight_thread_count -= 1
@@ -218,7 +233,6 @@ class TritonPythonModel:
         print('Finalize invoked')
 
         inflight_threads = True
-        print_status = False
         cycles = 0
         logging_time_sec = 5
         sleep_time_sec = 0.1

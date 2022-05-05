@@ -43,11 +43,28 @@ ResponseSender::ResponseSender(
 
 
 void
-ResponseSender::Send(std::shared_ptr<InferResponse>& infer_response)
+ResponseSender::Send(
+    std::shared_ptr<InferResponse> infer_response, const uint32_t flags)
 {
   if (closed_) {
     throw PythonBackendException(
-        "Unable to send responses. Response sender has been closed.");
+        "Unable to send response. Response sender has been closed.");
+  }
+
+  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    closed_ = true;
+  }
+
+  // Check the correctness of the provided flags.
+  if (flags != TRITONSERVER_RESPONSE_COMPLETE_FINAL && flags != 0) {
+    throw PythonBackendException(
+        "Unable to send response. Unsupported flag provided.");
+  }
+
+  if (flags == 0 && infer_response == nullptr) {
+    throw PythonBackendException(
+        "Inference Response object must be provided when the response flags is "
+        "set to zero.");
   }
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
@@ -56,7 +73,9 @@ ResponseSender::Send(std::shared_ptr<InferResponse>& infer_response)
       shm_pool_->Construct<ResponseSendMessage>(
           1 /* count */, true /* aligned */);
 
-  infer_response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
+  if (infer_response) {
+    infer_response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
+  }
 
   ResponseSendMessage* send_message_payload = response_send_message.data_.get();
   new (&(send_message_payload->mu)) bi::interprocess_mutex;
@@ -65,9 +84,16 @@ ResponseSender::Send(std::shared_ptr<InferResponse>& infer_response)
   send_message_payload->is_stub_turn = false;
   send_message_payload->request_address = request_address_;
   send_message_payload->response_factory_address = response_factory_address_;
-  send_message_payload->response = infer_response->ShmHandle();
+
+  if (infer_response) {
+    send_message_payload->response = infer_response->ShmHandle();
+  } else {
+    send_message_payload->response = 0;
+  }
+
   send_message_payload->has_error = false;
   send_message_payload->is_error_set = false;
+  send_message_payload->flags = flags;
 
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, false /* inline_response */);
@@ -103,56 +129,5 @@ ResponseSender::Send(std::shared_ptr<InferResponse>& infer_response)
     }
   }
 }
-
-void
-ResponseSender::Close()
-{
-  if (closed_) {
-    throw PythonBackendException(
-        "Unable to close the response sender. Response sender has already been "
-        "closed.");
-  }
-  closed_ = true;
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  AllocatedSharedMemory<ResponseCloseMessage> response_close_message =
-      shm_pool_->Construct<ResponseCloseMessage>(
-          1 /* count */, true /* aligned */);
-
-  ResponseCloseMessage* close_message_payload =
-      reinterpret_cast<ResponseCloseMessage*>(
-          response_close_message.data_.get());
-
-  new (&(close_message_payload->mu)) bi::interprocess_mutex;
-  new (&(close_message_payload->cv)) bi::interprocess_condition;
-  close_message_payload->is_stub_turn = false;
-  close_message_payload->request_address = request_address_;
-  close_message_payload->response_factory_address = response_factory_address_;
-  close_message_payload->has_error = false;
-  close_message_payload->is_error_set = false;
-
-  std::unique_ptr<IPCMessage> ipc_message =
-      IPCMessage::Create(shm_pool_, false /* inline_response */);
-
-  ipc_message->Command() = PYTHONSTUB_ResponseClose;
-  ipc_message->Args() = response_close_message.handle_;
-
-  ScopedDefer _([&close_message_payload] {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{close_message_payload->mu};
-
-      close_message_payload->is_stub_turn = false;
-      close_message_payload->cv.notify_all();
-    }
-  });
-
-  {
-    bi::scoped_lock<bi::interprocess_mutex> guard{close_message_payload->mu};
-    stub->SendIPCMessage(ipc_message);
-    while (!close_message_payload->is_stub_turn) {
-      close_message_payload->cv.wait(guard);
-    }
-  }
-}
-
 
 }}}  // namespace triton::backend::python
