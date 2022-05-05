@@ -27,6 +27,7 @@
 import sys
 from functools import partial
 import numpy as np
+import queue
 
 from tritonclient.utils import *
 import tritonclient.grpc as grpcclient
@@ -51,17 +52,19 @@ def callback(user_data, result, error):
 # with output: [4], [2], [0] and [1] respectively.
 model_name = "repeat_int32"
 in_value = [4, 2, 0, 1]
-delay_value = 2
+delay_value = [1, 2, 3, 4]
 wait_value = 5
 
 inputs = []
 inputs.append(grpcclient.InferInput('IN', [len(in_value)], "INT32"))
-inputs.append(grpcclient.InferInput('DELAY', [1], "UINT32"))
+inputs.append(grpcclient.InferInput('DELAY', [len(delay_value)], "UINT32"))
 inputs.append(grpcclient.InferInput('WAIT', [1], "UINT32"))
 
 outputs = []
 outputs.append(grpcclient.InferRequestedOutput('OUT'))
 outputs.append(grpcclient.InferRequestedOutput('IDX'))
+
+user_data = UserData()
 
 with grpcclient.InferenceServerClient(url="localhost:8001",
                                       verbose=True) as triton_client:
@@ -70,7 +73,7 @@ with grpcclient.InferenceServerClient(url="localhost:8001",
 
     in_data = np.array(in_value, dtype=np.int32)
     inputs[0].set_data_from_numpy(in_data)
-    delay_data = np.array([delay_value], dtype=np.uint32)
+    delay_data = np.array(delay_value, dtype=np.uint32)
     inputs[1].set_data_from_numpy(delay_data)
     wait_data = np.array([wait_value], dtype=np.uint32)
     inputs[2].set_data_from_numpy(wait_data)
@@ -98,14 +101,14 @@ with grpcclient.InferenceServerClient(url="localhost:8001",
         recv_count += 1
 
     # Validate results...
-    if len(result_dict[request_id]) != len(in_values):
+    if len(result_dict[request_id]) != len(in_value):
         print("expected {} many responses for request id {}, got {}".format(
-            len(in_values), request_id, len(result_dict[request_id])))
+            len(in_value), request_id, len(result_dict[request_id])))
         sys.exit(1)
 
     result_list = result_dict[request_id]
     for i in range(len(result_list)):
-        expected_data = np.array([in_values[i]], dtype=np.int32)
+        expected_data = np.array([in_value[i]], dtype=np.int32)
         this_data = result_list[i][1].as_numpy('OUT')
         if not np.array_equal(expected_data, this_data):
             print("incorrect data: expected {}, got {}".format(
