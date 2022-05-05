@@ -1,4 +1,4 @@
-# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -37,6 +37,43 @@ class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
     """
+
+    @staticmethod
+    def auto_complete_config(model_config):
+        """`auto_complete_config` is called only once when the server is started
+        with `--strict-model-config=false`. This function allows us to set
+        `max_batch_size`, `input` and `output` properties of the model using
+        `pb_utils.set_max_batch_size`, `pb_utils.set_input`, and
+        `pb_utils.set_output`.
+        Must return a `pb_utils.ModelConfig` object which contains the updated
+        model configuration.
+        Note: All the objects in this function will go out of scope after exiting.
+        Should not store any objects in this function.
+
+        Parameters
+        ----------
+        model_config : string
+          A JSON string contains the model configuration.
+
+        Returns
+        -------
+        pb_utils.ModelConfig
+          An object containing the updated model configuration
+        """
+        auto_complete_model_config = pb_utils.ModelConfig()
+
+        input0 = {'name': 'INPUT0', 'data_type': 'TYPE_FP32', 'dims': [16]}
+        input1 = {'name': 'INPUT1', 'data_type': 'TYPE_FP32', 'dims': [16]}
+        output0 = {'name': 'OUTPUT0', 'data_type': 'TYPE_FP32', 'dims': [16]}
+        output1 = {'name': 'OUTPUT1', 'data_type': 'TYPE_FP32', 'dims': [16]}
+
+        pb_utils.set_max_batch_size(auto_complete_model_config, 0)
+        pb_utils.set_input(auto_complete_model_config, input0)
+        pb_utils.set_input(auto_complete_model_config, input1)
+        pb_utils.set_output(auto_complete_model_config, output0)
+        pb_utils.set_output(auto_complete_model_config, output1)
+
+        return auto_complete_model_config
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.

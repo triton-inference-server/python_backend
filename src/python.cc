@@ -432,21 +432,21 @@ class StubLauncher {
 
   // Stub process setup
   TRITONSERVER_Error* Setup(
-    ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-    bool* initialized_,
-    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-        stub_message_queue_,
-    std::string* path_to_libpython_, std::string* path_to_activate_,
-    bi::interprocess_mutex** health_mutex_,
-    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-        parent_message_queue_,
-    std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
-    std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
-        ipc_control_,
-    bi::managed_external_buffer::handle_t* ipc_control_handle_,
-    std::unique_ptr<SharedMemoryManager>* shm_pool_,
-    std::string* shm_region_name_, std::unique_ptr<boost::asio::thread_pool>* thread_pool_,
-    bool isInstance);
+      ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
+      bool* initialized_,
+      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
+          stub_message_queue_,
+      std::string* path_to_libpython_, std::string* path_to_activate_,
+      bi::interprocess_mutex** health_mutex_,
+      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
+          parent_message_queue_,
+      std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
+      std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
+          ipc_control_,
+      bi::managed_external_buffer::handle_t* ipc_control_handle_,
+      std::unique_ptr<SharedMemoryManager>* shm_pool_,
+      std::string* shm_region_name_,
+      std::unique_ptr<boost::asio::thread_pool>* thread_pool_, bool isInstance);
 
   // Start stub process
   TRITONSERVER_Error* StubProcess(
@@ -464,6 +464,25 @@ class StubLauncher {
       bi::managed_external_buffer::handle_t* ipc_control_handle_,
       std::unique_ptr<SharedMemoryManager>* shm_pool_,
       std::string* shm_region_name_, const std::string name);
+
+  // Destruct Stub
+  void Destruct(
+      ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
+      bool* initialized_,
+      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
+          stub_message_queue_,
+      std::string* path_to_libpython_, std::string* path_to_activate_,
+      bi::interprocess_mutex** health_mutex_,
+      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
+          parent_message_queue_,
+      std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
+      std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
+          ipc_control_,
+      bi::managed_external_buffer::handle_t* ipc_control_handle_,
+      std::unique_ptr<SharedMemoryManager>* shm_pool_,
+      std::thread* decoupled_monitor_,
+      std::unique_ptr<boost::asio::thread_pool>* thread_pool_,
+      std::vector<std::future<void>>* futures_, bool isInstance);
 };
 
 TRITONSERVER_Error*
@@ -481,8 +500,8 @@ StubLauncher::Setup(
         ipc_control_,
     bi::managed_external_buffer::handle_t* ipc_control_handle_,
     std::unique_ptr<SharedMemoryManager>* shm_pool_,
-    std::string* shm_region_name_, std::unique_ptr<boost::asio::thread_pool>* thread_pool_,
-    bool isInstance)
+    std::string* shm_region_name_,
+    std::unique_ptr<boost::asio::thread_pool>* thread_pool_, bool isInstance)
 {
   // Increase the stub process count to avoid shared memory region name
   // collision
@@ -553,7 +572,7 @@ StubLauncher::Setup(
   (*memory_manager_) = nullptr;
   if (isInstance) {
     (*thread_pool_) = std::make_unique<boost::asio::thread_pool>(
-      model_state->StateForBackend()->thread_pool_size);
+        model_state->StateForBackend()->thread_pool_size);
   }
   int64_t shm_default_size =
       model_state->StateForBackend()->shm_default_byte_size;
@@ -728,6 +747,88 @@ StubLauncher::StubProcess(
   }
 
   return nullptr;
+}
+
+void
+StubLauncher::Destruct(
+    ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
+    bool* initialized_,
+    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
+        stub_message_queue_,
+    std::string* path_to_libpython_, std::string* path_to_activate_,
+    bi::interprocess_mutex** health_mutex_,
+    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
+        parent_message_queue_,
+    std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
+    std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
+        ipc_control_,
+    bi::managed_external_buffer::handle_t* ipc_control_handle_,
+    std::unique_ptr<SharedMemoryManager>* shm_pool_,
+    std::thread* decoupled_monitor_,
+    std::unique_ptr<boost::asio::thread_pool>* thread_pool_,
+    std::vector<std::future<void>>* futures_, bool isInstance)
+{
+  if ((*initialized_)) {
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock(**health_mutex_);
+      (*ipc_control_)->stub_health = false;
+    }
+
+    // Sleep 1 second so that the child process has a chance to change the
+    // health variable
+    sleep(1);
+
+    bool healthy = false;
+    bool force_kill = false;
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock(**health_mutex_);
+      healthy = (*ipc_control_)->stub_health;
+    }
+
+    if (healthy) {
+      // Finalize command does not have any arguments.
+      std::unique_ptr<IPCMessage> ipc_message =
+          IPCMessage::Create((*shm_pool_), false /* inline_response */);
+
+      if (model_state->IsDecoupled()) {
+        (*parent_message_queue_)->Push(DUMMY_MESSAGE);
+        if (isInstance) {
+          (*decoupled_monitor_).join();
+          (*futures_).clear();
+        }
+      }
+
+      if (isInstance) {
+        // Wait for all the futures to be finished.
+        (*thread_pool_)->wait();
+      }
+
+      ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
+      (*stub_message_queue_)->Push(ipc_message->ShmHandle());
+      (*parent_message_queue_)->Pop();
+
+
+      (*stub_message_queue_).reset();
+      (*parent_message_queue_).reset();
+      (*memory_manager_).reset();
+
+    } else {
+      force_kill = true;
+    }
+
+    int status;
+    if (force_kill) {
+      kill((*stub_pid_), SIGKILL);
+    }
+    waitpid((*stub_pid_), &status, 0);
+  }
+
+  // First destroy the IPCControl. This makes sure that IPCControl is
+  // destroyed before the shared memory manager goes out of scope.
+  (*ipc_control_).reset();
+  (*stub_message_queue_).reset();
+  (*parent_message_queue_).reset();
+  (*memory_manager_).reset();
 }
 
 ModelInstanceState::ModelInstanceState(
@@ -2119,64 +2220,13 @@ ModelInstanceState::ProcessRequests(
 
 ModelInstanceState::~ModelInstanceState()
 {
-  if (initialized_) {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      ipc_control_->stub_health = false;
-    }
-
-    // Sleep 1 second so that the child process has a chance to change the
-    // health variable
-    sleep(1);
-
-    bool healthy = false;
-    bool force_kill = false;
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      healthy = ipc_control_->stub_health;
-    }
-
-    if (healthy) {
-      // Finalize command does not have any arguments.
-      std::unique_ptr<IPCMessage> ipc_message =
-          IPCMessage::Create(shm_pool_, false /* inline_response */);
-
-      ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-      if (model_state->IsDecoupled()) {
-        futures_.clear();
-        parent_message_queue_->Push(DUMMY_MESSAGE);
-        decoupled_monitor_.join();
-      }
-
-      // Wait for all the futures to be finished.
-      thread_pool_->wait();
-
-      ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
-      stub_message_queue_->Push(ipc_message->ShmHandle());
-      parent_message_queue_->Pop();
-
-
-      stub_message_queue_.reset();
-      parent_message_queue_.reset();
-      memory_manager_.reset();
-
-    } else {
-      force_kill = true;
-    }
-
-    int status;
-    if (force_kill) {
-      kill(stub_pid_, SIGKILL);
-    }
-    waitpid(stub_pid_, &status, 0);
-  }
-
-  // First destroy the IPCControl. This makes sure that IPCControl is
-  // destroyed before the shared memory manager goes out of scope.
-  ipc_control_.reset();
-  stub_message_queue_.reset();
-  parent_message_queue_.reset();
-  memory_manager_.reset();
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  Stub()->Destruct(
+      model_state, &stub_pid_, &parent_pid_, &initialized_,
+      &stub_message_queue_, &path_to_libpython_, &path_to_activate_,
+      &health_mutex_, &parent_message_queue_, &memory_manager_, &model_path_,
+      &ipc_control_, &ipc_control_handle_, &shm_pool_, &decoupled_monitor_,
+      &thread_pool_, &futures_, true);
 }
 
 TRITONSERVER_Error*
@@ -2229,6 +2279,8 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   python_execution_env_ = "";
   force_cpu_only_input_tensors_ = true;
   decoupled_ = false;
+  initialized_ = false;
+  stub_pid_ = 0;
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
@@ -2314,8 +2366,8 @@ ModelState::SetupModelStubProcess()
       this, &stub_pid_, &parent_pid_, &initialized_, &stub_message_queue_,
       &path_to_libpython_, &path_to_activate_, &health_mutex_,
       &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
-      &ipc_control_handle_, &shm_pool_, &shm_region_name_, new std::unique_ptr<boost::asio::thread_pool>(),
-      false);
+      &ipc_control_handle_, &shm_pool_, &shm_region_name_,
+      new std::unique_ptr<boost::asio::thread_pool>(), false);
 
   RETURN_IF_ERROR(StartModelStubProcess());
 
@@ -2757,53 +2809,13 @@ ModelState::ValidateModelConfig()
 
 ModelState::~ModelState()
 {
-  if (initialized_) {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      ipc_control_->stub_health = false;
-    }
-
-    // Sleep 1 second so that the child process has a chance to change the
-    // health variable
-    sleep(1);
-
-    bool healthy = false;
-    bool force_kill = false;
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      healthy = ipc_control_->stub_health;
-    }
-
-    if (healthy) {
-      // Finalize command does not have any arguments.
-      std::unique_ptr<IPCMessage> ipc_message =
-          IPCMessage::Create(shm_pool_, false /* inline_response */);
-
-      ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
-      stub_message_queue_->Push(ipc_message->ShmHandle());
-      parent_message_queue_->Pop();
-
-      stub_message_queue_.reset();
-      parent_message_queue_.reset();
-      memory_manager_.reset();
-
-    } else {
-      force_kill = true;
-    }
-
-    int status;
-    if (force_kill) {
-      kill(stub_pid_, SIGKILL);
-    }
-    waitpid(stub_pid_, &status, 0);
-  }
-
-  // First destroy the IPCControl. This makes sure that IPCControl is
-  // destroyed before the shared memory manager goes out of scope.
-  ipc_control_.reset();
-  stub_message_queue_.reset();
-  parent_message_queue_.reset();
-  memory_manager_.reset();
+  Stub()->Destruct(
+      this, &stub_pid_, &parent_pid_, &initialized_, &stub_message_queue_,
+      &path_to_libpython_, &path_to_activate_, &health_mutex_,
+      &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
+      &ipc_control_handle_, &shm_pool_, new std::thread(),
+      new std::unique_ptr<boost::asio::thread_pool>(),
+      new std::vector<std::future<void>>(), false);
 }
 
 extern "C" {
