@@ -611,7 +611,7 @@ StubLauncher::Setup(
   (*stub_message_queue_)->ResetSemaphores();
   (*parent_message_queue_)->ResetSemaphores();
 
-  *initialized_ = false;
+  (*initialized_) = false;
 
   return nullptr;
 }
@@ -724,7 +724,7 @@ StubLauncher::StubProcess(
 
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
-        (std::string("Failed to initialize model instance ") + name).c_str());
+        (std::string("Failed to initialize ") + name).c_str());
   }
 
   return nullptr;
@@ -3119,7 +3119,7 @@ TRITONBACKEND_ModelInstanceExecute(
           "Stub process is unhealthy and it will be restarted.");
       instance_state->KillStubProcess();
       LOG_IF_ERROR(
-          instance_state->StartStubProcess(),
+          instance_state->SetupStubProcess(),
           "Failed to restart the stub process.");
     }
   } else {
