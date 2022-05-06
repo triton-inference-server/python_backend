@@ -858,7 +858,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
       .def("name", &PbTensor::Name)
-      .def("as_numpy", &PbTensor::AsNumpy)
+      // The keep_alive is added to make sure that the NumPy object has the same
+      // lifetime as the tensor object. This means even when the NumPy object is
+      // only in scope, the tensor object is not deallocated from shared memory
+      // to make sure the NumPy object is still valid.
+      .def("as_numpy", &PbTensor::AsNumpy, py::keep_alive<0, 1>())
       .def("triton_dtype", &PbTensor::TritonDtype)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("is_cpu", &PbTensor::IsCPU)
