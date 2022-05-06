@@ -372,7 +372,7 @@ $ git clone https://github.com/triton-inference-server/python_backend -b
 <GIT_BRANCH_NAME>
 $ cd python_backend
 $ mkdir build && cd build
-$ cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+$ cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
 $ make triton-python-backend-stub
 ```
 
