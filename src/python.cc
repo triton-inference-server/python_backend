@@ -688,10 +688,10 @@ ModelInstanceState::StartStubProcess()
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, message_queue_size));
 
-  std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue;
+  std::unique_ptr<MessageQueue<intptr_t>> memory_manager_message_queue;
   RETURN_IF_EXCEPTION(
       memory_manager_message_queue =
-          MessageQueue<uint64_t>::Create(shm_pool_, message_queue_size));
+          MessageQueue<intptr_t>::Create(shm_pool_, message_queue_size));
 
   memory_manager_message_queue->ResetSemaphores();
   ipc_control_->memory_manager_message_queue =
