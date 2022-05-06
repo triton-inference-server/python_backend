@@ -65,16 +65,15 @@ class GPUMemoryRecord : public MemoryRecord {
 /// message queue asking the memory manager to deallocate the GPU tensor.
 class MemoryManager {
  public:
-  MemoryManager(std::unique_ptr<MessageQueue<uint64_t>>&& memory_message_queue);
-  uint64_t AddRecord(std::unique_ptr<MemoryRecord>&& memory_record);
+  MemoryManager(std::unique_ptr<MessageQueue<intptr_t>>&& memory_message_queue);
+  intptr_t AddRecord(std::unique_ptr<MemoryRecord>&& memory_record);
   TRITONSERVER_Error* ResetCounter();
   ~MemoryManager();
 
  private:
   std::thread thread_;
-  std::unordered_map<uint64_t, std::unique_ptr<MemoryRecord>> records_;
-  uint64_t record_count_;
-  std::unique_ptr<MessageQueue<uint64_t>> message_queue_;
+  std::unordered_map<intptr_t, std::unique_ptr<MemoryRecord>> records_;
+  std::unique_ptr<MessageQueue<intptr_t>> message_queue_;
   void QueueMonitorThread();
   std::mutex mu_;
 };
