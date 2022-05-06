@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "memory_manager.h"
+#include "pb_utils.h"
 
 
 namespace triton { namespace backend { namespace python {
@@ -60,29 +61,29 @@ GPUMemoryRecord::ReleaseCallback()
 #endif
 
 MemoryManager::MemoryManager(
-    std::unique_ptr<MessageQueue<uint64_t>>&& memory_message_queue)
+    std::unique_ptr<MessageQueue<intptr_t>>&& memory_message_queue)
 {
   message_queue_ = std::move(memory_message_queue);
-  record_count_ = 0;
   thread_ = std::thread(&MemoryManager::QueueMonitorThread, this);
 }
 
-uint64_t
+intptr_t
 MemoryManager::AddRecord(std::unique_ptr<MemoryRecord>&& memory_record)
 {
   std::lock_guard<std::mutex> lock{mu_};
 
-  record_count_++;
-  records_.emplace(record_count_, std::move(memory_record));
+  intptr_t memory_record_id =
+      reinterpret_cast<intptr_t>(memory_record->MemoryId());
+  records_.emplace(memory_record_id, std::move(memory_record));
 
-  return record_count_;
+  return memory_record_id;
 }
 
 void
 MemoryManager::QueueMonitorThread()
 {
   while (true) {
-    uint64_t memory = message_queue_->Pop();
+    intptr_t memory = message_queue_->Pop();
     if (memory == 0) {
       return;
     }
@@ -100,19 +101,15 @@ MemoryManager::QueueMonitorThread()
       // Call the release callback.
       it->second->ReleaseCallback()(it->second->MemoryId());
       records_.erase(it);
-
-      // Reset the record_count_ when the number of records is zero.
-      if (records_.size() == 0)
-        record_count_ = 0;
     }
   }
 }
 
 MemoryManager::~MemoryManager()
 {
-  // Push a dummy 0 message that will trigger the destruction of the background
+  // Push a dummy message that will trigger the destruction of the background
   // thread.
-  message_queue_->Push(0);
+  message_queue_->Push(DUMMY_MESSAGE);
   thread_.join();
 }
 
