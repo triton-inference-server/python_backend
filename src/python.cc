@@ -428,12 +428,11 @@ class ModelInstanceState : public BackendModelInstance {
 
 class StubLauncher {
  public:
-  StubLauncher();
+  ~StubLauncher();
 
   // Stub process setup
   TRITONSERVER_Error* Setup(
-      ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-      bool* initialized_,
+      ModelState* model_state, pid_t* parent_pid_, bool* initialized_,
       std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
           stub_message_queue_,
       std::string* path_to_libpython_, std::string* path_to_activate_,
@@ -450,35 +449,25 @@ class StubLauncher {
 
   // Start stub process
   TRITONSERVER_Error* StubProcess(
-      ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-      bool* initialized_,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          stub_message_queue_,
+      ModelState* model_state, pid_t* parent_pid_,
       std::string* path_to_libpython_, std::string* path_to_activate_,
-      bi::interprocess_mutex** health_mutex_,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          parent_message_queue_,
       std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
       std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
           ipc_control_,
       bi::managed_external_buffer::handle_t* ipc_control_handle_,
-      std::unique_ptr<SharedMemoryManager>* shm_pool_,
       std::string* shm_region_name_, const std::string name);
 
   // Destruct Stub
   void Destruct(
-      ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-      bool* initialized_,
+      ModelState* model_state, pid_t* stub_pid_, bool* initialized_,
       std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
           stub_message_queue_,
-      std::string* path_to_libpython_, std::string* path_to_activate_,
       bi::interprocess_mutex** health_mutex_,
       std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
           parent_message_queue_,
-      std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
+      std::unique_ptr<MemoryManager>* memory_manager_,
       std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
           ipc_control_,
-      bi::managed_external_buffer::handle_t* ipc_control_handle_,
       std::unique_ptr<SharedMemoryManager>* shm_pool_,
       std::thread* decoupled_monitor_,
       std::unique_ptr<boost::asio::thread_pool>* thread_pool_,
@@ -487,8 +476,7 @@ class StubLauncher {
 
 TRITONSERVER_Error*
 StubLauncher::Setup(
-    ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-    bool* initialized_,
+    ModelState* model_state, pid_t* parent_pid_, bool* initialized_,
     std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
         stub_message_queue_,
     std::string* path_to_libpython_, std::string* path_to_activate_,
@@ -625,7 +613,7 @@ StubLauncher::Setup(
   (*ipc_control_)->stub_message_queue = (*stub_message_queue_)->ShmHandle();
 
   new (&((*ipc_control_)->stub_health_mutex)) bi::interprocess_mutex;
-  *health_mutex_ = &((*ipc_control_)->stub_health_mutex);
+  (*health_mutex_) = &((*ipc_control_)->stub_health_mutex);
 
   (*stub_message_queue_)->ResetSemaphores();
   (*parent_message_queue_)->ResetSemaphores();
@@ -637,19 +625,12 @@ StubLauncher::Setup(
 
 TRITONSERVER_Error*
 StubLauncher::StubProcess(
-    ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-    bool* initialized_,
-    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-        stub_message_queue_,
+    ModelState* model_state, pid_t* parent_pid_,
     std::string* path_to_libpython_, std::string* path_to_activate_,
-    bi::interprocess_mutex** health_mutex_,
-    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-        parent_message_queue_,
     std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
     std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
         ipc_control_,
     bi::managed_external_buffer::handle_t* ipc_control_handle_,
-    std::unique_ptr<SharedMemoryManager>* shm_pool_,
     std::string* shm_region_name_, const std::string name)
 {
   const char* model_path = model_state->RepositoryPath().c_str();
@@ -751,18 +732,15 @@ StubLauncher::StubProcess(
 
 void
 StubLauncher::Destruct(
-    ModelState* model_state, pid_t* stub_pid_, pid_t* parent_pid_,
-    bool* initialized_,
+    ModelState* model_state, pid_t* stub_pid_, bool* initialized_,
     std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
         stub_message_queue_,
-    std::string* path_to_libpython_, std::string* path_to_activate_,
     bi::interprocess_mutex** health_mutex_,
     std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
         parent_message_queue_,
-    std::unique_ptr<MemoryManager>* memory_manager_, std::string* model_path_,
+    std::unique_ptr<MemoryManager>* memory_manager_,
     std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
         ipc_control_,
-    bi::managed_external_buffer::handle_t* ipc_control_handle_,
     std::unique_ptr<SharedMemoryManager>* shm_pool_,
     std::thread* decoupled_monitor_,
     std::unique_ptr<boost::asio::thread_pool>* thread_pool_,
@@ -1125,11 +1103,9 @@ ModelInstanceState::StartStubProcess()
   // Stub process
   if (pid == 0) {
     Stub()->StubProcess(
-        model_state, &stub_pid_, &parent_pid_, &initialized_,
-        &stub_message_queue_, &path_to_libpython_, &path_to_activate_,
-        &health_mutex_, &parent_message_queue_, &memory_manager_, &model_path_,
-        &ipc_control_, &ipc_control_handle_, &shm_pool_, &shm_region_name_,
-        Name());
+        model_state, &parent_pid_, &path_to_libpython_, &path_to_activate_,
+        &memory_manager_, &model_path_, &ipc_control_, &ipc_control_handle_,
+        &shm_region_name_, Name());
   } else {
     ScopedDefer _([this] {
       // Push a dummy message to the message queue so that the stub
@@ -1303,11 +1279,10 @@ ModelInstanceState::SetupStubProcess()
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   Stub()->Setup(
-      model_state, &stub_pid_, &parent_pid_, &initialized_,
-      &stub_message_queue_, &path_to_libpython_, &path_to_activate_,
-      &health_mutex_, &parent_message_queue_, &memory_manager_, &model_path_,
-      &ipc_control_, &ipc_control_handle_, &shm_pool_, &shm_region_name_,
-      &thread_pool_, true);
+      model_state, &parent_pid_, &initialized_, &stub_message_queue_,
+      &path_to_libpython_, &path_to_activate_, &health_mutex_,
+      &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
+      &ipc_control_handle_, &shm_pool_, &shm_region_name_, &thread_pool_, true);
 
   RETURN_IF_ERROR(StartStubProcess());
 
@@ -2222,11 +2197,9 @@ ModelInstanceState::~ModelInstanceState()
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   Stub()->Destruct(
-      model_state, &stub_pid_, &parent_pid_, &initialized_,
-      &stub_message_queue_, &path_to_libpython_, &path_to_activate_,
-      &health_mutex_, &parent_message_queue_, &memory_manager_, &model_path_,
-      &ipc_control_, &ipc_control_handle_, &shm_pool_, &decoupled_monitor_,
-      &thread_pool_, &futures_, true);
+      model_state, &stub_pid_, &initialized_, &stub_message_queue_,
+      &health_mutex_, &parent_message_queue_, &memory_manager_, &ipc_control_,
+      &shm_pool_, &decoupled_monitor_, &thread_pool_, &futures_, true);
 }
 
 TRITONSERVER_Error*
@@ -2363,7 +2336,7 @@ TRITONSERVER_Error*
 ModelState::SetupModelStubProcess()
 {
   Stub()->Setup(
-      this, &stub_pid_, &parent_pid_, &initialized_, &stub_message_queue_,
+      this, &parent_pid_, &initialized_, &stub_message_queue_,
       &path_to_libpython_, &path_to_activate_, &health_mutex_,
       &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
       &ipc_control_handle_, &shm_pool_, &shm_region_name_,
@@ -2387,11 +2360,9 @@ ModelState::StartModelStubProcess()
   // Stub process for getting model configuration from model.py
   if (pid == 0) {
     Stub()->StubProcess(
-        this, &stub_pid_, &parent_pid_, &initialized_, &stub_message_queue_,
-        &path_to_libpython_, &path_to_activate_, &health_mutex_,
-        &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
-        &ipc_control_handle_, &shm_pool_, &shm_region_name_, Name());
-
+        this, &parent_pid_, &path_to_libpython_, &path_to_activate_,
+        &memory_manager_, &model_path_, &ipc_control_, &ipc_control_handle_,
+        &shm_region_name_, Name());
   } else {
     ScopedDefer _([this] {
       // Push a dummy message to the message queue so that the stub
@@ -2810,11 +2781,9 @@ ModelState::ValidateModelConfig()
 ModelState::~ModelState()
 {
   Stub()->Destruct(
-      this, &stub_pid_, &parent_pid_, &initialized_, &stub_message_queue_,
-      &path_to_libpython_, &path_to_activate_, &health_mutex_,
-      &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
-      &ipc_control_handle_, &shm_pool_, new std::thread(),
-      new std::unique_ptr<boost::asio::thread_pool>(),
+      this, &stub_pid_, &initialized_, &stub_message_queue_, &health_mutex_,
+      &parent_message_queue_, &memory_manager_, &ipc_control_, &shm_pool_,
+      new std::thread(), new std::unique_ptr<boost::asio::thread_pool>(),
       new std::vector<std::future<void>>(), false);
 }
 

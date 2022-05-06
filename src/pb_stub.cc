@@ -784,8 +784,10 @@ Stub::~Stub()
   {
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
+    model_ = py::none();
   }
 
+  stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
   memory_manager_message_queue_.reset();
