@@ -115,11 +115,11 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
             input0_data, input1_data, output1_data))
 
         if not np.allclose(input0_data + input1_data, output0_data):
-            print("add_sub example error: incorrect sum")
+            print("auto_complete example error: incorrect sum")
             sys.exit(1)
 
         if not np.allclose(input0_data - input1_data, output1_data):
-            print("add_sub example error: incorrect difference")
+            print("auto_complete example error: incorrect difference")
             sys.exit(1)
 
     print('PASS: auto_complete')
