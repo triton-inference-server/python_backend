@@ -295,16 +295,16 @@ def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
 
 
-def add_max_batch_size(config, max_batch_size):
-    """Add the max batch size for the model
+def set_max_batch_size(config, max_batch_size):
+    """Set the max batch size for the model
     Parameters
     ----------
     config : AutoCompleteConfig object
         object containing the model configuration for auto-complete
     max_batch_size : int
-        the max_batch_size we want to add for the model
+        the max_batch_size we want to set for the model
     """
-    config.add_max_batch_size(max_batch_size)
+    config.set_max_batch_size(max_batch_size)
 
 
 def add_input(config, input):
@@ -388,12 +388,12 @@ class ModelConfig:
     def __str__(self):
         return str(self._model_config)
 
-    def add_max_batch_size(self, max_batch_size):
-        """Add the max batch size for the model.
+    def set_max_batch_size(self, max_batch_size):
+        """Set the max batch size for the model.
         Parameters
         ----------
         max_batch_size : int
-            The max_batch_size to be added.
+            The max_batch_size to be set.
         """
         self._model_config["max_batch_size"] = max_batch_size
 

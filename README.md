@@ -199,8 +199,8 @@ class TritonPythonModel:
         with `--strict-model-config=false`. Implementing this function is optional.
         A no implementation of `auto_complete_config` will do nothing. This function
         can be used to set `max_batch_size`, `input` and `output` properties of the
-        model using `pb_utils.set_max_batch_size`, `pb_utils.set_input`, and
-        `pb_utils.set_output`. These properties will allow Triton to load the model
+        model using `pb_utils.set_max_batch_size`, `pb_utils.add_input`, and
+        `pb_utils.add_output`. These properties will allow Triton to load the model
         with minimal model configuration in absence of a configuration file. This
         function returns the `pb_utils.ModelConfig` object with these properties.
 
@@ -225,7 +225,7 @@ class TritonPythonModel:
         output0 = {'name': 'OUTPUT0', 'data_type': 'TYPE_FP32', 'dims': [4]}
         output1 = {'name': 'OUTPUT1', 'data_type': 'TYPE_FP32', 'dims': [4]}
 
-        pb_utils.add_max_batch_size(auto_complete_model_config, 0)
+        pb_utils.set_max_batch_size(auto_complete_model_config, 0)
         pb_utils.add_input(auto_complete_model_config, input0)
         pb_utils.add_input(auto_complete_model_config, input1)
         pb_utils.add_output(auto_complete_model_config, output0)
@@ -298,12 +298,13 @@ Every Python backend can implement four main functions:
 ### `auto_complete_config`
 
 `auto_complete_config` is called only once when the server is started
-with [`--strict-model-config=false`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration). Implementing this function is optional.
-A no implementation of `auto_complete_config` will do nothing. This function can be used to set 
+with [`--strict-model-config=false`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration).
+Implementing this function is optional. A no implementation of `auto_complete_config` will do nothing.
+This function can be used to set 
 [`max_batch_size`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
 [`input`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs) and
 [`output`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
-properties of the model using `pb_utils.set_max_batch_size`, `pb_utils.set_input`, and `pb_utils.set_output`.
+properties of the model using `pb_utils.set_max_batch_size`, `pb_utils.add_input`, and `pb_utils.add_output`.
 These properties will allow Triton to load the model with
 [minimal model configuration](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file. This function returns the `pb_utils.ModelConfig` object with these properties.

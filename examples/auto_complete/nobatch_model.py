@@ -44,8 +44,8 @@ class TritonPythonModel:
         with `--strict-model-config=false`. Implementing this function is optional.
         A no implementation of `auto_complete_config` will do nothing. This function
         can be used to set `max_batch_size`, `input` and `output` properties of the
-        model using `pb_utils.set_max_batch_size`, `pb_utils.set_input`, and
-        `pb_utils.set_output`. These properties will allow Triton to load the model
+        model using `pb_utils.set_max_batch_size`, `pb_utils.add_input`, and
+        `pb_utils.add_output`. These properties will allow Triton to load the model
         with minimal model configuration in absence of a configuration file. This
         function returns the `pb_utils.ModelConfig` object with these properties.
 
@@ -70,7 +70,7 @@ class TritonPythonModel:
         output0 = {'name': 'OUTPUT0', 'data_type': 'TYPE_FP32', 'dims': [4]}
         output1 = {'name': 'OUTPUT1', 'data_type': 'TYPE_FP32', 'dims': [4]}
 
-        pb_utils.add_max_batch_size(auto_complete_model_config, 0)
+        pb_utils.set_max_batch_size(auto_complete_model_config, 0)
         pb_utils.add_input(auto_complete_model_config, input0)
         pb_utils.add_input(auto_complete_model_config, input1)
         pb_utils.add_output(auto_complete_model_config, output0)
