@@ -295,80 +295,79 @@ def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
 
 
-def set_max_batch_size(config, value):
-    """Set the max batch size for the model
+def add_max_batch_size(config, max_batch_size):
+    """Add the max batch size for the model
     Parameters
     ----------
     config : AutoCompleteConfig object
-        object containing the model configuration
-    value : int
-        the max_batch_size we want to set for the model
+        object containing the model configuration for auto-complete
+    max_batch_size : int
+        the max_batch_size we want to add for the model
     """
-    config.set_max_batch_size(value)
+    config.add_max_batch_size(max_batch_size)
 
 
-def set_input(config, new_input):
-    """Set the input for the model
+def add_input(config, input):
+    """Add the input for the model
     Parameters
     ----------
     config : AutoCompleteConfig object
-        object containing the model configuration
-    new_input : dict
-        containing the input we want to set for the model
+        object containing the model configuration for auto-complete
+    input : dict
+        containing the input we want to add for the model
     Raises
     ------
     ValueError
         If 'new_input' contains property other than 'name',
-        'data_type' and 'dims' or any of the properties is
+        'data_type' and 'dims' or any of the properties are
         not set.
     """
     valid_properties = ['name', 'data_type', 'dims']
-    for current_property in new_input:
+    for current_property in input:
         if current_property not in valid_properties:
             raise ValueError(
                 "input contains property other than 'name', 'data_type' and 'dims'."
             )
 
-    if 'name' not in new_input:
+    if 'name' not in input:
         raise ValueError("input is missing 'name' property.")
-    elif 'data_type' not in new_input:
+    elif 'data_type' not in input:
         raise ValueError("input is missing 'data_type' property.")
-    elif 'dims' not in new_input:
+    elif 'dims' not in input:
         raise ValueError("input is missing 'dims' property.")
 
-    config.set_input(new_input)
+    config.add_input(input)
 
 
-def set_output(config, new_output):
-    """Set the output for the model
+def add_output(config, output):
+    """Add the output for the model
     Parameters
     ----------
-    config :AutoCompleteConfig object
-        object containing the model configuration
-    new_output : dict
-        containing the output we want to set for the model
+    config : AutoCompleteConfig object
+        object containing the model configuration for auto-complete
+    output : dict
+        containing the output we want to add for the model
     Raises
     ------
     ValueError
-        If 'new_output' contains property other than 'name',
-        'data_type' and 'dims' or any of the properties is
-        not set.
+        If 'output' contains property other than 'name',
+        'data_type' and 'dims' or any of the properties are not set.
     """
     valid_properties = ['name', 'data_type', 'dims']
-    for current_property in new_output:
+    for current_property in output:
         if current_property not in valid_properties:
             raise ValueError(
                 "output contains property other than 'name', 'data_type' and 'dims'."
             )
 
-    if 'name' not in new_output:
+    if 'name' not in output:
         raise ValueError("output is missing 'name' property.")
-    elif 'data_type' not in new_output:
+    elif 'data_type' not in output:
         raise ValueError("output is missing 'data_type' property.")
-    elif 'dims' not in new_output:
+    elif 'dims' not in output:
         raise ValueError("output is missing 'dims' property.")
 
-    config.set_output(new_output)
+    config.add_output(output)
 
 
 class ModelConfig:
@@ -377,8 +376,8 @@ class ModelConfig:
     Parameters
     ----------
     model_config : dict
-        dictionary object containing the auto-complete
-        model configuration
+        dictionary object containing the max_batch_size, inputs and
+        outputs properties for auto-complete model configuration
     """
 
     def __init__(self):
@@ -389,32 +388,32 @@ class ModelConfig:
     def __str__(self):
         return str(self._model_config)
 
-    def set_max_batch_size(self, new_max_batch_size):
-        """Set the max batch size for the model.
+    def add_max_batch_size(self, max_batch_size):
+        """Add the max batch size for the model.
         Parameters
         ----------
-        new_max_batch_size : int
-            The max_batch_size to be set.
+        max_batch_size : int
+            The max_batch_size to be added.
         """
-        self._model_config["max_batch_size"] = new_max_batch_size
+        self._model_config["max_batch_size"] = max_batch_size
 
-    def set_input(self, new_input):
-        """Set the input for the model.
+    def add_input(self, input):
+        """Add the input for the model.
         Parameters
         ----------
-        new_input : dict
-            The input to be set.
+        input : dict
+            The input to be added.
         """
-        self._model_config["input"].append(new_input)
+        self._model_config["input"].append(input)
 
-    def set_output(self, new_output):
-        """Set the output for the model.
+    def add_output(self, output):
+        """Add the output for the model.
         Parameters
         ----------
-        new_output : dict
-            The output to be set.
+        output : dict
+            The output to be added.
         """
-        self._model_config["output"].append(new_output)
+        self._model_config["output"].append(output)
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1

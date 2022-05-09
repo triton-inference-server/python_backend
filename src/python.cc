@@ -219,8 +219,6 @@ class ModelState : public BackendModel {
   static TRITONSERVER_Error* Create(
       TRITONBACKEND_Model* triton_model, ModelState** state);
 
-  ~ModelState();
-
   // Get backend state
   BackendState* StateForBackend() { return backend_state_; }
 
@@ -246,8 +244,8 @@ class ModelState : public BackendModel {
   TRITONSERVER_Error* CheckModelConfigMismatch();
   TRITONSERVER_Error* ValidateModelConfig();
 
-  // Correct the string to the right json string format
-  void CorrectStringFormat(std::string* str);
+  // Fix the string to json format
+  void FixStringToJsonFormat(std::string* str);
 
   // Get auto-complete model configuration
   common::TritonJson::Value& GetAutoCompleteConfig()
@@ -257,6 +255,9 @@ class ModelState : public BackendModel {
 
   // Get model stub launcher
   StubLauncher* Stub() { return model_stub_; }
+
+  // Terminate the stub process
+  void TerminateStub();
 
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
@@ -597,10 +598,10 @@ StubLauncher::Setup(
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               (*shm_pool_), message_queue_size));
 
-  std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue;
+  std::unique_ptr<MessageQueue<intptr_t>> memory_manager_message_queue;
   RETURN_IF_EXCEPTION(
       memory_manager_message_queue =
-          MessageQueue<uint64_t>::Create((*shm_pool_), message_queue_size));
+          MessageQueue<intptr_t>::Create((*shm_pool_), message_queue_size));
 
   memory_manager_message_queue->ResetSemaphores();
   (*ipc_control_)->memory_manager_message_queue =
@@ -1102,10 +1103,10 @@ ModelInstanceState::StartStubProcess()
 
   // Stub process
   if (pid == 0) {
-    Stub()->StubProcess(
+    RETURN_IF_ERROR(Stub()->StubProcess(
         model_state, &parent_pid_, &path_to_libpython_, &path_to_activate_,
         &memory_manager_, &model_path_, &ipc_control_, &ipc_control_handle_,
-        &shm_region_name_, Name());
+        &shm_region_name_, Name()));
   } else {
     ScopedDefer _([this] {
       // Push a dummy message to the message queue so that the stub
@@ -1278,11 +1279,12 @@ TRITONSERVER_Error*
 ModelInstanceState::SetupStubProcess()
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-  Stub()->Setup(
+  RETURN_IF_ERROR(Stub()->Setup(
       model_state, &parent_pid_, &initialized_, &stub_message_queue_,
       &path_to_libpython_, &path_to_activate_, &health_mutex_,
       &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
-      &ipc_control_handle_, &shm_pool_, &shm_region_name_, &thread_pool_, true);
+      &ipc_control_handle_, &shm_pool_, &shm_region_name_, &thread_pool_,
+      true));
 
   RETURN_IF_ERROR(StartStubProcess());
 
@@ -2221,6 +2223,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
       triton_model, &auto_complete_config));
   if (auto_complete_config) {
     RETURN_IF_ERROR((*state)->SetupModelStubProcess());
+    (*state)->TerminateStub();
     RETURN_IF_ERROR((*state)->AutoCompleteConfig());
 
     triton::common::TritonJson::WriteBuffer buf;
@@ -2335,14 +2338,24 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
 TRITONSERVER_Error*
 ModelState::SetupModelStubProcess()
 {
-  Stub()->Setup(
+  RETURN_IF_ERROR(Stub()->Setup(
       this, &parent_pid_, &initialized_, &stub_message_queue_,
       &path_to_libpython_, &path_to_activate_, &health_mutex_,
       &parent_message_queue_, &memory_manager_, &model_path_, &ipc_control_,
-      &ipc_control_handle_, &shm_pool_, &shm_region_name_,
-      new std::unique_ptr<boost::asio::thread_pool>(), false);
+      &ipc_control_handle_, &shm_pool_, &shm_region_name_, nullptr, false));
 
-  RETURN_IF_ERROR(StartModelStubProcess());
+  try {
+    RETURN_IF_ERROR(StartModelStubProcess());
+  }
+  catch (const BackendModelException& ex) {
+    TerminateStub();
+    // Need to make sure that the shared memory pool is destructed properly
+    shm_pool_.reset();
+    RETURN_ERROR_IF_TRUE(
+        ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
+        std::string("unexpected nullptr in BackendModelException"));
+    RETURN_IF_ERROR(ex.err_);
+  }
 
   return nullptr;
 }
@@ -2359,10 +2372,10 @@ ModelState::StartModelStubProcess()
 
   // Stub process for getting model configuration from model.py
   if (pid == 0) {
-    Stub()->StubProcess(
+    RETURN_IF_ERROR(Stub()->StubProcess(
         this, &parent_pid_, &path_to_libpython_, &path_to_activate_,
         &memory_manager_, &model_path_, &ipc_control_, &ipc_control_handle_,
-        &shm_region_name_, Name());
+        &shm_region_name_, Name()));
   } else {
     ScopedDefer _([this] {
       // Push a dummy message to the message queue so that the stub
@@ -2422,12 +2435,12 @@ ModelState::StartModelStubProcess()
         std::unique_ptr<PbString> error_message =
             PbString::LoadFromSharedMemory(
                 shm_pool_, auto_complete_response->response_error);
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, error_message->String().c_str());
+        throw BackendModelException(TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, error_message->String().c_str()));
       } else {
-        return TRITONSERVER_ErrorNew(
+        throw BackendModelException(TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
-            (std::string("Auto-complete failed for ") + Name()).c_str());
+            (std::string("Auto-complete failed for ") + Name()).c_str()));
       }
     }
 
@@ -2436,11 +2449,13 @@ ModelState::StartModelStubProcess()
           PbString::LoadFromSharedMemory(
               shm_pool_, auto_complete_response->response_model_config);
       std::string auto_complete_config_string = auto_complete_config->String();
-      // Need to corret the string for the right json format
-      CorrectStringFormat(&auto_complete_config_string);
-      RETURN_IF_ERROR(auto_complete_config_.Parse(auto_complete_config_string));
-      triton::common::TritonJson::WriteBuffer buf;
-      auto_complete_config_.Write(&buf);
+      if (!auto_complete_config_string.empty()) {
+        FixStringToJsonFormat(&auto_complete_config_string);
+        RETURN_IF_ERROR(
+            auto_complete_config_.Parse(auto_complete_config_string));
+        triton::common::TritonJson::WriteBuffer buf;
+        auto_complete_config_.Write(&buf);
+      }
     }
 
     initialized_ = true;
@@ -2450,7 +2465,16 @@ ModelState::StartModelStubProcess()
 }
 
 void
-ModelState::CorrectStringFormat(std::string* str)
+ModelState::TerminateStub()
+{
+  Stub()->Destruct(
+      this, &stub_pid_, &initialized_, &stub_message_queue_, &health_mutex_,
+      &parent_message_queue_, &memory_manager_, &ipc_control_, &shm_pool_,
+      nullptr, nullptr, nullptr, false);
+}
+
+void
+ModelState::FixStringToJsonFormat(std::string* str)
 {
   *str = std::regex_replace(*str, std::regex("\'"), "\"");
   *str = std::regex_replace(*str, std::regex("False"), "false");
@@ -2462,124 +2486,48 @@ ModelState::AutoCompleteConfig()
 {
   RETURN_IF_ERROR(CheckModelConfigMismatch());
 
-  // If the model configuration already specifies inputs and outputs
-  // then don't perform any auto-completion.
-  size_t input_cnt = 0;
-  size_t output_cnt = 0;
-  {
-    triton::common::TritonJson::Value inputs;
-    if (ModelConfig().Find("input", &inputs)) {
-      input_cnt = inputs.ArraySize();
-    }
+  std::vector<std::string> io_types{"input", "output"};
+  std::map<std::string, std::set<std::string>> allowed_tensors;
+  triton::common::TritonJson::Value& auto_complete_model_config = GetAutoCompleteConfig();
 
-    triton::common::TritonJson::Value config_batch_inputs;
-    if (ModelConfig().Find("batch_input", &config_batch_inputs)) {
-      input_cnt += config_batch_inputs.ArraySize();
-    }
-
-    triton::common::TritonJson::Value outputs;
-    if (ModelConfig().Find("output", &outputs)) {
-      output_cnt = outputs.ArraySize();
-    }
-  }
-
-  // Determine if the model can potentially support batching. All
-  // input and output tensors must have a variable first dimension.
-  // However, ragged batching is an exception to this rule. A tensor
-  // allowing ragged batch is in itself a batching hint.
-  bool config_batch_hint = false;
-  // The number of IO Tensors with shape specification in config
-  int tensors_with_config_shape_cnt = 0;
-
-  if ((input_cnt != 0) || (output_cnt != 0)) {
-    std::vector<std::string> io_types{"input", "output"};
-    std::map<std::string, std::set<std::string>> allowed_tensors;
-
-    bool io_allow_ragged_batch = false;
-    triton::common::TritonJson::Value& auto_complete_model_config =
-        GetAutoCompleteConfig();
-
-    for (const auto& io_type : io_types) {
-      triton::common::TritonJson::Value model_io;
-      if (auto_complete_model_config.Find(io_type.c_str(), &model_io)) {
-        for (size_t i = 0; i < model_io.ArraySize(); i++) {
-          triton::common::TritonJson::Value io;
-          RETURN_IF_ERROR(model_io.IndexAsObject(i, &io));
-          std::string io_name;
-          RETURN_IF_ERROR(io.MemberAsString("name", &io_name));
-          allowed_tensors[io_type].emplace(io_name);
-        }
-        triton::common::TritonJson::Value config_io;
-        RETURN_IF_ERROR(
-            ModelConfig().MemberAsArray(io_type.c_str(), &config_io));
-        for (size_t i = 0;
-             ((i < config_io.ArraySize()) && (!io_allow_ragged_batch)); i++) {
-          triton::common::TritonJson::Value io;
-          RETURN_IF_ERROR(config_io.IndexAsObject(i, &io));
-          io.MemberAsBool("allow_ragged_batch", &io_allow_ragged_batch);
-          if (io_allow_ragged_batch) {
-            // Treat the presence of tensor allowing ragged batch as
-            // a hint for batching.
-            config_batch_hint = true;
-          } else {
-            common::TritonJson::Value model_config_dims;
-            common::TritonJson::Value reshape;
-            if (io.Find("reshape", &reshape)) {
-              reshape.MemberAsArray("shape", &model_config_dims);
-            } else {
-              io.MemberAsArray("dims", &model_config_dims);
-            }
-            if (model_config_dims.ArraySize() != 0) {
-              tensors_with_config_shape_cnt++;
-            }
-            std::string name;
-            RETURN_IF_ERROR(io.MemberAsString("name", &name));
-            if (io_type.compare("input") == 0) {
-              RETURN_IF_ERROR(
-                  CheckAllowedModelInput(io, allowed_tensors[io_type]));
-            } else {
-              RETURN_IF_ERROR(
-                  CheckAllowedModelOutput(io, allowed_tensors[io_type]));
-            }
-            if (model_config_dims.ArraySize() != 0) {
-              int64_t dim = 0;
-              RETURN_IF_ERROR(model_config_dims.IndexAsInt(0, &dim));
-              if (dim == -1) {
-                config_batch_hint = true;
-              }
-            }
-          }
+  for (const auto& io_type : io_types) {
+    triton::common::TritonJson::Value model_io;
+    if (auto_complete_model_config.Find(io_type.c_str(), &model_io)) {
+      for (size_t i = 0; i < model_io.ArraySize(); i++) {
+        triton::common::TritonJson::Value io;
+        RETURN_IF_ERROR(model_io.IndexAsObject(i, &io));
+        std::string io_name;
+        RETURN_IF_ERROR(io.MemberAsString("name", &io_name));
+        allowed_tensors[io_type].emplace(io_name);
+      }
+      triton::common::TritonJson::Value config_io;
+      RETURN_IF_ERROR(
+          ModelConfig().MemberAsArray(io_type.c_str(), &config_io));
+      for (size_t i = 0; i < config_io.ArraySize(); i++) {
+        triton::common::TritonJson::Value io;
+        RETURN_IF_ERROR(config_io.IndexAsObject(i, &io));
+        std::string name;
+        RETURN_IF_ERROR(io.MemberAsString("name", &name));
+        if (io_type.compare("input") == 0) {
+          RETURN_IF_ERROR(
+              CheckAllowedModelInput(io, allowed_tensors[io_type]));
+        } else {
+          RETURN_IF_ERROR(
+              CheckAllowedModelOutput(io, allowed_tensors[io_type]));
         }
       }
     }
   }
 
+  // If a non-zero max_batch_size is provided in the model or in the configuration file,
+  // then treat the model as a batching model.
   int64_t max_batch_size = 0;
-  bool has_implicit_batch_dim = false;
-  // If model has implicit batch dimension then retrieve the value and exit
+  bool has_max_batch_size = false;
+
   triton::common::TritonJson::Value ref_mbs_value;
   if (GetAutoCompleteConfig().Find("max_batch_size", &ref_mbs_value)) {
     RETURN_IF_ERROR(ref_mbs_value.AsInt(&max_batch_size));
-    has_implicit_batch_dim = true;
-  }
-
-  if (config_batch_hint && max_batch_size == 0) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        (std::string("autofill failed for model '") + Name() +
-         "': model tensor shape configuration hints for dynamic batching "
-         "but the underlying model doesn't support batching.")
-            .c_str());
-  } else if (
-      (tensors_with_config_shape_cnt != 0) && (!config_batch_hint) &&
-      (!has_implicit_batch_dim)) {
-    // if no hint for batching in config io
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_WARN,
-        (std::string("The specified dimensions in model config for ") + Name() +
-         " hints that batching is unavailable")
-            .c_str());
-    max_batch_size = 0;
+    has_max_batch_size = true;
   }
 
   if (MaxBatchSize() == 0) {
@@ -2587,15 +2535,17 @@ ModelState::AutoCompleteConfig()
     ModelConfig().Find("max_batch_size", &mbs_value);
     mbs_value.SetInt(max_batch_size);
     SetMaxBatchSize(max_batch_size);
-  } else if (MaxBatchSize() > max_batch_size) {
-    return TRITONSERVER_ErrorNew(
+  } else if (has_max_batch_size && (MaxBatchSize() != max_batch_size)) {
+    if (max_batch_size != 0) {
+      return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         (std::string("autofill failed for model '") + Name() +
          "': configuration specified max-batch " +
          std::to_string(MaxBatchSize()) +
-         " but Python model only supports max-batch " +
+         " but Python model specified max-batch " +
          std::to_string(max_batch_size))
             .c_str());
+    }
   }
 
   triton::common::TritonJson::Value ref_inputs(
@@ -2646,49 +2596,46 @@ ModelState::CheckModelConfigMismatch()
                 initial_io.MemberAsString("name", &initial_io_name));
             if (ref_io_name == initial_io_name) {
               // Check if 'data_type' mismatch
-              triton::common::TritonJson::Value datatype;
-              if (ref_io.Find("data_type", &datatype)) {
-                std::string ref_datatype, initial_datatype;
-                RETURN_IF_ERROR(datatype.AsString(&ref_datatype));
-                RETURN_IF_ERROR(
-                    initial_io.MemberAsString("data_type", &initial_datatype));
-                if (!initial_datatype.empty() &&
-                    (initial_datatype.compare("TYPE_INVALID") != 0)) {
-                  if (ref_datatype != initial_datatype) {
-                    return TRITONSERVER_ErrorNew(
-                        TRITONSERVER_ERROR_INTERNAL,
-                        (io_type + " name '" + ref_io_name +
-                         "' has a conflicting data_type property.")
-                            .c_str());
-                  }
+              std::string ref_datatype, initial_datatype;
+              RETURN_IF_ERROR(
+                  ref_io.MemberAsString("data_type", &ref_datatype));
+              RETURN_IF_ERROR(
+                  initial_io.MemberAsString("data_type", &initial_datatype));
+              if (!initial_datatype.empty() &&
+                  (initial_datatype.compare("TYPE_INVALID") != 0)) {
+                if (ref_datatype != initial_datatype) {
+                  return TRITONSERVER_ErrorNew(
+                      TRITONSERVER_ERROR_INTERNAL,
+                      (io_type + " name '" + ref_io_name +
+                        "' has a conflicting data_type property.")
+                          .c_str());
                 }
               }
               // Check if 'dims' mismatch
               triton::common::TritonJson::Value ref_dims, initial_dims;
-              if (ref_io.Find("dims", &ref_dims)) {
-                RETURN_IF_ERROR(
-                    initial_io.MemberAsArray("dims", &initial_dims));
-                if (initial_dims.ArraySize() != 0) {
-                  if (ref_dims.ArraySize() == initial_dims.ArraySize()) {
-                    for (size_t i = 0; i < ref_dims.ArraySize(); i++) {
-                      int64_t ref_dim = 0, initial_dim = 0;
-                      RETURN_IF_ERROR(ref_dims.IndexAsInt(i, &ref_dim));
-                      RETURN_IF_ERROR(initial_dims.IndexAsInt(i, &initial_dim));
-                      if (ref_dim != initial_dim) {
-                        return TRITONSERVER_ErrorNew(
-                            TRITONSERVER_ERROR_INTERNAL,
-                            (io_type + " name '" + ref_io_name +
-                             "' has a conflicting dims property.")
-                                .c_str());
-                      }
+              RETURN_IF_ERROR(ref_io.MemberAsArray("dims", &ref_dims));
+              RETURN_IF_ERROR(
+                  initial_io.MemberAsArray("dims", &initial_dims));
+              if (initial_dims.ArraySize() != 0) {
+                if (ref_dims.ArraySize() == initial_dims.ArraySize()) {
+                  for (size_t i = 0; i < ref_dims.ArraySize(); i++) {
+                    int64_t ref_dim = 0, initial_dim = 0;
+                    RETURN_IF_ERROR(ref_dims.IndexAsInt(i, &ref_dim));
+                    RETURN_IF_ERROR(initial_dims.IndexAsInt(i, &initial_dim));
+                    if (ref_dim != initial_dim) {
+                      return TRITONSERVER_ErrorNew(
+                          TRITONSERVER_ERROR_INTERNAL,
+                          (io_type + " name '" + ref_io_name +
+                            "' has a conflicting dims property.")
+                              .c_str());
                     }
-                  } else {
-                    return TRITONSERVER_ErrorNew(
-                        TRITONSERVER_ERROR_INTERNAL,
-                        (io_type + " name '" + ref_io_name +
-                         "' has a conflicting dims property.")
-                            .c_str());
                   }
+                } else {
+                  return TRITONSERVER_ErrorNew(
+                      TRITONSERVER_ERROR_INTERNAL,
+                      (io_type + " name '" + ref_io_name +
+                        "' has a conflicting dims property.")
+                          .c_str());
                 }
               }
             }
@@ -2776,15 +2723,6 @@ ModelState::ValidateModelConfig()
       (std::string("model configuration:\n") + buffer.Contents()).c_str());
 
   return nullptr;
-}
-
-ModelState::~ModelState()
-{
-  Stub()->Destruct(
-      this, &stub_pid_, &initialized_, &stub_message_queue_, &health_mutex_,
-      &parent_message_queue_, &memory_manager_, &ipc_control_, &shm_pool_,
-      new std::thread(), new std::unique_ptr<boost::asio::thread_pool>(),
-      new std::vector<std::future<void>>(), false);
 }
 
 extern "C" {

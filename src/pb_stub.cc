@@ -264,7 +264,6 @@ Stub::RunCommand()
         }
       }
 
-      return true;  // Terminate the stub process.
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
