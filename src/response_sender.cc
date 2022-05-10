@@ -67,6 +67,17 @@ ResponseSender::Send(
         "set to zero.");
   }
 
+  if (infer_response) {
+    for (auto& tensor : infer_response->OutputTensors()) {
+      if (!tensor->IsCPU()) {
+        throw PythonBackendException(
+            "Tensor '" + tensor->Name() +
+            "' is stored in GPU. GPU tensors are not supported yet in the "
+            "decoupled response sender.");
+      }
+    }
+  }
+
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
   AllocatedSharedMemory<ResponseSendMessage> response_send_message =

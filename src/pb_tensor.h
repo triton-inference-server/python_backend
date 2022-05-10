@@ -159,7 +159,7 @@ class PbTensor {
   /// Get NumPy representation of the tensor.
   /// \throw If the tensor is stored in GPU, an exception is thrown
   /// \return NumPy representation of the Tensor
-  const py::array& AsNumpy() const;
+  const py::array* AsNumpy() const;
 #endif
 
   /// Save tensor inside shared memory.

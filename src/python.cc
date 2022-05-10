@@ -1097,6 +1097,13 @@ ModelInstanceState::GetInputTensor(
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   bool cpu_only_tensors = model_state->ForceCPUOnlyInputTensors();
+
+  if (!cpu_only_tensors && model_state->IsDecoupled()) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        "FORCE_CPU_ONLY_INPUT_TENSORS set to OFF is not yet supported in the "
+        "decoupled API.");
+  }
   if (input_dtype == TRITONSERVER_TYPE_BYTES) {
     cpu_only_tensors = true;
   }
@@ -2443,19 +2450,13 @@ TRITONBACKEND_ModelInstanceExecute(
         requests, request_count, infer_requests);
 
     if (error != nullptr) {
-      for (auto& infer_request : infer_requests) {
-        // We should only delete the response factory for the requests that have
-        // not been closed.
+      for (uint32_t r = 0; r < request_count; ++r) {
+        TRITONBACKEND_Request* request = requests[r];
         if (!instance_state->ExistsInClosedRequests(
-                infer_request->RequestAddress())) {
-          LOG_IF_ERROR(
-              infer_request->DeleteResponseFactory(),
-              "Failed to delete the response factory.");
+                reinterpret_cast<intptr_t>(request))) {
           TRITONBACKEND_Response* response = nullptr;
           LOG_IF_ERROR(
-              TRITONBACKEND_ResponseNew(
-                  &response, reinterpret_cast<TRITONBACKEND_Request*>(
-                                 infer_request->RequestAddress())),
+              TRITONBACKEND_ResponseNew(&response, request),
               "Failed to create a new resposne.");
 
           if (response != nullptr) {
@@ -2464,6 +2465,17 @@ TRITONBACKEND_ModelInstanceExecute(
                     response, TRITONSERVER_RESPONSE_COMPLETE_FINAL, error),
                 "Failed to send the error resposne.");
           }
+        }
+      }
+
+      // We should only delete the response factory for the requests that have
+      // not been closed.
+      for (auto& infer_request : infer_requests) {
+        if (!instance_state->ExistsInClosedRequests(
+                infer_request->RequestAddress())) {
+          LOG_IF_ERROR(
+              infer_request->DeleteResponseFactory(),
+              "Failed to delete the response factory.");
         }
       }
     }
