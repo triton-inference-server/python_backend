@@ -43,6 +43,8 @@ any C++ code.
   - [Usage](#usage)
     - [`initialize`](#initialize)
     - [`execute`](#execute)
+      - [Non-Decoupled mode](#non-decoupled-mode)
+      - [Decoupled mode](#decoupled-mode)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
   - [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
@@ -275,9 +277,40 @@ below:
 
 `execute` function is called whenever an inference request is made. Every Python
 model must implement `execute` function. In the `execute` function you are given
-a list of `InferenceRequest` objects. In this function, your `execute` function
-must return a list of `InferenceResponse` objects that has the same length as
-`requests`.
+a list of `InferenceRequest` objects. There are two modes of implementing this
+function. The mode you choose should depend on your use case. That is whether
+or not you want to return decoupled responses from this model or not.
+
+#### Non-Decoupled mode
+
+This is the most generic way you would like to implement your model and
+requires the `execute` function to return exactly one response per request.
+This entails that in this mode, your `execute` function must return a list of
+`InferenceResponse` objects that has the same length as `requests`. The work
+flow in this mode is:
+
+* `execute` function receives a batch of pb_utils.InferenceRequest as a
+  length N array.
+
+* Perform inference on the pb_utils.InferenceRequest and append the
+  corresponding pb_utils.InferenceResponse to a response list.
+
+* Return back the response list.
+
+  * The length of response list being returned must be N.
+
+  * Each element in the list should be the response for the corresponding
+    element in the request array.
+
+  * Each element must contain a response (a response can be either output
+    tensors or an error); an element cannot be None.
+
+
+Triton checks to ensure that these requirements on response list are
+satisfied and if not returns an error response for all inference requests.
+Upon return from the execute function all tensor data associated with the
+InferenceRequest objects passed to the function are deleted, and so
+InferenceRequest objects should not be retained by the Python model.
 
 In case one of the inputs has an error, you can use the `TritonError` object
 to set the error message for that specific request. Below is an example of
@@ -301,6 +334,74 @@ class TritonPythonModel:
 
         return responses
 ```
+
+
+#### Decoupled mode \[Beta\]
+
+This mode allows user to send multiple responses for a request or
+not send any responses for a request. A model may also send
+responses out-of-order relative to the order that the request batches
+are executed. Such models are called *decoupled* models.
+
+
+In decoupled mode, model must use `InferenceResponseSender` object per
+request to keep creating and sending any number of responses for the
+request. The workflow for in this mode looks like:
+
+* `execute` function receives a batch of pb_utils.InferenceRequest as a
+  length N array.
+
+* Iterate through each pb_utils.InferenceRequest and perform for the following
+  steps for each pb_utils.InferenceRequest object:
+
+  1. Get `InferenceResponseSender` object for the InferenceRequest using
+     InferenceRequest.get_response_sender().
+
+  2. Create and populate pb_utils.InferenceResponse to be sent back.
+
+  3. Use InferenceResponseSender.send() to send the above response. If
+     this is the last request then pass pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL
+     as a flag with InferenceResponseSender.send(). Otherwise continue with
+     Step 1 for sending next request.
+
+* The return value for `execute` function in this mode should be None.
+
+Similar to above, in case one of the inputs has an error, you can use
+the `TritonError` object to set the error message for that specific
+request. After setting errors for an pb_utils.InferenceResponse
+object, use InferenceResponseSender.send() to send response with the
+error back to the user.
+
+##### Special Cases
+
+The decoupled mode is powerful and supports various special cases:
+
+* If the model should not send any response for the request,
+  then call InferenceResponseSender.send() with no response
+  but flag parameter set to pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL.
+
+* The model can also send responses out-of-order in which it received
+  requests.
+
+* The request data and `InferenceResponseSender` object can be passed to
+  a separate thread in the model. This means main caller thread can exit
+  from `execute` function and the model can still continue generating
+  responses as long as it holds `InferenceResponseSender` object.
+
+
+The [decoupled examples](examples/decoupled/README.md) demonstrate
+full power of what can be acheived from decoupled API. Read
+[Decoupled Backends and Models](https://github.com/triton-inference-server/server/blob/main/docs/decoupled_models.md)
+for more details on how to host a decoupled model.
+
+##### Known Issues
+
+The support for decoupled models is still in beta and suffers
+from below known issues:
+
+* The decoupled mode does not support [GPU tensors](#interoperability-and-gpu-support).
+* Inferences on a decoupled model can not be run within [Business Logic Scripting](#business-logic-scripting).
+* The metrics collection may be incomplete.
 
 ### `finalize`
 
