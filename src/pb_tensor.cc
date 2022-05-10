@@ -395,17 +395,15 @@ PbTensor::Name() const
 }
 
 #ifdef TRITON_PB_STUB
-const py::array&
+const py::array*
 PbTensor::AsNumpy() const
 {
   if (IsCPU()) {
-    return numpy_array_;
+    return &numpy_array_;
   } else {
     throw PythonBackendException(
         "Tensor is stored in GPU and cannot be converted to NumPy.");
   }
-
-  return numpy_array_;
 }
 #endif  // TRITON_PB_STUB
 

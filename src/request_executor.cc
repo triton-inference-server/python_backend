@@ -186,6 +186,18 @@ RequestExecutor::Infer(
               .c_str());
     }
 
+    uint32_t txn_flags;
+    THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelTransactionProperties(
+        server_, model_name, model_version, &txn_flags, nullptr /* voidp */));
+
+    // Decoupled API is not supported in the current BLS interface
+    if ((txn_flags & TRITONSERVER_TXN_DECOUPLED) != 0) {
+      throw PythonBackendException(
+          std::string("Model ") + model_name +
+          " is using the decoupled. BLS doesn't support models using the "
+          "decoupled transaction policy.");
+    }
+
     // Inference
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
         &irequest, server_, model_name, model_version));
