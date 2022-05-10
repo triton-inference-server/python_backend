@@ -43,8 +43,8 @@ any C++ code.
   - [Usage](#usage)
     - [`initialize`](#initialize)
     - [`execute`](#execute)
-      - [Non-Decoupled mode](#non-decoupled-mode)
-      - [Decoupled mode](#decoupled-mode)
+      - [Default Mode](#default-mode)
+      - [Decoupled Mode](#decoupled-mode-beta)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
   - [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
@@ -281,7 +281,7 @@ a list of `InferenceRequest` objects. There are two modes of implementing this
 function. The mode you choose should depend on your use case. That is whether
 or not you want to return decoupled responses from this model or not.
 
-#### Non-Decoupled mode
+#### Default Mode
 
 This is the most generic way you would like to implement your model and
 requires the `execute` function to return exactly one response per request.
@@ -312,7 +312,7 @@ Upon return from the execute function all tensor data associated with the
 InferenceRequest objects passed to the function are deleted, and so
 InferenceRequest objects should not be retained by the Python model.
 
-In case one of the inputs has an error, you can use the `TritonError` object
+In case one of the requests has an error, you can use the `TritonError` object
 to set the error message for that specific request. Below is an example of
 setting errors for an `InferenceResponse` object:
 
@@ -341,12 +341,14 @@ class TritonPythonModel:
 This mode allows user to send multiple responses for a request or
 not send any responses for a request. A model may also send
 responses out-of-order relative to the order that the request batches
-are executed. Such models are called *decoupled* models.
+are executed. Such models are called *decoupled* models. In
+order to use this mode, the [transaction policy](https://github.com/triton-inference-server/server/docs/model_configuration.md#model-transaction-policy)
+in the model configuration must be set to decoupled.
 
 
 In decoupled mode, model must use `InferenceResponseSender` object per
 request to keep creating and sending any number of responses for the
-request. The workflow for in this mode looks like:
+request. The workflow in this mode may look like:
 
 * `execute` function receives a batch of pb_utils.InferenceRequest as a
   length N array.
@@ -366,15 +368,15 @@ request. The workflow for in this mode looks like:
 
 * The return value for `execute` function in this mode should be None.
 
-Similar to above, in case one of the inputs has an error, you can use
+Similar to above, in case one of the requests has an error, you can use
 the `TritonError` object to set the error message for that specific
 request. After setting errors for an pb_utils.InferenceResponse
 object, use InferenceResponseSender.send() to send response with the
 error back to the user.
 
-##### Special Cases
+##### Use Cases
 
-The decoupled mode is powerful and supports various special cases:
+The decoupled mode is powerful and supports various other use cases:
 
 * If the model should not send any response for the request,
   then call InferenceResponseSender.send() with no response
@@ -399,8 +401,11 @@ for more details on how to host a decoupled model.
 The support for decoupled models is still in beta and suffers
 from below known issues:
 
-* The decoupled mode does not support [GPU tensors](#interoperability-and-gpu-support).
-* Inferences on a decoupled model can not be run within [Business Logic Scripting](#business-logic-scripting).
+* The decoupled mode doesn't support [FORCE_CPU_ONLY_INPUT_TENSORS](#input-tensor-device-placement)
+  parameter to be turned off. This means that the input tensors
+  will always be in CPU.
+* Currently, the InferenceResponseSender.send method only supports
+  inference_response objects that contain only CPU tensors.
 * The metrics collection may be incomplete.
 
 ### `finalize`
@@ -823,6 +828,9 @@ do not create a circular dependency. For example, if model A performs an inferen
 on itself and there are no more model instances ready to execute the inference request, the
 model will block on the inference execution forever.
 
+- Currently, BLS can not run inference on a decoupled model.
+
+
 # Interoperability and GPU Support
 
 Starting from 21.09 release, Python backend supports
@@ -923,6 +931,12 @@ You can find the complete example instructions in [examples/bls](examples/bls/RE
 
 The Preprocessing example shows how to use Python Backend to do model preprocessing.
 You can find the complete example instructions in [examples/preprocessing](examples/preprocessing/README.md).
+
+## Decoupled Models
+
+The examples of decoupled models shows how to develop and serve
+[decoupled models](../../README.md#decoupled-mode-beta) in Triton using Python backend.
+You can find the complete example instructions in [examples/decoupled](examples/decoupled/README.md).
 
 # Running with Inferentia
 

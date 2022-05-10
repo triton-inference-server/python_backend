@@ -31,8 +31,6 @@
 In this section we demonstrate an end-to-end examples for developing and
 serving [decoupled models](../../README.md#decoupled-mode-beta) in Python backend.
 
-## Deploying the Decoupled Models
-
 [repeat_model.py](repeat_model.py) and [square_model.py](square_model.py) demonstrate
 how to write a decoupled model where each request can generate 0 to many responses.
 These files are heavily commented to describe each fuinction call.
@@ -42,6 +40,8 @@ the restriction placed by the [instance count](https://github.com/triton-inferen
 and allows multiple requests to be in process even for single instance. In
 real deployment, the model should not allow the caller thread to return from
 `execute` until that instance is ready to handle another set of requests.
+
+## Deploying the Decoupled Models
 
 1. Create the model repository:
 
