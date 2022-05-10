@@ -2452,8 +2452,6 @@ TRITONBACKEND_ModelInstanceExecute(
     if (error != nullptr) {
       for (uint32_t r = 0; r < request_count; ++r) {
         TRITONBACKEND_Request* request = requests[r];
-        // We should only delete the response factory for the requests that have
-        // not been closed.
         if (!instance_state->ExistsInClosedRequests(
                 reinterpret_cast<intptr_t>(request))) {
           TRITONBACKEND_Response* response = nullptr;
@@ -2470,10 +2468,15 @@ TRITONBACKEND_ModelInstanceExecute(
         }
       }
 
+      // We should only delete the response factory for the requests that have
+      // not been closed.
       for (auto& infer_request : infer_requests) {
-        LOG_IF_ERROR(
-            infer_request->DeleteResponseFactory(),
-            "Failed to delete the response factory.");
+        if (!instance_state->ExistsInClosedRequests(
+                infer_request->RequestAddress())) {
+          LOG_IF_ERROR(
+              infer_request->DeleteResponseFactory(),
+              "Failed to delete the response factory.");
+        }
       }
     }
   }
