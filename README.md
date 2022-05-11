@@ -342,7 +342,7 @@ This mode allows user to send multiple responses for a request or
 not send any responses for a request. A model may also send
 responses out-of-order relative to the order that the request batches
 are executed. Such models are called *decoupled* models. In
-order to use this mode, the [transaction policy](https://github.com/triton-inference-server/server/docs/model_configuration.md#model-transaction-policy)
+order to use this mode, the [transaction policy](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#model-transaction-policy)
 in the model configuration must be set to decoupled.
 
 
