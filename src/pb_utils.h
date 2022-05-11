@@ -153,6 +153,13 @@ struct ResponseSenderBase {
 
 struct ResponseSendMessage : ResponseSenderBase {
   bi::managed_external_buffer::handle_t response;
+
+  // GPU Buffers handle
+  bi::managed_external_buffer::handle_t gpu_buffers_handle;
+
+  // GPU buffers count
+  uint32_t gpu_buffers_count;
+
   uint32_t flags;
 };
 

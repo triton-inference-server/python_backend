@@ -29,6 +29,7 @@
 #include "pb_error.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
+#include "scoped_defer.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -49,6 +50,19 @@ struct ResponseShm {
     }                                        \
   } while (false)
 
+#define SET_ERROR_AND_RETURN_IF_EXCEPTION(E, X)                \
+  do {                                                         \
+    try {                                                      \
+      (X);                                                     \
+    }                                                          \
+    catch (const PythonBackendException& pb_exception) {       \
+      TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
+          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());   \
+      E = rarie_err__;                                         \
+      return E;                                                \
+    }                                                          \
+  } while (false)
+
 class InferResponse {
  public:
   InferResponse(
@@ -66,10 +80,19 @@ class InferResponse {
   bi::managed_external_buffer::handle_t ShmHandle();
 
 #ifndef TRITON_PB_STUB
-  /// Send an inference response
+  /// Send an inference response. If the response has a GPU tensor, sending the
+  /// response needs to be done in two step. The boolean
+  /// 'requires_deferred_callback' indicates whether DeferredSendCallback method
+  /// should be called or not.
   TRITONSERVER_Error* Send(
       TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
-      const uint32_t flags);
+      bool& requires_deferred_callback, const uint32_t flags,
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      std::vector<std::unique_ptr<PbMemory>>& output_buffers,
+      const std::set<std::string>& requested_output_names = {},
+      TRITONBACKEND_Response* response = nullptr);
+
+  void DeferredSendCallback();
 #endif
 
   // Disallow copying the inference response object.
@@ -84,5 +107,7 @@ class InferResponse {
   std::shared_ptr<PbError> error_;
   bi::managed_external_buffer::handle_t shm_handle_;
   AllocatedSharedMemory<char> response_shm_;
+  std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
+  std::unique_ptr<ScopedDefer> deferred_send_callback_;
 };
 }}}  // namespace triton::backend::python
