@@ -1098,12 +1098,6 @@ ModelInstanceState::GetInputTensor(
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   bool cpu_only_tensors = model_state->ForceCPUOnlyInputTensors();
 
-  if (!cpu_only_tensors && model_state->IsDecoupled()) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        "FORCE_CPU_ONLY_INPUT_TENSORS set to OFF is not yet supported in the "
-        "decoupled API.");
-  }
   if (input_dtype == TRITONSERVER_TYPE_BYTES) {
     cpu_only_tensors = true;
   }
@@ -2077,6 +2071,18 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
       TRITONSERVER_ErrorDelete(error);
     }
 
+    triton::common::TritonJson::Value model_transaction_policy;
+    if (model_config_.Find(
+            "model_transaction_policy", &model_transaction_policy)) {
+      triton::common::TritonJson::Value decoupled;
+      if (model_transaction_policy.Find("decoupled", &decoupled)) {
+        auto error = decoupled.AsBool(&decoupled_);
+        if (error != nullptr) {
+          throw BackendModelException(error);
+        }
+      }
+    }
+
     // Skip the FORCE_CPU_ONLY_INPUT_TENSORS variable if it doesn't exits.
     std::string force_cpu_only_input_tensor;
     error = nullptr;
@@ -2089,6 +2095,12 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
             TRITONSERVER_LOG_INFO,
             (std::string("Forcing CPU only input tensors.")).c_str());
       } else if (force_cpu_only_input_tensor == "no") {
+        if (decoupled_) {
+          throw BackendModelException(TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_UNSUPPORTED,
+              "FORCE_CPU_ONLY_INPUT_TENSORS set to OFF is not yet supported in "
+              "the decoupled API."));
+        }
         force_cpu_only_input_tensors_ = false;
         LOG_MESSAGE(
             TRITONSERVER_LOG_INFO,
@@ -2105,18 +2117,6 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
     } else {
       // Delete the error
       TRITONSERVER_ErrorDelete(error);
-    }
-  }
-
-  triton::common::TritonJson::Value model_transaction_policy;
-  if (model_config_.Find(
-          "model_transaction_policy", &model_transaction_policy)) {
-    triton::common::TritonJson::Value decoupled;
-    if (model_transaction_policy.Find("decoupled", &decoupled)) {
-      auto error = decoupled.AsBool(&decoupled_);
-      if (error != nullptr) {
-        throw BackendModelException(error);
-      }
     }
   }
 
