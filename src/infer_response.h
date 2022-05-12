@@ -45,8 +45,8 @@ struct ResponseShm {
   do {                                       \
     TRITONSERVER_Error* raasnie_err__ = (X); \
     if (raasnie_err__ != nullptr) {          \
-      E = raasnie_err__;                     \
-      return E;                              \
+      *E = raasnie_err__;                    \
+      return *E;                             \
     }                                        \
   } while (false)
 
@@ -58,8 +58,8 @@ struct ResponseShm {
     catch (const PythonBackendException& pb_exception) {       \
       TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
           TRITONSERVER_ERROR_INTERNAL, pb_exception.what());   \
-      E = rarie_err__;                                         \
-      return E;                                                \
+      *E = rarie_err__;                                        \
+      return *E;                                               \
     }                                                          \
   } while (false)
 
@@ -88,7 +88,7 @@ class InferResponse {
       TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
       bool& requires_deferred_callback, const uint32_t flags,
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      std::vector<std::unique_ptr<PbMemory>>& output_buffers,
+      std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
       const std::set<std::string>& requested_output_names = {},
       TRITONBACKEND_Response* response = nullptr);
 

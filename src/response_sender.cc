@@ -28,6 +28,7 @@
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include "pb_stub.h"
+#include "pb_stub_utils.h"
 #include "scoped_defer.h"
 
 namespace triton { namespace backend { namespace python {
@@ -67,17 +68,6 @@ ResponseSender::Send(
         "set to zero.");
   }
 
-  if (infer_response) {
-    for (auto& tensor : infer_response->OutputTensors()) {
-      if (!tensor->IsCPU()) {
-        throw PythonBackendException(
-            "Tensor '" + tensor->Name() +
-            "' is stored in GPU. GPU tensors are not supported yet in the "
-            "decoupled response sender.");
-      }
-    }
-  }
-
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
   AllocatedSharedMemory<ResponseSendMessage> response_send_message =
@@ -115,7 +105,6 @@ ResponseSender::Send(
   ScopedDefer _([&send_message_payload] {
     {
       bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
-
       send_message_payload->is_stub_turn = false;
       send_message_payload->cv.notify_all();
     }
@@ -131,10 +120,12 @@ ResponseSender::Send(
 
   bool has_gpu_output = false;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors;
-  for (auto& tensor : infer_response->OutputTensors()) {
-    if (!tensor->IsCPU()) {
-      has_gpu_output = true;
-      gpu_tensors.push_back(tensor);
+  if (infer_response) {
+    for (auto& tensor : infer_response->OutputTensors()) {
+      if (!tensor->IsCPU()) {
+        has_gpu_output = true;
+        gpu_tensors.push_back(tensor);
+      }
     }
   }
 
@@ -145,58 +136,35 @@ ResponseSender::Send(
     bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             gpu_buffers_handle.data_.get() + sizeof(uint64_t));
+    uint64_t* gpu_buffer_count =
+        reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
+    if (gpu_tensors.size() != *gpu_buffer_count) {
+      LOG_INFO
+          << (std::string(
+                  "GPU buffers size does not match the provided buffers: ") +
+              std::to_string(gpu_tensors.size()) +
+              " != " + std::to_string(*gpu_buffer_count));
+      return;
+    }
 
-    // We need to hold the cpu_buffers until the main process makes a copy from
-    // them.
-    std::vector<std::unique_ptr<PbMemory>> cpu_buffers;
     std::vector<std::unique_ptr<PbMemory>> dst_buffers;
 
-    bool has_cpu_buffer = false;
     for (size_t i = 0; i < gpu_tensors.size(); i++) {
       std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
           shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
-      if (dst_buffer->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-        has_cpu_buffer = true;
-      }
       dst_buffers.emplace_back(std::move(dst_buffer));
+      std::shared_ptr<PbTensor>& src_buffer = gpu_tensors[i];
+      PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
     }
 
-    // Pop a dummy message from the stub message queue indicating that the
-    // parent has finished copying the tensors.
-    ScopedDefer _([has_cpu_buffer, send_message_payload] {
-      if (has_cpu_buffer) {
-        bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
-        while (!send_message_payload->is_stub_turn) {
-          send_message_payload->cv.wait(guard);
-        }
-      }
-    });
-
-    ScopedDefer load_gpu_buffer_response([this, send_message_payload] {
+    {
       bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
       send_message_payload->is_stub_turn = false;
       send_message_payload->cv.notify_one();
-    });
-
-    for (size_t i = 0; i < gpu_tensors.size(); i++) {
-      std::shared_ptr<PbTensor>& src_buffer = gpu_tensors[i];
-
-      // If the memory type is CPU, the buffer is empty and we need to create
-      // a buffer.
-      if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-        dst_buffers[i] = PbMemory::Create(
-            shm_pool_, dst_buffers[i]->MemoryType(),
-            dst_buffers[i]->MemoryTypeId(), src_buffer->ByteSize(),
-            nullptr /* buffer */);
-
-        // Update the handle so that the main process can load it.
-        gpu_buffers_handle_shm[i] = dst_buffers[i]->ShmHandle();
-      }
-
-      PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
-
-      if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-        cpu_buffers.push_back(std::move(dst_buffers[i]));
+      while (!send_message_payload->is_stub_turn) {
+        // Wait for the stub process to send the response and populate error
+        // message if any.
+        send_message_payload->cv.wait(guard);
       }
     }
   }
@@ -212,5 +180,4 @@ ResponseSender::Send(
     }
   }
 }
-
 }}}  // namespace triton::backend::python

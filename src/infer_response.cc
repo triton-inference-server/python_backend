@@ -169,41 +169,15 @@ InferResponse::Send(
     TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
     bool& requires_deferred_callback, const uint32_t flags,
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    std::vector<std::unique_ptr<PbMemory>>& output_buffers,
+    std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
     const std::set<std::string>& requested_output_names,
     TRITONBACKEND_Response* response)
 {
-  TRITONSERVER_Error* response_error = nullptr;
+  std::shared_ptr<TRITONSERVER_Error*> response_error =
+      std::make_shared<TRITONSERVER_Error*>();
   std::unique_ptr<ScopedDefer> response_error_handling;
   requires_deferred_callback = false;
-
-  if (response == nullptr) {
-    response_error_handling = std::make_unique<ScopedDefer>([response,
-                                                             response_error,
-                                                             flags,
-                                                             response_factory] {
-      if (response != nullptr) {
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(response, flags, response_error),
-            "failed to send the response.");
-        if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-          std::unique_ptr<
-              TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-          response_factory_ptr(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-              response_factory));
-        }
-      }
-    });
-  } else {
-    response_error_handling = std::make_unique<ScopedDefer>(
-        [response, response_error, flags, response_factory] {
-          if (response != nullptr) {
-            LOG_IF_ERROR(
-                TRITONBACKEND_ResponseSend(response, flags, response_error),
-                "failed to send the response.");
-          }
-        });
-  }
+  bool destruct_resposne_factor = (response == nullptr);
 
   if (response == nullptr) {
     SET_ERROR_AND_RETURN(
@@ -211,8 +185,32 @@ InferResponse::Send(
         TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
   }
 
+  response_error_handling = std::make_unique<ScopedDefer>(
+      [response, response_error, flags, response_factory,
+       destruct_resposne_factor] {
+        if (response != nullptr) {
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseSend(response, flags, *response_error),
+              "failed to send the response.");
+          if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+            std::unique_ptr<
+                TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+            response_factory_ptr(
+                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                    response_factory));
+          }
+        }
+      });
+
+  ScopedDefer deferred_task(
+      [this, &requires_deferred_callback, &response_error_handling] {
+        if (requires_deferred_callback) {
+          deferred_send_callback_ = std::move(response_error_handling);
+        }
+      });
+
   if (HasError()) {
-    response_error = TRITONSERVER_ErrorNew(
+    *response_error = TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
     return nullptr;
   }
@@ -277,7 +275,7 @@ InferResponse::Send(
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
                 true /* copy_gpu */));
       }
-      output_buffers.emplace_back(std::move(output_buffer));
+      output_buffers.push_back({std::move(output_buffer), buffer});
 #endif
     }
 
@@ -289,9 +287,9 @@ InferResponse::Send(
           response_error,
           output_buffer = PbMemory::Create(
               shm_pool, actual_memory_type, actual_memory_type_id,
-              0 /* byte size */, nullptr /* data ptr */));
+              output_tensor->ByteSize(), nullptr /* data ptr */));
 
-      output_buffers.emplace_back(std::move(output_buffer));
+      output_buffers.push_back({std::move(output_buffer), buffer});
     }
 
     if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
@@ -312,9 +310,8 @@ InferResponse::Send(
     cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(cuda_stream));
   }
 #endif  // TRITON_ENABLE_GPU
-  deferred_send_callback_ = std::move(response_error_handling);
 
-  return response_error;
+  return *response_error;
 }
 #endif
 
