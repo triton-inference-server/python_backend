@@ -1097,12 +1097,6 @@ ModelInstanceState::GetInputTensor(
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   bool cpu_only_tensors = model_state->ForceCPUOnlyInputTensors();
 
-  if (!cpu_only_tensors && model_state->IsDecoupled()) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        "FORCE_CPU_ONLY_INPUT_TENSORS set to OFF is not yet supported in the "
-        "decoupled API.");
-  }
   if (input_dtype == TRITONSERVER_TYPE_BYTES) {
     cpu_only_tensors = true;
   }
@@ -1146,12 +1140,9 @@ ModelInstanceState::GetInputTensor(
           input_name, input_buffer, input_byte_size,
           TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
     } else {
-      bool cuda_used = false;
-      CopyBuffer(
-          "Failed to copy the output tensor to buffer.", src_memory_type,
-          src_memory_type_id, TRITONSERVER_MEMORY_CPU /* memory_type */,
-          0 /* memory type id */, input_byte_size, src_ptr, input_buffer,
-          CudaStream(), &cuda_used);
+      size_t byte_size = input_byte_size;
+      RETURN_IF_ERROR(backend::ReadInputTensor(
+          request, input_name, input_buffer, &byte_size));
     }
   } else {
 #ifdef TRITON_ENABLE_GPU
@@ -1161,54 +1152,81 @@ ModelInstanceState::GetInputTensor(
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
     alloc_perference = {{TRITONSERVER_MEMORY_GPU, src_memory_type_id}};
 
+    // collector is used in the non-decoupled mode.
     if (collector) {
       RETURN_IF_ERROR(collector->ProcessTensor(
           input_name, nullptr, 0, alloc_perference,
           reinterpret_cast<const char**>(&buffer), &input_byte_size,
           &src_memory_type, &src_memory_type_id));
-    }
 
-    // If the tensor is using the cuda shared memory, we need to extract the
-    // handle that was used to create the device pointer. This is because of a
-    // limitation in the legacy CUDA IPC API that doesn't allow getting the
-    // handle of an exported pointer. If the cuda handle exists, it indicates
-    // that the cuda shared memory was used and the input is in a single buffer.
-    // [FIXME] for the case where the input is in cuda shared memory and uses
-    // multiple input buffers this needs to be changed.
-    TRITONSERVER_BufferAttributes* buffer_attributes;
+      // If the tensor is using the cuda shared memory, we need to extract the
+      // handle that was used to create the device pointer. This is because of a
+      // limitation in the legacy CUDA IPC API that doesn't allow getting the
+      // handle of an exported pointer. If the cuda handle exists, it indicates
+      // that the cuda shared memory was used and the input is in a single
+      // buffer. [FIXME] for the case where the input is in cuda shared memory
+      // and uses multiple input buffers this needs to be changed.
+      TRITONSERVER_BufferAttributes* buffer_attributes;
 
-    // This value is not used.
-    const void* buffer_p;
-    RETURN_IF_ERROR(TRITONBACKEND_InputBufferAttributes(
-        in, 0, &buffer_p, &buffer_attributes));
+      // This value is not used.
+      const void* buffer_p;
+      RETURN_IF_ERROR(TRITONBACKEND_InputBufferAttributes(
+          in, 0, &buffer_p, &buffer_attributes));
 
-    if (collector) {
       input_tensor = std::make_shared<PbTensor>(
           std::string(input_name),
           std::vector<int64_t>(input_shape, input_shape + input_dims_count),
           input_dtype, src_memory_type, src_memory_type_id,
           const_cast<void*>(buffer), input_byte_size,
           nullptr /* DLManagedTensor */);
+
+      cudaIpcMemHandle_t* cuda_ipc_handle;
+      RETURN_IF_ERROR(TRITONSERVER_BufferAttributesCudaIpcHandle(
+          buffer_attributes, reinterpret_cast<void**>(&cuda_ipc_handle)));
+      if (cuda_ipc_handle != nullptr) {
+        RETURN_IF_EXCEPTION(
+            input_tensor->SaveToSharedMemory(shm_pool_, false /* copy_gpu */));
+        RETURN_IF_EXCEPTION(
+            input_tensor->Memory()->SetCudaIpcHandle(cuda_ipc_handle));
+      } else {
+        RETURN_IF_EXCEPTION(
+            input_tensor->SaveToSharedMemory(shm_pool_, true /* copy_gpu */));
+      }
     } else {
+      void* dev_ptr;
+      RETURN_IF_CUDA_ERROR(
+          cudaMalloc(&dev_ptr, input_byte_size), TRITONSERVER_ERROR_INTERNAL,
+          std::string("Failed to allocated CUDA memory"));
+
+      size_t byte_size = input_byte_size;
+
+      bool cuda_used = false;
+      RETURN_IF_ERROR(backend::ReadInputTensor(
+          request, input_name, reinterpret_cast<char*>(dev_ptr), &byte_size,
+          TRITONSERVER_MEMORY_GPU, src_memory_type_id, CudaStream(),
+          &cuda_used));
+
+      if (cuda_used) {
+#ifdef TRITON_ENABLE_GPU
+        cudaStreamSynchronize(stream_);
+#endif
+      }
+
       input_tensor = std::make_shared<PbTensor>(
           std::string(input_name),
           std::vector<int64_t>(input_shape, input_shape + input_dims_count),
           input_dtype, src_memory_type, src_memory_type_id,
-          const_cast<void*>(buffer_p), input_byte_size,
+          const_cast<void*>(dev_ptr), input_byte_size,
           nullptr /* DLManagedTensor */);
-    }
 
-    cudaIpcMemHandle_t* cuda_ipc_handle;
-    RETURN_IF_ERROR(TRITONSERVER_BufferAttributesCudaIpcHandle(
-        buffer_attributes, reinterpret_cast<void**>(&cuda_ipc_handle)));
-    if (cuda_ipc_handle != nullptr) {
-      RETURN_IF_EXCEPTION(
-          input_tensor->SaveToSharedMemory(shm_pool_, false /* copy_gpu */));
-      RETURN_IF_EXCEPTION(
-          input_tensor->Memory()->SetCudaIpcHandle(cuda_ipc_handle));
-    } else {
       RETURN_IF_EXCEPTION(
           input_tensor->SaveToSharedMemory(shm_pool_, true /* copy_gpu */));
+
+      std::unique_ptr<MemoryRecord> gpu_memory_record =
+          std::make_unique<GPUMemoryRecord>(input_tensor->Memory()->DataPtr());
+      uint64_t memory_release_id =
+          memory_manager_->AddRecord(std::move(gpu_memory_record));
+      input_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
     }
 #else
     return TRITONSERVER_ErrorNew(
