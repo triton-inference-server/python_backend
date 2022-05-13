@@ -30,6 +30,9 @@
 
 namespace triton { namespace backend { namespace python {
 
+#ifndef PB_MAP_H
+#define PB_MAP_H
+
 struct PairShm {
   bi::managed_external_buffer::handle_t key;
   bi::managed_external_buffer::handle_t value;
@@ -66,4 +69,5 @@ class PbMap {
   bi::managed_external_buffer::handle_t dict_handle_;
   std::unordered_map<std::string, std::string> map_;
 };
-}}}  // namespace triton::backend::python
+#endif  // PB_MAP_H
+}}}     // namespace triton::backend::python

@@ -26,6 +26,7 @@
 
 import numpy as np
 import struct
+import json
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -299,7 +300,7 @@ def set_max_batch_size(config, max_batch_size):
     """Set the max batch size for the model
     Parameters
     ----------
-    config : AutoCompleteConfig object
+    config : ModelConfig object
         object containing the model configuration for auto-complete
     max_batch_size : int
         the max_batch_size we want to set for the model
@@ -311,30 +312,32 @@ def add_input(config, input):
     """Add the input for the model
     Parameters
     ----------
-    config : AutoCompleteConfig object
+    config : ModelConfig object
         object containing the model configuration for auto-complete
     input : dict
         containing the input we want to add for the model
     Raises
     ------
     ValueError
-        If 'new_input' contains property other than 'name',
-        'data_type' and 'dims' or any of the properties are
-        not set.
+        If input contains property other than 'name', 'data_type'
+        and 'dims' or any of the properties are not set.
     """
     valid_properties = ['name', 'data_type', 'dims']
     for current_property in input:
         if current_property not in valid_properties:
             raise ValueError(
-                "input contains property other than 'name', 'data_type' and 'dims'."
+                "input '" + input['name'] +
+                "' contains property other than 'name', 'data_type' and 'dims'."
             )
 
     if 'name' not in input:
         raise ValueError("input is missing 'name' property.")
     elif 'data_type' not in input:
-        raise ValueError("input is missing 'data_type' property.")
+        raise ValueError("input '" + input['name'] +
+                         "' is missing 'data_type' property.")
     elif 'dims' not in input:
-        raise ValueError("input is missing 'dims' property.")
+        raise ValueError("input '" + input['name'] +
+                         "' is missing 'dims' property.")
 
     config.add_input(input)
 
@@ -343,31 +346,49 @@ def add_output(config, output):
     """Add the output for the model
     Parameters
     ----------
-    config : AutoCompleteConfig object
+    config : ModelConfig object
         object containing the model configuration for auto-complete
     output : dict
         containing the output we want to add for the model
     Raises
     ------
     ValueError
-        If 'output' contains property other than 'name',
-        'data_type' and 'dims' or any of the properties are not set.
+        If output contains property other than 'name', 'data_type'
+        and 'dims' or any of the properties are not set.
     """
     valid_properties = ['name', 'data_type', 'dims']
     for current_property in output:
         if current_property not in valid_properties:
             raise ValueError(
-                "output contains property other than 'name', 'data_type' and 'dims'."
+                "output '" + output['name'] +
+                "' contains property other than 'name', 'data_type' and 'dims'."
             )
 
     if 'name' not in output:
         raise ValueError("output is missing 'name' property.")
     elif 'data_type' not in output:
-        raise ValueError("output is missing 'data_type' property.")
+        raise ValueError("output '" + output['name'] +
+                         "' is missing 'data_type' property.")
     elif 'dims' not in output:
-        raise ValueError("output is missing 'dims' property.")
+        raise ValueError("output '" + output['name'] +
+                         "' is missing 'dims' property.")
 
     config.add_output(output)
+
+
+def as_dict(config):
+    """Provide the read-only access to the model configuration
+    Parameters
+    ----------
+    config : ModelConfig Object
+        object containing the auto-complete model configuration
+    Returns
+    -------
+    dict
+        dictionary type of the model configuration contained in
+        the ModelConfig object
+    """
+    return config.as_dict()
 
 
 class ModelConfig:
@@ -375,18 +396,19 @@ class ModelConfig:
     the model configuration for autocomplete.
     Parameters
     ----------
-    model_config : dict
-        dictionary object containing the max_batch_size, inputs and
-        outputs properties for auto-complete model configuration
+    model_config : ModelConfig Object
+        Object containing the model configuration. Only the max_batch_size, inputs
+        and outputs properties can be modified for auto-complete model configuration.
     """
 
-    def __init__(self):
-        self._model_config = {}
-        self._model_config["input"] = []
-        self._model_config["output"] = []
+    def __init__(self, model_config):
+        self._model_config = json.loads(model_config)
 
     def __str__(self):
         return str(self._model_config)
+
+    def as_dict(self):
+        return self._model_config
 
     def set_max_batch_size(self, max_batch_size):
         """Set the max batch size for the model.
@@ -394,8 +416,20 @@ class ModelConfig:
         ----------
         max_batch_size : int
             The max_batch_size to be set.
+        Raises
+        ------
+        ValueError
+            If configuration has specified max_batch_size non-zero value and
+            the max_batch_size to be set has different value.
         """
-        self._model_config["max_batch_size"] = max_batch_size
+        if self._model_config["max_batch_size"] != 0 and self._model_config[
+                "max_batch_size"] != max_batch_size:
+            raise ValueError("configuration specified max_batch_size " +
+                             str(self._model_config["max_batch_size"]) +
+                             " but Python model specified max_batch_size " +
+                             str(max_batch_size))
+        else:
+            self._model_config["max_batch_size"] = max_batch_size
 
     def add_input(self, input):
         """Add the input for the model.
@@ -403,7 +437,28 @@ class ModelConfig:
         ----------
         input : dict
             The input to be added.
+        Raises
+        ------
+        ValueError
+            If an input with the same name already exists in the configuration
+            but has different data_type or dims property
         """
+        for current_input in self._model_config["input"]:
+            if input['name'] == current_input['name']:
+                if current_input[
+                        'data_type'] != "TYPE_INVALID" and current_input[
+                            'data_type'] != input['data_type']:
+                    raise ValueError("input '" + input['name'] +
+                                     "' has a conflicting data_type property.")
+                elif current_input[
+                        'dims'] and current_input['dims'] != input['dims']:
+                    raise ValueError("input '" + input['name'] +
+                                     "' has a conflicting dims property.")
+                else:
+                    current_input['data_type'] = input['data_type']
+                    current_input['dims'] = input['dims']
+                    return
+
         self._model_config["input"].append(input)
 
     def add_output(self, output):
@@ -412,7 +467,28 @@ class ModelConfig:
         ----------
         output : dict
             The output to be added.
+        Raises
+        ------
+        ValueError
+            If an output with the same name already exists in the configuration
+            but has different data_type or dims property
         """
+        for current_output in self._model_config["output"]:
+            if output['name'] == current_output['name']:
+                if current_output[
+                        'data_type'] != "TYPE_INVALID" and current_output[
+                            'data_type'] != output['data_type']:
+                    raise ValueError("output '" + output['name'] +
+                                     "' has a conflicting data_type property.")
+                elif current_output[
+                        'dims'] and current_output['dims'] != output['dims']:
+                    raise ValueError("output '" + output['name'] +
+                                     "' has a conflicting dims property.")
+                else:
+                    current_output['data_type'] = output['data_type']
+                    current_output['dims'] = output['dims']
+                    return
+
         self._model_config["output"].append(output)
 
 

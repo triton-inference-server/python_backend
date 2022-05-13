@@ -29,6 +29,9 @@
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
+#ifndef REQUEST_EXECUTOR_H
+#define REQUEST_EXECUTOR_H
+
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
 
@@ -48,5 +51,5 @@ class RequestExecutor {
 
   ~RequestExecutor();
 };
-
-}}}  // namespace triton::backend::python
+#endif  // REQUEST_EXECUTOR_H
+}}}     // namespace triton::backend::python

@@ -39,6 +39,9 @@
 
 namespace triton { namespace backend { namespace python {
 
+#ifndef MEMORY_MANAGER_H
+#define MEMORY_MANAGER_H
+
 class MemoryRecord {
  public:
   virtual const std::function<void(void*)>& ReleaseCallback() = 0;
@@ -77,4 +80,5 @@ class MemoryManager {
   void QueueMonitorThread();
   std::mutex mu_;
 };
-}}};  // namespace triton::backend::python
+#endif  // MEMORY_MANAGER_H
+}}};    // namespace triton::backend::python

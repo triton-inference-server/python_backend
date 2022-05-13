@@ -194,7 +194,7 @@ class TritonPythonModel:
     """
 
     @staticmethod
-    def auto_complete_config(model_config):
+    def auto_complete_config(auto_complete_model_config):
         """`auto_complete_config` is called only once when the server is started
         with `--strict-model-config=false`. Implementing this function is optional.
         A no implementation of `auto_complete_config` will do nothing. This function
@@ -203,23 +203,26 @@ class TritonPythonModel:
         `pb_utils.add_output`. These properties will allow Triton to load the model
         with minimal model configuration in absence of a configuration file. This
         function returns the `pb_utils.ModelConfig` object with these properties.
+        Users can use `pb_utils.as_dict` function to gain read-only access to the
+        `pb_utils.ModelConfig` object. The `pb_utils.ModelConfig` object being returned
+        from here will be used as the final configuration for the model.
 
-        Note: All the objects in this function will go out of scope after exiting.
-        Should not store any objects in this function.
+        Note: The Python interpreter used to invoke this function will be destroyed
+        upon returning from this function and as a result none of the objects created
+        here will be available in the `initialize`, `execute`, or `finalize` functions.
 
         Parameters
         ----------
-        model_config : string
-          A JSON string containing the available model configuration. The users can
-          refer to this configuration when setting the properties for this model.
+        auto_complete_model_config : pb_utils.ModelConfig object
+          An object containing the existing model configuration. The users can build
+          upon the configuration given by this object when setting the properties for 
+          this model.
 
         Returns
         -------
         pb_utils.ModelConfig
-          An object containing the max_batch_size, inputs and outputs properties.
+          An object containing the final model configuration
         """
-        auto_complete_model_config = pb_utils.ModelConfig()
-
         input0 = {'name': 'INPUT0', 'data_type': 'TYPE_FP32', 'dims': [4]}
         input1 = {'name': 'INPUT1', 'data_type': 'TYPE_FP32', 'dims': [4]}
         output0 = {'name': 'OUTPUT0', 'data_type': 'TYPE_FP32', 'dims': [4]}
@@ -230,6 +233,9 @@ class TritonPythonModel:
         pb_utils.add_input(auto_complete_model_config, input1)
         pb_utils.add_output(auto_complete_model_config, output0)
         pb_utils.add_output(auto_complete_model_config, output1)
+
+        model_config = pb_utils.as_dict(auto_complete_model_config)
+        print('Auto-complete Model Configuration:', model_config)
 
         return auto_complete_model_config
 
@@ -308,9 +314,12 @@ properties of the model using `pb_utils.set_max_batch_size`, `pb_utils.add_input
 These properties will allow Triton to load the model with
 [minimal model configuration](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file. This function returns the `pb_utils.ModelConfig` object with these properties.
+Users can use `pb_utils.as_dict` function to gain read-only access to the `pb_utils.ModelConfig` object.
+The `pb_utils.ModelConfig` object being returned from here will be used as the final configuration for the model.
 
-Note: All the objects in this function will go out of scope after exiting.
-Should not store any objects in this function.
+Note: The Python interpreter used to invoke this function will be destroyed upon returning from this
+function and as a result none of the objects created here will be available in the `initialize`, `execute`, or
+`finalize` functions.
 
 ### `initialize`
 

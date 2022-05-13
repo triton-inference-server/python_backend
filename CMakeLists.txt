@@ -157,6 +157,7 @@ set(
 set(
   PYTHON_BACKEND_SRCS
   src/python.cc
+  src/python.h
   src/pb_env.cc
   src/pb_env.h
   src/pb_metric_reporter.cc
@@ -165,6 +166,8 @@ set(
   src/memory_manager.h
   src/request_executor.cc
   src/request_executor.h
+  src/stub_launcher.h
+  src/stub_launcher.cc
 )
 
 list(APPEND
@@ -241,7 +244,6 @@ target_link_libraries(
    Threads::Threads
    triton-backend-utils           # from repo-backend
    pybind11::embed
-   dlpack
    -lrt                           # shared memory 
    -larchive                      # libarchive
 )

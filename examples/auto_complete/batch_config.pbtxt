@@ -25,4 +25,3 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 name: "batch_auto_complete"
-backend: "python"

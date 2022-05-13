@@ -37,12 +37,14 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <thread>
 #include <unordered_map>
 #include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
+#include "pb_utils.h"
 #include "response_sender.h"
 #include "scoped_defer.h"
 #include "shm_manager.h"
@@ -251,9 +253,7 @@ Stub::RunCommand()
         }
 
         return true;  // Terminate the stub process.
-      }
-
-      if (auto_complete_config != "None" || auto_complete_config.size() != 0) {
+      } else {
         LOG_IF_EXCEPTION(
             auto_complete_config_shm =
                 PbString::Create(shm_pool_, auto_complete_config));
@@ -263,7 +263,6 @@ Stub::RunCommand()
               auto_complete_config_shm->ShmHandle();
         }
       }
-
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
@@ -422,15 +421,24 @@ Stub::AutoCompleteModelConfig(
 {
   model_ = StubSetup();
 
-  py::str model_config;
   std::unique_ptr<PbString> pb_string_shm =
       PbString::LoadFromSharedMemory(shm_pool_, string_handle);
-  model_config = pb_string_shm->String();
+
+  py::module python_backend_utils =
+      py::module_::import("triton_python_backend_utils");
+  py::object model_config =
+      python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
 
   if (py::hasattr(model_, "auto_complete_config")) {
-    *auto_complete_config =
-        std::string(py::str(model_.attr("auto_complete_config")(model_config)));
+    model_config = model_.attr("auto_complete_config")(model_config);
   }
+  if (py::isinstance<py::none>(model_config)) {
+    throw PythonBackendException(
+        "Python model '" + name_ +
+        "' is using auto-complete and the auto_complete_config function must "
+        "not return None.");
+  }
+  (*auto_complete_config) = std::string(py::str(model_config));
 }
 
 void
