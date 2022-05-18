@@ -449,7 +449,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
   std::unique_ptr<IPCMessage> execute_response =
       IPCMessage::Create(shm_pool_, false /* Inline response */);
-  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
 
   AllocatedSharedMemory<ResponseBatch> response_batch =
       shm_pool_->Construct<ResponseBatch>();
@@ -523,7 +523,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 {
   std::unique_ptr<IPCMessage> execute_response =
       IPCMessage::Create(shm_pool_, false /* Inline response */);
-  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
 
   AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
       request_batch_shm_ptr->batch_size *
@@ -601,7 +601,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     size_t response_size = py::len(responses);
 
     // If the number of request objects do not match the number of
-    // resposne objects throw an error.
+    // response objects throw an error.
     if (response_size != batch_size) {
       std::string err =
           "Number of InferenceResponse objects do not match the number "

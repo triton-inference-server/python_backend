@@ -102,7 +102,7 @@ ResponseSender::Send(
   ipc_message->Command() = PYTHONSTUB_ResponseSend;
   ipc_message->Args() = response_send_message.handle_;
 
-  ScopedDefer _([&send_message_payload] {
+  ScopedDefer _([send_message_payload] {
     {
       bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
       send_message_payload->is_stub_turn = false;

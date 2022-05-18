@@ -37,7 +37,7 @@ namespace bi = boost::interprocess;
 
 typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_ExecuteRequest,
-  PYTHONSTUB_ExecuteResposne,
+  PYTHONSTUB_ExecuteResponse,
   PYTHONSTUB_InitializeRequest,
   PYTHONSTUB_InitializeResponse,
   PYTHONSTUB_FinalizeRequest,

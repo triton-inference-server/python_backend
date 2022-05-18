@@ -177,7 +177,10 @@ InferResponse::Send(
       std::make_shared<TRITONSERVER_Error*>();
   std::unique_ptr<ScopedDefer> response_error_handling;
   requires_deferred_callback = false;
-  bool destruct_resposne_factor = (response == nullptr);
+
+  // Should only destruct the response factory whenever a response factory is
+  // being created.
+  bool destruct_response_factor = (response == nullptr);
 
   if (response == nullptr) {
     SET_ERROR_AND_RETURN(
@@ -187,12 +190,13 @@ InferResponse::Send(
 
   response_error_handling = std::make_unique<ScopedDefer>(
       [response, response_error, flags, response_factory,
-       destruct_resposne_factor] {
+       destruct_response_factor] {
         if (response != nullptr) {
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseSend(response, flags, *response_error),
               "failed to send the response.");
-          if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+          if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL &&
+              destruct_response_factor) {
             std::unique_ptr<
                 TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
             response_factory_ptr(

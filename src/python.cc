@@ -862,7 +862,7 @@ ModelInstanceState::StartStubProcess()
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           (std::string(
-               "Received unexpected resposne from Python backend stub: ") +
+               "Received unexpected response from Python backend stub: ") +
            name_)
               .c_str());
     }
@@ -1164,8 +1164,9 @@ ModelInstanceState::GetInputTensor(
       // limitation in the legacy CUDA IPC API that doesn't allow getting the
       // handle of an exported pointer. If the cuda handle exists, it indicates
       // that the cuda shared memory was used and the input is in a single
-      // buffer. [FIXME] for the case where the input is in cuda shared memory
-      // and uses multiple input buffers this needs to be changed.
+      // buffer.
+      // [FIXME] For the case where the input is in cuda shared memory and uses
+      // multiple input buffers this needs to be changed.
       TRITONSERVER_BufferAttributes* buffer_attributes;
 
       // This value is not used.
@@ -1427,7 +1428,7 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
 
     // Need to notify the model instance thread that the execute response has
     // been received.
-    if (message->Command() == PYTHONSTUB_ExecuteResposne) {
+    if (message->Command() == PYTHONSTUB_ExecuteResponse) {
       std::lock_guard<std::mutex> guard{mu_};
       received_message_ = std::move(message);
       cv_.notify_one();
@@ -1460,7 +1461,7 @@ ModelInstanceState::ResponseSendDecoupled(
   ResponseSendMessage* send_message_payload =
       reinterpret_cast<ResponseSendMessage*>(send_message.data_.get());
   std::unique_ptr<PbString> error_message;
-  ScopedDefer _([&send_message_payload] {
+  ScopedDefer _([send_message_payload] {
     {
       bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
       send_message_payload->is_stub_turn = true;
@@ -1912,7 +1913,6 @@ ModelInstanceState::ProcessRequests(
       for (auto& buffer_memory_pair : gpu_output_buffer.second) {
         auto& pb_memory = buffer_memory_pair.first;
         if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-          std::cout << "CPU used when GPU requested." << std::endl;
           bool cuda_used;
           uint32_t response_index = gpu_output_buffer.first;
           void* pointer = buffer_memory_pair.second;
@@ -2451,13 +2451,13 @@ TRITONBACKEND_ModelInstanceExecute(
           TRITONBACKEND_Response* response = nullptr;
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseNew(&response, request),
-              "Failed to create a new resposne.");
+              "Failed to create a new response.");
 
           if (response != nullptr) {
             LOG_IF_ERROR(
                 TRITONBACKEND_ResponseSend(
                     response, TRITONSERVER_RESPONSE_COMPLETE_FINAL, error),
-                "Failed to send the error resposne.");
+                "Failed to send the error response.");
           }
         }
       }
