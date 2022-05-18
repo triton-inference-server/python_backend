@@ -144,7 +144,6 @@ class StubLauncher {
   std::string path_to_activate_;
   std::string python_execution_env_;
 
-  //   common::TritonJson::Value* model_config_;
   common::TritonJson::WriteBuffer model_config_buffer_;
   common::TritonJson::Value auto_complete_config_;
 
