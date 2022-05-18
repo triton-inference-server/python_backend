@@ -242,8 +242,11 @@ class ModelState : public BackendModel {
 
   // Auto-complete stub
   std::unique_ptr<StubLauncher>& Stub() { return auto_complete_stub_; }
+<<<<<<< HEAD:src/python_be.h
 
   ~ModelState();
+=======
+>>>>>>> Address review:src/python_be.h
 
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
@@ -264,8 +267,11 @@ class ModelInstanceState : public BackendModelInstance {
   std::mutex bls_responses_mutex_;
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
+<<<<<<< HEAD:src/python_be.h
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
+=======
+>>>>>>> Address review:src/python_be.h
   bool decoupled_thread_;
   std::mutex mu_;
   std::condition_variable cv_;
@@ -280,8 +286,13 @@ class ModelInstanceState : public BackendModelInstance {
 
   ~ModelInstanceState();
 
+<<<<<<< HEAD:src/python_be.h
   // Launch stub process.
   TRITONSERVER_Error* LaunchStubProcess();
+=======
+  // Launch model instance stub process.
+  TRITONSERVER_Error* LaunchModelInstanceStubProcess();
+>>>>>>> Address review:src/python_be.h
 
   TRITONSERVER_Error* SendMessageToStub(off_t message);
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);

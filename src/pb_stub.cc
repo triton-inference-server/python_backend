@@ -434,9 +434,8 @@ Stub::AutoCompleteModelConfig(
   }
   if (py::isinstance<py::none>(model_config)) {
     throw PythonBackendException(
-        "Python model '" + name_ +
-        "' is using auto-complete and the auto_complete_config function must "
-        "not return None.");
+        "auto_complete_config function in model '" + name_ +
+        "' must return a valid pb.ModelConfig object.");
   }
   (*auto_complete_config) = std::string(py::str(model_config));
 }

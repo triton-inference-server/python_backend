@@ -24,6 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
 #include <unistd.h>
 #include <atomic>
 #include <boost/asio.hpp>
@@ -42,7 +44,7 @@
 #include "memory_manager.h"
 #include "message_queue.h"
 #include "pb_utils.h"
-#include "python.h"
+#include "python_be.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
@@ -53,94 +55,111 @@ namespace triton { namespace backend { namespace python {
 
 class StubLauncher {
  public:
+  StubLauncher(const std::string stub_process_kind);
   StubLauncher(
-      ModelState* model_state, const std::string stub_process_kind,
-      const std::string name);
-  StubLauncher(
-      ModelState* model_state, const std::string stub_process_kind,
-      const std::string name, const int32_t device_id, const std::string kind);
+      const std::string stub_process_kind,
+      const std::string model_instance_name, const int32_t device_id,
+      const std::string kind);
 
   // Initialize stub process
-  TRITONSERVER_Error* Initialize();
+  TRITONSERVER_Error* Initialize(ModelState* model_state);
 
   // Stub process setup
-  TRITONSERVER_Error* Setup(
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          stub_message_queue,
-      bi::interprocess_mutex** health_mutex,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          parent_message_queue,
-      std::unique_ptr<MemoryManager>* memory_manager,
-      std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
-          ipc_control,
-      bi::managed_external_buffer::handle_t* ipc_control_handle,
-      std::unique_ptr<SharedMemoryManager>* shm_pool,
-      std::unique_ptr<boost::asio::thread_pool>* thread_pool);
+  TRITONSERVER_Error* Setup();
 
   // Launch stub process
-  TRITONSERVER_Error* Launch(
-      pid_t* stub_pid,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          stub_message_queue,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          parent_message_queue,
-      std::unique_ptr<MemoryManager>* memory_manager,
-      std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
-          ipc_control,
-      bi::managed_external_buffer::handle_t* ipc_control_handle,
-      std::unique_ptr<SharedMemoryManager>* shm_pool);
+  TRITONSERVER_Error* Launch();
 
-  // Model stub process for auto-complete
-  void ModelStubProcess(
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          stub_message_queue,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          parent_message_queue,
-      std::unique_ptr<SharedMemoryManager>* shm_pool);
+  // Auto-complete stub process
+  void AutocompleteStubProcess();
 
-  // Model Instance stub process
-  TRITONSERVER_Error* InstanceStubProcess(
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          stub_message_queue,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          parent_message_queue,
-      std::unique_ptr<SharedMemoryManager>* shm_pool);
+  // Model instance stub process
+  TRITONSERVER_Error* ModelInstanceStubProcess();
+
+  pid_t* StubPid() { return &stub_pid_; }
+  bi::interprocess_mutex* HealthMutex() { return health_mutex_; }
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  StubMessageQueue()
+  {
+    return stub_message_queue_;
+  }
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  ParentMessageQueue()
+  {
+    return parent_message_queue_;
+  }
+  std::unique_ptr<MemoryManager>& GetMemoryManager() { return memory_manager_; }
+  std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>&
+  IpcControl()
+  {
+    return ipc_control_;
+  }
+  std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
+  std::vector<std::future<void>>* Futures() { return &futures_; }
+  std::unique_ptr<boost::asio::thread_pool>& ThreadPool()
+  {
+    return thread_pool_;
+  }
+
+  // Get auto-complete model configuration
+  common::TritonJson::Value& AutoCompleteConfig()
+  {
+    return auto_complete_config_;
+  }
+  std::thread* DecoupledMonitor() { return &decoupled_monitor_; }
 
   // Destruct Stub process
-  void Destruct(
-      pid_t* stub_pid_,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          stub_message_queue,
-      bi::interprocess_mutex** health_mutex,
-      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>*
-          parent_message_queue,
-      std::unique_ptr<MemoryManager>* memory_manager,
-      std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>*
-          ipc_control,
-      std::unique_ptr<SharedMemoryManager>* shm_pool,
-      std::thread* decoupled_monitor,
-      std::unique_ptr<boost::asio::thread_pool>* thread_pool,
-      std::vector<std::future<void>>* futures);
+  void TerminateStub();
 
   // Fix string to json format
   void FixStringToJsonFormat(std::string* str);
 
+  // Kill stub process
+  void KillStubProcess();
+
  private:
-  ModelState* model_state_;
+  pid_t parent_pid_;
+  pid_t stub_pid_;
+
+  bool is_initialized_;
+  bool is_decoupled_;
+  std::string shm_region_name_;
+  std::string model_repository_path_;
+  std::string model_path_;
   const std::string stub_process_kind_;
-  const std::string name_;
+  std::string model_name_;
+  const std::string model_instance_name_;
   const int32_t device_id_;
   const std::string kind_;
+  uint64_t model_version_;
 
-  // Parent process pid
-  pid_t parent_pid_;
-
-  bool initialized_;
-  std::string shm_region_name_;
-  std::string model_path_;
+  std::string python_lib_;
+  int64_t shm_default_byte_size_;
+  int64_t shm_growth_byte_size_;
+  int64_t shm_message_queue_size_;
+  int64_t thread_pool_size_;
 
   // Path to python execution environment
   std::string path_to_libpython_;
   std::string path_to_activate_;
+  std::string python_execution_env_;
+
+  //   common::TritonJson::Value* model_config_;
+  common::TritonJson::WriteBuffer model_config_buffer_;
+  common::TritonJson::Value auto_complete_config_;
+
+  bi::interprocess_mutex* health_mutex_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      stub_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      parent_message_queue_;
+  std::unique_ptr<MemoryManager> memory_manager_;
+  std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
+      ipc_control_;
+  bi::managed_external_buffer::handle_t ipc_control_handle_;
+  std::vector<std::future<void>> futures_;
+  std::unique_ptr<SharedMemoryManager> shm_pool_;
+  std::unique_ptr<boost::asio::thread_pool> thread_pool_;
+  std::thread decoupled_monitor_;
 };
 }}}  // namespace triton::backend::python

@@ -199,13 +199,13 @@ class TritonPythonModel:
         with `--strict-model-config=false`. Implementing this function is optional.
         A no implementation of `auto_complete_config` will do nothing. This function
         can be used to set `max_batch_size`, `input` and `output` properties of the
-        model using `pb_utils.set_max_batch_size`, `pb_utils.add_input`, and
-        `pb_utils.add_output`. These properties will allow Triton to load the model
-        with minimal model configuration in absence of a configuration file. This
-        function returns the `pb_utils.ModelConfig` object with these properties.
-        Users can use `pb_utils.as_dict` function to gain read-only access to the
-        `pb_utils.ModelConfig` object. The `pb_utils.ModelConfig` object being returned
-        from here will be used as the final configuration for the model.
+        model using `set_max_batch_size`, `add_input`, and `add_output`.
+        These properties will allow Triton to load the model with minimal model
+        configuration in absence of a configuration file. This function returns the
+        `pb_utils.ModelConfig` object with these properties. You can use `as_dict`
+        function to gain read-only access to the `pb_utils.ModelConfig` object.
+        The `pb_utils.ModelConfig` object being returned from here will be used as
+        the final configuration for the model.
 
         Note: The Python interpreter used to invoke this function will be destroyed
         upon returning from this function and as a result none of the objects created
@@ -213,29 +213,61 @@ class TritonPythonModel:
 
         Parameters
         ----------
-        auto_complete_model_config : pb_utils.ModelConfig object
-          An object containing the existing model configuration. The users can build
-          upon the configuration given by this object when setting the properties for 
+        auto_complete_model_config : pb_utils.ModelConfig
+          An object containing the existing model configuration. You can build upon
+          the configuration given by this object when setting the properties for 
           this model.
 
         Returns
         -------
         pb_utils.ModelConfig
-          An object containing the final model configuration
+          An object containing the auto-completed model configuration
         """
-        input0 = {'name': 'INPUT0', 'data_type': 'TYPE_FP32', 'dims': [4]}
-        input1 = {'name': 'INPUT1', 'data_type': 'TYPE_FP32', 'dims': [4]}
-        output0 = {'name': 'OUTPUT0', 'data_type': 'TYPE_FP32', 'dims': [4]}
-        output1 = {'name': 'OUTPUT1', 'data_type': 'TYPE_FP32', 'dims': [4]}
+        inputs = [{
+            'name': 'INPUT0',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }, {
+            'name': 'INPUT1',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }]
+        outputs = [{
+            'name': 'OUTPUT0',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }, {
+            'name': 'OUTPUT1',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }]
 
-        pb_utils.set_max_batch_size(auto_complete_model_config, 0)
-        pb_utils.add_input(auto_complete_model_config, input0)
-        pb_utils.add_input(auto_complete_model_config, input1)
-        pb_utils.add_output(auto_complete_model_config, output0)
-        pb_utils.add_output(auto_complete_model_config, output1)
+        # Demonstrate the usage of `as_dict`, `add_input`, `add_output`,
+        # and `set_max_batch_size` functions.
+        config = auto_complete_model_config.as_dict()
+        input_names = []
+        output_names = []
+        for input in config['input']:
+            input_names.append(input['name'])
+        for output in config['output']:
+            output_names.append(output['name'])
 
-        model_config = pb_utils.as_dict(auto_complete_model_config)
-        print('Auto-complete Model Configuration:', model_config)
+        for input in inputs:
+            # The name checking here is only for demonstrating the usage of `as_dict`
+            # function. `add_input` will check for conflicts and raise errors
+            # if an input with the same name already exists in the configuration but
+            # has different data_type or dims property.
+            if input['name'] not in input_names:
+                auto_complete_model_config.add_input(input)
+        for output in outputs:
+            # The name checking here is only for demonstrating the usage of `as_dict`
+            # function. `add_output` will check for conflicts and raise errors
+            # if an output with the same name already exists in the configuration but
+            # has different data_type or dims property.
+            if output['name'] not in output_names:
+                auto_complete_model_config.add_output(output)
+
+        auto_complete_model_config.set_max_batch_size(0)
 
         return auto_complete_model_config
 
@@ -310,11 +342,11 @@ This function can be used to set
 [`max_batch_size`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
 [`input`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs) and
 [`output`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
-properties of the model using `pb_utils.set_max_batch_size`, `pb_utils.add_input`, and `pb_utils.add_output`.
+properties of the model using `set_max_batch_size`, `add_input`, and `add_output`.
 These properties will allow Triton to load the model with
 [minimal model configuration](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file. This function returns the `pb_utils.ModelConfig` object with these properties.
-Users can use `pb_utils.as_dict` function to gain read-only access to the `pb_utils.ModelConfig` object.
+You can use `as_dict` function to gain read-only access to the `pb_utils.ModelConfig` object.
 The `pb_utils.ModelConfig` object being returned from here will be used as the final configuration for the model.
 
 Note: The Python interpreter used to invoke this function will be destroyed upon returning from this

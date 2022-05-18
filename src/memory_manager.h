@@ -24,6 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -38,9 +40,6 @@
 
 
 namespace triton { namespace backend { namespace python {
-
-#ifndef MEMORY_MANAGER_H
-#define MEMORY_MANAGER_H
 
 class MemoryRecord {
  public:
@@ -80,5 +79,4 @@ class MemoryManager {
   void QueueMonitorThread();
   std::mutex mu_;
 };
-#endif  // MEMORY_MANAGER_H
-}}};    // namespace triton::backend::python
+}}};  // namespace triton::backend::python

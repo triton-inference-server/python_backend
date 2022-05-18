@@ -24,14 +24,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
 #include <unordered_map>
 #include "pb_string.h"
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
-
-#ifndef PB_MAP_H
-#define PB_MAP_H
 
 struct PairShm {
   bi::managed_external_buffer::handle_t key;
@@ -69,5 +68,4 @@ class PbMap {
   bi::managed_external_buffer::handle_t dict_handle_;
   std::unordered_map<std::string, std::string> map_;
 };
-#endif  // PB_MAP_H
-}}}     // namespace triton::backend::python
+}}}  // namespace triton::backend::python

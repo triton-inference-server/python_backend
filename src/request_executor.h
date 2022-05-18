@@ -24,13 +24,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
 #include <memory>
 #include "infer_request.h"
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
-#ifndef REQUEST_EXECUTOR_H
-#define REQUEST_EXECUTOR_H
 
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
@@ -51,5 +51,4 @@ class RequestExecutor {
 
   ~RequestExecutor();
 };
-#endif  // REQUEST_EXECUTOR_H
-}}}     // namespace triton::backend::python
+}}}  // namespace triton::backend::python

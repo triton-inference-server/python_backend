@@ -156,8 +156,8 @@ set(
 
 set(
   PYTHON_BACKEND_SRCS
-  src/python.cc
-  src/python.h
+  src/python_be.cc
+  src/python_be.h
   src/pb_env.cc
   src/pb_env.h
   src/pb_metric_reporter.cc
