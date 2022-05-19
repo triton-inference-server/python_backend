@@ -338,7 +338,8 @@ class ModelConfig:
             raise ValueError(
                 "configuration specified max_batch_size " +
                 str(self._model_config["max_batch_size"]) +
-                " but Python model only specified max_batch_size " +
+                ", but in auto-complete-config function for model '" +
+                self._model_config["name"] + "' specified max_batch_size " +
                 str(max_batch_size))
         else:
             self._model_config["max_batch_size"] = max_batch_size
