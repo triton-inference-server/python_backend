@@ -205,4 +205,9 @@ class CUDAHandler {
 };
 #endif  // TRITON_ENABLE_GPU
 
+#ifndef TRITON_PB_STUB
+std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
+    TRITONSERVER_Error* error);
+#endif
+
 }}}  // namespace triton::backend::python

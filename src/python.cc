@@ -353,7 +353,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Set error for response send message
   void SetErrorForResponseSendMessage(
-      ResponseSendMessage* response_send_message, TRITONSERVER_Error* error,
+      ResponseSendMessage* response_send_message,
+      std::shared_ptr<TRITONSERVER_Error*> error,
       std::unique_ptr<PbString>& error_message);
 
   TRITONSERVER_Error* SaveRequestsToSharedMemory(
@@ -475,14 +476,15 @@ ModelInstanceState::ExistsInClosedRequests(intptr_t closed_request)
 
 void
 ModelInstanceState::SetErrorForResponseSendMessage(
-    ResponseSendMessage* response_send_message, TRITONSERVER_Error* error,
+    ResponseSendMessage* response_send_message,
+    std::shared_ptr<TRITONSERVER_Error*> error,
     std::unique_ptr<PbString>& error_message)
 {
-  if (error != nullptr) {
+  if (error && *error != nullptr) {
     response_send_message->has_error = true;
     LOG_IF_EXCEPTION(
         error_message =
-            PbString::Create(shm_pool_, TRITONSERVER_ErrorMessage(error)));
+            PbString::Create(shm_pool_, TRITONSERVER_ErrorMessage(*error)));
     response_send_message->error = error_message->ShmHandle();
     response_send_message->is_error_set = true;
   }
@@ -1489,7 +1491,7 @@ ModelInstanceState::ResponseSendDecoupled(
 
     bool requires_deferred_callback = false;
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers;
-    TRITONSERVER_Error* error = infer_response->Send(
+    std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
         response_factory, CudaStream(), requires_deferred_callback,
         send_message_payload->flags, shm_pool_, gpu_output_buffers);
     SetErrorForResponseSendMessage(send_message_payload, error, error_message);
@@ -1554,7 +1556,8 @@ ModelInstanceState::ResponseSendDecoupled(
   } else {
     TRITONSERVER_Error* error = TRITONBACKEND_ResponseFactorySendFlags(
         response_factory, send_message_payload->flags);
-    SetErrorForResponseSendMessage(send_message_payload, error, error_message);
+    SetErrorForResponseSendMessage(
+        send_message_payload, WrapTritonErrorInSharedPtr(error), error_message);
 
     if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
       std::unique_ptr<
@@ -1860,12 +1863,16 @@ ModelInstanceState::ProcessRequests(
 
     gpu_output_buffers[r] =
         std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>{};
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
-        infer_response->Send(
-            nullptr, CudaStream(), require_deferred_callback,
-            TRITONSERVER_RESPONSE_COMPLETE_FINAL, shm_pool_,
-            gpu_output_buffers[r], requested_output_names, response));
+    std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
+        nullptr, CudaStream(), require_deferred_callback,
+        TRITONSERVER_RESPONSE_COMPLETE_FINAL, shm_pool_, gpu_output_buffers[r],
+        requested_output_names, response);
+    GUARDED_RESPOND_IF_ERROR(responses, r, *error);
+
+    // Error object will be deleted by the GUARDED_RESPOND macro
+    *error = nullptr;
+    error.reset();
+
     if (require_deferred_callback) {
       has_gpu_output = true;
     }

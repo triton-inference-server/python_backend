@@ -164,7 +164,7 @@ InferResponse::Error()
 }
 
 #ifndef TRITON_PB_STUB
-TRITONSERVER_Error*
+std::shared_ptr<TRITONSERVER_Error*>
 InferResponse::Send(
     TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
     bool& requires_deferred_callback, const uint32_t flags,
@@ -174,7 +174,7 @@ InferResponse::Send(
     TRITONBACKEND_Response* response)
 {
   std::shared_ptr<TRITONSERVER_Error*> response_error =
-      std::make_shared<TRITONSERVER_Error*>();
+      WrapTritonErrorInSharedPtr(nullptr);
   std::unique_ptr<ScopedDefer> response_error_handling;
   requires_deferred_callback = false;
 
@@ -188,6 +188,9 @@ InferResponse::Send(
         TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
   }
 
+  // This lambda expression will be called when this function exits, if the
+  // inference response doesn't have any GPU tensors. Otherwise, it will be
+  // called when the object is destructed or DeferredSendCallback is called.
   response_error_handling = std::make_unique<ScopedDefer>(
       [response, response_error, flags, response_factory,
        destruct_response_factor] {
@@ -206,6 +209,8 @@ InferResponse::Send(
         }
       });
 
+  // Moves the response sending callback so that it is not called until the stub
+  // process fills in the GPU buffers.
   ScopedDefer deferred_task(
       [this, &requires_deferred_callback, &response_error_handling] {
         if (requires_deferred_callback) {
@@ -315,7 +320,7 @@ InferResponse::Send(
   }
 #endif  // TRITON_ENABLE_GPU
 
-  return *response_error;
+  return response_error;
 }
 #endif
 

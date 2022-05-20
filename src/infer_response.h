@@ -46,7 +46,7 @@ struct ResponseShm {
     TRITONSERVER_Error* raasnie_err__ = (X); \
     if (raasnie_err__ != nullptr) {          \
       *E = raasnie_err__;                    \
-      return *E;                             \
+      return E;                              \
     }                                        \
   } while (false)
 
@@ -59,7 +59,7 @@ struct ResponseShm {
       TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
           TRITONSERVER_ERROR_INTERNAL, pb_exception.what());   \
       *E = rarie_err__;                                        \
-      return *E;                                               \
+      return E;                                                \
     }                                                          \
   } while (false)
 
@@ -84,7 +84,7 @@ class InferResponse {
   /// response needs to be done in two step. The boolean
   /// 'requires_deferred_callback' indicates whether DeferredSendCallback method
   /// should be called or not.
-  TRITONSERVER_Error* Send(
+  std::shared_ptr<TRITONSERVER_Error*> Send(
       TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
       bool& requires_deferred_callback, const uint32_t flags,
       std::unique_ptr<SharedMemoryManager>& shm_pool,

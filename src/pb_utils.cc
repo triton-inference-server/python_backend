@@ -211,4 +211,23 @@ CUDAHandler::~CUDAHandler() noexcept(false)
   }
 }
 #endif
+
+#ifndef TRITON_PB_STUB
+std::shared_ptr<TRITONSERVER_Error*>
+WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)
+{
+  std::shared_ptr<TRITONSERVER_Error*> response_error(
+      new TRITONSERVER_Error*, [](TRITONSERVER_Error** error) {
+        if (error != nullptr && *error != nullptr) {
+          TRITONSERVER_ErrorDelete(*error);
+        }
+
+        if (error != nullptr) {
+          delete error;
+        }
+      });
+  *response_error = error;
+  return response_error;
+}
+#endif
 }}}  // namespace triton::backend::python
