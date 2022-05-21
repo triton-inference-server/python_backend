@@ -24,6 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#pragma once
+
 #include <pybind11/embed.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -31,6 +33,9 @@
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <condition_variable>
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include "infer_request.h"
@@ -39,13 +44,73 @@
 #include "message_queue.h"
 #include "pb_utils.h"
 
-#pragma once
 
 namespace bi = boost::interprocess;
 namespace py = pybind11;
 using namespace pybind11::literals;
 
 namespace triton { namespace backend { namespace python {
+
+#define LOG_IF_EXCEPTION(X)                              \
+  do {                                                   \
+    try {                                                \
+      (X);                                               \
+    }                                                    \
+    catch (const PythonBackendException& pb_exception) { \
+      LOG_INFO << pb_exception.what();                   \
+    }                                                    \
+  } while (false)
+
+#define LOG_EXCEPTION(E)  \
+  do {                    \
+    LOG_INFO << E.what(); \
+  } while (false)
+
+// Macros that use current filename and line number.
+#define LOG_INFO LOG_INFO_FL(__FILE__, __LINE__)
+
+class Logger {
+ public:
+  // Log a message.
+  void Log(const std::string& msg) { std::cerr << msg << std::endl; }
+
+  // Flush the log.
+  void Flush() { std::cerr << std::flush; }
+};
+
+static Logger gLogger_;
+
+class LogMessage {
+ public:
+  LogMessage(const char* file, int line)
+  {
+    std::string path(file);
+    size_t pos = path.rfind('/');
+    if (pos != std::string::npos) {
+      path = path.substr(pos + 1, std::string::npos);
+    }
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm tm_time;
+    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
+    stream_ << std::setfill('0') << std::setw(2) << (tm_time.tm_mon + 1)
+            << std::setw(2) << tm_time.tm_mday << " " << std::setw(2)
+            << tm_time.tm_hour << ':' << std::setw(2) << tm_time.tm_min << ':'
+            << std::setw(2) << tm_time.tm_sec << "." << std::setw(6)
+            << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid()) << ' '
+            << path << ':' << line << "] ";
+  }
+
+  ~LogMessage() { gLogger_.Log(stream_.str()); }
+
+  std::stringstream& stream() { return stream_; }
+
+ private:
+  std::stringstream stream_;
+};
+
+#define LOG_INFO_FL(FN, LN) LogMessage((char*)(FN), LN).stream()
 
 class Stub {
  public:

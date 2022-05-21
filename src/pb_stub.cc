@@ -25,7 +25,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "pb_stub.h"
-
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -59,65 +58,6 @@ using namespace pybind11::literals;
 namespace bi = boost::interprocess;
 namespace triton { namespace backend { namespace python {
 
-#define LOG_IF_EXCEPTION(X)                              \
-  do {                                                   \
-    try {                                                \
-      (X);                                               \
-    }                                                    \
-    catch (const PythonBackendException& pb_exception) { \
-      LOG_INFO << pb_exception.what();                   \
-    }                                                    \
-  } while (false)
-
-#define LOG_EXCEPTION(E)  \
-  do {                    \
-    LOG_INFO << E.what(); \
-  } while (false)
-
-// Macros that use current filename and line number.
-#define LOG_INFO LOG_INFO_FL(__FILE__, __LINE__)
-
-class Logger {
- public:
-  // Log a message.
-  void Log(const std::string& msg) { std::cerr << msg << std::endl; }
-
-  // Flush the log.
-  void Flush() { std::cerr << std::flush; }
-};
-
-Logger gLogger_;
-class LogMessage {
- public:
-  LogMessage(const char* file, int line)
-  {
-    std::string path(file);
-    size_t pos = path.rfind('/');
-    if (pos != std::string::npos) {
-      path = path.substr(pos + 1, std::string::npos);
-    }
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tm_time;
-    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
-    stream_ << std::setfill('0') << std::setw(2) << (tm_time.tm_mon + 1)
-            << std::setw(2) << tm_time.tm_mday << " " << std::setw(2)
-            << tm_time.tm_hour << ':' << std::setw(2) << tm_time.tm_min << ':'
-            << std::setw(2) << tm_time.tm_sec << "." << std::setw(6)
-            << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid()) << ' '
-            << path << ':' << line << "] ";
-  }
-
-  ~LogMessage() { gLogger_.Log(stream_.str()); }
-
-  std::stringstream& stream() { return stream_; }
-
- private:
-  std::stringstream stream_;
-};
-
-#define LOG_INFO_FL(FN, LN) LogMessage((char*)(FN), LN).stream()
 std::atomic<bool> non_graceful_exit = {false};
 
 
@@ -458,52 +398,20 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
     return;
   }
 
-  // We need to hold the cpu_buffers until the main process makes a copy from
-  // them.
-  std::vector<std::unique_ptr<PbMemory>> cpu_buffers;
   std::vector<std::unique_ptr<PbMemory>> dst_buffers;
 
-  bool has_cpu_buffer = false;
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
         shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
-    if (dst_buffer->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-      has_cpu_buffer = true;
-    }
     dst_buffers.emplace_back(std::move(dst_buffer));
   }
 
-  // Pop a dummy message from the stub message queue indicating that the parent
-  // has finished copying the tensors.
-  ScopedDefer _([this, has_cpu_buffer] {
-    if (has_cpu_buffer) {
-      stub_message_queue_->Pop();
-    }
-  });
-
   ScopedDefer load_gpu_buffer_response(
-      [this, has_cpu_buffer] { parent_message_queue_->Push(DUMMY_MESSAGE); });
+      [this] { parent_message_queue_->Push(DUMMY_MESSAGE); });
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
-
-    // If the memory type is CPU, the buffer is empty and we need to create
-    // a buffer.
-    if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-      dst_buffers[i] = PbMemory::Create(
-          shm_pool_, dst_buffers[i]->MemoryType(),
-          dst_buffers[i]->MemoryTypeId(), src_buffer->ByteSize(),
-          nullptr /* buffer */);
-
-      // Update the handle so that the main process can load it.
-      gpu_buffers_handle_shm[i] = dst_buffers[i]->ShmHandle();
-    }
-
     PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
-
-    if (dst_buffers[i]->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-      cpu_buffers.push_back(std::move(dst_buffers[i]));
-    }
   }
 
   gpu_tensors_.clear();
@@ -541,7 +449,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
   std::unique_ptr<IPCMessage> execute_response =
       IPCMessage::Create(shm_pool_, false /* Inline response */);
-  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
 
   AllocatedSharedMemory<ResponseBatch> response_batch =
       shm_pool_->Construct<ResponseBatch>();
@@ -615,7 +523,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 {
   std::unique_ptr<IPCMessage> execute_response =
       IPCMessage::Create(shm_pool_, false /* Inline response */);
-  execute_response->Command() = PYTHONSTUB_ExecuteResposne;
+  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
 
   AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
       request_batch_shm_ptr->batch_size *
@@ -693,7 +601,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     size_t response_size = py::len(responses);
 
     // If the number of request objects do not match the number of
-    // resposne objects throw an error.
+    // response objects throw an error.
     if (response_size != batch_size) {
       std::string err =
           "Number of InferenceResponse objects do not match the number "

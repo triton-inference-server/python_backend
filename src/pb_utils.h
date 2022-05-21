@@ -153,6 +153,13 @@ struct ResponseSenderBase {
 
 struct ResponseSendMessage : ResponseSenderBase {
   bi::managed_external_buffer::handle_t response;
+
+  // GPU Buffers handle
+  bi::managed_external_buffer::handle_t gpu_buffers_handle;
+
+  // GPU buffers count
+  uint32_t gpu_buffers_count;
+
   uint32_t flags;
 };
 
@@ -197,5 +204,10 @@ class CUDAHandler {
   void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
 };
 #endif  // TRITON_ENABLE_GPU
+
+#ifndef TRITON_PB_STUB
+std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
+    TRITONSERVER_Error* error);
+#endif
 
 }}}  // namespace triton::backend::python

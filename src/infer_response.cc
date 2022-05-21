@@ -164,40 +164,68 @@ InferResponse::Error()
 }
 
 #ifndef TRITON_PB_STUB
-TRITONSERVER_Error*
+std::shared_ptr<TRITONSERVER_Error*>
 InferResponse::Send(
     TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
-    const uint32_t flags)
+    bool& requires_deferred_callback, const uint32_t flags,
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
+    const std::set<std::string>& requested_output_names,
+    TRITONBACKEND_Response* response)
 {
-  // [FIXME] Use this code to send responses in non-decoupled mode.
-  TRITONBACKEND_Response* response = nullptr;
-  TRITONSERVER_Error* response_error = nullptr;
-  ScopedDefer response_error_handling([&response, &response_error, flags,
-                                       response_factory] {
-    if (response != nullptr) {
-      LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(response, flags, response_error),
-          "failed to send the response.");
-      if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-        std::unique_ptr<
-            TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-        response_factory_ptr(
-            reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
-      }
-    }
-  });
+  std::shared_ptr<TRITONSERVER_Error*> response_error =
+      WrapTritonErrorInSharedPtr(nullptr);
+  std::unique_ptr<ScopedDefer> response_error_handling;
+  requires_deferred_callback = false;
 
-  SET_ERROR_AND_RETURN(
-      response_error,
-      TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
+  // Should only destruct the response factory whenever a response factory is
+  // being created.
+  bool destruct_response_factor = (response == nullptr);
+
+  if (response == nullptr) {
+    SET_ERROR_AND_RETURN(
+        response_error,
+        TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
+  }
+
+  // This lambda expression will be called when this function exits, if the
+  // inference response doesn't have any GPU tensors. Otherwise, it will be
+  // called when the object is destructed or DeferredSendCallback is called.
+  response_error_handling = std::make_unique<ScopedDefer>(
+      [response, response_error, flags, response_factory,
+       destruct_response_factor] {
+        if (response != nullptr) {
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseSend(response, flags, *response_error),
+              "failed to send the response.");
+          if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL &&
+              destruct_response_factor) {
+            std::unique_ptr<
+                TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+            response_factory_ptr(
+                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                    response_factory));
+          }
+        }
+      });
+
+  // Moves the response sending callback so that it is not called until the stub
+  // process fills in the GPU buffers.
+  ScopedDefer deferred_task(
+      [this, &requires_deferred_callback, &response_error_handling] {
+        if (requires_deferred_callback) {
+          deferred_send_callback_ = std::move(response_error_handling);
+        }
+      });
 
   if (HasError()) {
-    response_error = TRITONSERVER_ErrorNew(
+    *response_error = TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
     return nullptr;
   }
 
   bool cuda_copy = false;
+
   for (auto& output_tensor : OutputTensors()) {
     TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
     int64_t src_memory_type_id = output_tensor->MemoryTypeId();
@@ -205,12 +233,8 @@ InferResponse::Send(
     TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
     int64_t actual_memory_type_id = src_memory_type_id;
 
-    // [FIXME] GPU tensors are not supported in the decoupled API mode.
     if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-      response_error = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          "GPU tensors are not supported in decoupled API.");
-      return response_error;
+      requires_deferred_callback = true;
     }
 
     TRITONBACKEND_Output* response_output;
@@ -222,11 +246,60 @@ InferResponse::Send(
             output_tensor->Dims().data(), output_tensor->Dims().size()));
 
     void* buffer;
-    bool cuda_used = false;
     SET_ERROR_AND_RETURN(
         response_error, TRITONBACKEND_OutputBuffer(
                             response_output, &buffer, output_tensor->ByteSize(),
                             &actual_memory_type, &actual_memory_type_id));
+
+    bool cuda_used = false;
+    TRITONSERVER_BufferAttributes* output_buffer_attributes;
+    SET_ERROR_AND_RETURN(
+        response_error, TRITONBACKEND_OutputBufferAttributes(
+                            response_output, &output_buffer_attributes));
+
+    std::unique_ptr<PbMemory> output_buffer;
+    if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
+        actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+#ifdef TRITON_ENABLE_GPU
+      cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
+      SET_ERROR_AND_RETURN(
+          response_error,
+          TRITONSERVER_BufferAttributesCudaIpcHandle(
+              output_buffer_attributes,
+              reinterpret_cast<void**>(&cuda_ipc_mem_handle_p)));
+
+      if (cuda_ipc_mem_handle_p != nullptr) {
+        SET_ERROR_AND_RETURN_IF_EXCEPTION(
+            response_error,
+            output_buffer = PbMemory::Create(
+                shm_pool, actual_memory_type, actual_memory_type_id,
+                output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
+                false /* copy_gpu */));
+        output_buffer->SetCudaIpcHandle(cuda_ipc_mem_handle_p);
+      } else {
+        SET_ERROR_AND_RETURN_IF_EXCEPTION(
+            response_error,
+            output_buffer = PbMemory::Create(
+                shm_pool, actual_memory_type, actual_memory_type_id,
+                output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
+                true /* copy_gpu */));
+      }
+      output_buffers.push_back({std::move(output_buffer), buffer});
+#endif
+    }
+
+    // When we requested a GPU buffer but received a CPU buffer.
+    if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
+        (actual_memory_type == TRITONSERVER_MEMORY_CPU ||
+         actual_memory_type == TRITONSERVER_MEMORY_CPU_PINNED)) {
+      SET_ERROR_AND_RETURN_IF_EXCEPTION(
+          response_error,
+          output_buffer = PbMemory::Create(
+              shm_pool, actual_memory_type, actual_memory_type_id,
+              output_tensor->ByteSize(), nullptr /* data ptr */));
+
+      output_buffers.push_back({std::move(output_buffer), buffer});
+    }
 
     if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
       SET_ERROR_AND_RETURN(
@@ -248,6 +321,14 @@ InferResponse::Send(
 #endif  // TRITON_ENABLE_GPU
 
   return response_error;
+}
+#endif
+
+#ifndef TRITON_PB_STUB
+void
+InferResponse::DeferredSendCallback()
+{
+  deferred_send_callback_.reset();
 }
 #endif
 
