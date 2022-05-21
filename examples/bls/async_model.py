@@ -120,11 +120,11 @@ class TritonPythonModel:
                     raise pb_utils.TritonModelException(
                         infer_response.error().message())
 
-            # Get the OUTPUT0 from the "pytorch" model inference resposne
+            # Get the OUTPUT0 from the "pytorch" model inference response
             pytorch_output0_tensor = pb_utils.get_output_tensor_by_name(
                 inference_responses[0], "OUTPUT0")
 
-            # Get the OUTPUT1 from the "addsub" model inference resposne
+            # Get the OUTPUT1 from the "addsub" model inference response
             addsub_output1_tensor = pb_utils.get_output_tensor_by_name(
                 inference_responses[1], "OUTPUT1")
 

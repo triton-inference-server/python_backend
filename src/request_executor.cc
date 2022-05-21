@@ -306,7 +306,7 @@ RequestExecutor::Infer(
     if (response != nullptr) {
       LOG_IF_ERROR(
           TRITONSERVER_InferenceResponseDelete(response),
-          "Failed to delete inference resposne.");
+          "Failed to delete inference response.");
 
       *triton_response = nullptr;
     }
