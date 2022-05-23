@@ -432,7 +432,9 @@ Stub::AutoCompleteModelConfig(
   if (py::hasattr(model_, "auto_complete_config")) {
     model_config = model_.attr("auto_complete_config")(model_config);
   }
-  if (py::isinstance<py::none>(model_config)) {
+
+  if (std::string(py::str(model_config.get_type())) !=
+      "<class 'triton_python_backend_utils.ModelConfig'>") {
     throw PythonBackendException(
         "auto_complete_config function in model '" + name_ +
         "' must return a valid pb.ModelConfig object.");

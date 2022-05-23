@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "stub_launcher.h"
+#include "python_be.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -55,7 +56,6 @@ StubLauncher::Initialize(ModelState* model_state)
   shm_growth_byte_size_ = model_state->StateForBackend()->shm_growth_byte_size;
   shm_message_queue_size_ =
       model_state->StateForBackend()->shm_message_queue_size;
-  thread_pool_size_ = model_state->StateForBackend()->thread_pool_size;
   python_execution_env_ = model_state->PythonExecutionEnv();
   python_lib_ = model_state->StateForBackend()->python_lib;
   model_state->ModelConfig().Write(&model_config_buffer_);
@@ -133,10 +133,6 @@ StubLauncher::Setup()
   stub_message_queue_ = nullptr;
   parent_message_queue_ = nullptr;
   memory_manager_ = nullptr;
-  if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
-    thread_pool_ =
-        std::make_unique<boost::asio::thread_pool>(thread_pool_size_);
-  }
 
   try {
     // It is necessary for restart to make sure that the previous shared memory
@@ -391,7 +387,6 @@ StubLauncher::AutocompleteStubProcess()
             shm_pool_, auto_complete_response->response_model_config);
     std::string auto_complete_config_string = auto_complete_config->String();
     if (!auto_complete_config_string.empty()) {
-      FixStringToJsonFormat(&auto_complete_config_string);
       TRITONSERVER_Error* err =
           auto_complete_config_.Parse(auto_complete_config_string);
       if (err != nullptr) {
@@ -459,7 +454,9 @@ StubLauncher::ModelInstanceStubProcess()
 }
 
 void
-StubLauncher::TerminateStub()
+StubLauncher::TerminateStub(
+    std::thread* decoupled_monitor, std::vector<std::future<void>>* futures,
+    std::unique_ptr<boost::asio::thread_pool>* thread_pool)
 {
   if (is_initialized_) {
     {
@@ -486,14 +483,14 @@ StubLauncher::TerminateStub()
       if (is_decoupled_) {
         parent_message_queue_->Push(DUMMY_MESSAGE);
         if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
-          decoupled_monitor_.join();
-          futures_.clear();
+          (*decoupled_monitor).join();
+          (*futures).clear();
         }
       }
 
       if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
         // Wait for all the futures to be finished.
-        thread_pool_->wait();
+        (*thread_pool)->wait();
       }
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
@@ -530,14 +527,6 @@ StubLauncher::KillStubProcess()
   int status;
   waitpid(stub_pid_, &status, 0);
   stub_pid_ = 0;
-}
-
-void
-StubLauncher::FixStringToJsonFormat(std::string* str)
-{
-  *str = std::regex_replace(*str, std::regex("\'"), "\"");
-  *str = std::regex_replace(*str, std::regex("False"), "false");
-  *str = std::regex_replace(*str, std::regex("True"), "true");
 }
 
 }}};  // namespace triton::backend::python

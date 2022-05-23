@@ -40,28 +40,31 @@ class TritonPythonModel:
 
     @staticmethod
     def auto_complete_config(auto_complete_model_config):
-        """`auto_complete_config` is called only once when the server is started
-        with `--strict-model-config=false`. Implementing this function is optional.
-        A no implementation of `auto_complete_config` will do nothing. This function
-        can be used to set `max_batch_size`, `input` and `output` properties of the
-        model using `set_max_batch_size`, `add_input`, and `add_output`.
-        These properties will allow Triton to load the model with minimal model
-        configuration in absence of a configuration file. This function returns the
-        `pb_utils.ModelConfig` object with these properties. You can use `as_dict`
-        function to gain read-only access to the `pb_utils.ModelConfig` object.
-        The `pb_utils.ModelConfig` object being returned from here will be used as
-        the final configuration for the model.
+        """`auto_complete_config` is called only once when the server is
+        started with `--strict-model-config=false`. Implementing this
+        function is optional. A no implementation of `auto_complete_config`
+        will do nothing. This function can be used to set `max_batch_size`,
+        `input` and `output` properties of the model using
+        `set_max_batch_size`, `add_input`, and `add_output`. These properties
+        will allow Triton to load the model with minimal model configuration
+        in absence of a configuration file. This function returns the
+        `pb_utils.ModelConfig` object with these properties. You can use
+        `as_dict` function to gain read-only access to the
+        `pb_utils.ModelConfig` object. The `pb_utils.ModelConfig` object being
+        returned from here will be used as the final configuration for the
+        model.
 
-        Note: The Python interpreter used to invoke this function will be destroyed
-        upon returning from this function and as a result none of the objects created
-        here will be available in the `initialize`, `execute`, or `finalize` functions.
+        Note: The Python interpreter used to invoke this function will be
+        destroyed upon returning from this function and as a result none of
+        the objects created here will be available in the `initialize`,
+        `execute`, or `finalize` functions.
 
         Parameters
         ----------
         auto_complete_model_config : pb_utils.ModelConfig
-          An object containing the existing model configuration. You can build upon
-          the configuration given by this object when setting the properties for 
-          this model.
+          An object containing the existing model configuration. You can build
+          upon the configuration given by this object when setting the
+          properties for this model.
 
         Returns
         -------
@@ -89,6 +92,7 @@ class TritonPythonModel:
 
         # Demonstrate the usage of `as_dict`, `add_input`, `add_output`,
         # and `set_max_batch_size` functions.
+        # Store the model configuration as a dictionary.
         config = auto_complete_model_config.as_dict()
         input_names = []
         output_names = []
@@ -98,17 +102,17 @@ class TritonPythonModel:
             output_names.append(output['name'])
 
         for input in inputs:
-            # The name checking here is only for demonstrating the usage of `as_dict`
-            # function. `add_input` will check for conflicts and raise errors
-            # if an input with the same name already exists in the configuration but
-            # has different data_type or dims property.
+            # The name checking here is only for demonstrating the usage of
+            # `as_dict` function. `add_input` will check for conflicts and
+            # raise errors if an input with the same name already exists in
+            # the configuration but has different data_type or dims property.
             if input['name'] not in input_names:
                 auto_complete_model_config.add_input(input)
         for output in outputs:
-            # The name checking here is only for demonstrating the usage of `as_dict`
-            # function. `add_output` will check for conflicts and raise errors
-            # if an output with the same name already exists in the configuration but
-            # has different data_type or dims property.
+            # The name checking here is only for demonstrating the usage of
+            # `as_dict` function. `add_output` will check for conflicts and
+            # raise errors if an output with the same name already exists in
+            # the configuration but has different data_type or dims property.
             if output['name'] not in output_names:
                 auto_complete_model_config.add_output(output)
 

@@ -44,7 +44,6 @@
 #include "memory_manager.h"
 #include "message_queue.h"
 #include "pb_utils.h"
-#include "python_be.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_model.h"
 #include "triton/backend/backend_model_instance.h"
@@ -52,6 +51,8 @@
 #include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
+
+class ModelState;
 
 class StubLauncher {
  public:
@@ -76,43 +77,49 @@ class StubLauncher {
   // Model instance stub process
   TRITONSERVER_Error* ModelInstanceStubProcess();
 
-  pid_t* StubPid() { return &stub_pid_; }
+  // Stub PID
+  pid_t StubPid() { return stub_pid_; }
+
+  // Health mutex
   bi::interprocess_mutex* HealthMutex() { return health_mutex_; }
+
+  // Stub message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
   StubMessageQueue()
   {
     return stub_message_queue_;
   }
+
+  // Parent message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
   ParentMessageQueue()
   {
     return parent_message_queue_;
   }
+
+  // Memory Manager
   std::unique_ptr<MemoryManager>& GetMemoryManager() { return memory_manager_; }
+
+  // IPC control
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>&
   IpcControl()
   {
     return ipc_control_;
   }
+
+  // Shared memory pool
   std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
-  std::vector<std::future<void>>* Futures() { return &futures_; }
-  std::unique_ptr<boost::asio::thread_pool>& ThreadPool()
-  {
-    return thread_pool_;
-  }
 
   // Get auto-complete model configuration
   common::TritonJson::Value& AutoCompleteConfig()
   {
     return auto_complete_config_;
   }
-  std::thread* DecoupledMonitor() { return &decoupled_monitor_; }
 
   // Destruct Stub process
-  void TerminateStub();
-
-  // Fix string to json format
-  void FixStringToJsonFormat(std::string* str);
+  void TerminateStub(
+      std::thread* decoupled_monitor, std::vector<std::future<void>>* futures,
+      std::unique_ptr<boost::asio::thread_pool>* thread_pool);
 
   // Kill stub process
   void KillStubProcess();
@@ -123,6 +130,7 @@ class StubLauncher {
 
   bool is_initialized_;
   bool is_decoupled_;
+  bool is_healthy_;
   std::string shm_region_name_;
   std::string model_repository_path_;
   std::string model_path_;
@@ -137,7 +145,6 @@ class StubLauncher {
   int64_t shm_default_byte_size_;
   int64_t shm_growth_byte_size_;
   int64_t shm_message_queue_size_;
-  int64_t thread_pool_size_;
 
   // Path to python execution environment
   std::string path_to_libpython_;
@@ -156,9 +163,6 @@ class StubLauncher {
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;
   bi::managed_external_buffer::handle_t ipc_control_handle_;
-  std::vector<std::future<void>> futures_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
-  std::unique_ptr<boost::asio::thread_pool> thread_pool_;
-  std::thread decoupled_monitor_;
 };
 }}}  // namespace triton::backend::python

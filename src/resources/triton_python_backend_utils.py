@@ -310,7 +310,7 @@ class ModelConfig:
         self._model_config = json.loads(model_config)
 
     def __str__(self):
-        return str(self._model_config)
+        return json.dumps(self._model_config)
 
     def as_dict(self):
         """Provide the read-only access to the model configuration

@@ -281,7 +281,7 @@ ModelInstanceState::RespondErrorToAllRequests(
 void
 ModelInstanceState::WaitForBLSRequestsToFinish()
 {
-  (*Stub()->Futures()).clear();
+  futures_.clear();
 }
 
 bool
@@ -398,9 +398,12 @@ ModelInstanceState::LaunchStubProcess()
   RETURN_IF_ERROR(Stub()->Initialize(model_state));
   RETURN_IF_ERROR(Stub()->Launch());
 
+  thread_pool_ = std::make_unique<boost::asio::thread_pool>(
+      model_state->StateForBackend()->thread_pool_size);
+
   if (model_state->IsDecoupled()) {
     decoupled_thread_ = true;
-    *Stub()->DecoupledMonitor() =
+    decoupled_monitor_ =
         std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
   }
 
@@ -791,15 +794,15 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
         ResponseSendDecoupled(response_send_message);
       });
       std::future<void> future =
-          boost::asio::post(*Stub()->ThreadPool(), std::move(task));
-      (*Stub()->Futures()).emplace_back(std::move(future));
+          boost::asio::post(*thread_pool_, std::move(task));
+      futures_.emplace_back(std::move(future));
     } else if (message->Command() == PYTHONSTUB_InferExecRequest) {
       std::shared_ptr<IPCMessage> bls_execute = std::move(message);
       std::packaged_task<void()> task(
           [this, bls_execute] { ExecuteBLSRequest(bls_execute); });
       std::future<void> future =
-          boost::asio::post(*Stub()->ThreadPool(), std::move(task));
-      (*Stub()->Futures()).emplace_back(std::move(future));
+          boost::asio::post(*thread_pool_, std::move(task));
+      futures_.emplace_back(std::move(future));
     }
   }
 }
@@ -1093,8 +1096,8 @@ ModelInstanceState::ProcessRequests(
     std::packaged_task<void()> task(
         [this, ipc_message] { ExecuteBLSRequest(ipc_message); });
     std::future<void> future =
-        boost::asio::post(*Stub()->ThreadPool(), std::move(task));
-    (*Stub()->Futures()).emplace_back(std::move(future));
+        boost::asio::post(*thread_pool_, std::move(task));
+    futures_.emplace_back(std::move(future));
 
     auto error = ReceiveMessageFromStub(response_message);
     if (error != nullptr) {
