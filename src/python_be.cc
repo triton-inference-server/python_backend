@@ -536,13 +536,13 @@ ModelInstanceState::GetInputTensor(
       RETURN_IF_ERROR(TRITONSERVER_BufferAttributesCudaIpcHandle(
           buffer_attributes, reinterpret_cast<void**>(&cuda_ipc_handle)));
       if (cuda_ipc_handle != nullptr) {
-        RETURN_IF_EXCEPTION(
-            input_tensor->SaveToSharedMemory(shm_pool_, false /* copy_gpu */));
+        RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
+            Stub()->ShmPool(), false /* copy_gpu */));
         RETURN_IF_EXCEPTION(
             input_tensor->Memory()->SetCudaIpcHandle(cuda_ipc_handle));
       } else {
-        RETURN_IF_EXCEPTION(
-            input_tensor->SaveToSharedMemory(shm_pool_, true /* copy_gpu */));
+        RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
+            Stub()->ShmPool(), true /* copy_gpu */));
       }
     } else {
       void* dev_ptr;
@@ -577,7 +577,7 @@ ModelInstanceState::GetInputTensor(
       std::unique_ptr<MemoryRecord> gpu_memory_record =
           std::make_unique<GPUMemoryRecord>(input_tensor->Memory()->DataPtr());
       uint64_t memory_release_id =
-          memory_manager_->AddRecord(std::move(gpu_memory_record));
+          Stub()->GetMemoryManager()->AddRecord(std::move(gpu_memory_record));
       input_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
     }
 #else
@@ -848,12 +848,12 @@ ModelInstanceState::ResponseSendDecoupled(
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers;
     std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
         response_factory, CudaStream(), requires_deferred_callback,
-        send_message_payload->flags, shm_pool_, gpu_output_buffers);
+        send_message_payload->flags, Stub()->ShmPool(), gpu_output_buffers);
     SetErrorForResponseSendMessage(send_message_payload, error, error_message);
 
     if (requires_deferred_callback) {
       AllocatedSharedMemory<char> gpu_buffers_handle =
-          shm_pool_->Construct<char>(
+          Stub()->ShmPool()->Construct<char>(
               sizeof(uint64_t) +
               gpu_output_buffers.size() *
                   sizeof(bi::managed_external_buffer::handle_t));
@@ -1221,8 +1221,8 @@ ModelInstanceState::ProcessRequests(
         std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>{};
     std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
         nullptr, CudaStream(), require_deferred_callback,
-        TRITONSERVER_RESPONSE_COMPLETE_FINAL, shm_pool_, gpu_output_buffers[r],
-        requested_output_names, response);
+        TRITONSERVER_RESPONSE_COMPLETE_FINAL, Stub()->ShmPool(),
+        gpu_output_buffers[r], requested_output_names, response);
     GUARDED_RESPOND_IF_ERROR(responses, r, *error);
 
     // Error object will be deleted by the GUARDED_RESPOND macro
@@ -1319,11 +1319,6 @@ ModelInstanceState::ProcessRequests(
 ModelInstanceState::~ModelInstanceState()
 {
   Stub()->TerminateStub(&decoupled_monitor_, &futures_, &thread_pool_);
-}
-
-ModelState::~ModelState()
-{
-  std::cout << "DESTRUCTOR\n";
 }
 
 TRITONSERVER_Error*
@@ -1879,4 +1874,3 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 
 }  // extern "C"
 }}}  // namespace triton::backend::python
-

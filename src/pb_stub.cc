@@ -62,7 +62,6 @@ namespace triton { namespace backend { namespace python {
 
 std::atomic<bool> non_graceful_exit = {false};
 
-
 void
 SignalHandler(int signum)
 {

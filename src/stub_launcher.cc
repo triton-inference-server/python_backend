@@ -362,7 +362,7 @@ StubLauncher::AutocompleteStubProcess()
   if (auto_complete_response_message->Command() !=
       PYTHONSTUB_AutoCompleteResponse) {
     throw PythonBackendException(
-        "Received unexpected resposne from Python backend stub: " +
+        "Received unexpected response from Python backend stub: " +
         model_name_);
   }
 
@@ -426,7 +426,7 @@ StubLauncher::ModelInstanceStubProcess()
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         (std::string(
-             "Received unexpected resposne from Python backend stub: ") +
+             "Received unexpected response from Python backend stub: ") +
          model_instance_name_)
             .c_str());
   }
