@@ -252,7 +252,6 @@ class ModelInstanceState : public BackendModelInstance {
       ipc_control_;
   bi::managed_external_buffer::handle_t ipc_control_handle_;
   std::vector<std::future<void>> futures_;
-  std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
   std::mutex bls_responses_mutex_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   std::string shm_region_name_;
@@ -1250,7 +1249,6 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
   bool is_response_batch_set = false;
   std::unique_ptr<InferResponse> infer_response;
   ResponseBatch* response_batch;
-  TRITONSERVER_InferenceResponse* inference_response = nullptr;
   std::unique_ptr<PbString> pb_error_message;
   std::unique_ptr<IPCMessage> bls_response;
   AllocatedSharedMemory<char> response_batch_shm;
@@ -1358,29 +1356,53 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
       }
 
       if (pb_exception.what() != nullptr) {
-        infer_response =
-            request_executor->Infer(infer_request, &inference_response);
+        // Callback function that will be called whenever a response is
+        // received.
+        std::unique_ptr<std::function<void(
+            std::unique_ptr<InferResponse>&, const uint32_t)>>
+            response_complete_cb = std::make_unique<std::function<void(
+                std::unique_ptr<InferResponse>&, const uint32_t)>>(
+                [this, response_handle, ipc_message](
+                    std::unique_ptr<InferResponse>& infer_response,
+                    const uint32_t flags) {
+                  if (infer_response) {
+                    try {
+                      infer_response->SaveToSharedMemory(shm_pool_);
+                    }
+                    catch (const PythonBackendException& exception) {
+                    }
 
-        if (infer_response) {
-          infer_response->SaveToSharedMemory(shm_pool_);
-
-          for (auto& output_tensor : infer_response->OutputTensors()) {
-            // For GPU tensors we need to store the memory release id in memory
-            // manager.
-            if (!output_tensor->IsCPU()) {
+                    for (auto& output_tensor :
+                         infer_response->OutputTensors()) {
+                      // For GPU tensors we need to store the memory release id
+                      // in memory manager.
+                      if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-              std::unique_ptr<MemoryRecord> gpu_memory_record =
-                  std::make_unique<GPUMemoryRecord>(
-                      output_tensor->Memory()->DataPtr());
-              uint64_t memory_release_id =
-                  memory_manager_->AddRecord(std::move(gpu_memory_record));
-              output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
+                        std::unique_ptr<MemoryRecord> gpu_memory_record =
+                            std::make_unique<GPUMemoryRecord>(
+                                output_tensor->Memory()->DataPtr());
+                        uint64_t memory_release_id = memory_manager_->AddRecord(
+                            std::move(gpu_memory_record));
+                        output_tensor->Memory()->SetMemoryReleaseId(
+                            memory_release_id);
 #endif
-            }
-          }
-          *response_handle = infer_response->ShmHandle();
-        }
+                      }
+                    }
 
+                    // At this point, the stub has notified the parent process
+                    // that it has finished loading the inference response from
+                    // shared memory.
+                    {
+                      bi::scoped_lock<bi::interprocess_mutex> lock{
+                          *(ipc_message->ResponseMutex())};
+                      *response_handle = infer_response->ShmHandle();
+                      ipc_message->ResponseCondition()->notify_all();
+                      ipc_message->ResponseCondition()->wait(lock);
+                    }
+                  }
+                });
+
+        request_executor->Infer(infer_request, std::move(response_complete_cb));
       } else {
         throw pb_exception;
       }
@@ -1399,21 +1421,6 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
     } else {
       LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
     }
-  }
-
-  // At this point, the stub has notified the parent process that it has
-  // finished loading the inference response from shared memory.
-  {
-    bi::scoped_lock<bi::interprocess_mutex> lock{
-        *(ipc_message->ResponseMutex())};
-    ipc_message->ResponseCondition()->notify_all();
-    ipc_message->ResponseCondition()->wait(lock);
-  }
-
-  if (inference_response != nullptr) {
-    LOG_IF_ERROR(
-        TRITONSERVER_InferenceResponseDelete(inference_response),
-        " failed to release BLS inference response.");
   }
 }
 

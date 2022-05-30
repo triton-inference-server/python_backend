@@ -745,6 +745,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
       .def("exec", &InferRequest::Exec)
+      .def("stream_exec", &InferRequest::StreamExec)
       .def(
           "async_exec",
           [](std::shared_ptr<InferRequest>& infer_request) {

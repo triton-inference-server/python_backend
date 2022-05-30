@@ -348,7 +348,6 @@ InferRequest::GetResponseSender()
   return response_sender_;
 }
 
-
 std::shared_ptr<InferResponse>
 InferRequest::Exec()
 {
