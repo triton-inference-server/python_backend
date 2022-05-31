@@ -135,7 +135,7 @@ class Stub {
   bool RunCommand();
 
   /// Setup for the stub process
-  py::object StubSetup();
+  py::module StubSetup();
 
   /// Set the model configuration for auto-complete
   void AutoCompleteModelConfig(
@@ -200,6 +200,5 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
-  py::object model_;
 };
 }}}  // namespace triton::backend::python

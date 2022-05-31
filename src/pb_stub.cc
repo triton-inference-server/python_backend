@@ -355,7 +355,7 @@ Stub::RunCommand()
   return false;
 }
 
-py::object
+py::module
 Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
@@ -382,6 +382,8 @@ Stub::StubSetup()
   sys.attr("path").attr("append")(model_path_parent);
   sys.attr("path").attr("append")(model_path_parent_parent);
   sys.attr("path").attr("append")(python_backend_folder);
+  sys = py::module_::import(
+      (std::string(model_version_) + "." + model_name_trimmed).c_str());
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
@@ -403,14 +405,10 @@ Stub::StubSetup()
       c_python_backend_utils.attr("InferenceResponse"));
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
-  py::object TritonPythonModel =
-      py::module_::import(
-          (std::string(model_version_) + "." + model_name_trimmed).c_str())
-          .attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
 
-  return TritonPythonModel();
+  return sys;
 }
 
 void
@@ -418,7 +416,7 @@ Stub::AutoCompleteModelConfig(
     bi::managed_external_buffer::handle_t string_handle,
     std::string* auto_complete_config)
 {
-  model_ = StubSetup();
+  py::module sys = StubSetup();
 
   std::unique_ptr<PbString> pb_string_shm =
       PbString::LoadFromSharedMemory(shm_pool_, string_handle);
@@ -428,8 +426,9 @@ Stub::AutoCompleteModelConfig(
   py::object model_config =
       python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
 
-  if (py::hasattr(model_, "auto_complete_config")) {
-    model_config = model_.attr("auto_complete_config")(model_config);
+  if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
+    model_config = sys.attr("TritonPythonModel")
+                       .attr("auto_complete_config")(model_config);
   }
 
   if (std::string(py::str(model_config.get_type())) !=
@@ -444,7 +443,32 @@ Stub::AutoCompleteModelConfig(
 void
 Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 {
-  model_instance_ = StubSetup();
+  py::module sys = StubSetup();
+
+  py::module python_backend_utils =
+      py::module_::import("triton_python_backend_utils");
+  py::module c_python_backend_utils =
+      py::module_::import("c_python_backend_utils");
+  py::setattr(
+      python_backend_utils, "TritonError",
+      c_python_backend_utils.attr("TritonError"));
+  py::setattr(
+      python_backend_utils, "TritonModelException",
+      c_python_backend_utils.attr("TritonModelException"));
+  py::setattr(
+      python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
+  py::setattr(
+      python_backend_utils, "InferenceRequest",
+      c_python_backend_utils.attr("InferenceRequest"));
+  py::setattr(
+      python_backend_utils, "InferenceResponse",
+      c_python_backend_utils.attr("InferenceResponse"));
+  c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
+
+  py::object TritonPythonModel = sys.attr("TritonPythonModel");
+  deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
+  serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
+  model_instance_ = TritonPythonModel();
 
   std::unordered_map<std::string, std::string> map;
   std::unique_ptr<PbMap> pb_map_shm =
@@ -791,7 +815,6 @@ Stub::~Stub()
   {
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
-    model_ = py::none();
   }
 
   stub_instance_.reset();
