@@ -1318,7 +1318,21 @@ ModelInstanceState::ProcessRequests(
 
 ModelInstanceState::~ModelInstanceState()
 {
-  Stub()->TerminateStub(&decoupled_monitor_, &futures_, &thread_pool_);
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  Stub()->UpdateHealth();
+  if (Stub()->Is_Healthy()) {
+    if (model_state->IsDecoupled()) {
+      futures_.clear();
+      Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
+      decoupled_monitor_.join();
+    }
+    // Wait for all the futures to be finished.
+    thread_pool_->wait();
+  }
+
+  Stub()->TerminateStub();
+  received_message_.reset();
+  Stub().reset();
 }
 
 TRITONSERVER_Error*
@@ -1340,7 +1354,6 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
       triton_model, &auto_complete_config));
   if (auto_complete_config) {
     RETURN_IF_ERROR((*state)->LaunchAutoCompleteStubProcess());
-    (*state)->Stub()->TerminateStub(nullptr, nullptr, nullptr);
     triton::common::TritonJson::WriteBuffer buf;
     (*state)->Stub()->AutoCompleteConfig().Write(&buf);
 
@@ -1349,8 +1362,11 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
         &message, buf.Base(), buf.Size()));
     RETURN_IF_ERROR(TRITONBACKEND_ModelSetConfig(
         triton_model, 1 /* config_version */, message));
-    RETURN_IF_ERROR(
-        (*state)->ModelConfig().Swap((*state)->Stub()->AutoCompleteConfig()));
+    (*state)->ModelConfig() = std::move((*state)->Stub()->AutoCompleteConfig());
+
+    (*state)->Stub()->UpdateHealth();
+    (*state)->Stub()->TerminateStub();
+    (*state)->Stub().reset();
   }
 
   RETURN_IF_ERROR((*state)->ValidateModelConfig());
@@ -1460,9 +1476,9 @@ ModelState::LaunchAutoCompleteStubProcess()
     RETURN_IF_ERROR(Stub()->Launch());
   }
   catch (const BackendModelException& ex) {
-    Stub()->TerminateStub(nullptr, nullptr, nullptr);
-    // Need to make sure that the shared memory pool is destructed properly
-    Stub()->ShmPool().reset();
+    Stub()->UpdateHealth();
+    Stub()->TerminateStub();
+    Stub().reset();
     RETURN_ERROR_IF_TRUE(
         ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
         std::string("unexpected nullptr in BackendModelException"));

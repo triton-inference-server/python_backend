@@ -116,10 +116,14 @@ class StubLauncher {
     return auto_complete_config_;
   }
 
+  // Update health variable
+  void UpdateHealth();
+
+  // Is Healthy
+  bool Is_Healthy() { return is_healthy_; }
+
   // Destruct Stub process
-  void TerminateStub(
-      std::thread* decoupled_monitor, std::vector<std::future<void>>* futures,
-      std::unique_ptr<boost::asio::thread_pool>* thread_pool);
+  void TerminateStub();
 
   // Kill stub process
   void KillStubProcess();

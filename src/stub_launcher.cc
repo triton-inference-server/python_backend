@@ -454,10 +454,9 @@ StubLauncher::ModelInstanceStubProcess()
 }
 
 void
-StubLauncher::TerminateStub(
-    std::thread* decoupled_monitor, std::vector<std::future<void>>* futures,
-    std::unique_ptr<boost::asio::thread_pool>* thread_pool)
+StubLauncher::UpdateHealth()
 {
+  is_healthy_ = false;
   if (is_initialized_) {
     {
       bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
@@ -468,30 +467,22 @@ StubLauncher::TerminateStub(
     // health variable
     sleep(1);
 
-    bool healthy = false;
-    bool force_kill = false;
     {
       bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      healthy = ipc_control_->stub_health;
+      is_healthy_ = ipc_control_->stub_health;
     }
+  }
+}
 
-    if (healthy) {
+void
+StubLauncher::TerminateStub()
+{
+  if (is_initialized_) {
+    bool force_kill = false;
+    if (is_healthy_) {
       // Finalize command does not have any arguments.
       std::unique_ptr<IPCMessage> ipc_message =
           IPCMessage::Create(shm_pool_, false /* inline_response */);
-
-      if (is_decoupled_) {
-        parent_message_queue_->Push(DUMMY_MESSAGE);
-        if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
-          (*decoupled_monitor).join();
-          (*futures).clear();
-        }
-      }
-
-      if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
-        // Wait for all the futures to be finished.
-        (*thread_pool)->wait();
-      }
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
       stub_message_queue_->Push(ipc_message->ShmHandle());
@@ -500,7 +491,6 @@ StubLauncher::TerminateStub(
       stub_message_queue_.reset();
       parent_message_queue_.reset();
       memory_manager_.reset();
-
     } else {
       force_kill = true;
     }
