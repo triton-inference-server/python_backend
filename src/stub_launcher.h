@@ -120,7 +120,7 @@ class StubLauncher {
   void UpdateHealth();
 
   // Is Healthy
-  bool Is_Healthy() { return is_healthy_; }
+  bool IsHealthy() { return is_healthy_; }
 
   // Destruct Stub process
   void TerminateStub();

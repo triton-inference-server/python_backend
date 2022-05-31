@@ -1320,7 +1320,7 @@ ModelInstanceState::~ModelInstanceState()
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   Stub()->UpdateHealth();
-  if (Stub()->Is_Healthy()) {
+  if (Stub()->IsHealthy()) {
     if (model_state->IsDecoupled()) {
       futures_.clear();
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
