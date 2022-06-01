@@ -155,8 +155,9 @@ set(
 )
 
 set(
-  PYTHNON_BACKEND_SRCS
-  src/python.cc
+  PYTHON_BACKEND_SRCS
+  src/python_be.cc
+  src/python_be.h
   src/pb_env.cc
   src/pb_env.h
   src/pb_metric_reporter.cc
@@ -165,20 +166,22 @@ set(
   src/memory_manager.h
   src/request_executor.cc
   src/request_executor.h
+  src/stub_launcher.h
+  src/stub_launcher.cc
 )
 
 list(APPEND
-  PYTHNON_BACKEND_SRCS
+  PYTHON_BACKEND_SRCS
   ${COMMON_SRCS}
 )
 
 add_library(
   triton-python-backend SHARED
-  ${PYTHNON_BACKEND_SRCS}
+  ${PYTHON_BACKEND_SRCS}
 )
 
 set(
-  PYTHNON_BACKEND_STUB_SRCS
+  PYTHON_BACKEND_STUB_SRCS
   src/pb_stub_utils.h
   src/pb_stub_utils.cc
   src/response_sender.cc
@@ -188,13 +191,13 @@ set(
 )
 
 list(APPEND
-  PYTHNON_BACKEND_STUB_SRCS
+  PYTHON_BACKEND_STUB_SRCS
   ${COMMON_SRCS}
 )
 
 add_executable(
   triton-python-backend-stub
-  ${PYTHNON_BACKEND_STUB_SRCS}
+  ${PYTHON_BACKEND_STUB_SRCS}
 )
 
 add_dependencies(triton-python-backend boostorg)
@@ -241,7 +244,6 @@ target_link_libraries(
    Threads::Threads
    triton-backend-utils           # from repo-backend
    pybind11::embed
-   dlpack
    -lrt                           # shared memory 
    -larchive                      # libarchive
 )

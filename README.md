@@ -41,6 +41,7 @@ any C++ code.
   - [Quick Start](#quick-start)
   - [Building from Source](#building-from-source)
   - [Usage](#usage)
+    - [`auto_complete_config`](#auto_complete_config)
     - [`initialize`](#initialize)
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
@@ -192,6 +193,85 @@ class TritonPythonModel:
     that is created must have "TritonPythonModel" as the class name.
     """
 
+    @staticmethod
+    def auto_complete_config(auto_complete_model_config):
+        """`auto_complete_config` is called only once when the server is started
+        with `--strict-model-config=false`. Implementing this function is optional.
+        A no implementation of `auto_complete_config` will do nothing. This function
+        can be used to set `max_batch_size`, `input` and `output` properties of the
+        model using `set_max_batch_size`, `add_input`, and `add_output`.
+        These properties will allow Triton to load the model with minimal model
+        configuration in absence of a configuration file. This function returns the
+        `pb_utils.ModelConfig` object with these properties. You can use `as_dict`
+        function to gain read-only access to the `pb_utils.ModelConfig` object.
+        The `pb_utils.ModelConfig` object being returned from here will be used as
+        the final configuration for the model.
+
+        Note: The Python interpreter used to invoke this function will be destroyed
+        upon returning from this function and as a result none of the objects created
+        here will be available in the `initialize`, `execute`, or `finalize` functions.
+
+        Parameters
+        ----------
+        auto_complete_model_config : pb_utils.ModelConfig
+          An object containing the existing model configuration. You can build upon
+          the configuration given by this object when setting the properties for 
+          this model.
+
+        Returns
+        -------
+        pb_utils.ModelConfig
+          An object containing the auto-completed model configuration
+        """
+        inputs = [{
+            'name': 'INPUT0',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }, {
+            'name': 'INPUT1',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }]
+        outputs = [{
+            'name': 'OUTPUT0',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }, {
+            'name': 'OUTPUT1',
+            'data_type': 'TYPE_FP32',
+            'dims': [4]
+        }]
+
+        # Demonstrate the usage of `as_dict`, `add_input`, `add_output`,
+        # and `set_max_batch_size` functions.
+        # Store the model configuration as a dictionary.
+        config = auto_complete_model_config.as_dict()
+        input_names = []
+        output_names = []
+        for input in config['input']:
+            input_names.append(input['name'])
+        for output in config['output']:
+            output_names.append(output['name'])
+
+        for input in inputs:
+            # The name checking here is only for demonstrating the usage of
+            # `as_dict` function. `add_input` will check for conflicts and
+            # raise errors if an input with the same name already exists in
+            # the configuration but has different data_type or dims property.
+            if input['name'] not in input_names:
+                auto_complete_model_config.add_input(input)
+        for output in outputs:
+            # The name checking here is only for demonstrating the usage of
+            # `as_dict` function. `add_output` will check for conflicts and
+            # raise errors if an output with the same name already exists in
+            # the configuration but has different data_type or dims property.
+            if output['name'] not in output_names:
+                auto_complete_model_config.add_output(output)
+
+        auto_complete_model_config.set_max_batch_size(0)
+
+        return auto_complete_model_config
+
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
@@ -252,7 +332,35 @@ class TritonPythonModel:
 
 ```
 
-Every Python backend can implement three main functions:
+Every Python backend can implement four main functions:
+
+### `auto_complete_config`
+
+`auto_complete_config` is called only once when the server is started
+with [`--strict-model-config=false`](
+  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration).
+Implementing this function is optional. A no implementation of
+`auto_complete_config` will do nothing. This function can be used to set 
+[`max_batch_size`](
+  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
+[`input`](
+  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs) and
+[`output`](
+  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
+properties of the model using `set_max_batch_size`, `add_input`, and
+`add_output`. These properties will allow Triton to load the model with
+[minimal model configuration](
+  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
+in absence of a configuration file. This function returns the
+`pb_utils.ModelConfig` object with these properties. You can use `as_dict`
+function to gain read-only access to the `pb_utils.ModelConfig` object.
+The `pb_utils.ModelConfig` object being returned from here will be used as the
+final configuration for the model.
+
+Note: The Python interpreter used to invoke this function will be destroyed
+upon returning from this function and as a result none of the objects
+created here will be available in the `initialize`, `execute`, or `finalize`
+functions.
 
 ### `initialize`
 
@@ -413,7 +521,7 @@ from below known issues:
 Implementing `finalize` is optional. This function allows you to do any clean
 ups necessary before the model is unloaded from Triton server.
 
-You can look at the [add_sub example](examples/add_sub.py) which contains
+You can look at the [add_sub example](examples/add_sub/model.py) which contains
 a complete example of implementing all these functions for a Python model
 that adds and subtracts the inputs given to it. After implementing all the
 necessary functions, you should save this file as `model.py`.

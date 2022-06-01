@@ -37,12 +37,14 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <thread>
 #include <unordered_map>
 #include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_string.h"
+#include "pb_utils.h"
 #include "response_sender.h"
 #include "scoped_defer.h"
 #include "shm_manager.h"
@@ -60,7 +62,6 @@ namespace triton { namespace backend { namespace python {
 
 std::atomic<bool> non_graceful_exit = {false};
 
-
 void
 SignalHandler(int signum)
 {
@@ -73,12 +74,12 @@ Stub::Instantiate(
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
     bi::managed_external_buffer::handle_t ipc_control_handle,
-    const std::string& model_instance_name)
+    const std::string& name)
 {
   model_path_ = model_path;
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
-  model_instance_name_ = model_instance_name;
+  name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
 
@@ -185,7 +186,7 @@ Stub::IsDecoupled()
 bool
 Stub::RunCommand()
 {
-  NVTX_RANGE(nvtx_, "RunCommand " + model_instance_name_);
+  NVTX_RANGE(nvtx_, "RunCommand " + name_);
   std::unique_ptr<IPCMessage> ipc_message;
   {
     // Release the GIL lock when waiting for new message. Without this line, the
@@ -195,6 +196,73 @@ Stub::RunCommand()
     ipc_message = this->PopMessage();
   }
   switch (ipc_message->Command()) {
+    case PYTHONSTUB_CommandType::PYTHONSTUB_AutoCompleteRequest: {
+      // Only run this case when Triton Server is started with
+      // '--strict-model-config=false'
+      bool has_exception = false;
+      std::string error_string;
+      std::string auto_complete_config;
+
+      std::unique_ptr<IPCMessage> auto_complete_response_msg =
+          IPCMessage::Create(shm_pool_, false /* inline_response */);
+      auto_complete_response_msg->Command() = PYTHONSTUB_AutoCompleteResponse;
+      std::unique_ptr<PbString> error_string_shm;
+      std::unique_ptr<PbString> auto_complete_config_shm;
+      AllocatedSharedMemory<AutoCompleteResponseShm> auto_complete_response =
+          shm_pool_->Construct<AutoCompleteResponseShm>();
+
+      ScopedDefer receive_autocomplete_finalize(
+          [this] { stub_message_queue_->Pop(); });
+      ScopedDefer _([this, &auto_complete_response_msg] {
+        SendIPCMessage(auto_complete_response_msg);
+      });
+
+      auto_complete_response.data_->response_has_error = false;
+      auto_complete_response.data_->response_is_error_set = false;
+      auto_complete_response.data_->response_has_model_config = false;
+      auto_complete_response_msg->Args() = auto_complete_response.handle_;
+
+      try {
+        AutoCompleteModelConfig(ipc_message->Args(), &auto_complete_config);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        has_exception = true;
+        error_string = pb_exception.what();
+      }
+      catch (const py::error_already_set& error) {
+        has_exception = true;
+        error_string = error.what();
+      }
+
+      if (has_exception) {
+        // Do not delete the region. The region will be deleted by the parent
+        // process.
+        shm_pool_->SetDeleteRegion(false);
+        LOG_INFO << "Failed to initialize Python stub for auto-complete: "
+                 << error_string;
+        auto_complete_response.data_->response_has_error = true;
+        auto_complete_response.data_->response_is_error_set = false;
+
+        LOG_IF_EXCEPTION(
+            error_string_shm = PbString::Create(shm_pool_, error_string));
+        if (error_string_shm != nullptr) {
+          auto_complete_response.data_->response_is_error_set = true;
+          auto_complete_response.data_->response_error =
+              error_string_shm->ShmHandle();
+        }
+
+        return true;  // Terminate the stub process.
+      } else {
+        LOG_IF_EXCEPTION(
+            auto_complete_config_shm =
+                PbString::Create(shm_pool_, auto_complete_config));
+        if (auto_complete_config_shm != nullptr) {
+          auto_complete_response.data_->response_has_model_config = true;
+          auto_complete_response.data_->response_model_config =
+              auto_complete_config_shm->ShmHandle();
+        }
+      }
+    } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_InitializeRequest: {
       bool has_exception = false;
       std::string error_string;
@@ -252,7 +320,6 @@ Stub::RunCommand()
 
         return true;  // Terminate the stub process.
       }
-
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest: {
       AllocatedSharedMemory<char> request_batch =
@@ -288,8 +355,8 @@ Stub::RunCommand()
   return false;
 }
 
-void
-Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
+py::module
+Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
 
@@ -315,6 +382,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   sys.attr("path").attr("append")(model_path_parent);
   sys.attr("path").attr("append")(model_path_parent_parent);
   sys.attr("path").attr("append")(python_backend_folder);
+  sys = py::module_::import(
+      (std::string(model_version_) + "." + model_name_trimmed).c_str());
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
@@ -336,10 +405,68 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
       c_python_backend_utils.attr("InferenceResponse"));
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
-  py::object TritonPythonModel =
-      py::module_::import(
-          (std::string(model_version_) + "." + model_name_trimmed).c_str())
-          .attr("TritonPythonModel");
+  deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
+  serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
+
+  return sys;
+}
+
+void
+Stub::AutoCompleteModelConfig(
+    bi::managed_external_buffer::handle_t string_handle,
+    std::string* auto_complete_config)
+{
+  py::module sys = StubSetup();
+
+  std::unique_ptr<PbString> pb_string_shm =
+      PbString::LoadFromSharedMemory(shm_pool_, string_handle);
+
+  py::module python_backend_utils =
+      py::module_::import("triton_python_backend_utils");
+  py::object model_config =
+      python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
+
+  if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
+    model_config = sys.attr("TritonPythonModel")
+                       .attr("auto_complete_config")(model_config);
+  }
+
+  if (!py::isinstance(model_config, python_backend_utils.attr("ModelConfig"))) {
+    throw PythonBackendException(
+        "auto_complete_config function in model '" + name_ +
+        "' must return a valid pb.ModelConfig object.");
+  }
+  py::module json = py::module_::import("json");
+  (*auto_complete_config) = std::string(
+      py::str(json.attr("dumps")(model_config.attr("_model_config"))));
+}
+
+void
+Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
+{
+  py::module sys = StubSetup();
+
+  py::module python_backend_utils =
+      py::module_::import("triton_python_backend_utils");
+  py::module c_python_backend_utils =
+      py::module_::import("c_python_backend_utils");
+  py::setattr(
+      python_backend_utils, "TritonError",
+      c_python_backend_utils.attr("TritonError"));
+  py::setattr(
+      python_backend_utils, "TritonModelException",
+      c_python_backend_utils.attr("TritonModelException"));
+  py::setattr(
+      python_backend_utils, "Tensor", c_python_backend_utils.attr("Tensor"));
+  py::setattr(
+      python_backend_utils, "InferenceRequest",
+      c_python_backend_utils.attr("InferenceRequest"));
+  py::setattr(
+      python_backend_utils, "InferenceResponse",
+      c_python_backend_utils.attr("InferenceResponse"));
+  c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
+
+  py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
   model_instance_ = TritonPythonModel();
@@ -475,13 +602,13 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     }
 
     {
-      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+      NVTX_RANGE(nvtx_, "PyExecute " + name_);
 
       py::object execute_return =
           model_instance_.attr("execute")(py_request_list);
       if (!py::isinstance<py::none>(execute_return)) {
         throw PythonBackendException(
-            "Python model '" + model_instance_name_ +
+            "Python model '" + name_ +
             "' is using the decoupled mode and the execute function must "
             "return None.");
       }
@@ -499,8 +626,8 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
   if (has_exception) {
     std::string err_message =
         std::string(
-            "Failed to process the request(s) for model '" +
-            model_instance_name_ + "', message: ") +
+            "Failed to process the request(s) for model '" + name_ +
+            "', message: ") +
         error_string;
     LOG_INFO << err_message.c_str();
     response_batch_shm_ptr->has_error = true;
@@ -570,7 +697,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     bool is_coroutine;
 
     {
-      NVTX_RANGE(nvtx_, "PyExecute " + model_instance_name_);
+      NVTX_RANGE(nvtx_, "PyExecute " + name_);
       execute_return = model_instance_.attr("execute")(request_list);
       is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
     }
@@ -643,8 +770,8 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   if (has_exception) {
     std::string err_message =
         std::string(
-            "Failed to process the request(s) for model '" +
-            model_instance_name_ + "', message: ") +
+            "Failed to process the request(s) for model '" + name_ +
+            "', message: ") +
         error_string;
     LOG_INFO << err_message.c_str();
     error_string_shm = PbString::Create(shm_pool_, error_string);
@@ -691,6 +818,7 @@ Stub::~Stub()
     model_instance_ = py::none();
   }
 
+  stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
   memory_manager_message_queue_.reset();
@@ -843,14 +971,14 @@ main(int argc, char** argv)
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
   int64_t shm_growth_size = std::stoi(argv[4]);
   std::string triton_install_path = argv[6];
-  std::string model_instance_name = argv[8];
+  std::string name = argv[8];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl handle */, model_instance_name);
+        std::stoi(argv[7]) /* IPCControl handle */, name);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
@@ -888,7 +1016,7 @@ main(int argc, char** argv)
 
   // The stub process will always keep listening for new notifications from the
   // parent process. After the notification is received the stub process will
-  // run the appropriate comamnd and wait for new notifications.
+  // run the appropriate command and wait for new notifications.
   bool finalize = false;
   while (true) {
     if (finalize) {

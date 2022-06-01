@@ -1,4 +1,4 @@
-# Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 import numpy as np
 import struct
+import json
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -293,6 +294,182 @@ def numpy_to_triton_type(data_type):
 
 def triton_string_to_numpy(triton_type_string):
     return TRITON_STRING_TO_NUMPY[triton_type_string]
+
+
+class ModelConfig:
+    """An object of ModelConfig class is used to describe
+    the model configuration for autocomplete.
+    Parameters
+    ----------
+    model_config : ModelConfig Object
+        Object containing the model configuration. Only the max_batch_size, inputs
+        and outputs properties can be modified for auto-complete model configuration.
+    """
+
+    def __init__(self, model_config):
+        self._model_config = json.loads(model_config)
+
+    def as_dict(self):
+        """Provide the read-only access to the model configuration
+        Returns
+        -------
+        dict
+            dictionary type of the model configuration contained in
+            the ModelConfig object
+        """
+        return self._model_config
+
+    def set_max_batch_size(self, max_batch_size):
+        """Set the max batch size for the model.
+        Parameters
+        ----------
+        max_batch_size : int
+            The max_batch_size to be set.
+        Raises
+        ------
+        ValueError
+            If configuration has specified max_batch_size non-zero value which
+            is larger than the max_batch_size to be set for the model.
+        """
+        if self._model_config["max_batch_size"] > max_batch_size:
+            raise ValueError(
+                "configuration specified max_batch_size " +
+                str(self._model_config["max_batch_size"]) +
+                ", but in auto-complete-config function for model '" +
+                self._model_config["name"] + "' specified max_batch_size " +
+                str(max_batch_size))
+        else:
+            self._model_config["max_batch_size"] = max_batch_size
+
+    def add_input(self, input):
+        """Add the input for the model.
+        Parameters
+        ----------
+        input : dict
+            The input to be added.
+        Raises
+        ------
+        ValueError
+            If input contains property other than 'name', 'data_type'
+            and 'dims' or any of the properties are not set, or if an
+            input with the same name already exists in the configuration
+            but has different data_type or dims property
+        """
+        valid_properties = ['name', 'data_type', 'dims']
+        for current_property in input:
+            if current_property not in valid_properties:
+                raise ValueError(
+                    "input '" + input['name'] +
+                    "' in auto-complete-config function for model '" +
+                    self._model_config["name"] +
+                    "' contains property other than 'name', 'data_type' and 'dims'."
+                )
+
+        if 'name' not in input:
+            raise ValueError(
+                "input in auto-complete-config function for model '" +
+                self._model_config["name"] + "' is missing 'name' property.")
+        elif 'data_type' not in input:
+            raise ValueError("input '" + input['name'] +
+                             "' in auto-complete-config function for model '" +
+                             self._model_config["name"] +
+                             "' is missing 'data_type' property.")
+        elif 'dims' not in input:
+            raise ValueError("input '" + input['name'] +
+                             "' in auto-complete-config function for model '" +
+                             self._model_config["name"] +
+                             "' is missing 'dims' property.")
+
+        for current_input in self._model_config["input"]:
+            if input['name'] == current_input['name']:
+                if current_input[
+                        'data_type'] != "TYPE_INVALID" and current_input[
+                            'data_type'] != input['data_type']:
+                    raise ValueError("unable to load model '" +
+                                     self._model_config["name"] +
+                                     "', configuration expects datatype " +
+                                     current_input['data_type'] +
+                                     " for input '" + input['name'] +
+                                     "', model provides " + input['data_type'])
+                elif current_input[
+                        'dims'] and current_input['dims'] != input['dims']:
+                    raise ValueError(
+                        "model '" + self._model_config["name"] + "', tensor '" +
+                        input['name'] + "': the model expects dims " +
+                        str(input['dims']) +
+                        " but the model configuration specifies dims " +
+                        str(current_input['dims']))
+                else:
+                    current_input['data_type'] = input['data_type']
+                    current_input['dims'] = input['dims']
+                    return
+
+        self._model_config["input"].append(input)
+
+    def add_output(self, output):
+        """Add the output for the model.
+        Parameters
+        ----------
+        output : dict
+            The output to be added.
+        Raises
+        ------
+        ValueError
+            If output contains property other than 'name', 'data_type'
+            and 'dims' or any of the properties are not set, or if an
+            output with the same name already exists in the configuration
+            but has different data_type or dims property
+        """
+        valid_properties = ['name', 'data_type', 'dims']
+        for current_property in output:
+            if current_property not in valid_properties:
+                raise ValueError(
+                    "output '" + output['name'] +
+                    "' in auto-complete-config function for model '" +
+                    self._model_config["name"] +
+                    "' contains property other than 'name', 'data_type' and 'dims'."
+                )
+
+        if 'name' not in output:
+            raise ValueError(
+                "output in auto-complete-config function for model '" +
+                self._model_config["name"] + "' is missing 'name' property.")
+        elif 'data_type' not in output:
+            raise ValueError("output '" + output['name'] +
+                             "' in auto-complete-config function for model '" +
+                             self._model_config["name"] +
+                             "' is missing 'data_type' property.")
+        elif 'dims' not in output:
+            raise ValueError("output '" + output['name'] +
+                             "' in auto-complete-config function for model '" +
+                             self._model_config["name"] +
+                             "' is missing 'dims' property.")
+
+        for current_output in self._model_config["output"]:
+            if output['name'] == current_output['name']:
+                if current_output[
+                        'data_type'] != "TYPE_INVALID" and current_output[
+                            'data_type'] != output['data_type']:
+                    raise ValueError("unable to load model '" +
+                                     self._model_config["name"] +
+                                     "', configuration expects datatype " +
+                                     current_output['data_type'] +
+                                     " for output '" + output['name'] +
+                                     "', model provides " + output['data_type'])
+                elif current_output[
+                        'dims'] and current_output['dims'] != output['dims']:
+                    raise ValueError(
+                        "model '" + self._model_config["name"] + "', tensor '" +
+                        output['name'] + "': the model expects dims " +
+                        str(output['dims']) +
+                        " but the model configuration specifies dims " +
+                        str(current_output['dims']))
+                else:
+                    current_output['data_type'] = output['data_type']
+                    current_output['dims'] = output['dims']
+                    return
+
+        self._model_config["output"].append(output)
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1

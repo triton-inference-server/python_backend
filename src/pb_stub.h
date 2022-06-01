@@ -134,6 +134,14 @@ class Stub {
   /// Run a single command from the shared memory.
   bool RunCommand();
 
+  /// Setup for the stub process
+  py::module StubSetup();
+
+  /// Set the model configuration for auto-complete
+  void AutoCompleteModelConfig(
+      bi::managed_external_buffer::handle_t string_handle,
+      std::string* auto_complete_config);
+
   /// Initialize the user's Python code.
   void Initialize(bi::managed_external_buffer::handle_t map_handle);
 
@@ -173,7 +181,7 @@ class Stub {
   bi::interprocess_mutex* health_mutex_;
   std::string model_path_;
   std::string model_version_;
-  std::string model_instance_name_;
+  std::string name_;
   std::string triton_install_path_;
   IPCControlShm* ipc_control_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
