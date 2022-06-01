@@ -1714,7 +1714,6 @@ ModelInstanceState::ProcessRequests(
         requests, request_count);
   }
 
-
   ScopedDefer execute_finalize([this, &restart] {
     // Push a dummy message to the message queue so that
     // the stub process is notified that it can release
