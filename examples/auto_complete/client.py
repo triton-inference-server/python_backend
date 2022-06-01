@@ -112,6 +112,7 @@ if __name__ == '__main__':
             output0_data = response.as_numpy("OUTPUT0")
             output1_data = response.as_numpy("OUTPUT1")
 
+            print("=========='" + model_name + "' model result==========")
             print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
                 input0_data, input1_data, output0_data))
             print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(
@@ -124,6 +125,8 @@ if __name__ == '__main__':
             if not np.allclose(input0_data - input1_data, output1_data):
                 print("auto_complete example error: incorrect difference")
                 sys.exit(1)
+
+            print("\n")
 
     print('PASS: auto_complete')
 
