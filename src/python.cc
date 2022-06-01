@@ -2102,12 +2102,6 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
             TRITONSERVER_LOG_INFO,
             (std::string("Forcing CPU only input tensors.")).c_str());
       } else if (force_cpu_only_input_tensor == "no") {
-        if (decoupled_) {
-          throw BackendModelException(TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_UNSUPPORTED,
-              "FORCE_CPU_ONLY_INPUT_TENSORS set to OFF is not yet supported in "
-              "the decoupled API."));
-        }
         force_cpu_only_input_tensors_ = false;
         LOG_MESSAGE(
             TRITONSERVER_LOG_INFO,
