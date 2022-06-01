@@ -431,13 +431,14 @@ Stub::AutoCompleteModelConfig(
                        .attr("auto_complete_config")(model_config);
   }
 
-  if (std::string(py::str(model_config.get_type())) !=
-      "<class 'triton_python_backend_utils.ModelConfig'>") {
+  if (!py::isinstance(model_config, python_backend_utils.attr("ModelConfig"))) {
     throw PythonBackendException(
         "auto_complete_config function in model '" + name_ +
         "' must return a valid pb.ModelConfig object.");
   }
-  (*auto_complete_config) = std::string(py::str(model_config));
+  py::module json = py::module_::import("json");
+  (*auto_complete_config) = std::string(
+      py::str(json.attr("dumps")(model_config.attr("_model_config"))));
 }
 
 void
