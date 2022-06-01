@@ -459,7 +459,6 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
   bool has_exception = false;
   std::string error_string;
   std::unique_ptr<PbString> error_string_shm;
-  bool is_coroutine;
 
   ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
   ScopedDefer _(
@@ -480,13 +479,6 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
 
       py::object execute_return =
           model_instance_.attr("execute")(py_request_list);
-      py::module asyncio = py::module::import("asyncio");
-
-      is_coroutine = asyncio.attr("iscoroutine")(execute_return).cast<bool>();
-      if (is_coroutine) {
-        execute_return = asyncio.attr("run")(execute_return);
-      }
-
       if (!py::isinstance<py::none>(execute_return)) {
         throw PythonBackendException(
             "Python model '" + model_instance_name_ +
@@ -748,6 +740,12 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "async_exec",
           [](std::shared_ptr<InferRequest>& infer_request) {
+            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+            if (stub->IsDecoupled()) {
+              throw PythonBackendException(
+                  "Async BLS request execution is not support in the decoupled "
+                  "API.");
+            }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [infer_request]() {
