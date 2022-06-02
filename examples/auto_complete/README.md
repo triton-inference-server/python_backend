@@ -35,14 +35,18 @@ function in Python backend to provide
 [`input`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
 and [`output`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
 properties. These properties will allow Triton to load the Python model with
-[MinimalModel Configuration](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
-in absence of a configuration file. The
+[Minimal Model Configuration](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
+in absence of a configuration file.
+
+The
 [model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md)
 should contain [nobatch_auto_complete](./nobatch_model.py), and
 [batch_auto_complete](./batch_model.py) models.
 The max_batch_size of [nobatch_auto_complete](./nobatch_model.py) model is set
 to zero, whereas the max_batch_size of [batch_auto_complete](./batch_model.py)
-model is set to 4.
+model is set to 4. For models with a non-zero value of max_batch_size, the
+configuration can specify a different value of max_batch_size as long as it
+does not exceed the value set in the model file.
 
 The
 [nobatch_auto_complete](./nobatch_model.py) and
@@ -62,8 +66,8 @@ $ mkdir -p models/batch_auto_complete/1/
 $ cp examples/auto_complete/nobatch_model.py models/nobatch_auto_complete/1/model.py
 $ cp examples/auto_complete/batch_model.py models/batch_auto_complete/1/model.py
 ```
-(Note that we don't need a model configuration file since Triton will use the
-auto-complete model configuration provided in the Python model.)
+**(Note that we don't need a model configuration file since Triton will use the
+auto-complete model configuration provided in the Python model.)**
 
 2. Start the tritonserver with 
 [`--strict-model-config=false`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration):
