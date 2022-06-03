@@ -45,7 +45,7 @@ any C++ code.
     - [`initialize`](#initialize)
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
-      - [Decoupled Mode](#decoupled-mode-beta)
+      - [Decoupled Mode](#decoupled-mode)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
   - [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
@@ -444,7 +444,7 @@ class TritonPythonModel:
 ```
 
 
-#### Decoupled mode \[Beta\]
+#### Decoupled mode
 
 This mode allows user to send multiple responses for a request or
 not send any responses for a request. A model may also send
@@ -506,15 +506,7 @@ for more details on how to host a decoupled model.
 
 ##### Known Issues
 
-The support for decoupled models is still in beta and suffers
-from below known issues:
-
-* The decoupled mode doesn't support [FORCE_CPU_ONLY_INPUT_TENSORS](#input-tensor-device-placement)
-  parameter to be turned off. This means that the input tensors
-  will always be in CPU.
-* Currently, the InferenceResponseSender.send method only supports
-  inference_response objects that contain only CPU tensors.
-* The metrics collection may be incomplete.
+* Currently, async BLS requests are not supported in decoupled mode.
 
 ### `finalize`
 
@@ -1043,7 +1035,7 @@ You can find the complete example instructions in [examples/preprocessing](examp
 ## Decoupled Models
 
 The examples of decoupled models shows how to develop and serve
-[decoupled models](../../README.md#decoupled-mode-beta) in Triton using Python backend.
+[decoupled models](../../README.md#decoupled-mode) in Triton using Python backend.
 You can find the complete example instructions in [examples/decoupled](examples/decoupled/README.md).
 
 # Running with Inferentia
