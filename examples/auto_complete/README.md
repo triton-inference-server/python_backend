@@ -87,15 +87,9 @@ python3 examples/auto_complete/client.py
 You should see an output similar to the output below:
 
 ```
-=========='nobatch_auto_complete' model result==========
-INPUT0 ([0.29817334 0.93232846 0.75578576 0.17140342]) + INPUT1 ([0.7670651  0.7858047  0.12256423 0.08163388]) = OUTPUT0 ([1.0652385 1.7181332 0.87835   0.2530373])
-INPUT0 ([0.29817334 0.93232846 0.75578576 0.17140342]) - INPUT1 ([0.7670651  0.7858047  0.12256423 0.08163388]) = OUTPUT0 ([-0.46889177  0.14652377  0.6332215   0.08976954])
+'nobatch_auto_complete' configuration matches the expected auto complete configuration
 
-
-=========='batch_auto_complete' model result==========
-INPUT0 ([[0.5377827  0.84344584 0.8403696  0.88994217]]) + INPUT1 ([[0.40896812 0.05573703 0.9360248  0.6221403 ]]) = OUTPUT0 ([[0.9467509  0.89918286 1.7763944  1.5120825 ]])
-INPUT0 ([[0.5377827  0.84344584 0.8403696  0.88994217]]) - INPUT1 ([[0.40896812 0.05573703 0.9360248  0.6221403 ]]) = OUTPUT0 ([[ 0.12881461  0.7877088  -0.0956552   0.26780188]])
-
+'batch_auto_complete' configuration matches the expected auto complete configuration
 
 PASS: auto_complete
 
