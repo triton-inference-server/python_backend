@@ -42,6 +42,7 @@ class PbMetricReporter {
   uint64_t compute_start_ns_;
   uint64_t compute_end_ns_;
   uint64_t exec_end_ns_;
+  bool success_status_;
 
  public:
   PbMetricReporter(
@@ -54,5 +55,6 @@ class PbMetricReporter {
   void SetComputeStartNs(const uint64_t compute_start_ns);
   void SetComputeEndNs(const uint64_t compute_end_ns);
   void SetExecEndNs(const uint64_t exec_end_ns);
+  void SetSuccessStatus(const bool success_status);
 };
 }}};  // namespace triton::backend::python

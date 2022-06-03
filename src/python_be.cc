@@ -926,7 +926,8 @@ ModelInstanceState::ResponseSendDecoupled(
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequestsDecoupled(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
-    std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests)
+    std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
+    PbMetricReporter& reporter)
 {
   NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
   closed_requests_ = {};
@@ -954,6 +955,10 @@ ModelInstanceState::ProcessRequestsDecoupled(
       requests, request_count, pb_inference_requests, request_batch,
       responses));
 
+  uint64_t compute_start_ns = 0;
+  SET_TIMESTAMP(compute_start_ns);
+  reporter.SetComputeStartNs(compute_start_ns);
+
   std::unique_ptr<IPCMessage> ipc_message;
   RETURN_IF_EXCEPTION(
       ipc_message =
@@ -971,6 +976,12 @@ ModelInstanceState::ProcessRequestsDecoupled(
 
   AllocatedSharedMemory<ResponseBatch> response_batch =
       Stub()->ShmPool()->Load<ResponseBatch>(received_message_->Args());
+
+  uint64_t compute_end_ns = 0;
+  SET_TIMESTAMP(compute_end_ns);
+  reporter.SetComputeEndNs(compute_end_ns);
+  reporter.SetBatchStatistics(request_count);
+
   if (response_batch.data_->has_error) {
     if (response_batch.data_->is_error_set) {
       auto error = PbString::LoadFromSharedMemory(
@@ -1819,10 +1830,24 @@ TRITONBACKEND_ModelInstanceExecute(
     }
   } else {
     std::vector<std::unique_ptr<InferRequest>> infer_requests;
+
+    uint64_t exec_start_ns = 0;
+    SET_TIMESTAMP(exec_start_ns);
+
+    PbMetricReporter reporter(
+        instance_state->TritonModelInstance(), requests, request_count,
+        nullptr);
+    reporter.SetExecStartNs(exec_start_ns);
+
     error = instance_state->ProcessRequestsDecoupled(
-        requests, request_count, infer_requests);
+        requests, request_count, infer_requests, reporter);
+
+    uint64_t exec_end_ns = 0;
+    SET_TIMESTAMP(exec_end_ns);
+    reporter.SetExecEndNs(exec_end_ns);
 
     if (error != nullptr) {
+      reporter.SetSuccessStatus(false);
       for (uint32_t r = 0; r < request_count; ++r) {
         TRITONBACKEND_Request* request = requests[r];
         if (!instance_state->ExistsInClosedRequests(
