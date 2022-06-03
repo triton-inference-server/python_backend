@@ -29,7 +29,7 @@
 # Decoupled Model Examples
 
 In this section we demonstrate an end-to-end examples for developing and
-serving [decoupled models](../../README.md#decoupled-mode-beta) in Python backend.
+serving [decoupled models](../../README.md#decoupled-mode) in Python backend.
 
 [repeat_model.py](repeat_model.py) and [square_model.py](square_model.py) demonstrate
 how to write a decoupled model where each request can generate 0 to many responses.
