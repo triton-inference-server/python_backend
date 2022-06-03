@@ -32,8 +32,6 @@ import numpy as np
 
 nobatch_model_name = "nobatch_auto_complete"
 batch_model_name = "batch_auto_complete"
-nobatch_shape = [4]
-batch_shape = [1, 4]
 
 
 def validate_ios(config, expected_ios, model_name):
@@ -72,10 +70,10 @@ if __name__ == '__main__':
             'data_type': 'TYPE_FP32',
             'dims': [4]
         }]
-        models = [nobatch_model_name, batch_model_name]
-        shapes = [nobatch_shape, batch_shape]
 
-        for model_name, shape in zip(models, shapes):
+        models = [nobatch_model_name, batch_model_name]
+
+        for model_name in models:
             # Validate the auto-complete model configuration
             model_config = client.get_model_config(model_name)
             if model_config["max_batch_size"] != expected_max_batch_size[
@@ -85,45 +83,8 @@ if __name__ == '__main__':
                 sys.exit(1)
             validate_ios(model_config["input"], expected_inputs, model_name)
             validate_ios(model_config["output"], expected_outputs, model_name)
-
-            input0_data = np.random.rand(*shape).astype(np.float32)
-            input1_data = np.random.rand(*shape).astype(np.float32)
-            inputs = [
-                httpclient.InferInput("INPUT0", input0_data.shape,
-                                      np_to_triton_dtype(input0_data.dtype)),
-                httpclient.InferInput("INPUT1", input1_data.shape,
-                                      np_to_triton_dtype(input1_data.dtype)),
-            ]
-
-            inputs[0].set_data_from_numpy(input0_data)
-            inputs[1].set_data_from_numpy(input1_data)
-
-            outputs = [
-                httpclient.InferRequestedOutput("OUTPUT0"),
-                httpclient.InferRequestedOutput("OUTPUT1"),
-            ]
-
-            response = client.infer(model_name,
-                                    inputs,
-                                    request_id=str(1),
-                                    outputs=outputs)
-
-            result = response.get_response()
-            output0_data = response.as_numpy("OUTPUT0")
-            output1_data = response.as_numpy("OUTPUT1")
-
-            print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
-                input0_data, input1_data, output0_data))
-            print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(
-                input0_data, input1_data, output1_data))
-
-            if not np.allclose(input0_data + input1_data, output0_data):
-                print("auto_complete example error: incorrect sum")
-                sys.exit(1)
-
-            if not np.allclose(input0_data - input1_data, output1_data):
-                print("auto_complete example error: incorrect difference")
-                sys.exit(1)
+            print("'" + model_name + "' configuration matches the expected " +
+                  "auto complete configuration\n")
 
     print('PASS: auto_complete')
 
