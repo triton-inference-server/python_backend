@@ -1,4 +1,4 @@
-# Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -68,11 +68,11 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
         input0_data, input1_data, output1_data))
     if not np.allclose(input0_data + input1_data, output0_data):
-        print("BLS async example error: incorrect sum")
+        print("BLS sync example error: incorrect sum")
         sys.exit(1)
 
     if not np.allclose(input0_data - input1_data, output1_data):
-        print("BLS async example error: incorrect difference")
+        print("BLS sync example error: incorrect difference")
         sys.exit(1)
 
     # Will perform the inference request on the pytorch model:
@@ -92,11 +92,11 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
         input0_data, input1_data, output1_data))
     if not np.allclose(input0_data + input1_data, output0_data):
-        print("BLS async example error: incorrect sum")
+        print("BLS sync example error: incorrect sum")
         sys.exit(1)
 
     if not np.allclose(input0_data - input1_data, output1_data):
-        print("BLS async example error: incorrect difference")
+        print("BLS sync example error: incorrect difference")
         sys.exit(1)
 
     # Will perform the same inference request on an undefined model. This leads
