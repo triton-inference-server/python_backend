@@ -1178,6 +1178,7 @@ ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Response* response = (*responses)[r];
     TRITONBACKEND_Request* request = requests[r];
     uint32_t requested_output_count = 0;
+    requires_deferred_callback.push_back(false);
 
     shm_responses.emplace_back(nullptr);
     std::unique_ptr<InferResponse>& infer_response = shm_responses.back();
@@ -1236,13 +1237,14 @@ ModelInstanceState::ProcessRequests(
         gpu_output_buffers[r], requested_output_names, response);
     GUARDED_RESPOND_IF_ERROR(responses, r, *error);
 
+    requires_deferred_callback[r] = require_deferred_callback;
+
     // Error object will be deleted by the GUARDED_RESPOND macro
     *error = nullptr;
     error.reset();
-    if (require_deferred_callback) {
+    if (requires_deferred_callback[r]) {
       has_gpu_output = true;
     }
-    requires_deferred_callback.push_back(require_deferred_callback);
   }
 
   // Finalize the execute.
