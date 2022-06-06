@@ -342,24 +342,29 @@ class ModelConfig:
             self._model_config["max_batch_size"] = max_batch_size
 
     def set_dynamic_batching(self):
-        """Set dynamic_batching as the scheduler for the model if no scheduler is set.
-           If dynamic_batching is already set, then no action is taken and return success.
+        """Set dynamic_batching as the scheduler for the model if no scheduler 
+        is set.
         Raises
         ------
         ValueError
-            If the configuration has a scheduler set which is not dynamic_batching.
+            If any scheduler is set for this model configuration.
         """
-        if "sequence_batching" in self._model_config.keys():
-            raise ValueError(
-                "Configuration cannot set dynamic batching as the model configuration "
-                + "has 'sequence_batching' set.")
-        elif "ensemble_scheduling" in self._model_config.keys():
-            raise ValueError(
-                "Configuration cannot set dynamic batching as the model configuration "
-                + "has 'ensemble_scheduling' set.")
+        found_scheduler = None
+        if "sequence_batching" in self._model_config:
+            found_scheduler = "sequence_batching"
+        elif "ensemble_scheduling" in self._model_config:
+            found_scheduler = "sequence_batching"
+        elif "dynamic_batching" in self._model_config:
+            found_scheduler = "sequence_batching"
 
-        if "dynamic_batching" not in self._model_config.keys():
+        if found_scheduler != None:
+            raise ValueError(
+                "Configuration already has scheduler '" \
+                + found_scheduler + "' and will not auto-complete " \
+                +"scheduler to dynamic_batching.")
+        else:
             self._model_config["dynamic_batching"] = {}
+
 
     def add_input(self, input):
         """Add the input for the model.
