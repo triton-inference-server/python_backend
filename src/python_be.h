@@ -320,7 +320,8 @@ class ModelInstanceState : public BackendModelInstance {
   // Process all the requests in the decoupled mode.
   TRITONSERVER_Error* ProcessRequestsDecoupled(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
-      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests);
+      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
+      PbMetricReporter& pb_metric_reporter);
 
   bool ExistsInClosedRequests(intptr_t closed_request);
 
