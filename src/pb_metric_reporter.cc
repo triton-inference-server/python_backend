@@ -36,7 +36,8 @@ PbMetricReporter::PbMetricReporter(
     std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses)
     : instance_(instance), requests_(requests), request_count_(request_count),
       responses_(responses), total_batch_size_(0), exec_start_ns_(0),
-      compute_start_ns_(0), compute_end_ns_(0), exec_end_ns_(0)
+      compute_start_ns_(0), compute_end_ns_(0), exec_end_ns_(0),
+      success_status_(true)
 {
 }
 
@@ -51,12 +52,19 @@ PbMetricReporter::~PbMetricReporter()
     // request object. We use the execution start/end time for
     // compute also so that the entire execution time is associated
     // with the inference computation.
-    LOG_IF_ERROR(
-        TRITONBACKEND_ModelInstanceReportStatistics(
-            instance_, request,
-            ((*responses_)[r] != nullptr) /* success */, exec_start_ns_,
-            compute_start_ns_, compute_end_ns_, exec_end_ns_),
-        "failed reporting request statistics");
+    if (responses_) {
+      LOG_IF_ERROR(
+          TRITONBACKEND_ModelInstanceReportStatistics(
+              instance_, request, ((*responses_)[r] != nullptr) /* success */,
+              exec_start_ns_, compute_start_ns_, compute_end_ns_, exec_end_ns_),
+          "failed reporting request statistics");
+    } else {
+      LOG_IF_ERROR(
+          TRITONBACKEND_ModelInstanceReportStatistics(
+              instance_, request, success_status_, exec_start_ns_,
+              compute_start_ns_, compute_end_ns_, exec_end_ns_),
+          "failed reporting request statistics");
+    }
   }
 
   // Report the entire batch statistics. This backend does not support
@@ -64,8 +72,8 @@ PbMetricReporter::~PbMetricReporter()
   if (total_batch_size_ != 0) {
     LOG_IF_ERROR(
         TRITONBACKEND_ModelInstanceReportBatchStatistics(
-            instance_, total_batch_size_, exec_start_ns_,
-            compute_start_ns_, compute_end_ns_, exec_end_ns_),
+            instance_, total_batch_size_, exec_start_ns_, compute_start_ns_,
+            compute_end_ns_, exec_end_ns_),
         "failed reporting batch request statistics");
   }
 }
@@ -98,6 +106,12 @@ void
 PbMetricReporter::SetExecEndNs(const uint64_t exec_end_ns)
 {
   exec_end_ns_ = exec_end_ns;
+}
+
+void
+PbMetricReporter::SetSuccessStatus(const bool success_status)
+{
+  success_status_ = success_status;
 }
 
 }}}  // namespace triton::backend::python
