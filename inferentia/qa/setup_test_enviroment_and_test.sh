@@ -131,11 +131,12 @@ if [ "${UPSTREAM_CONTAINER_VERSION}" = "" ]; then
     echo "found upstream container version: ${UPSTREAM_CONTAINER_VERSION} from build.py"
 fi
 
+set -e 
 # Build container with only python backend 
 cd ${TRITON_PATH}/server
 pip3 install docker
-./build.py --build-dir=/tmp/tritonbuild \
-           --cmake-dir=${TRITON_PATH}/server/build \
+./build.py -v \
+          --no-container-interactive \
            --container-version=${CONTAINER_VERSION} \
            --upstream-container-version=${UPSTREAM_CONTAINER_VERSION} \
            --enable-logging --enable-stats --enable-tracing \
@@ -149,7 +150,7 @@ pip3 install docker
            --backend=identity:${IDENTITY_BACKEND_REPO_TAG} \
            --backend=python:${PYTHON_BACKEND_REPO_TAG} \
            --repoagent=checksum:${CHECKSUM_REPOAGENT_REPO_TAG}
-docker tag tritonserver_build "${BUILD_IMAGE}"
+docker tag tritonserver_cibase "${BUILD_IMAGE}"
 docker tag tritonserver "${BASE_IMAGE}"
 
 # Build docker container for SDK
@@ -170,6 +171,7 @@ docker build -t ${QA_IMAGE} \
                    --build-arg "BASE_IMAGE=${BASE_IMAGE}"   \
                    --build-arg "BUILD_IMAGE=${BUILD_IMAGE}" \
                    --build-arg "SDK_IMAGE=${SDK_IMAGE}"     .
+set +e
 
 # Run pytorch instance test
 docker stop ${CONTAINER_NAME} && docker rm ${CONTAINER_NAME}
