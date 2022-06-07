@@ -353,9 +353,9 @@ class ModelConfig:
         if "sequence_batching" in self._model_config:
             found_scheduler = "sequence_batching"
         elif "ensemble_scheduling" in self._model_config:
-            found_scheduler = "sequence_batching"
+            found_scheduler = "ensemble_scheduling"
         elif "dynamic_batching" in self._model_config:
-            found_scheduler = "sequence_batching"
+            found_scheduler = "dynamic_batching"
 
         if found_scheduler != None:
             raise ValueError(
