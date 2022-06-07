@@ -1,4 +1,4 @@
-# Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -61,7 +61,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
 
     print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
         input0_data, input1_data, output0_data))
-    print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(
+    print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
         input0_data, input1_data, output1_data))
 
     if not np.allclose(input0_data + input1_data, output0_data):
