@@ -45,7 +45,9 @@ any C++ code.
     - [`initialize`](#initialize)
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
-      - [Decoupled Mode](#decoupled-mode)
+      - [Decoupled mode](#decoupled-mode)
+        - [Use Cases](#use-cases)
+        - [Known Issues](#known-issues)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
   - [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
@@ -66,8 +68,9 @@ any C++ code.
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
-  - [Business Logic Scripting](#business-logic-scripting)
+  - [Business Logic Scripting](#business-logic-scripting-1)
   - [Preprocessing](#preprocessing)
+  - [Decoupled Models](#decoupled-models)
 - [Running with Inferentia](#running-with-inferentia)
 - [Reporting problems, asking questions](#reporting-problems-asking-questions)
 
@@ -243,7 +246,7 @@ class TritonPythonModel:
         }]
 
         # Demonstrate the usage of `as_dict`, `add_input`, `add_output`,
-        # and `set_max_batch_size` functions.
+        # `set_max_batch_size`, and `set_dynamic_batching` functions.
         # Store the model configuration as a dictionary.
         config = auto_complete_model_config.as_dict()
         input_names = []
@@ -269,6 +272,12 @@ class TritonPythonModel:
                 auto_complete_model_config.add_output(output)
 
         auto_complete_model_config.set_max_batch_size(0)
+        
+        # To enable a dynamic batcher with default settings, you can use 
+        # auto_complete_model_config set_dynamic_batching() function. It is 
+        # commented in this example because the max_batch_size is zero.
+        #
+        # auto_complete_model_config.set_dynamic_batching()
 
         return auto_complete_model_config
 
@@ -343,11 +352,13 @@ Implementing this function is optional. A no implementation of
 `auto_complete_config` will do nothing. This function can be used to set 
 [`max_batch_size`](
   https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
+[dynamic_batching](
+  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#dynamic-batcher),
 [`input`](
   https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs) and
 [`output`](
   https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
-properties of the model using `set_max_batch_size`, `add_input`, and
+properties of the model using `set_max_batch_size`, `set_dynamic_batching`, `add_input`, and
 `add_output`. These properties will allow Triton to load the model with
 [minimal model configuration](
   https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
