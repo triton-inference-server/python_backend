@@ -135,8 +135,8 @@ set -e
 # Build container with only python backend 
 cd ${TRITON_PATH}/server
 pip3 install docker
-./build.py -v \
-          --no-container-interactive \
+./build.py --verbose \
+           --no-container-interactive \
            --container-version=${CONTAINER_VERSION} \
            --upstream-container-version=${UPSTREAM_CONTAINER_VERSION} \
            --enable-logging --enable-stats --enable-tracing \
