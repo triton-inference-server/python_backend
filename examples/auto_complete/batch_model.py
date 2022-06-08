@@ -117,6 +117,7 @@ class TritonPythonModel:
                 auto_complete_model_config.add_output(output)
 
         auto_complete_model_config.set_max_batch_size(4)
+        auto_complete_model_config.set_dynamic_batching()
 
         return auto_complete_model_config
 
