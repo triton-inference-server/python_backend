@@ -343,19 +343,19 @@ class ModelConfig:
 
     def set_dynamic_batching(self):
         """Set dynamic_batching as the scheduler for the model if no scheduler 
-        is set.
+        is set. If dynamic_batching is set in the model configuration, then no 
+        action is taken and return success.
         Raises
         ------
         ValueError
-            If any scheduler is set for this model configuration.
+            If the 'sequence_batching' or 'ensemble_scheduling' scheduler is 
+            set for this model configuration.
         """
         found_scheduler = None
         if "sequence_batching" in self._model_config:
             found_scheduler = "sequence_batching"
         elif "ensemble_scheduling" in self._model_config:
             found_scheduler = "ensemble_scheduling"
-        elif "dynamic_batching" in self._model_config:
-            found_scheduler = "dynamic_batching"
 
         if found_scheduler != None:
             raise ValueError(
@@ -363,9 +363,9 @@ class ModelConfig:
                 + found_scheduler + "', but auto-complete-config " \
                 "function for model '" + self._model_config["name"] 
                 + "' tries to set scheduling_choice as 'dynamic_batching'")
-        else:
-            self._model_config["dynamic_batching"] = {}
 
+        if "dynamic_batching" not in self._model_config:
+            self._model_config["dynamic_batching"] = {}
 
     def add_input(self, input):
         """Add the input for the model.
