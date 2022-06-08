@@ -359,9 +359,10 @@ class ModelConfig:
 
         if found_scheduler != None:
             raise ValueError(
-                "Configuration already has scheduler '" \
-                + found_scheduler + "' and will not auto-complete " \
-                +"scheduler to dynamic_batching.")
+                "Configuration specified scheduling_choice as '" \
+                + found_scheduler + "', but auto-complete-config " \
+                "function for model '" + self._model_config["name"] 
+                + "' tries to set scheduling_choice as 'dynamic_batching'")
         else:
             self._model_config["dynamic_batching"] = {}
 
