@@ -341,6 +341,32 @@ class ModelConfig:
         else:
             self._model_config["max_batch_size"] = max_batch_size
 
+    def set_dynamic_batching(self):
+        """Set dynamic_batching as the scheduler for the model if no scheduler 
+        is set. If dynamic_batching is set in the model configuration, then no 
+        action is taken and return success.
+        Raises
+        ------
+        ValueError
+            If the 'sequence_batching' or 'ensemble_scheduling' scheduler is 
+            set for this model configuration.
+        """
+        found_scheduler = None
+        if "sequence_batching" in self._model_config:
+            found_scheduler = "sequence_batching"
+        elif "ensemble_scheduling" in self._model_config:
+            found_scheduler = "ensemble_scheduling"
+
+        if found_scheduler != None:
+            raise ValueError(
+                "Configuration specified scheduling_choice as '" \
+                + found_scheduler + "', but auto-complete-config " \
+                "function for model '" + self._model_config["name"] 
+                + "' tries to set scheduling_choice as 'dynamic_batching'")
+
+        if "dynamic_batching" not in self._model_config:
+            self._model_config["dynamic_batching"] = {}
+
     def add_input(self, input):
         """Add the input for the model.
         Parameters
