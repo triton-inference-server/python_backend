@@ -35,7 +35,7 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 -i|--inferentia-path       Inferentia path, default is: /home/ubuntu
 -p|--use-pytorch           Install pytorch-neuron if specified
 -t|--use-tensorflow        Install tensorflow-neuron is specified
---tensorflow-version       Version of Tensorflow used. Default is 1. Ignored if installing pytorch-neuron
+--tensorflow-version       Version of Tensorflow used. Default is 2. Ignored if installing pytorch-neuron
 "
 
 # Get all options:
@@ -47,7 +47,7 @@ export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
 export USE_TENSORFLOW=0
-export TENSORFLOW_VERSION=1
+export TENSORFLOW_VERSION=2
 for OPTS; do
     case "$OPTS" in
         -h|--help)
