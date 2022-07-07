@@ -227,91 +227,95 @@ InferResponse::Send(
   bool cuda_copy = false;
 
   for (auto& output_tensor : OutputTensors()) {
-    TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
-    int64_t src_memory_type_id = output_tensor->MemoryTypeId();
+    if (requested_output_names.find(output_tensor->Name()) !=
+        requested_output_names.end()) {
+      TRITONSERVER_MemoryType src_memory_type = output_tensor->MemoryType();
+      int64_t src_memory_type_id = output_tensor->MemoryTypeId();
 
-    TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
-    int64_t actual_memory_type_id = src_memory_type_id;
+      TRITONSERVER_MemoryType actual_memory_type = src_memory_type;
+      int64_t actual_memory_type_id = src_memory_type_id;
 
-    if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-      requires_deferred_callback = true;
-    }
-
-    TRITONBACKEND_Output* response_output;
-    SET_ERROR_AND_RETURN(
-        response_error,
-        TRITONBACKEND_ResponseOutput(
-            response, &response_output, output_tensor->Name().c_str(),
-            static_cast<TRITONSERVER_DataType>(output_tensor->TritonDtype()),
-            output_tensor->Dims().data(), output_tensor->Dims().size()));
-
-    void* buffer;
-    SET_ERROR_AND_RETURN(
-        response_error, TRITONBACKEND_OutputBuffer(
-                            response_output, &buffer, output_tensor->ByteSize(),
-                            &actual_memory_type, &actual_memory_type_id));
-
-    bool cuda_used = false;
-    TRITONSERVER_BufferAttributes* output_buffer_attributes;
-    SET_ERROR_AND_RETURN(
-        response_error, TRITONBACKEND_OutputBufferAttributes(
-                            response_output, &output_buffer_attributes));
-
-    std::unique_ptr<PbMemory> output_buffer;
-    if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
-        actual_memory_type == TRITONSERVER_MEMORY_GPU) {
-#ifdef TRITON_ENABLE_GPU
-      cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
-      SET_ERROR_AND_RETURN(
-          response_error,
-          TRITONSERVER_BufferAttributesCudaIpcHandle(
-              output_buffer_attributes,
-              reinterpret_cast<void**>(&cuda_ipc_mem_handle_p)));
-
-      if (cuda_ipc_mem_handle_p != nullptr) {
-        SET_ERROR_AND_RETURN_IF_EXCEPTION(
-            response_error,
-            output_buffer = PbMemory::Create(
-                shm_pool, actual_memory_type, actual_memory_type_id,
-                output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
-                false /* copy_gpu */));
-        output_buffer->SetCudaIpcHandle(cuda_ipc_mem_handle_p);
-      } else {
-        SET_ERROR_AND_RETURN_IF_EXCEPTION(
-            response_error,
-            output_buffer = PbMemory::Create(
-                shm_pool, actual_memory_type, actual_memory_type_id,
-                output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
-                true /* copy_gpu */));
+      if (actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+        requires_deferred_callback = true;
       }
-      output_buffers.push_back({std::move(output_buffer), buffer});
-#endif
-    }
 
-    // When we requested a GPU buffer but received a CPU buffer.
-    if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
-        (actual_memory_type == TRITONSERVER_MEMORY_CPU ||
-         actual_memory_type == TRITONSERVER_MEMORY_CPU_PINNED)) {
-      SET_ERROR_AND_RETURN_IF_EXCEPTION(
-          response_error,
-          output_buffer = PbMemory::Create(
-              shm_pool, actual_memory_type, actual_memory_type_id,
-              output_tensor->ByteSize(), nullptr /* data ptr */));
-
-      output_buffers.push_back({std::move(output_buffer), buffer});
-    }
-
-    if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
+      TRITONBACKEND_Output* response_output;
       SET_ERROR_AND_RETURN(
           response_error,
-          CopyBuffer(
-              "Failed to copy the output tensor to buffer.", src_memory_type,
-              src_memory_type_id, actual_memory_type, actual_memory_type_id,
-              output_tensor->ByteSize(), output_tensor->DataPtr(), buffer,
-              reinterpret_cast<cudaStream_t>(cuda_stream), &cuda_used));
-    }
+          TRITONBACKEND_ResponseOutput(
+              response, &response_output, output_tensor->Name().c_str(),
+              static_cast<TRITONSERVER_DataType>(output_tensor->TritonDtype()),
+              output_tensor->Dims().data(), output_tensor->Dims().size()));
 
-    cuda_copy |= cuda_used;
+      void* buffer;
+      SET_ERROR_AND_RETURN(
+          response_error,
+          TRITONBACKEND_OutputBuffer(
+              response_output, &buffer, output_tensor->ByteSize(),
+              &actual_memory_type, &actual_memory_type_id));
+
+      bool cuda_used = false;
+      TRITONSERVER_BufferAttributes* output_buffer_attributes;
+      SET_ERROR_AND_RETURN(
+          response_error, TRITONBACKEND_OutputBufferAttributes(
+                              response_output, &output_buffer_attributes));
+
+      std::unique_ptr<PbMemory> output_buffer;
+      if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
+          actual_memory_type == TRITONSERVER_MEMORY_GPU) {
+#ifdef TRITON_ENABLE_GPU
+        cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
+        SET_ERROR_AND_RETURN(
+            response_error,
+            TRITONSERVER_BufferAttributesCudaIpcHandle(
+                output_buffer_attributes,
+                reinterpret_cast<void**>(&cuda_ipc_mem_handle_p)));
+
+        if (cuda_ipc_mem_handle_p != nullptr) {
+          SET_ERROR_AND_RETURN_IF_EXCEPTION(
+              response_error,
+              output_buffer = PbMemory::Create(
+                  shm_pool, actual_memory_type, actual_memory_type_id,
+                  output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
+                  false /* copy_gpu */));
+          output_buffer->SetCudaIpcHandle(cuda_ipc_mem_handle_p);
+        } else {
+          SET_ERROR_AND_RETURN_IF_EXCEPTION(
+              response_error,
+              output_buffer = PbMemory::Create(
+                  shm_pool, actual_memory_type, actual_memory_type_id,
+                  output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
+                  true /* copy_gpu */));
+        }
+        output_buffers.push_back({std::move(output_buffer), buffer});
+#endif
+      }
+
+      // When we requested a GPU buffer but received a CPU buffer.
+      if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
+          (actual_memory_type == TRITONSERVER_MEMORY_CPU ||
+           actual_memory_type == TRITONSERVER_MEMORY_CPU_PINNED)) {
+        SET_ERROR_AND_RETURN_IF_EXCEPTION(
+            response_error,
+            output_buffer = PbMemory::Create(
+                shm_pool, actual_memory_type, actual_memory_type_id,
+                output_tensor->ByteSize(), nullptr /* data ptr */));
+
+        output_buffers.push_back({std::move(output_buffer), buffer});
+      }
+
+      if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
+        SET_ERROR_AND_RETURN(
+            response_error,
+            CopyBuffer(
+                "Failed to copy the output tensor to buffer.", src_memory_type,
+                src_memory_type_id, actual_memory_type, actual_memory_type_id,
+                output_tensor->ByteSize(), output_tensor->DataPtr(), buffer,
+                reinterpret_cast<cudaStream_t>(cuda_stream), &cuda_used));
+      }
+
+      cuda_copy |= cuda_used;
+    }
   }
 
 #ifdef TRITON_ENABLE_GPU
