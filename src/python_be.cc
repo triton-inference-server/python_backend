@@ -1367,14 +1367,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
       triton_model, &auto_complete_config));
   if (auto_complete_config) {
     RETURN_IF_ERROR((*state)->LaunchAutoCompleteStubProcess());
-    triton::common::TritonJson::WriteBuffer buf;
-    (*state)->Stub()->AutoCompleteConfig().Write(&buf);
-
-    TRITONSERVER_Message* message;
-    RETURN_IF_ERROR(TRITONSERVER_MessageNewFromSerializedJson(
-        &message, buf.Base(), buf.Size()));
-    RETURN_IF_ERROR(TRITONBACKEND_ModelSetConfig(
-        triton_model, 1 /* config_version */, message));
+    RETURN_IF_ERROR((*state)->SetModelConfig());
     (*state)->ModelConfig() = std::move((*state)->Stub()->AutoCompleteConfig());
 
     (*state)->Stub()->UpdateHealth();
