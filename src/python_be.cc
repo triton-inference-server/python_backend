@@ -344,13 +344,13 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       pb_input_tensors.emplace_back(std::move(pb_input_tensor));
     }
 
-    std::vector<std::string> requested_output_names;
+    std::set<std::string> requested_output_names;
     // Append the list of requested outputs to the inference_request
     for (size_t iidx = 0; iidx < requested_output_count; ++iidx) {
       const char* requested_output_name;
       RETURN_IF_ERROR(TRITONBACKEND_RequestOutputName(
           request, iidx, &requested_output_name));
-      requested_output_names.emplace_back(requested_output_name);
+      requested_output_names.emplace(requested_output_name);
     }
 
     // request id
