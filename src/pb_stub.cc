@@ -197,8 +197,8 @@ Stub::RunCommand()
   }
   switch (ipc_message->Command()) {
     case PYTHONSTUB_CommandType::PYTHONSTUB_AutoCompleteRequest: {
-      // Only run this case when Triton Server is started with
-      // '--strict-model-config=false'
+      // Only run this case when auto complete was requested by
+      // Triton core.
       bool has_exception = false;
       std::string error_string;
       std::string auto_complete_config;
