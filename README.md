@@ -198,14 +198,14 @@ class TritonPythonModel:
 
     @staticmethod
     def auto_complete_config(auto_complete_model_config):
-        """`auto_complete_config` is called only once when the server is started
-        with `--strict-model-config=false`. Implementing this function is optional.
-        A no implementation of `auto_complete_config` will do nothing. This function
-        can be used to set `max_batch_size`, `input` and `output` properties of the
-        model using `set_max_batch_size`, `add_input`, and `add_output`.
-        These properties will allow Triton to load the model with minimal model
-        configuration in absence of a configuration file. This function returns the
-        `pb_utils.ModelConfig` object with these properties. You can use `as_dict`
+        """`auto_complete_config` is called only once when loading the model assuming
+        the server was not started with `--disable-auto-complete-config`. Implementing
+        this function is optional. No implementation of `auto_complete_config` will
+        do nothing. This function can be used to set `max_batch_size`, `input` and
+        `output` properties of the model using `set_max_batch_size`, `add_input`, and
+        `add_output`. These properties will allow Triton to load the model with minimal
+        model configuration in absence of a configuration file. This function returns
+        the `pb_utils.ModelConfig` object with these properties. You can use the `as_dict`
         function to gain read-only access to the `pb_utils.ModelConfig` object.
         The `pb_utils.ModelConfig` object being returned from here will be used as
         the final configuration for the model.
@@ -345,10 +345,10 @@ Every Python backend can implement four main functions:
 
 ### `auto_complete_config`
 
-`auto_complete_config` is called only once when the server is started
-with [`--strict-model-config=false`](
-  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration).
-Implementing this function is optional. A no implementation of
+`auto_complete_config` is called only once when loading the model assuming
+the server was not started with [`--disable-auto-complete-config`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration).
+
+Implementing this function is optional. No implementation of
 `auto_complete_config` will do nothing. This function can be used to set 
 [`max_batch_size`](
   https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
@@ -363,7 +363,7 @@ properties of the model using `set_max_batch_size`, `set_dynamic_batching`, `add
 [minimal model configuration](
   https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file. This function returns the
-`pb_utils.ModelConfig` object with these properties. You can use `as_dict`
+`pb_utils.ModelConfig` object with these properties. You can use the `as_dict`
 function to gain read-only access to the `pb_utils.ModelConfig` object.
 The `pb_utils.ModelConfig` object being returned from here will be used as the
 final configuration for the model.

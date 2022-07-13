@@ -69,11 +69,10 @@ $ cp examples/auto_complete/batch_model.py models/batch_auto_complete/1/model.py
 **Note that we don't need a model configuration file since Triton will use the
 auto-complete model configuration provided in the Python model.**
 
-2. Start the tritonserver with 
-[`--strict-model-config=false`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration):
+2. Start the tritonserver:
 
 ```
-tritonserver --model-repository `pwd`/models --strict-model-config=false
+tritonserver --model-repository `pwd`/models
 ```
 
 ## Running inferences on Nobatch and Batch models:
