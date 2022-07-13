@@ -1367,8 +1367,8 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
       triton_model, &auto_complete_config));
   if (auto_complete_config) {
     RETURN_IF_ERROR((*state)->LaunchAutoCompleteStubProcess());
-    RETURN_IF_ERROR((*state)->SetModelConfig());
     (*state)->ModelConfig() = std::move((*state)->Stub()->AutoCompleteConfig());
+    RETURN_IF_ERROR((*state)->SetModelConfig());
 
     (*state)->Stub()->UpdateHealth();
     (*state)->Stub()->TerminateStub();
