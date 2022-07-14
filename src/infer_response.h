@@ -78,6 +78,7 @@ class InferResponse {
   bool HasError();
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();
+  void PruneOutputTensors(const std::set<std::string>& requested_output_names);
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
