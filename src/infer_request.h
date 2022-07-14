@@ -54,7 +54,7 @@ class InferRequest {
   InferRequest(
       const std::string& request_id, uint64_t correlation_id,
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
-      const std::vector<std::string>& requested_output_names,
+      const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
       const uint32_t flags = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0);
@@ -66,7 +66,7 @@ class InferRequest {
   int64_t ModelVersion();
   uint32_t Flags();
   void SetFlags(uint32_t flags);
-  const std::vector<std::string>& RequestedOutputNames();
+  const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
 
 #ifdef TRITON_PB_STUB
@@ -112,7 +112,7 @@ class InferRequest {
   std::string request_id_;
   uint64_t correlation_id_;
   std::vector<std::shared_ptr<PbTensor>> inputs_;
-  std::vector<std::string> requested_output_names_;
+  std::set<std::string> requested_output_names_;
   std::string model_name_;
   int64_t model_version_;
   uint32_t flags_;
