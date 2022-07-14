@@ -38,7 +38,7 @@ namespace triton { namespace backend { namespace python {
 InferRequest::InferRequest(
     const std::string& request_id, uint64_t correlation_id,
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
-    const std::vector<std::string>& requested_output_names,
+    const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
     const uint32_t flags, const intptr_t response_factory_address,
     const intptr_t request_address)
@@ -91,7 +91,7 @@ InferRequest::CorrelationId()
   return correlation_id_;
 }
 
-const std::vector<std::string>&
+const std::set<std::string>&
 InferRequest::RequestedOutputNames()
 {
   return requested_output_names_;
@@ -296,12 +296,12 @@ InferRequest::InferRequest(
               infer_request_shm_ptr_->requested_output_count);
   inputs_ = std::move(input_tensors);
 
-  std::vector<std::string> requested_output_names;
+  std::set<std::string> requested_output_names;
   for (size_t output_idx = 0;
        output_idx < infer_request_shm_ptr_->requested_output_count;
        ++output_idx) {
     auto& pb_string = requested_output_names_shm_[output_idx];
-    requested_output_names.emplace_back(pb_string->String());
+    requested_output_names.emplace(pb_string->String());
   }
 
   request_id_ = request_id_shm_->String();
