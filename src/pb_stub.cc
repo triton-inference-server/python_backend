@@ -911,6 +911,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("triton_dtype", &PbTensor::TritonDtype)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("is_cpu", &PbTensor::IsCPU)
+      .def("shape", &PbTensor::Dims)
       .def("from_dlpack", &PbTensor::FromDLPack);
 
   py::class_<InferResponse, std::shared_ptr<InferResponse>>(
