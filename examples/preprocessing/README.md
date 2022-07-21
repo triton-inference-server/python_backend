@@ -26,7 +26,7 @@ Set the arguments for enabling fp16 precision --fp16. To enable dynamic shapes u
 
 **4. Run the command below to start the server container:**
 
-Under model_repository, run this command to start the server docker container:
+Under python_backend/examples/preprocessing, run this command to start the server docker container:
 
     $ docker run --gpus=all -it --rm -p8000:8000 -p8001:8001 -p8002:8002 -v$(pwd):/workspace/ -v/$(pwd)/model_repository:/models nvcr.io/nvidia/tritonserver:xx.yy-py3 bash
     $ pip install numpy pillow torchvision
@@ -34,7 +34,7 @@ Under model_repository, run this command to start the server docker container:
      
 **5. Start the client to test:**
 
-Under python_backend/examples/resnet50_trt, run the commands below to start the client Docker container:
+Under python_backend/examples/preprocessing, run the commands below to start the client Docker container:
 
     $ wget https://raw.githubusercontent.com/triton-inference-server/server/main/qa/images/mug.jpg -O "mug.jpg"
     $ docker run --rm --net=host -v $(pwd):/workspace/ nvcr.io/nvidia/tritonserver:xx.yy-py3-sdk python client.py --image mug.jpg 
