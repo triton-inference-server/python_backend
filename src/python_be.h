@@ -261,6 +261,8 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
 
+  std::thread log_monitor_;
+  bool log_thread_;
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
   bool decoupled_thread_;
@@ -305,6 +307,8 @@ class ModelInstanceState : public BackendModelInstance {
   // function during the execute phase. No other thread should pop any message
   // from the message queue in the decoupled mode.
   void DecoupledMessageQueueMonitor();
+
+  void LogMessageQueueMonitor();
 
   // Convert TRITONBACKEND_Input to Python backend tensors.
   TRITONSERVER_Error* GetInputTensor(

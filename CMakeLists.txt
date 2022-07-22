@@ -143,6 +143,7 @@ set(
   src/scoped_defer.h
   src/pb_error.cc
   src/pb_error.h
+  src/pb_log.h
   src/pb_memory.cc
   src/pb_memory.h
   src/pb_tensor.cc

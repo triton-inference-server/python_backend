@@ -406,6 +406,8 @@ ModelInstanceState::LaunchStubProcess()
     decoupled_monitor_ =
         std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
   }
+  log_thread_ = true;
+  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
 
   return nullptr;
 }
@@ -803,6 +805,74 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
       std::future<void> future =
           boost::asio::post(*thread_pool_, std::move(task));
       futures_.emplace_back(std::move(future));
+    }
+  }
+}
+
+void
+ModelInstanceState::LogMessageQueueMonitor()
+{
+  while (log_thread_) {
+    bi::managed_external_buffer::handle_t handle =
+        Stub()->LogMessageQueue()->Pop();
+    if (handle == DUMMY_MESSAGE) {
+      break;
+    }
+    std::unique_ptr<IPCMessage> message =
+        IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), handle);
+    if (message->Command() == PYTHONSTUB_LogRequest) {
+      std::lock_guard<std::mutex> guard{mu_};
+      AllocatedSharedMemory<LogSendMessage> log_message =
+          Stub()->ShmPool()->Load<LogSendMessage>(message->Args());
+
+      std::unique_ptr<PbString> pb_string_filename =
+          PbString::LoadFromSharedMemory(
+              Stub()->ShmPool(), log_message.data_->filename);
+      uint32_t line = log_message.data_->line;
+      std::unique_ptr<PbString> pb_string_msg = PbString::LoadFromSharedMemory(
+          Stub()->ShmPool(), log_message.data_->logMsg);
+      LogLevel level = log_message.data_->level;
+      uint32_t verbosity = log_message.data_->verbosity;
+
+      switch (level) {
+        case LogLevel::INFO: {
+          TRITONSERVER_LogMessage(
+              TRITONSERVER_LOG_INFO, (pb_string_filename->String().c_str()),
+              line, (pb_string_msg->String().c_str()));
+          break;
+        }
+        case LogLevel::WARNINGS: {
+          TRITONSERVER_LogMessage(
+              TRITONSERVER_LOG_WARN, (pb_string_filename->String().c_str()),
+              line, (pb_string_msg->String().c_str()));
+          break;
+        }
+        case LogLevel::ERRORS: {
+          TRITONSERVER_LogMessage(
+              TRITONSERVER_LOG_ERROR, (pb_string_filename->String().c_str()),
+              line, (pb_string_msg->String().c_str()));
+          break;
+        }
+        case LogLevel::VERBOSE: {
+          TRITONSERVER_LogMessage(
+              TRITONSERVER_LOG_VERBOSE, (pb_string_filename->String().c_str()),
+              line, (pb_string_msg->String().c_str()), verbosity);
+          break;
+        }
+      }
+      // Send confirmation back to pb_stub.cc that the message
+      // was received.
+      LogSendMessage* send_message_payload =
+          reinterpret_cast<LogSendMessage*>(log_message.data_.get());
+      {
+        bi::scoped_lock<bi::interprocess_mutex> guard{
+            send_message_payload->log_mu};
+        send_message_payload->waiting_on_stub = true;
+        send_message_payload->log_cv.notify_all();
+        while (send_message_payload->waiting_on_stub) {
+          send_message_payload->log_cv.wait(guard);
+        }
+      }
     }
   }
 }
@@ -1339,6 +1409,8 @@ ModelInstanceState::~ModelInstanceState()
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
     }
+    Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
+    log_monitor_.join();
     // Wait for all the futures to be finished.
     thread_pool_->wait();
   }

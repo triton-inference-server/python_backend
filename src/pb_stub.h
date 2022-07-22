@@ -38,10 +38,13 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <queue>
+#include <thread>
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
+#include "pb_log.h"
 #include "pb_utils.h"
 
 
@@ -73,6 +76,19 @@ class Logger {
  public:
   // Log a message.
   void Log(const std::string& msg) { std::cerr << msg << std::endl; }
+
+  void log(
+      const std::string& filename, uint32_t line, const std::string& message,
+      LogLevel level = LogLevel::INFO, uint32_t verbosity = 0);
+  void log_info(
+      const std::string& filename, uint32_t line, const std::string& message);
+  void log_warn(
+      const std::string& filename, uint32_t line, const std::string& message);
+  void log_error(
+      const std::string& filename, uint32_t line, const std::string& message);
+  void log_verbose(
+      const std::string& filename, uint32_t line, const std::string& message,
+      uint32_t verbosity = 1);
 
   // Flush the log.
   void Flush() { std::cerr << std::flush; }
@@ -148,6 +164,9 @@ class Stub {
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
 
+  /// Send a log message to the parent process.
+  void SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message);
+
   /// Receive a message from the parent process.
   std::unique_ptr<IPCMessage> PopMessage();
 
@@ -172,6 +191,13 @@ class Stub {
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
   bool IsDecoupled();
   ~Stub();
+  void LaunchLogRequestThread();
+  void TerminateLogRequestThread();
+  void EnqueueLogRequest(PbLog* log_ptr);
+  void ServiceLogRequests();
+  void SendLogMessage(
+      const std::string& filename, uint32_t line, const std::string& message,
+      LogLevel level, uint32_t verbosity);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -192,6 +218,8 @@ class Stub {
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      log_message_queue_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   std::mutex tensors_to_remove_mutex_;
   std::vector<std::unique_ptr<IPCMessage>> messages_;
@@ -200,5 +228,8 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
+  std::queue<PbLog*> log_request_buffer;
+  std::thread log_monitor_;
+  bool log_thread_;
 };
 }}}  // namespace triton::backend::python

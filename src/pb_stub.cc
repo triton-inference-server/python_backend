@@ -100,6 +100,9 @@ Stub::Instantiate(
         MessageQueue<bi::managed_external_buffer::handle_t>::
             LoadFromSharedMemory(shm_pool_, ipc_control_->parent_message_queue);
 
+    log_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->log_message_queue);
+
     memory_manager_message_queue_ =
         MessageQueue<uint64_t>::LoadFromSharedMemory(
             shm_pool_, ipc_control_->memory_manager_message_queue);
@@ -403,6 +406,9 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
+  py::setattr(
+      python_backend_utils, "Logger", c_python_backend_utils.attr("Logger"));
+
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
@@ -464,6 +470,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   py::setattr(
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
+  py::setattr(
+      python_backend_utils, "Logger", c_python_backend_utils.attr("Logger"));
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
@@ -812,16 +820,33 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
   }
 }
 
+void
+Stub::SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  bool success = false;
+  while (!success) {
+    log_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
+  }
+}
+
 Stub::~Stub()
 {
   {
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
   }
-
+  // Clear any remaining log requests from heap
+  PbLog* delete_ptr = nullptr;
+  while (log_request_buffer.size() != 0) {
+    delete_ptr = log_request_buffer.front();
+    log_request_buffer.pop();
+    delete delete_ptr;
+    delete_ptr = NULL;
+  }
   stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
+  log_message_queue_.reset();
   memory_manager_message_queue_.reset();
 }
 
@@ -835,6 +860,130 @@ Stub::GetOrCreateInstance()
   }
 
   return Stub::stub_instance_;
+}
+
+void
+Stub::LaunchLogRequestThread()
+{
+  log_thread_ = true;
+  log_monitor_ = std::thread(&Stub::ServiceLogRequests, this);
+}
+
+void
+Stub::TerminateLogRequestThread()
+{
+  log_thread_ = false;
+  log_monitor_.join();
+}
+
+void
+Stub::EnqueueLogRequest(PbLog* log_ptr)
+{
+  log_request_buffer.push(log_ptr);
+}
+
+void
+Stub::ServiceLogRequests()
+{
+  while (log_thread_) {
+    if (log_request_buffer.size() != 0) {
+      PbLog* log_request = log_request_buffer.front();
+      log_request_buffer.pop();
+      SendLogMessage(
+          log_request->Filename(), log_request->Line(), log_request->Message(),
+          log_request->Level(), log_request->Verbosity());
+      delete log_request;
+      log_request = nullptr;
+    }
+  }
+}
+
+void
+Stub::SendLogMessage(
+    const std::string& filename, uint32_t line, const std::string& message,
+    LogLevel level, uint32_t verbosity)
+{
+  std::shared_ptr<PbString> file_name = PbString::Create(shm_pool_, filename);
+  std::shared_ptr<PbString> log_message = PbString::Create(shm_pool_, message);
+  AllocatedSharedMemory<LogSendMessage> log_send_message =
+      shm_pool_->Construct<LogSendMessage>();
+
+  LogSendMessage* send_message_payload = log_send_message.data_.get();
+  new (&(send_message_payload->log_mu)) bi::interprocess_mutex;
+  new (&(send_message_payload->log_cv)) bi::interprocess_condition;
+
+  send_message_payload->filename = file_name->ShmHandle();
+  send_message_payload->line = line;
+  send_message_payload->logMsg = log_message->ShmHandle();
+  send_message_payload->level = level;
+  send_message_payload->verbosity = verbosity;
+  send_message_payload->waiting_on_stub = false;
+
+  std::unique_ptr<IPCMessage> log_request_msg =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  log_request_msg->Command() = PYTHONSTUB_LogRequest;
+  log_request_msg->Args() = log_send_message.handle_;
+   
+  ScopedDefer _([send_message_payload] {
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->log_mu};
+      send_message_payload->waiting_on_stub = false;
+      send_message_payload->log_cv.notify_all();
+    }
+  });
+
+  {
+    // Send a message to be caught by the log monitor thread in python_be.cc
+    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->log_mu};
+    SendIPCLogMessage(log_request_msg);
+    while (!send_message_payload->waiting_on_stub) {
+      send_message_payload->log_cv.wait(guard);
+    }
+  }
+}
+
+void
+Logger::log(
+    const std::string& filename, uint32_t line, const std::string& message,
+    LogLevel level, uint32_t verbosity)
+{
+  bool verbose_flag_set = verbosity > 0;
+  if (verbose_flag_set && level != LogLevel::VERBOSE) {
+    log_error(__FILE__, __LINE__, "Verbosity level set but log level is not verbose!");
+    return;
+  }
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  PbLog* log_msg = new PbLog(filename, line, message, level, verbosity);
+  stub->EnqueueLogRequest(log_msg);
+}
+
+void
+Logger::log_info(
+    const std::string& filename, uint32_t line, const std::string& message)
+{
+  Logger::log(filename, line, message, LogLevel::INFO);
+}
+
+void
+Logger::log_warn(
+    const std::string& filename, uint32_t line, const std::string& message)
+{
+  Logger::log(filename, line, message, LogLevel::WARNINGS);
+}
+
+void
+Logger::log_error(
+    const std::string& filename, uint32_t line, const std::string& message)
+{
+  Logger::log(filename, line, message, LogLevel::ERRORS);
+}
+
+void
+Logger::log_verbose(
+    const std::string& filename, uint32_t line, const std::string& message,
+    uint32_t verbosity)
+{
+  Logger::log(filename, line, message, LogLevel::VERBOSE, verbosity);
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -934,6 +1083,28 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
           py::arg("flags") = 0);
 
+  py::class_<Logger> logger(module, "Logger");
+  py::enum_<LogLevel>(logger, "LogLevel")
+      .value("INFO", LogLevel::INFO)
+      .value("WARNINGS", LogLevel::WARNINGS)
+      .value("ERRORS", LogLevel::ERRORS)
+      .value("VERBOSE", LogLevel::VERBOSE)
+      .export_values();
+  logger.def(py::init<>());
+  logger.def(
+      "log", &Logger::log, py::arg("filename"), py::arg("line"),
+      py::arg("message") = "", py::arg("level") = LogLevel::INFO,
+      py::arg("verbosity") = 0);
+  logger.def("log_info", &Logger::log_info,
+    py::arg("filename"), py::arg("line"), py::arg("message") = "");
+  logger.def("log_warn", &Logger::log_warn,
+    py::arg("filename"), py::arg("line"), py::arg("message") = "");
+  logger.def("log_error", &Logger::log_error,
+    py::arg("filename"), py::arg("line"), py::arg("message") = "");
+  logger.def(
+      "log_verbose", &Logger::log_verbose, py::arg("filename"),
+      py::arg("line"), py::arg("message") = "", py::arg("verbosity") = 1);
+
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
   py::class_<SharedMemoryManager>(module, "SharedMemory")
@@ -995,6 +1166,8 @@ main(int argc, char** argv)
     exit(1);
   }
 
+  stub->LaunchLogRequestThread();
+
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
   pid_t parent_pid = std::stoi(argv[5]);
@@ -1030,6 +1203,7 @@ main(int argc, char** argv)
   bool finalize = false;
   while (true) {
     if (finalize) {
+      stub->TerminateLogRequestThread();
       stub->Finalize();
       background_thread_running = false;
       background_thread.join();
