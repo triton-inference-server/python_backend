@@ -167,7 +167,6 @@ struct LogSendMessage : LogSendMessageBase {
   int32_t line;
   bi::managed_external_buffer::handle_t logMsg;
   LogLevel level;
-  int32_t verbosity;
 };
 
 struct ResponseSenderBase {

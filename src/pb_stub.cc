@@ -891,7 +891,7 @@ Stub::ServiceLogRequests()
       log_request_buffer.pop();
       SendLogMessage(
           log_request->Filename(), log_request->Line(), log_request->Message(),
-          log_request->Level(), log_request->Verbosity());
+          log_request->Level());
       delete log_request;
       log_request = nullptr;
     }
@@ -901,7 +901,7 @@ Stub::ServiceLogRequests()
 void
 Stub::SendLogMessage(
     const std::string& filename, uint32_t line, const std::string& message,
-    LogLevel level, uint32_t verbosity)
+    LogLevel level)
 {
   std::shared_ptr<PbString> file_name = PbString::Create(shm_pool_, filename);
   std::shared_ptr<PbString> log_message = PbString::Create(shm_pool_, message);
@@ -916,7 +916,6 @@ Stub::SendLogMessage(
   send_message_payload->line = line;
   send_message_payload->logMsg = log_message->ShmHandle();
   send_message_payload->level = level;
-  send_message_payload->verbosity = verbosity;
   send_message_payload->waiting_on_stub = false;
 
   std::unique_ptr<IPCMessage> log_request_msg =
@@ -945,15 +944,10 @@ Stub::SendLogMessage(
 void
 Logger::log(
     const std::string& filename, uint32_t line, const std::string& message,
-    LogLevel level, uint32_t verbosity)
+    LogLevel level)
 {
-  bool verbose_flag_set = verbosity > 0;
-  if (verbose_flag_set && level != LogLevel::VERBOSE) {
-    log_error(__FILE__, __LINE__, "Verbosity level set but log level is not verbose!");
-    return;
-  }
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  PbLog* log_msg = new PbLog(filename, line, message, level, verbosity);
+  PbLog* log_msg = new PbLog(filename, line, message, level);
   stub->EnqueueLogRequest(log_msg);
 }
 
@@ -980,10 +974,9 @@ Logger::log_error(
 
 void
 Logger::log_verbose(
-    const std::string& filename, uint32_t line, const std::string& message,
-    uint32_t verbosity)
+    const std::string& filename, uint32_t line, const std::string& message)
 {
-  Logger::log(filename, line, message, LogLevel::VERBOSE, verbosity);
+  Logger::log(filename, line, message, LogLevel::VERBOSE);
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -1093,8 +1086,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def(py::init<>());
   logger.def(
       "log", &Logger::log, py::arg("filename"), py::arg("line"),
-      py::arg("message") = "", py::arg("level") = LogLevel::INFO,
-      py::arg("verbosity") = 0);
+      py::arg("message") = "", py::arg("level") = LogLevel::INFO);
   logger.def("log_info", &Logger::log_info,
     py::arg("filename"), py::arg("line"), py::arg("message") = "");
   logger.def("log_warn", &Logger::log_warn,
@@ -1103,7 +1095,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
     py::arg("filename"), py::arg("line"), py::arg("message") = "");
   logger.def(
       "log_verbose", &Logger::log_verbose, py::arg("filename"),
-      py::arg("line"), py::arg("message") = "", py::arg("verbosity") = 1);
+      py::arg("line"), py::arg("message") = "");
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

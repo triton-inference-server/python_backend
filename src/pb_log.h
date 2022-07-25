@@ -35,15 +35,13 @@ class PbLog {
  public:
   PbLog(
       const std::string& filename, uint32_t line, const std::string& message,
-      LogLevel level, uint32_t verbosity)
-      : filename_(filename), line_(line), message_(message), level_(level),
-        verbosity_(verbosity)
+      LogLevel level)
+      : filename_(filename), line_(line), message_(message), level_(level)
   {
   }
   const std::string& Filename() { return filename_; };
   const std::string& Message() { return message_; };
   const LogLevel& Level() { return level_; };
-  const uint32_t& Verbosity() { return verbosity_; };
   const uint32_t& Line() { return line_; };
 
  private:
@@ -51,14 +49,12 @@ class PbLog {
   uint32_t line_;
   std::string message_;
   LogLevel level_;
-  uint32_t verbosity_;
 };
 struct LogMsgShm {
   bi::managed_external_buffer::handle_t filename;
   uint32_t line;
   bi::managed_external_buffer::handle_t logMsg;
   LogLevel level;
-  uint32_t verbosity;
   bool is_stub_turn;
   bi::managed_external_buffer::handle_t response_mutex;
   bi::managed_external_buffer::handle_t response_cond;

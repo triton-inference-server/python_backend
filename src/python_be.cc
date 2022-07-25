@@ -832,7 +832,6 @@ ModelInstanceState::LogMessageQueueMonitor()
       std::unique_ptr<PbString> pb_string_msg = PbString::LoadFromSharedMemory(
           Stub()->ShmPool(), log_message.data_->logMsg);
       LogLevel level = log_message.data_->level;
-      uint32_t verbosity = log_message.data_->verbosity;
 
       switch (level) {
         case LogLevel::INFO: {
@@ -856,7 +855,7 @@ ModelInstanceState::LogMessageQueueMonitor()
         case LogLevel::VERBOSE: {
           TRITONSERVER_LogMessage(
               TRITONSERVER_LOG_VERBOSE, (pb_string_filename->String().c_str()),
-              line, (pb_string_msg->String().c_str()), verbosity);
+              line, (pb_string_msg->String().c_str()));
           break;
         }
       }

@@ -79,7 +79,7 @@ class Logger {
 
   void log(
       const std::string& filename, uint32_t line, const std::string& message,
-      LogLevel level = LogLevel::INFO, uint32_t verbosity = 0);
+      LogLevel level = LogLevel::INFO);
   void log_info(
       const std::string& filename, uint32_t line, const std::string& message);
   void log_warn(
@@ -87,8 +87,7 @@ class Logger {
   void log_error(
       const std::string& filename, uint32_t line, const std::string& message);
   void log_verbose(
-      const std::string& filename, uint32_t line, const std::string& message,
-      uint32_t verbosity = 1);
+      const std::string& filename, uint32_t line, const std::string& message);
 
   // Flush the log.
   void Flush() { std::cerr << std::flush; }
@@ -197,7 +196,7 @@ class Stub {
   void ServiceLogRequests();
   void SendLogMessage(
       const std::string& filename, uint32_t line, const std::string& message,
-      LogLevel level, uint32_t verbosity);
+      LogLevel level);
 
  private:
   bi::interprocess_mutex* stub_mutex_;

@@ -27,6 +27,9 @@
 import numpy as np
 import struct
 import json
+import sys 
+from inspect import currentframe, getframeinfo
+from enum import Enum
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -497,6 +500,26 @@ class ModelConfig:
 
         self._model_config["output"].append(output)
 
+class level(Enum):
+    INFO = 0,
+    WARNINGS = 1,
+    ERRORS = 2,
+    VERBOSE = 3
+
+def log(message, log_level=level.INFO):
+    caller_frame = currentframe().f_back
+    caller_info = getframeinfo(caller_frame)
+    caller_line_number = caller_info.lineno
+    caller_filename = caller_info.filename
+    logger = Logger()
+    if(log_level == level.INFO):
+        logger.log_info(caller_filename, caller_line_number, message)
+    elif(log_level == level.WARNINGS):
+        logger.log_warn(caller_filename, caller_line_number, message)
+    elif(log_level == level.ERRORS):
+        logger.log_error(caller_filename, caller_line_number, message)
+    elif(log_level == level.VERBOSE):
+        logger.log_verbose(caller_filename, caller_line_number, message)
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2
