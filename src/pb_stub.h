@@ -80,14 +80,6 @@ class Logger {
   void log(
       const std::string& filename, uint32_t line, const std::string& message,
       LogLevel level = LogLevel::INFO);
-  void log_info(
-      const std::string& filename, uint32_t line, const std::string& message);
-  void log_warn(
-      const std::string& filename, uint32_t line, const std::string& message);
-  void log_error(
-      const std::string& filename, uint32_t line, const std::string& message);
-  void log_verbose(
-      const std::string& filename, uint32_t line, const std::string& message);
 
   // Flush the log.
   void Flush() { std::cerr << std::flush; }

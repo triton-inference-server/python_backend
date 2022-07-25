@@ -922,10 +922,11 @@ Stub::SendLogMessage(
       IPCMessage::Create(shm_pool_, false /* inline_response */);
   log_request_msg->Command() = PYTHONSTUB_LogRequest;
   log_request_msg->Args() = log_send_message.handle_;
-   
+
   ScopedDefer _([send_message_payload] {
     {
-      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->log_mu};
+      bi::scoped_lock<bi::interprocess_mutex> guard{
+          send_message_payload->log_mu};
       send_message_payload->waiting_on_stub = false;
       send_message_payload->log_cv.notify_all();
     }
@@ -949,34 +950,6 @@ Logger::log(
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   PbLog* log_msg = new PbLog(filename, line, message, level);
   stub->EnqueueLogRequest(log_msg);
-}
-
-void
-Logger::log_info(
-    const std::string& filename, uint32_t line, const std::string& message)
-{
-  Logger::log(filename, line, message, LogLevel::INFO);
-}
-
-void
-Logger::log_warn(
-    const std::string& filename, uint32_t line, const std::string& message)
-{
-  Logger::log(filename, line, message, LogLevel::WARNINGS);
-}
-
-void
-Logger::log_error(
-    const std::string& filename, uint32_t line, const std::string& message)
-{
-  Logger::log(filename, line, message, LogLevel::ERRORS);
-}
-
-void
-Logger::log_verbose(
-    const std::string& filename, uint32_t line, const std::string& message)
-{
-  Logger::log(filename, line, message, LogLevel::VERBOSE);
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -1087,15 +1060,6 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def(
       "log", &Logger::log, py::arg("filename"), py::arg("line"),
       py::arg("message") = "", py::arg("level") = LogLevel::INFO);
-  logger.def("log_info", &Logger::log_info,
-    py::arg("filename"), py::arg("line"), py::arg("message") = "");
-  logger.def("log_warn", &Logger::log_warn,
-    py::arg("filename"), py::arg("line"), py::arg("message") = "");
-  logger.def("log_error", &Logger::log_error,
-    py::arg("filename"), py::arg("line"), py::arg("message") = "");
-  logger.def(
-      "log_verbose", &Logger::log_verbose, py::arg("filename"),
-      py::arg("line"), py::arg("message") = "");
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

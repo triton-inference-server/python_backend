@@ -27,9 +27,8 @@
 import numpy as np
 import struct
 import json
-import sys 
+import sys
 from inspect import currentframe, getframeinfo
-from enum import Enum
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -364,7 +363,7 @@ class ModelConfig:
             raise ValueError(
                 "Configuration specified scheduling_choice as '" \
                 + found_scheduler + "', but auto-complete-config " \
-                "function for model '" + self._model_config["name"] 
+                "function for model '" + self._model_config["name"]
                 + "' tries to set scheduling_choice as 'dynamic_batching'")
 
         if "dynamic_batching" not in self._model_config:
@@ -500,26 +499,36 @@ class ModelConfig:
 
         self._model_config["output"].append(output)
 
-class level(Enum):
-    INFO = 0,
-    WARNINGS = 1,
-    ERRORS = 2,
-    VERBOSE = 3
 
-def log(message, log_level=level.INFO):
+def log(message, level, nested_call=False):
+    # Convenience function calls originiate
+    # 2 function calls back, not 1
     caller_frame = currentframe().f_back
+    if nested_call:
+        caller_frame = caller_frame.f_back
+
     caller_info = getframeinfo(caller_frame)
     caller_line_number = caller_info.lineno
     caller_filename = caller_info.filename
     logger = Logger()
-    if(log_level == level.INFO):
-        logger.log_info(caller_filename, caller_line_number, message)
-    elif(log_level == level.WARNINGS):
-        logger.log_warn(caller_filename, caller_line_number, message)
-    elif(log_level == level.ERRORS):
-        logger.log_error(caller_filename, caller_line_number, message)
-    elif(log_level == level.VERBOSE):
-        logger.log_verbose(caller_filename, caller_line_number, message)
+    logger.log(caller_filename, caller_line_number, message, level)
+
+
+def log_info(message):
+    log(message, Logger().INFO, True)
+
+
+def log_warn(message):
+    log(message, Logger().WARNINGS, True)
+
+
+def log_error(message):
+    log(message, Logger().ERRORS, True)
+
+
+def log_verbose(message):
+    log(message, Logger().VERBOSE, True)
+
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2
