@@ -26,6 +26,9 @@
 
 #pragma once
 
+#ifdef TRITON_ENABLE_GPU
+#include <cuda.h>
+#endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
 #include <climits>
 #include <exception>
