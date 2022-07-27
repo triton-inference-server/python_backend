@@ -140,6 +140,17 @@ ResponseAlloc(
 }
 
 TRITONSERVER_Error*
+OutputBufferQuery(
+    TRITONSERVER_ResponseAllocator* allocator, void* userp,
+    const char* tensor_name, size_t* byte_size,
+    TRITONSERVER_MemoryType* memory_type, int64_t* memory_type_id)
+{
+  // Always attempt to return the memory in the requested memory_type and
+  // memory_type_id.
+  return nullptr;  // Success
+}
+
+TRITONSERVER_Error*
 ResponseRelease(
     TRITONSERVER_ResponseAllocator* allocator, void* buffer, void* buffer_userp,
     size_t byte_size, TRITONSERVER_MemoryType memory_type,
@@ -155,6 +166,8 @@ RequestExecutor::RequestExecutor(
   TRITONSERVER_ResponseAllocator* allocator;
   THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorNew(
       &allocator, ResponseAlloc, ResponseRelease, nullptr /* start_fn */));
+  THROW_IF_TRITON_ERROR(TRITONSERVER_ResponseAllocatorSetQueryFunction(
+      allocator, OutputBufferQuery));
   response_allocator_ = allocator;
 }
 
