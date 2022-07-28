@@ -404,7 +404,7 @@ StubLauncher::ModelInstanceStubProcess()
       {"model_instance_kind", kind_},
       {"model_instance_name", model_instance_name_},
       {"model_instance_device_id", std::to_string(device_id_)},
-      {"model_repository", model_path_},
+      {"model_repository", model_repository_path_},
       {"model_version", std::to_string(model_version_)},
       {"model_name", model_name_}};
 
