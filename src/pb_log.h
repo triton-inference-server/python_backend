@@ -35,14 +35,11 @@ class PbLog {
  public:
   PbLog(
       const std::string& filename, uint32_t line, const std::string& message,
-      LogLevel level)
-      : filename_(filename), line_(line), message_(message), level_(level)
-  {
-  }
-  const std::string& Filename() { return filename_; };
-  const std::string& Message() { return message_; };
-  const LogLevel& Level() { return level_; };
-  const uint32_t& Line() { return line_; };
+      LogLevel level);
+  const std::string& Filename();
+  const std::string& Message();
+  const LogLevel& Level();
+  const uint32_t& Line();
 
  private:
   std::string filename_;
@@ -50,13 +47,29 @@ class PbLog {
   std::string message_;
   LogLevel level_;
 };
-struct LogMsgShm {
-  bi::managed_external_buffer::handle_t filename;
-  uint32_t line;
-  bi::managed_external_buffer::handle_t logMsg;
-  LogLevel level;
-  bool is_stub_turn;
-  bi::managed_external_buffer::handle_t response_mutex;
-  bi::managed_external_buffer::handle_t response_cond;
+
+class PbLogShm {
+ public:
+  static std::unique_ptr<PbLogShm> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      const std::string& filename, const uint32_t& line,
+      const std::string& message, const LogLevel& level);
+  static std::unique_ptr<PbLog> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bi::managed_external_buffer::handle_t handle);
+  bi::managed_external_buffer::handle_t ShmHandle();
+  LogSendMessage* LogMessage();
+  AllocatedSharedMemory<LogSendMessage> LogMessageShm();
+  
+ private:
+  AllocatedSharedMemory<LogSendMessage> log_container_shm_;
+  std::unique_ptr<PbString> filename_pb_string_;
+  std::unique_ptr<PbString> message_pb_string_;
+
+  LogSendMessage* log_container_shm_ptr_;
+
+  PbLogShm(
+      AllocatedSharedMemory<LogSendMessage>& log_container_shm,
+      std::unique_ptr<PbString>& filename, std::unique_ptr<PbString>& message);
 };
 }}};  // namespace triton::backend::python

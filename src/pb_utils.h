@@ -165,7 +165,7 @@ enum LogLevel { INFO = 0, WARNINGS, ERRORS, VERBOSE };
 struct LogSendMessage : LogSendMessageBase {
   bi::managed_external_buffer::handle_t filename;
   int32_t line;
-  bi::managed_external_buffer::handle_t logMsg;
+  bi::managed_external_buffer::handle_t log_message;
   LogLevel level;
 };
 

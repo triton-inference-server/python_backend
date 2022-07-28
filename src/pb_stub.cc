@@ -835,13 +835,8 @@ Stub::~Stub()
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
   }
-  // Clear any remaining log requests from heap
-  PbLog* delete_ptr = nullptr;
   while (log_request_buffer.size() != 0) {
-    delete_ptr = log_request_buffer.front();
     log_request_buffer.pop();
-    delete delete_ptr;
-    delete_ptr = NULL;
   }
   stub_instance_.reset();
   stub_message_queue_.reset();
@@ -877,7 +872,7 @@ Stub::TerminateLogRequestThread()
 }
 
 void
-Stub::EnqueueLogRequest(PbLog* log_ptr)
+Stub::EnqueueLogRequest(std::shared_ptr<PbLog> log_ptr)
 {
   log_request_buffer.push(log_ptr);
 }
@@ -887,42 +882,24 @@ Stub::ServiceLogRequests()
 {
   while (log_thread_) {
     if (log_request_buffer.size() != 0) {
-      PbLog* log_request = log_request_buffer.front();
+      std::shared_ptr<PbLog> log_request = log_request_buffer.front();
       log_request_buffer.pop();
-      SendLogMessage(
-          log_request->Filename(), log_request->Line(), log_request->Message(),
-          log_request->Level());
-      delete log_request;
-      log_request = nullptr;
+      SendLogMessage(log_request);
     }
   }
 }
 
 void
-Stub::SendLogMessage(
-    const std::string& filename, uint32_t line, const std::string& message,
-    LogLevel level)
+Stub::SendLogMessage(std::shared_ptr<PbLog> log_send_message)
 {
-  std::shared_ptr<PbString> file_name = PbString::Create(shm_pool_, filename);
-  std::shared_ptr<PbString> log_message = PbString::Create(shm_pool_, message);
-  AllocatedSharedMemory<LogSendMessage> log_send_message =
-      shm_pool_->Construct<LogSendMessage>();
-
-  LogSendMessage* send_message_payload = log_send_message.data_.get();
-  new (&(send_message_payload->log_mu)) bi::interprocess_mutex;
-  new (&(send_message_payload->log_cv)) bi::interprocess_condition;
-
-  send_message_payload->filename = file_name->ShmHandle();
-  send_message_payload->line = line;
-  send_message_payload->logMsg = log_message->ShmHandle();
-  send_message_payload->level = level;
+  std::unique_ptr<PbLogShm> log_request_shm = PbLogShm::Create(
+      shm_pool_, log_send_message->Filename(), log_send_message->Line(),
+      log_send_message->Message(), log_send_message->Level());
+  LogSendMessage* send_message_payload = log_request_shm->LogMessage();
   send_message_payload->waiting_on_stub = false;
-
   std::unique_ptr<IPCMessage> log_request_msg =
       IPCMessage::Create(shm_pool_, false /* inline_response */);
-  log_request_msg->Command() = PYTHONSTUB_LogRequest;
-  log_request_msg->Args() = log_send_message.handle_;
-
+  log_request_msg->Args() = log_request_shm->ShmHandle();
   ScopedDefer _([send_message_payload] {
     {
       bi::scoped_lock<bi::interprocess_mutex> guard{
@@ -943,12 +920,12 @@ Stub::SendLogMessage(
 }
 
 void
-Logger::log(
+Logger::LogPythonMessage(
     const std::string& filename, uint32_t line, const std::string& message,
     LogLevel level)
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  PbLog* log_msg = new PbLog(filename, line, message, level);
+  std::shared_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
   stub->EnqueueLogRequest(log_msg);
 }
 
@@ -1058,7 +1035,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .export_values();
   logger.def(py::init<>());
   logger.def(
-      "log", &Logger::log, py::arg("filename"), py::arg("line"),
+      "log", &Logger::LogPythonMessage, py::arg("filename"), py::arg("line"),
       py::arg("message") = "", py::arg("level") = LogLevel::INFO);
 
   // This class is not part of the public API for Python backend. This is only

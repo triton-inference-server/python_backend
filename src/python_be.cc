@@ -23,7 +23,7 @@
 // OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+#include "pb_log.h"
 #include "python_be.h"
 
 namespace triton { namespace backend { namespace python {
@@ -820,57 +820,54 @@ ModelInstanceState::LogMessageQueueMonitor()
     }
     std::unique_ptr<IPCMessage> message =
         IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), handle);
-    if (message->Command() == PYTHONSTUB_LogRequest) {
-      std::lock_guard<std::mutex> guard{mu_};
-      AllocatedSharedMemory<LogSendMessage> log_message =
-          Stub()->ShmPool()->Load<LogSendMessage>(message->Args());
 
-      std::unique_ptr<PbString> pb_string_filename =
-          PbString::LoadFromSharedMemory(
-              Stub()->ShmPool(), log_message.data_->filename);
-      uint32_t line = log_message.data_->line;
-      std::unique_ptr<PbString> pb_string_msg = PbString::LoadFromSharedMemory(
-          Stub()->ShmPool(), log_message.data_->logMsg);
-      LogLevel level = log_message.data_->level;
+    AllocatedSharedMemory<LogSendMessage> log_message_response =
+        Stub()->ShmPool()->Load<LogSendMessage>(message->Args());
+    std::unique_ptr<PbLog> pb_log_message =
+        PbLogShm::LoadFromSharedMemory(Stub()->ShmPool(), message->Args());
 
-      switch (level) {
-        case LogLevel::INFO: {
-          TRITONSERVER_LogMessage(
-              TRITONSERVER_LOG_INFO, (pb_string_filename->String().c_str()),
-              line, (pb_string_msg->String().c_str()));
-          break;
-        }
-        case LogLevel::WARNINGS: {
-          TRITONSERVER_LogMessage(
-              TRITONSERVER_LOG_WARN, (pb_string_filename->String().c_str()),
-              line, (pb_string_msg->String().c_str()));
-          break;
-        }
-        case LogLevel::ERRORS: {
-          TRITONSERVER_LogMessage(
-              TRITONSERVER_LOG_ERROR, (pb_string_filename->String().c_str()),
-              line, (pb_string_msg->String().c_str()));
-          break;
-        }
-        case LogLevel::VERBOSE: {
-          TRITONSERVER_LogMessage(
-              TRITONSERVER_LOG_VERBOSE, (pb_string_filename->String().c_str()),
-              line, (pb_string_msg->String().c_str()));
-          break;
-        }
+    const std::string& filename = pb_log_message->Filename();
+    uint32_t line = pb_log_message->Line();
+    const std::string& log_message = pb_log_message->Message();
+    LogLevel level = pb_log_message->Level();
+
+    switch (level) {
+      case LogLevel::INFO: {
+        TRITONSERVER_LogMessage(
+            TRITONSERVER_LOG_INFO, (filename.c_str()), line,
+            (log_message.c_str()));
+        break;
       }
-      // Send confirmation back to pb_stub.cc that the message
-      // was received.
-      LogSendMessage* send_message_payload =
-          reinterpret_cast<LogSendMessage*>(log_message.data_.get());
-      {
-        bi::scoped_lock<bi::interprocess_mutex> guard{
-            send_message_payload->log_mu};
-        send_message_payload->waiting_on_stub = true;
-        send_message_payload->log_cv.notify_all();
-        while (send_message_payload->waiting_on_stub) {
-          send_message_payload->log_cv.wait(guard);
-        }
+      case LogLevel::WARNINGS: {
+        TRITONSERVER_LogMessage(
+            TRITONSERVER_LOG_WARN, (filename.c_str()), line,
+            (log_message.c_str()));
+        break;
+      }
+      case LogLevel::ERRORS: {
+        TRITONSERVER_LogMessage(
+            TRITONSERVER_LOG_ERROR, (filename.c_str()), line,
+            (log_message.c_str()));
+        break;
+      }
+      case LogLevel::VERBOSE: {
+        TRITONSERVER_LogMessage(
+            TRITONSERVER_LOG_VERBOSE, (filename.c_str()), line,
+            (log_message.c_str()));
+        break;
+      }
+    }
+    // Send confirmation back to pb_stub.cc that the message
+    // was received.
+    LogSendMessage* send_message_payload =
+        reinterpret_cast<LogSendMessage*>(log_message_response.data_.get());
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{
+          send_message_payload->log_mu};
+      send_message_payload->waiting_on_stub = true;
+      send_message_payload->log_cv.notify_all();
+      while (send_message_payload->waiting_on_stub) {
+        send_message_payload->log_cv.wait(guard);
       }
     }
   }

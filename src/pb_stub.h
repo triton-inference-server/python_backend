@@ -77,7 +77,7 @@ class Logger {
   // Log a message.
   void Log(const std::string& msg) { std::cerr << msg << std::endl; }
 
-  void log(
+  void LogPythonMessage(
       const std::string& filename, uint32_t line, const std::string& message,
       LogLevel level = LogLevel::INFO);
 
@@ -184,11 +184,9 @@ class Stub {
   ~Stub();
   void LaunchLogRequestThread();
   void TerminateLogRequestThread();
-  void EnqueueLogRequest(PbLog* log_ptr);
+  void EnqueueLogRequest(std::shared_ptr<PbLog> log_ptr);
   void ServiceLogRequests();
-  void SendLogMessage(
-      const std::string& filename, uint32_t line, const std::string& message,
-      LogLevel level);
+  void SendLogMessage(std::shared_ptr<PbLog> log_send_message);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -219,7 +217,7 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
-  std::queue<PbLog*> log_request_buffer;
+  std::queue<std::shared_ptr<PbLog>> log_request_buffer;
   std::thread log_monitor_;
   bool log_thread_;
 };
