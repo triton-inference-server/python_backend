@@ -59,8 +59,7 @@ class PbLogShm {
       bi::managed_external_buffer::handle_t handle);
   bi::managed_external_buffer::handle_t ShmHandle();
   LogSendMessage* LogMessage();
-  AllocatedSharedMemory<LogSendMessage> LogMessageShm();
-  
+
  private:
   AllocatedSharedMemory<LogSendMessage> log_container_shm_;
   std::unique_ptr<PbString> filename_pb_string_;

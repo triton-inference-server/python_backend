@@ -118,5 +118,4 @@ PbLogShm::LogMessage()
   return log_container_shm_ptr_;
 }
 
-
 }}}  // namespace triton::backend::python

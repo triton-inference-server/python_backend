@@ -872,9 +872,10 @@ Stub::TerminateLogRequestThread()
 }
 
 void
-Stub::EnqueueLogRequest(std::shared_ptr<PbLog> log_ptr)
+Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
-  log_request_buffer.push(log_ptr);
+  std::unique_lock<std::mutex> guard{log_message_mutex_};
+  log_request_buffer.push(std::move(log_ptr));
 }
 
 void
@@ -882,7 +883,9 @@ Stub::ServiceLogRequests()
 {
   while (log_thread_) {
     if (log_request_buffer.size() != 0) {
-      std::shared_ptr<PbLog> log_request = log_request_buffer.front();
+      std::unique_lock<std::mutex> guard{log_message_mutex_};
+      std::unique_ptr<PbLog> log_request =
+          std::move(log_request_buffer.front());
       log_request_buffer.pop();
       SendLogMessage(log_request);
     }
@@ -890,7 +893,7 @@ Stub::ServiceLogRequests()
 }
 
 void
-Stub::SendLogMessage(std::shared_ptr<PbLog> log_send_message)
+Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
 {
   std::unique_ptr<PbLogShm> log_request_shm = PbLogShm::Create(
       shm_pool_, log_send_message->Filename(), log_send_message->Line(),
@@ -921,11 +924,22 @@ Stub::SendLogMessage(std::shared_ptr<PbLog> log_send_message)
 
 void
 Logger::LogPythonMessage(
-    const std::string& filename, uint32_t line, const std::string& message,
-    LogLevel level)
+    const std::string& message, LogLevel level, bool nested_call)
 {
+  py::object frame = py::module_::import("inspect").attr("currentframe");
+  py::object caller_frame = frame().attr("f_back");
+  if (nested_call) {
+    caller_frame = caller_frame.attr("f_back");
+  }
+  py::object info = py::module_::import("inspect").attr("getframeinfo");
+  py::object caller_info = info(caller_frame);
+  py::object filename_python = caller_info.attr("filename");
+  std::string filename = filename_python.cast<std::string>();
+  py::object lineno = caller_info.attr("lineno");
+  uint32_t line = lineno.cast<uint32_t>();
+
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  std::shared_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
+  std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
   stub->EnqueueLogRequest(log_msg);
 }
 
@@ -1029,14 +1043,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")
       .value("INFO", LogLevel::INFO)
-      .value("WARNINGS", LogLevel::WARNINGS)
-      .value("ERRORS", LogLevel::ERRORS)
+      .value("WARNING", LogLevel::WARNING)
+      .value("ERROR", LogLevel::ERROR)
       .value("VERBOSE", LogLevel::VERBOSE)
       .export_values();
   logger.def(py::init<>());
   logger.def(
-      "log", &Logger::LogPythonMessage, py::arg("filename"), py::arg("line"),
-      py::arg("message") = "", py::arg("level") = LogLevel::INFO);
+      "log", &Logger::LogPythonMessage, py::arg("message") = "",
+      py::arg("level") = LogLevel::INFO, py::arg("nested_call") = false);
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

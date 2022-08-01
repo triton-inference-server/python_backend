@@ -501,17 +501,8 @@ class ModelConfig:
 
 
 def log(message, level, nested_call=False):
-    # Convenience function calls originiate
-    # 2 function calls back, not 1
-    caller_frame = currentframe().f_back
-    if nested_call:
-        caller_frame = caller_frame.f_back
-
-    caller_info = getframeinfo(caller_frame)
-    caller_line_number = caller_info.lineno
-    caller_filename = caller_info.filename
     logger = Logger()
-    logger.log(caller_filename, caller_line_number, message, level)
+    logger.log(message, level, nested_call)
 
 
 def log_info(message):
@@ -519,11 +510,11 @@ def log_info(message):
 
 
 def log_warn(message):
-    log(message, Logger().WARNINGS, True)
+    log(message, Logger().WARNING, True)
 
 
 def log_error(message):
-    log(message, Logger().ERRORS, True)
+    log(message, Logger().ERROR, True)
 
 
 def log_verbose(message):

@@ -160,7 +160,7 @@ struct LogSendMessageBase {
   bool waiting_on_stub;
 };
 
-enum LogLevel { INFO = 0, WARNINGS, ERRORS, VERBOSE };
+enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
 
 struct LogSendMessage : LogSendMessageBase {
   bi::managed_external_buffer::handle_t filename;

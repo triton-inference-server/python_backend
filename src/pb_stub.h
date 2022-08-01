@@ -78,8 +78,8 @@ class Logger {
   void Log(const std::string& msg) { std::cerr << msg << std::endl; }
 
   void LogPythonMessage(
-      const std::string& filename, uint32_t line, const std::string& message,
-      LogLevel level = LogLevel::INFO);
+      const std::string& message, LogLevel level = LogLevel::INFO,
+      bool nested_call = false);
 
   // Flush the log.
   void Flush() { std::cerr << std::flush; }
@@ -184,9 +184,9 @@ class Stub {
   ~Stub();
   void LaunchLogRequestThread();
   void TerminateLogRequestThread();
-  void EnqueueLogRequest(std::shared_ptr<PbLog> log_ptr);
+  void EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr);
   void ServiceLogRequests();
-  void SendLogMessage(std::shared_ptr<PbLog> log_send_message);
+  void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -210,15 +210,12 @@ class Stub {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       log_message_queue_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
-  std::mutex tensors_to_remove_mutex_;
-  std::vector<std::unique_ptr<IPCMessage>> messages_;
-  std::mutex messages_mutex_;
-  std::condition_variable messages_cv_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
-  std::queue<std::shared_ptr<PbLog>> log_request_buffer;
+  std::queue<std::unique_ptr<PbLog>> log_request_buffer;
   std::thread log_monitor_;
   bool log_thread_;
+  std::mutex log_message_mutex_;
 };
 }}}  // namespace triton::backend::python

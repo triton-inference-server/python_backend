@@ -48,7 +48,7 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_ResponseSend,
   PYTHONSTUB_ResponseClose,
   PYTHONSTUB_AutoCompleteRequest,
-  PYTHONSTUB_AutoCompleteResponse,
+  PYTHONSTUB_AutoCompleteResponse
 } PYTHONSTUB_CommandType;
 
 ///

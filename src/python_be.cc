@@ -23,8 +23,8 @@
 // OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#include "pb_log.h"
 #include "python_be.h"
+#include "pb_log.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -838,13 +838,13 @@ ModelInstanceState::LogMessageQueueMonitor()
             (log_message.c_str()));
         break;
       }
-      case LogLevel::WARNINGS: {
+      case LogLevel::WARNING: {
         TRITONSERVER_LogMessage(
             TRITONSERVER_LOG_WARN, (filename.c_str()), line,
             (log_message.c_str()));
         break;
       }
-      case LogLevel::ERRORS: {
+      case LogLevel::ERROR: {
         TRITONSERVER_LogMessage(
             TRITONSERVER_LOG_ERROR, (filename.c_str()), line,
             (log_message.c_str()));
