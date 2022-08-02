@@ -27,8 +27,7 @@
 import numpy as np
 import struct
 import json
-import sys
-from inspect import currentframe, getframeinfo
+from c_python_backend_utils import Logger
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -499,9 +498,9 @@ class ModelConfig:
 
         self._model_config["output"].append(output)
 
+logger = Logger()
 
 def log(message, level, nested_call=False):
-    logger = Logger()
     logger.log(message, level, nested_call)
 
 
