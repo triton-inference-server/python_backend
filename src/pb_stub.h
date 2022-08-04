@@ -70,54 +70,60 @@ namespace triton { namespace backend { namespace python {
   } while (false)
 
 // Macros that use current filename and line number.
-#define LOG_INFO LOG_INFO_FL(__FILE__, __LINE__)
+#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::INFO)
+#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::WARNING)
+#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::ERROR)
+#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::VERBOSE)
 
 class Logger {
  public:
-  // Log a message.
-  void Log(const std::string& msg) { std::cerr << msg << std::endl; }
-
-  void LogPythonMessage(
-      const std::string& message, LogLevel level = LogLevel::INFO,
-      bool nested_call = false);
-
+  Logger(){};
+  void Log(const std::string& message, LogLevel level = LogLevel::INFO);
+  void Log(
+      const std::string& filename, uint32_t lineno, LogLevel level,
+      const std::string& message);
+  void LogInfo(const std::string& message);
+  void LogWarn(const std::string& message);
+  void LogError(const std::string& message);
+  void LogVerbose(const std::string& message);
+  static Logger& Instance()
+  {
+    static Logger instance;
+    return instance;
+  }
+  // Should not be cloneable
+  Logger(Logger const&) = delete;
+  // Should not be assignable
+  void operator=(Logger const&) = delete;
   // Flush the log.
   void Flush() { std::cerr << std::flush; }
 };
 
-static Logger gLogger_;
-
 class LogMessage {
  public:
-  LogMessage(const char* file, int line)
+  LogMessage(const char* file, int line, LogLevel level) : level_(level)
   {
     std::string path(file);
     size_t pos = path.rfind('/');
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tm_time;
-    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
-    stream_ << std::setfill('0') << std::setw(2) << (tm_time.tm_mon + 1)
-            << std::setw(2) << tm_time.tm_mday << " " << std::setw(2)
-            << tm_time.tm_hour << ':' << std::setw(2) << tm_time.tm_min << ':'
-            << std::setw(2) << tm_time.tm_sec << "." << std::setw(6)
-            << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid()) << ' '
-            << path << ':' << line << "] ";
+    file_ = path;
+    line_ = static_cast<uint32_t>(line);
   }
 
-  ~LogMessage() { gLogger_.Log(stream_.str()); }
+  ~LogMessage() { Logger::Instance().Log(file_, line_, level_, stream_.str()); }
 
   std::stringstream& stream() { return stream_; }
 
  private:
   std::stringstream stream_;
+  std::string file_;
+  uint32_t line_;
+  LogLevel level_;
 };
 
-#define LOG_INFO_FL(FN, LN) LogMessage((char*)(FN), LN).stream()
+#define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
 class Stub {
  public:
@@ -216,6 +222,7 @@ class Stub {
   std::queue<std::unique_ptr<PbLog>> log_request_buffer;
   std::thread log_monitor_;
   bool log_thread_;
-  std::mutex log_message_mutex_;
+  bi::interprocess_mutex log_message_mutex_;
+  bi::interprocess_condition log_message_cv_;
 };
 }}}  // namespace triton::backend::python

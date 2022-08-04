@@ -27,7 +27,6 @@
 import numpy as np
 import struct
 import json
-from c_python_backend_utils import Logger
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -497,27 +496,6 @@ class ModelConfig:
                     return
 
         self._model_config["output"].append(output)
-
-logger = Logger()
-
-def log(message, level, nested_call=False):
-    logger.log(message, level, nested_call)
-
-
-def log_info(message):
-    log(message, Logger().INFO, True)
-
-
-def log_warn(message):
-    log(message, Logger().WARNING, True)
-
-
-def log_error(message):
-    log(message, Logger().ERROR, True)
-
-
-def log_verbose(message):
-    log(message, Logger().VERBOSE, True)
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1

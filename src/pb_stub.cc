@@ -868,22 +868,33 @@ void
 Stub::TerminateLogRequestThread()
 {
   log_thread_ = false;
+  {
+    bi::scoped_lock<bi::interprocess_mutex> guard{log_message_mutex_};
+    log_request_buffer.push(DUMMY_MESSAGE);
+  }
+  log_message_cv_.notify_all();
   log_monitor_.join();
 }
-
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
-  std::unique_lock<std::mutex> guard{log_message_mutex_};
-  log_request_buffer.push(std::move(log_ptr));
+  {
+    bi::scoped_lock<bi::interprocess_mutex> guard{log_message_mutex_};
+    log_request_buffer.push(std::move(log_ptr));
+  }
+  log_message_cv_.notify_one();
 }
 
 void
 Stub::ServiceLogRequests()
 {
   while (log_thread_) {
-    if (log_request_buffer.size() != 0) {
-      std::unique_lock<std::mutex> guard{log_message_mutex_};
+    bi::scoped_lock<bi::interprocess_mutex> guard{log_message_mutex_};
+    while (log_request_buffer.empty()) {
+      log_message_cv_.wait(guard);
+    }
+    // In case of exit, do not send message
+    if (log_thread_) {
       std::unique_ptr<PbLog> log_request =
           std::move(log_request_buffer.front());
       log_request_buffer.pop();
@@ -922,15 +933,12 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
   }
 }
 
+// Bound function, called from the python client
 void
-Logger::LogPythonMessage(
-    const std::string& message, LogLevel level, bool nested_call)
+Logger::Log(const std::string& message, LogLevel level)
 {
   py::object frame = py::module_::import("inspect").attr("currentframe");
-  py::object caller_frame = frame().attr("f_back");
-  if (nested_call) {
-    caller_frame = caller_frame.attr("f_back");
-  }
+  py::object caller_frame = frame();
   py::object info = py::module_::import("inspect").attr("getframeinfo");
   py::object caller_info = info(caller_frame);
   py::object filename_python = caller_info.attr("filename");
@@ -941,6 +949,41 @@ Logger::LogPythonMessage(
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
   stub->EnqueueLogRequest(log_msg);
+}
+
+// Called internally (.e.g. LOG_ERROR << "Error"; )
+void
+Logger::Log(
+    const std::string& filename, uint32_t lineno, LogLevel level,
+    const std::string& message)
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  std::unique_ptr<PbLog> log_msg(new PbLog(filename, lineno, message, level));
+  stub->EnqueueLogRequest(log_msg);
+}
+
+void
+Logger::LogInfo(const std::string& message)
+{
+  Logger::Log(message, LogLevel::INFO);
+}
+
+void
+Logger::LogWarn(const std::string& message)
+{
+  Logger::Log(message, LogLevel::WARNING);
+}
+
+void
+Logger::LogError(const std::string& message)
+{
+  Logger::Log(message, LogLevel::ERROR);
+}
+
+void
+Logger::LogVerbose(const std::string& message)
+{
+  Logger::Log(message, LogLevel::VERBOSE);
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -1047,10 +1090,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .value("ERROR", LogLevel::ERROR)
       .value("VERBOSE", LogLevel::VERBOSE)
       .export_values();
-  logger.def(py::init<>());
+  logger.def("instance", &Logger::Instance, py::return_value_policy::reference);
   logger.def(
-      "log", &Logger::LogPythonMessage, py::arg("message") = "",
-      py::arg("level") = LogLevel::INFO, py::arg("nested_call") = false);
+      "log", py::overload_cast<const std::string&, LogLevel>(&Logger::Log),
+      py::arg("message") = "", py::arg("level") = LogLevel::INFO);
+  logger.def("log_info", &Logger::LogInfo, py::arg("message") = "");
+  logger.def("log_warn", &Logger::LogWarn, py::arg("message") = "");
+  logger.def("log_error", &Logger::LogError, py::arg("message") = "");
+  logger.def("log_verbose", &Logger::LogVerbose, py::arg("message") = "");
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
