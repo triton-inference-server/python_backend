@@ -499,6 +499,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   }
 
   initialized_ = true;
+  LaunchLogRequestThread();
 }
 
 void
@@ -783,7 +784,6 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
             "Failed to process the request(s) for model '" + name_ +
             "', message: ") +
         error_string;
-    LOG_INFO << err_message.c_str();
     error_string_shm = PbString::Create(shm_pool_, error_string);
     response_batch_shm_ptr->has_error = true;
     response_batch_shm_ptr->is_error_set = true;
@@ -877,7 +877,7 @@ Stub::TerminateLogRequestThread()
     std::lock_guard<std::mutex> guard{log_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
   }
-  log_message_cv_.notify_all();
+  log_message_cv_.notify_one();
   log_monitor_.join();
 }
 
@@ -888,7 +888,7 @@ Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
     std::lock_guard<std::mutex> guard{log_message_mutex_};
     log_request_buffer_.push(std::move(log_ptr));
   }
-  log_message_cv_.notify_all();
+  log_message_cv_.notify_one();
 }
 
 void
@@ -898,14 +898,13 @@ Stub::ServiceLogRequests()
     std::unique_lock<std::mutex> guard{log_message_mutex_};
     while (log_request_buffer_.empty()) {
       log_message_cv_.wait(guard);
-
-      // In case of exit, do not send message
-      if (log_thread_) {
-        std::unique_ptr<PbLog> log_request =
-            std::move(log_request_buffer_.front());
-        log_request_buffer_.pop();
-        SendLogMessage(log_request);
-      }
+    }
+    // In case of exit, do not send message
+    if (log_thread_) {
+      std::unique_ptr<PbLog> log_request =
+          std::move(log_request_buffer_.front());
+      log_request_buffer_.pop();
+      SendLogMessage(log_request);
     }
   }
 }
@@ -944,12 +943,6 @@ bool
 Stub::LogServiceActive()
 {
   return log_thread_;
-}
-
-bool
-Stub::Initialized()
-{
-  return initialized_;
 }
 
 // Bound function, called from the python client
@@ -1253,12 +1246,7 @@ main(int argc, char** argv)
   // parent process. After the notification is received the stub process will
   // run the appropriate command and wait for new notifications.
   bool finalize = false;
-  bool initial = true;
   while (true) {
-    if (stub->Initialized() && initial) {
-      stub->LaunchLogRequestThread();
-      initial = false;
-    }
     if (finalize) {
       // need check or may recieve not joinable error
       if (stub->LogServiceActive()) {

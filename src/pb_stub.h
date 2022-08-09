@@ -229,9 +229,6 @@ class Stub {
   /// Check if log handler is running
   bool LogServiceActive();
 
-  /// Check if the stub is initialized
-  bool Initialized();
-
  private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
