@@ -97,7 +97,7 @@ class StubLauncher {
     return parent_message_queue_;
   }
 
-  // Parent message queue
+  // Log message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
   LogMessageQueue()
   {

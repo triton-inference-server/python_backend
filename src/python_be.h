@@ -308,6 +308,9 @@ class ModelInstanceState : public BackendModelInstance {
   // from the message queue in the decoupled mode.
   void DecoupledMessageQueueMonitor();
 
+  // This function is executed on a separate thread and monitors the log message
+  // queue. When it receives a message from the stub, it will load it from 
+  // shared memory and log it using the triton server core logging facilities.
   void LogMessageQueueMonitor();
 
   // Convert TRITONBACKEND_Input to Python backend tensors.
