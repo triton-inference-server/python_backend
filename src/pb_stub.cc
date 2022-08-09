@@ -82,6 +82,7 @@ Stub::Instantiate(
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
+  log_thread_ = false;
 
   try {
     shm_pool_ = std::make_unique<SharedMemoryManager>(
@@ -835,8 +836,12 @@ Stub::~Stub()
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
   }
-  while (log_request_buffer.size() != 0) {
-    log_request_buffer.pop();
+  while (log_request_buffer_.size() != 0) {
+    std::unique_ptr<PbLog> log_request = std::move(log_request_buffer_.front());
+    log_request_buffer_.pop();
+    Logger::GetOrCreateInstance().Log(
+        log_request->Filename(), log_request->Line(), log_request->Level(),
+        log_request->Message());
   }
   stub_instance_.reset();
   stub_message_queue_.reset();
@@ -869,36 +874,38 @@ Stub::TerminateLogRequestThread()
 {
   log_thread_ = false;
   {
-    bi::scoped_lock<bi::interprocess_mutex> guard{log_message_mutex_};
-    log_request_buffer.push(DUMMY_MESSAGE);
+    std::lock_guard<std::mutex> guard{log_message_mutex_};
+    log_request_buffer_.push(DUMMY_MESSAGE);
   }
   log_message_cv_.notify_all();
   log_monitor_.join();
 }
+
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
   {
-    bi::scoped_lock<bi::interprocess_mutex> guard{log_message_mutex_};
-    log_request_buffer.push(std::move(log_ptr));
+    std::lock_guard<std::mutex> guard{log_message_mutex_};
+    log_request_buffer_.push(std::move(log_ptr));
   }
-  log_message_cv_.notify_one();
+  log_message_cv_.notify_all();
 }
 
 void
 Stub::ServiceLogRequests()
 {
   while (log_thread_) {
-    bi::scoped_lock<bi::interprocess_mutex> guard{log_message_mutex_};
-    while (log_request_buffer.empty()) {
+    std::unique_lock<std::mutex> guard{log_message_mutex_};
+    while (log_request_buffer_.empty()) {
       log_message_cv_.wait(guard);
-    }
-    // In case of exit, do not send message
-    if (log_thread_) {
-      std::unique_ptr<PbLog> log_request =
-          std::move(log_request_buffer.front());
-      log_request_buffer.pop();
-      SendLogMessage(log_request);
+
+      // In case of exit, do not send message
+      if (log_thread_) {
+        std::unique_ptr<PbLog> log_request =
+            std::move(log_request_buffer_.front());
+        log_request_buffer_.pop();
+        SendLogMessage(log_request);
+      }
     }
   }
 }
@@ -933,10 +940,23 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
   }
 }
 
+bool
+Stub::LogServiceActive()
+{
+  return log_thread_;
+}
+
+bool
+Stub::Initialized()
+{
+  return initialized_;
+}
+
 // Bound function, called from the python client
 void
 Logger::Log(const std::string& message, LogLevel level)
 {
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   py::object frame = py::module_::import("inspect").attr("currentframe");
   py::object caller_frame = frame();
   py::object info = py::module_::import("inspect").attr("getframeinfo");
@@ -946,9 +966,12 @@ Logger::Log(const std::string& message, LogLevel level)
   py::object lineno = caller_info.attr("lineno");
   uint32_t line = lineno.cast<uint32_t>();
 
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
-  stub->EnqueueLogRequest(log_msg);
+  if (!stub->LogServiceActive()) {
+    Logger::Log(filename, line, message, level);
+  } else {
+    std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
+    stub->EnqueueLogRequest(log_msg);
+  }
 }
 
 // Called internally (.e.g. LOG_ERROR << "Error"; )
@@ -958,8 +981,30 @@ Logger::Log(
     const std::string& message)
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  std::unique_ptr<PbLog> log_msg(new PbLog(filename, lineno, message, level));
-  stub->EnqueueLogRequest(log_msg);
+  // If the log monitor service is not active yet, format
+  // and pass messages to cerr
+  if (!stub->LogServiceActive()) {
+    std::string path(filename);
+    size_t pos = path.rfind('/');
+    if (pos != std::string::npos) {
+      path = path.substr(pos + 1, std::string::npos);
+    }
+    std::stringstream ss;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm tm_time;
+    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
+    ss << LeadingLogChar(level) << std::setfill('0') << std::setw(2)
+       << (tm_time.tm_mon + 1) << std::setw(2) << tm_time.tm_mday << " "
+       << std::setw(2) << tm_time.tm_hour << ':' << std::setw(2)
+       << tm_time.tm_min << ':' << std::setw(2) << tm_time.tm_sec << "."
+       << std::setw(6) << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid())
+       << ' ' << path << ':' << lineno << "] ";
+    std::cerr << ss.str() << " " << message << std::endl;
+  } else {
+    std::unique_ptr<PbLog> log_msg(new PbLog(filename, lineno, message, level));
+    stub->EnqueueLogRequest(log_msg);
+  }
 }
 
 void
@@ -984,6 +1029,21 @@ void
 Logger::LogVerbose(const std::string& message)
 {
   Logger::Log(message, LogLevel::VERBOSE);
+}
+
+const std::string
+Logger::LeadingLogChar(const LogLevel& level)
+{
+  switch (level) {
+    case LogLevel::WARNING:
+      return "W";
+    case LogLevel::ERROR:
+      return "E";
+    case LogLevel::INFO:
+    case LogLevel::VERBOSE:
+    default:
+      return "I";
+  }
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -1090,14 +1150,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .value("ERROR", LogLevel::ERROR)
       .value("VERBOSE", LogLevel::VERBOSE)
       .export_values();
-  logger.def("instance", &Logger::Instance, py::return_value_policy::reference);
-  logger.def(
+  logger.def_static(
       "log", py::overload_cast<const std::string&, LogLevel>(&Logger::Log),
       py::arg("message") = "", py::arg("level") = LogLevel::INFO);
-  logger.def("log_info", &Logger::LogInfo, py::arg("message") = "");
-  logger.def("log_warn", &Logger::LogWarn, py::arg("message") = "");
-  logger.def("log_error", &Logger::LogError, py::arg("message") = "");
-  logger.def("log_verbose", &Logger::LogVerbose, py::arg("message") = "");
+  logger.def_static("log_info", &Logger::LogInfo, py::arg("message") = "");
+  logger.def_static("log_warn", &Logger::LogWarn, py::arg("message") = "");
+  logger.def_static("log_error", &Logger::LogError, py::arg("message") = "");
+  logger.def_static(
+      "log_verbose", &Logger::LogVerbose, py::arg("message") = "");
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
@@ -1160,8 +1220,6 @@ main(int argc, char** argv)
     exit(1);
   }
 
-  stub->LaunchLogRequestThread();
-
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
   pid_t parent_pid = std::stoi(argv[5]);
@@ -1195,15 +1253,22 @@ main(int argc, char** argv)
   // parent process. After the notification is received the stub process will
   // run the appropriate command and wait for new notifications.
   bool finalize = false;
+  bool initial = true;
   while (true) {
+    if (stub->Initialized() && initial) {
+      stub->LaunchLogRequestThread();
+      initial = false;
+    }
     if (finalize) {
-      stub->TerminateLogRequestThread();
+      // need check or may recieve not joinable error
+      if (stub->LogServiceActive()) {
+        stub->TerminateLogRequestThread();
+      }
       stub->Finalize();
       background_thread_running = false;
       background_thread.join();
       break;
     }
-
     finalize = stub->RunCommand();
   }
 

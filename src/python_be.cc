@@ -398,6 +398,8 @@ ModelInstanceState::LaunchStubProcess()
   RETURN_IF_ERROR(Stub()->Initialize(model_state));
   RETURN_IF_ERROR(Stub()->Launch());
 
+  log_thread_ = true;
+  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
@@ -406,8 +408,6 @@ ModelInstanceState::LaunchStubProcess()
     decoupled_monitor_ =
         std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
   }
-  log_thread_ = true;
-  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
 
   return nullptr;
 }

@@ -69,7 +69,7 @@ namespace triton { namespace backend { namespace python {
     LOG_INFO << E.what(); \
   } while (false)
 
-// Macros that use current filename and line number.
+/// Macros that use current filename and line number.
 #define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::INFO)
 #define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::WARNING)
 #define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::ERROR)
@@ -78,24 +78,43 @@ namespace triton { namespace backend { namespace python {
 class Logger {
  public:
   Logger(){};
-  void Log(const std::string& message, LogLevel level = LogLevel::INFO);
+  /// Python client log function
+  static void Log(const std::string& message, LogLevel level = LogLevel::INFO);
+
+  /// Python client log info function
+  static void LogInfo(const std::string& message);
+
+  /// Python client warning function
+  static void LogWarn(const std::string& message);
+
+  /// Python client log error function
+  static void LogError(const std::string& message);
+
+  /// Python client log verbose function
+  static void LogVerbose(const std::string& message);
+
+  /// Internal log function
   void Log(
       const std::string& filename, uint32_t lineno, LogLevel level,
       const std::string& message);
-  void LogInfo(const std::string& message);
-  void LogWarn(const std::string& message);
-  void LogError(const std::string& message);
-  void LogVerbose(const std::string& message);
-  static Logger& Instance()
+
+  /// Log format helper function
+  const std::string LeadingLogChar(const LogLevel& level);
+
+  /// Singleton Getter function
+  static Logger& GetOrCreateInstance()
   {
     static Logger instance;
     return instance;
   }
-  // Should not be cloneable
+
+  /// Should not be cloneable
   Logger(Logger const&) = delete;
-  // Should not be assignable
+
+  /// Should not be assignable
   void operator=(Logger const&) = delete;
-  // Flush the log.
+
+  /// Flush the log.
   void Flush() { std::cerr << std::flush; }
 };
 
@@ -112,7 +131,10 @@ class LogMessage {
     line_ = static_cast<uint32_t>(line);
   }
 
-  ~LogMessage() { Logger::Instance().Log(file_, line_, level_, stream_.str()); }
+  ~LogMessage()
+  {
+    Logger::GetOrCreateInstance().Log(file_, line_, level_, stream_.str());
+  }
 
   std::stringstream& stream() { return stream_; }
 
@@ -188,11 +210,27 @@ class Stub {
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
   bool IsDecoupled();
   ~Stub();
+
+  /// Start client log handler process
   void LaunchLogRequestThread();
+
+  /// End client log handler process
   void TerminateLogRequestThread();
+
+  /// Add client log to queue
   void EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr);
+
+  /// Thread process
   void ServiceLogRequests();
+
+  /// Send client log to the python backend
   void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
+
+  /// Check if log handler is running
+  bool LogServiceActive();
+
+  /// Check if the stub is initialized
+  bool Initialized();
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -219,10 +257,10 @@ class Stub {
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
-  std::queue<std::unique_ptr<PbLog>> log_request_buffer;
+  std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
   std::thread log_monitor_;
   bool log_thread_;
-  bi::interprocess_mutex log_message_mutex_;
-  bi::interprocess_condition log_message_cv_;
+  std::mutex log_message_mutex_;
+  std::condition_variable log_message_cv_;
 };
 }}}  // namespace triton::backend::python
