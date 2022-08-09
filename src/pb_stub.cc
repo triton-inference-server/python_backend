@@ -967,7 +967,7 @@ Logger::Log(const std::string& message, LogLevel level)
   uint32_t line = lineno.cast<uint32_t>();
 
   if (!stub->LogServiceActive()) {
-    Logger::Log(filename, line, message, level);
+    Logger::GetOrCreateInstance().Log(filename, line, level, message);
   } else {
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
     stub->EnqueueLogRequest(log_msg);
