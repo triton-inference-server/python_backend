@@ -397,9 +397,7 @@ ModelInstanceState::LaunchStubProcess()
       TRITONSERVER_InstanceGroupKindString(Kind()));
   RETURN_IF_ERROR(Stub()->Initialize(model_state));
   RETURN_IF_ERROR(Stub()->Launch());
-
-  log_thread_ = true;
-  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
+  StartLogMonitor();
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
@@ -871,6 +869,19 @@ ModelInstanceState::LogMessageQueueMonitor()
       }
     }
   }
+}
+
+void
+ModelInstanceState::StartLogMonitor()
+{
+  log_thread_ = true;
+  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
+}
+
+void ModelInstanceState::TerminateLogMonitor()
+{
+  Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
+  log_monitor_.join();
 }
 
 void
@@ -1405,12 +1416,9 @@ ModelInstanceState::~ModelInstanceState()
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
     }
-    Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
-    log_monitor_.join();
-    // Wait for all the futures to be finished.
     thread_pool_->wait();
   }
-
+  TerminateLogMonitor();
   Stub()->TerminateStub();
   received_message_.reset();
   Stub().reset();
@@ -1886,10 +1894,12 @@ TRITONBACKEND_ModelInstanceExecute(
       LOG_MESSAGE(
           TRITONSERVER_LOG_ERROR,
           "Stub process is unhealthy and it will be restarted.");
+      instance_state->TerminateLogMonitor();
       instance_state->Stub()->KillStubProcess();
       LOG_IF_ERROR(
           instance_state->Stub()->Launch(),
           "Failed to restart the stub process.");
+      instance_state->StartLogMonitor();
     }
   } else {
     std::vector<std::unique_ptr<InferRequest>> infer_requests;
