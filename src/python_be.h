@@ -361,10 +361,10 @@ class ModelInstanceState : public BackendModelInstance {
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
 
-  // Start the log monitor thread
+  // Stop the log monitor thread
   void TerminateLogMonitor();
 
-  // Stop the log monitor thread
+  // Start the log monitor thread
   void StartLogMonitor();
 };
 }}}  // namespace triton::backend::python

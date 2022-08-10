@@ -880,8 +880,11 @@ ModelInstanceState::StartLogMonitor()
 
 void ModelInstanceState::TerminateLogMonitor()
 {
-  Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
-  log_monitor_.join();
+  if(log_thread_) {
+    log_thread_ = false;
+    Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
+    log_monitor_.join();
+  }
 }
 
 void
@@ -1896,10 +1899,11 @@ TRITONBACKEND_ModelInstanceExecute(
           "Stub process is unhealthy and it will be restarted.");
       instance_state->TerminateLogMonitor();
       instance_state->Stub()->KillStubProcess();
-      LOG_IF_ERROR(
-          instance_state->Stub()->Launch(),
-          "Failed to restart the stub process.");
-      instance_state->StartLogMonitor();
+      TRITONSERVER_Error* err = instance_state->Stub()->Launch();
+      if(err == nullptr) {
+        instance_state->StartLogMonitor();
+      }
+      LOG_IF_ERROR(err, "Failed to restart the stub process.");
     }
   } else {
     std::vector<std::unique_ptr<InferRequest>> infer_requests;
