@@ -34,6 +34,7 @@ ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
     : BackendModelInstance(model_state, triton_model_instance)
 {
+  log_thread_ = false;
 }
 
 TRITONSERVER_Error*
