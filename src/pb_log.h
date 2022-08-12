@@ -33,12 +33,22 @@
 namespace triton { namespace backend { namespace python {
 class PbLog {
  public:
+
+  /// Create a PbLog instance
   PbLog(
       const std::string& filename, uint32_t line, const std::string& message,
       LogLevel level);
+
+  /// Get the filename where the log was recorded
   const std::string& Filename();
+
+  /// Get the log message
   const std::string& Message();
+
+  /// Get the log level of the message
   const LogLevel& Level();
+
+  /// Get the line number of the log message
   const uint32_t& Line();
 
  private:
@@ -50,14 +60,21 @@ class PbLog {
 
 class PbLogShm {
  public:
+  /// Save PbLog object to shared memory
   static std::unique_ptr<PbLogShm> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       const std::string& filename, const uint32_t& line,
       const std::string& message, const LogLevel& level);
+  
+  /// Load PbLog object to shared memory
   static std::unique_ptr<PbLog> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
+
+  /// Get the shared memory handle of the saved log message
   bi::managed_external_buffer::handle_t ShmHandle();
+
+  /// Get a pointer to the saved log message
   LogSendMessage* LogMessage();
 
  private:

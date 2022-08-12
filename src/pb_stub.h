@@ -120,6 +120,7 @@ class Logger {
 
 class LogMessage {
  public:
+  /// Create a log message, stripping the path down to the filename only
   LogMessage(const char* file, int line, LogLevel level) : level_(level)
   {
     std::string path(file);
@@ -130,7 +131,7 @@ class LogMessage {
     file_ = path;
     line_ = static_cast<uint32_t>(line);
   }
-
+  /// Log message to console or send to backend (see Logger::Log for details)
   ~LogMessage()
   {
     Logger::GetOrCreateInstance().Log(file_, line_, level_, stream_.str());
