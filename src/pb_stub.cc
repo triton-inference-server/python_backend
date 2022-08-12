@@ -839,9 +839,11 @@ Stub::~Stub()
   while (log_request_buffer_.size() != 0) {
     std::unique_ptr<PbLog> log_request = std::move(log_request_buffer_.front());
     log_request_buffer_.pop();
-    Logger::GetOrCreateInstance().Log(
+    if(log_request != DUMMY_MESSAGE) {
+      Logger::GetOrCreateInstance().Log(
         log_request->Filename(), log_request->Line(), log_request->Level(),
         log_request->Message());
+    }
   }
   stub_instance_.reset();
   stub_message_queue_.reset();
@@ -1230,6 +1232,11 @@ main(int argc, char** argv)
           stub->UpdateHealth();
 
           if (kill(parent_pid, 0) != 0) {
+            // When unhealthy, we should stop attempting to send
+            // messages to the backend ASAP.
+            if (stub->LogServiceActive()) {
+              stub->TerminateLogRequestThread();
+            }
             // Destroy Stub
             LOG_INFO << "Non-graceful termination detected. ";
             background_thread_running = false;
@@ -1248,7 +1255,7 @@ main(int argc, char** argv)
   bool finalize = false;
   while (true) {
     if (finalize) {
-      // need check or may recieve not joinable error
+      // Need check or may recieve not joinable error
       if (stub->LogServiceActive()) {
         stub->TerminateLogRequestThread();
       }
