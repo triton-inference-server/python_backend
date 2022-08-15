@@ -108,11 +108,7 @@ class Logger {
     return instance;
   }
 
-  /// Should not be cloneable
-  Logger(Logger const&) = delete;
-
-  /// Should not be assignable
-  void operator=(Logger const&) = delete;
+  DISALLOW_COPY_AND_ASSIGN(Logger);
 
   /// Flush the log.
   void Flush() { std::cerr << std::flush; }

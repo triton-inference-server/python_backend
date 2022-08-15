@@ -471,8 +471,6 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   py::setattr(
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
-  py::setattr(
-      python_backend_utils, "Logger", c_python_backend_utils.attr("Logger"));
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
@@ -1147,12 +1145,12 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .export_values();
   logger.def_static(
       "log", py::overload_cast<const std::string&, LogLevel>(&Logger::Log),
-      py::arg("message") = "", py::arg("level") = LogLevel::INFO);
-  logger.def_static("log_info", &Logger::LogInfo, py::arg("message") = "");
-  logger.def_static("log_warn", &Logger::LogWarn, py::arg("message") = "");
-  logger.def_static("log_error", &Logger::LogError, py::arg("message") = "");
+      py::arg("message"), py::arg("level") = LogLevel::INFO);
+  logger.def_static("log_info", &Logger::LogInfo, py::arg("message"));
+  logger.def_static("log_warn", &Logger::LogWarn, py::arg("message"));
+  logger.def_static("log_error", &Logger::LogError, py::arg("message"));
   logger.def_static(
-      "log_verbose", &Logger::LogVerbose, py::arg("message") = "");
+      "log_verbose", &Logger::LogVerbose, py::arg("message"));
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
