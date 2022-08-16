@@ -132,6 +132,9 @@ class StubLauncher {
   // Destruct Stub process
   void TerminateStub();
 
+  // Reset log queue pointer
+  void ClearLogQueue();
+
   // Kill stub process
   void KillStubProcess();
 

@@ -491,13 +491,13 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_config_params[pair.first.c_str()] = pair.second;
   }
 
+  LaunchLogRequestThread();
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
     model_instance_.attr("initialize")(model_config_params);
   }
 
   initialized_ = true;
-  LaunchLogRequestThread();
 }
 
 void
@@ -834,15 +834,6 @@ Stub::~Stub()
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
   }
-  while (log_request_buffer_.size() != 0) {
-    std::unique_ptr<PbLog> log_request = std::move(log_request_buffer_.front());
-    log_request_buffer_.pop();
-    if(log_request != DUMMY_MESSAGE) {
-      Logger::GetOrCreateInstance().Log(
-        log_request->Filename(), log_request->Line(), log_request->Level(),
-        log_request->Message());
-    }
-  }
   stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
@@ -872,7 +863,6 @@ Stub::LaunchLogRequestThread()
 void
 Stub::TerminateLogRequestThread()
 {
-  log_thread_ = false;
   {
     std::lock_guard<std::mutex> guard{log_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
@@ -899,10 +889,14 @@ Stub::ServiceLogRequests()
     while (log_request_buffer_.empty()) {
       log_message_cv_.wait(guard);
     }
-    // In case of exit, do not send message
-    if (log_thread_) {
-      std::unique_ptr<PbLog> log_request =
+    // On exit, will send messages until 
+    // DUMMY_MESSAGE is reached
+    std::unique_ptr<PbLog> log_request =
           std::move(log_request_buffer_.front());
+    if (log_request == DUMMY_MESSAGE) {
+      log_request_buffer_.pop();
+      break;
+    } else {
       log_request_buffer_.pop();
       SendLogMessage(log_request);
     }
@@ -1253,11 +1247,11 @@ main(int argc, char** argv)
   bool finalize = false;
   while (true) {
     if (finalize) {
+      stub->Finalize();
       // Need check or may recieve not joinable error
       if (stub->LogServiceActive()) {
         stub->TerminateLogRequestThread();
       }
-      stub->Finalize();
       background_thread_running = false;
       background_thread.join();
       break;

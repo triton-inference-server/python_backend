@@ -397,8 +397,10 @@ ModelInstanceState::LaunchStubProcess()
       "MODEL_INSTANCE_STUB", Name(), DeviceId(),
       TRITONSERVER_InstanceGroupKindString(Kind()));
   RETURN_IF_ERROR(Stub()->Initialize(model_state));
-  RETURN_IF_ERROR(Stub()->Launch());
+  RETURN_IF_ERROR(Stub()->Setup());
   StartLogMonitor();
+  RETURN_IF_ERROR(Stub()->Launch());
+  
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
@@ -1422,8 +1424,12 @@ ModelInstanceState::~ModelInstanceState()
     }
     thread_pool_->wait();
   }
-  TerminateLogMonitor();
+  // Terminate stub first to allow any last
+  // messages to be received by the back end
+  // before deallocating the queue memory
   Stub()->TerminateStub();
+  TerminateLogMonitor();
+  Stub()->ClearLogQueue();
   received_message_.reset();
   Stub().reset();
 }
@@ -1452,6 +1458,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 
     (*state)->Stub()->UpdateHealth();
     (*state)->Stub()->TerminateStub();
+    (*state)->Stub()->ClearLogQueue();
     (*state)->Stub().reset();
   }
 
@@ -1559,11 +1566,13 @@ ModelState::LaunchAutoCompleteStubProcess()
   Stub() = std::make_unique<StubLauncher>("AUTOCOMPLETE_STUB");
   RETURN_IF_ERROR(Stub()->Initialize(this));
   try {
+    RETURN_IF_ERROR(Stub()->Setup());
     RETURN_IF_ERROR(Stub()->Launch());
   }
   catch (const BackendModelException& ex) {
     Stub()->UpdateHealth();
     Stub()->TerminateStub();
+    Stub()->ClearLogQueue();
     Stub().reset();
     RETURN_ERROR_IF_TRUE(
         ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
@@ -1900,10 +1909,12 @@ TRITONBACKEND_ModelInstanceExecute(
           "Stub process is unhealthy and it will be restarted.");
       instance_state->TerminateLogMonitor();
       instance_state->Stub()->KillStubProcess();
-      TRITONSERVER_Error* err = instance_state->Stub()->Launch();
+      TRITONSERVER_Error* err = instance_state->Stub()->Setup();
       if(err == nullptr) {
         instance_state->StartLogMonitor();
       }
+      LOG_IF_ERROR(err, "Failed to restart the stub process.");
+      err = instance_state->Stub()->Launch();
       LOG_IF_ERROR(err, "Failed to restart the stub process.");
     }
   } else {

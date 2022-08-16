@@ -197,7 +197,6 @@ StubLauncher::Setup()
 TRITONSERVER_Error*
 StubLauncher::Launch()
 {
-  RETURN_IF_ERROR(Setup());
 
   std::string stub_name;
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
@@ -312,7 +311,6 @@ StubLauncher::Launch()
         int status;
         stub_message_queue_.reset();
         parent_message_queue_.reset();
-        log_message_queue_.reset();
         memory_manager_.reset();
         waitpid(stub_pid_, &status, 0);
       }
@@ -498,7 +496,6 @@ StubLauncher::TerminateStub()
 
       stub_message_queue_.reset();
       parent_message_queue_.reset();
-      log_message_queue_.reset();
       memory_manager_.reset();
     } else {
       force_kill = true;
@@ -516,8 +513,13 @@ StubLauncher::TerminateStub()
   ipc_control_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
-  log_message_queue_.reset();
   memory_manager_.reset();
+}
+
+void
+StubLauncher::ClearLogQueue()
+{
+  log_message_queue_.reset();
 }
 
 void
