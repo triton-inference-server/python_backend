@@ -1248,7 +1248,7 @@ main(int argc, char** argv)
   while (true) {
     if (finalize) {
       stub->Finalize();
-      // Need check or may recieve not joinable error
+      // Need check or may receive not joinable error
       if (stub->LogServiceActive()) {
         stub->TerminateLogRequestThread();
       }
