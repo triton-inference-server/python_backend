@@ -1916,6 +1916,10 @@ TRITONBACKEND_GetBackendAttribute(
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       "TRITONBACKEND_GetBackendAttribute: setting attributes");
+  // Specify different preferred instance kind baseds on backend compatibility,
+  // so Triton core won't blindly auto-complete kind that may not be supported.
+  // Other instance groups setting are set to "no value" so that Triton core
+  // will auto-complete them with default policy.
 #ifdef TRITON_ENABLE_GPU
   RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(backend_attributes,
       TRITONSERVER_INSTANCEGROUPKIND_GPU, 0, nullptr, 0));
