@@ -97,6 +97,13 @@ class StubLauncher {
     return parent_message_queue_;
   }
 
+  // Log message queue
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  LogMessageQueue()
+  {
+    return log_message_queue_;
+  }
+
   // Memory Manager
   std::unique_ptr<MemoryManager>& GetMemoryManager() { return memory_manager_; }
 
@@ -124,6 +131,9 @@ class StubLauncher {
 
   // Destruct Stub process
   void TerminateStub();
+
+  // Reset log queue pointer
+  void ClearLogQueue();
 
   // Kill stub process
   void KillStubProcess();
@@ -163,6 +173,8 @@ class StubLauncher {
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      log_message_queue_;
   std::unique_ptr<MemoryManager> memory_manager_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;

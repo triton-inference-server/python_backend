@@ -137,6 +137,7 @@ struct IPCControlShm {
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
   bi::managed_external_buffer::handle_t parent_message_queue;
+  bi::managed_external_buffer::handle_t log_message_queue;
   bi::managed_external_buffer::handle_t memory_manager_message_queue;
 };
 
@@ -151,6 +152,21 @@ struct ResponseBatch {
 
   // Indicates whether this error has a message or not.
   bool is_error_set;
+};
+
+struct LogSendMessageBase {
+  bi::interprocess_mutex log_mu;
+  bi::interprocess_condition log_cv;
+  bool waiting_on_stub;
+};
+
+enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
+
+struct LogSendMessage : LogSendMessageBase {
+  bi::managed_external_buffer::handle_t filename;
+  int32_t line;
+  bi::managed_external_buffer::handle_t log_message;
+  LogLevel level;
 };
 
 struct ResponseSenderBase {
