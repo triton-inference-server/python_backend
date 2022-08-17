@@ -38,10 +38,13 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <queue>
+#include <thread>
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
+#include "pb_log.h"
 #include "pb_utils.h"
 
 
@@ -66,51 +69,80 @@ namespace triton { namespace backend { namespace python {
     LOG_INFO << E.what(); \
   } while (false)
 
-// Macros that use current filename and line number.
-#define LOG_INFO LOG_INFO_FL(__FILE__, __LINE__)
+/// Macros that use current filename and line number.
+#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::INFO)
+#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::WARNING)
+#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::ERROR)
+#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::VERBOSE)
 
 class Logger {
  public:
-  // Log a message.
-  void Log(const std::string& msg) { std::cerr << msg << std::endl; }
+  Logger(){};
+  /// Python client log function
+  static void Log(const std::string& message, LogLevel level = LogLevel::INFO);
 
-  // Flush the log.
+  /// Python client log info function
+  static void LogInfo(const std::string& message);
+
+  /// Python client warning function
+  static void LogWarn(const std::string& message);
+
+  /// Python client log error function
+  static void LogError(const std::string& message);
+
+  /// Python client log verbose function
+  static void LogVerbose(const std::string& message);
+
+  /// Internal log function
+  void Log(
+      const std::string& filename, uint32_t lineno, LogLevel level,
+      const std::string& message);
+
+  /// Log format helper function
+  const std::string LeadingLogChar(const LogLevel& level);
+
+  /// Singleton Getter function
+  static Logger& GetOrCreateInstance()
+  {
+    static Logger instance;
+    return instance;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(Logger);
+
+  /// Flush the log.
   void Flush() { std::cerr << std::flush; }
 };
 
-static Logger gLogger_;
-
 class LogMessage {
  public:
-  LogMessage(const char* file, int line)
+  /// Create a log message, stripping the path down to the filename only
+  LogMessage(const char* file, int line, LogLevel level) : level_(level)
   {
     std::string path(file);
     size_t pos = path.rfind('/');
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tm_time;
-    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
-    stream_ << std::setfill('0') << std::setw(2) << (tm_time.tm_mon + 1)
-            << std::setw(2) << tm_time.tm_mday << " " << std::setw(2)
-            << tm_time.tm_hour << ':' << std::setw(2) << tm_time.tm_min << ':'
-            << std::setw(2) << tm_time.tm_sec << "." << std::setw(6)
-            << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid()) << ' '
-            << path << ':' << line << "] ";
+    file_ = path;
+    line_ = static_cast<uint32_t>(line);
   }
-
-  ~LogMessage() { gLogger_.Log(stream_.str()); }
+  /// Log message to console or send to backend (see Logger::Log for details)
+  ~LogMessage()
+  {
+    Logger::GetOrCreateInstance().Log(file_, line_, level_, stream_.str());
+  }
 
   std::stringstream& stream() { return stream_; }
 
  private:
   std::stringstream stream_;
+  std::string file_;
+  uint32_t line_;
+  LogLevel level_;
 };
 
-#define LOG_INFO_FL(FN, LN) LogMessage((char*)(FN), LN).stream()
+#define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
 class Stub {
  public:
@@ -148,6 +180,9 @@ class Stub {
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
 
+  /// Send a log message to the parent process.
+  void SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message);
+
   /// Receive a message from the parent process.
   std::unique_ptr<IPCMessage> PopMessage();
 
@@ -173,6 +208,24 @@ class Stub {
   bool IsDecoupled();
   ~Stub();
 
+  /// Start client log handler process
+  void LaunchLogRequestThread();
+
+  /// End client log handler process
+  void TerminateLogRequestThread();
+
+  /// Add client log to queue
+  void EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr);
+
+  /// Thread process
+  void ServiceLogRequests();
+
+  /// Send client log to the python backend
+  void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
+
+  /// Check if log handler is running
+  bool LogServiceActive();
+
  private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
@@ -192,13 +245,16 @@ class Stub {
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      log_message_queue_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
-  std::mutex tensors_to_remove_mutex_;
-  std::vector<std::unique_ptr<IPCMessage>> messages_;
-  std::mutex messages_mutex_;
-  std::condition_variable messages_cv_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
+  std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
+  std::thread log_monitor_;
+  bool log_thread_;
+  std::mutex log_message_mutex_;
+  std::condition_variable log_message_cv_;
 };
 }}}  // namespace triton::backend::python

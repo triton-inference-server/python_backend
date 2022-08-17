@@ -361,7 +361,7 @@ class ModelConfig:
             raise ValueError(
                 "Configuration specified scheduling_choice as '" \
                 + found_scheduler + "', but auto-complete-config " \
-                "function for model '" + self._model_config["name"] 
+                "function for model '" + self._model_config["name"]
                 + "' tries to set scheduling_choice as 'dynamic_batching'")
 
         if "dynamic_batching" not in self._model_config:

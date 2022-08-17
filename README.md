@@ -72,6 +72,7 @@ any C++ code.
   - [Preprocessing](#preprocessing)
   - [Decoupled Models](#decoupled-models)
 - [Running with Inferentia](#running-with-inferentia)
+- [Logging](#logging)
 - [Reporting problems, asking questions](#reporting-problems-asking-questions)
 
 ## Quick Start
@@ -1052,6 +1053,34 @@ You can find the complete example instructions in [examples/decoupled](examples/
 # Running with Inferentia
 
 Please see the [README.md](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/README.md) located in the python_backend/inferentia sub folder.
+
+# Logging
+
+Your Python model can log information using the following methods:
+
+```python
+import triton_python_backend_utils as pb_utils
+...
+logger = pb_utils.Logger
+logger.log_info("Info Msg!")
+logger.log_warn("Warning Msg!")
+logger.log_error("Error Msg!")
+logger.log_verbose("Verbose Msg!")
+```
+Log messages can also be sent with their log-level explcitiy specified:
+```python
+# log-level options: INFO, WARNING, ERROR, VERBOSE
+logger.log("Specific Msg!", logger.INFO)
+```
+If no log-level is specified, this method will log INFO level messages.
+
+Note that the Triton server's settings determine which log messages appear
+within the server log. For example, if a model attempts to log a verbose-level
+message, but Triton is not set to log verbose-level messages, it will not
+appear in the server log. For more information on Triton's log settings and
+how to adjust them dynamically, please see Triton's 
+[logging extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_logging.md)
+documentation.
 
 # Reporting problems, asking questions
 
