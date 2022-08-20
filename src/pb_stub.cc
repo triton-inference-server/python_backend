@@ -939,6 +939,18 @@ Stub::LogServiceActive()
   return log_thread_;
 }
 
+std::unique_ptr<Logger> Logger::log_instance_;
+
+std::unique_ptr<Logger>&
+Logger::GetOrCreateInstance()
+{
+  if (Logger::log_instance_.get() == nullptr) {
+    Logger::log_instance_ = std::make_unique<Logger>();
+  }
+
+  return Logger::log_instance_;
+}
+
 // Bound function, called from the python client
 void
 Logger::Log(const std::string& message, LogLevel level)
@@ -954,7 +966,7 @@ Logger::Log(const std::string& message, LogLevel level)
   uint32_t line = lineno.cast<uint32_t>();
 
   if (!stub->LogServiceActive()) {
-    Logger::GetOrCreateInstance().Log(filename, line, level, message);
+    Logger::GetOrCreateInstance()->Log(filename, line, level, message);
   } else {
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
     stub->EnqueueLogRequest(log_msg);
