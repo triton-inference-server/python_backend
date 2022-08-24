@@ -2002,5 +2002,28 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
   return nullptr;
 }
 
+TRITONSERVER_Error*
+TRITONBACKEND_GetBackendAttribute(
+    TRITONBACKEND_Backend* backend,
+    TRITONBACKEND_BackendAttribute* backend_attributes)
+{
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      "TRITONBACKEND_GetBackendAttribute: setting attributes");
+  // Specify different preferred instance kind based on backend compatibility,
+  // so Triton core won't blindly auto-complete kind that may not be supported.
+  // Other instance groups setting are set to "no value" so that Triton core
+  // will auto-complete them with default policy.
+#ifdef TRITON_ENABLE_GPU
+  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(backend_attributes,
+      TRITONSERVER_INSTANCEGROUPKIND_GPU, 0, nullptr, 0));
+#else
+  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(backend_attributes,
+      TRITONSERVER_INSTANCEGROUPKIND_CPU, 0, nullptr, 0));
+#endif
+
+  return nullptr;
+}
+
 }  // extern "C"
 }}}  // namespace triton::backend::python
