@@ -121,12 +121,12 @@ sudo ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
 # If container version is not known, look up container version and upstream container version from build.py
 cd ${TRITON_PATH}/server
 if [ "${CONTAINER_VERSION}" = "" ]; then
-    QUERY_STRING="import build; container_version,_= build.get_container_versions('$(cat TRITON_VERSION)', None, None); print(container_version)"
+    QUERY_STRING="import build; container_version,_= build.container_versions('$(cat TRITON_VERSION)', None, None); print(container_version)"
     CONTAINER_VERSION=$(python3 -c "${QUERY_STRING}")
     echo "found container version: ${CONTAINER_VERSION} from build.py"
 fi
 if [ "${UPSTREAM_CONTAINER_VERSION}" = "" ]; then
-    QUERY_STRING="import build; _,upstream_container_version = build.get_container_versions('$(cat TRITON_VERSION)', None, None); print(upstream_container_version)"
+    QUERY_STRING="import build; _,upstream_container_version = build.container_versions('$(cat TRITON_VERSION)', None, None); print(upstream_container_version)"
     UPSTREAM_CONTAINER_VERSION=$(python3 -c "${QUERY_STRING}")
     echo "found upstream container version: ${UPSTREAM_CONTAINER_VERSION} from build.py"
 fi
@@ -134,9 +134,7 @@ fi
 # Build container with only python backend 
 cd ${TRITON_PATH}/server
 pip3 install docker
-./build.py --build-dir=/tmp/tritonbuild \
-           --cmake-dir=${TRITON_PATH}/server/build \
-           --container-version=${CONTAINER_VERSION} \
+./build.py --container-version=${CONTAINER_VERSION} \
            --upstream-container-version=${UPSTREAM_CONTAINER_VERSION} \
            --enable-logging --enable-stats --enable-tracing \
            --enable-metrics --enable-gpu-metrics --enable-gpu \
@@ -149,7 +147,7 @@ pip3 install docker
            --backend=identity:${IDENTITY_BACKEND_REPO_TAG} \
            --backend=python:${PYTHON_BACKEND_REPO_TAG} \
            --repoagent=checksum:${CHECKSUM_REPOAGENT_REPO_TAG}
-docker tag tritonserver_build "${BUILD_IMAGE}"
+docker tag tritonserver_buildbase "${BUILD_IMAGE}"
 docker tag tritonserver "${BASE_IMAGE}"
 
 # Build docker container for SDK

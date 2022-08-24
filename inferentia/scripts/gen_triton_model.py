@@ -272,9 +272,7 @@ def get_tensorflow_initialize_impl():
 
         # TODO: Validate input/output from the model
 
-        # TODO: NEURONCORE_GROUP_SIZES is deprecated by AWS Neuron
-        group_sizes = [str(1)] * cores_per_instance
-        os.environ["NEURONCORE_GROUP_SIZES"] = ','.join(group_sizes)
+        os.environ["NEURON_RT_NUM_CORES"] = str(cores_per_instance)
 
         self.pred_list = [
             tf.contrib.predictor.from_saved_model(compiled_model)
