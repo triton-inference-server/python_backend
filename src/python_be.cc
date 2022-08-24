@@ -1916,7 +1916,7 @@ TRITONBACKEND_GetBackendAttribute(
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       "TRITONBACKEND_GetBackendAttribute: setting attributes");
-  // Specify different preferred instance kind baseds on backend compatibility,
+  // Specify different preferred instance kind based on backend compatibility,
   // so Triton core won't blindly auto-complete kind that may not be supported.
   // Other instance groups setting are set to "no value" so that Triton core
   // will auto-complete them with default policy.
