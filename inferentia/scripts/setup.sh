@@ -159,9 +159,9 @@ if [ $USE_TENSORFLOW -eq 1 ]; then
     pip install --upgrade tensorboard-plugin-neuron
     # Update Neuron TensorFlow
     if [ $TENSORFLOW_VERSION -eq 1 ]; then
-        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
+        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4"
     else
-        pip install --upgrade tensorflow-neuron[cc]
+        pip install --upgrade tensorflow-neuron[cc] "protobuf<4"
     fi
 fi
 
@@ -169,7 +169,7 @@ if [ $USE_PYTORCH -eq 1 ]
 then
     conda install torch-neuron torchvision -y
     # Upgrade torch-neuron and install transformers
-    pip install --upgrade torch-neuron neuron-cc[tensorflow] torchvision "transformers==4.6.0"
+    pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf<4" torchvision "transformers==4.6.0"
 fi
 
 # Upgrade the python backend stub, rules and sockets
