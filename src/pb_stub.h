@@ -78,6 +78,7 @@ namespace triton { namespace backend { namespace python {
 class Logger {
  public:
   Logger(){};
+  ~Logger(){ log_instance_.reset(); };
   /// Python client log function
   static void Log(const std::string& message, LogLevel level = LogLevel::INFO);
 
@@ -101,17 +102,16 @@ class Logger {
   /// Log format helper function
   const std::string LeadingLogChar(const LogLevel& level);
 
-  /// Singleton Getter function
-  static Logger& GetOrCreateInstance()
-  {
-    static Logger instance;
-    return instance;
-  }
+  /// Singleton Getter Function
+  static std::unique_ptr<Logger>& GetOrCreateInstance();
 
   DISALLOW_COPY_AND_ASSIGN(Logger);
 
   /// Flush the log.
   void Flush() { std::cerr << std::flush; }
+
+ private:
+  static std::unique_ptr<Logger> log_instance_;
 };
 
 class LogMessage {
@@ -130,7 +130,7 @@ class LogMessage {
   /// Log message to console or send to backend (see Logger::Log for details)
   ~LogMessage()
   {
-    Logger::GetOrCreateInstance().Log(file_, line_, level_, stream_.str());
+    Logger::GetOrCreateInstance()->Log(file_, line_, level_, stream_.str());
   }
 
   std::stringstream& stream() { return stream_; }
@@ -146,7 +146,7 @@ class LogMessage {
 
 class Stub {
  public:
-  Stub(){};
+  Stub(){ log_thread_ = false; };
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
