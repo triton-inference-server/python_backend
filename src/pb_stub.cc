@@ -939,6 +939,18 @@ Stub::LogServiceActive()
   return log_thread_;
 }
 
+std::unique_ptr<Logger> Logger::log_instance_;
+
+std::unique_ptr<Logger>&
+Logger::GetOrCreateInstance()
+{
+  if (Logger::log_instance_.get() == nullptr) {
+    Logger::log_instance_ = std::make_unique<Logger>();
+  }
+
+  return Logger::log_instance_;
+}
+
 // Bound function, called from the python client
 void
 Logger::Log(const std::string& message, LogLevel level)
@@ -954,7 +966,7 @@ Logger::Log(const std::string& message, LogLevel level)
   uint32_t line = lineno.cast<uint32_t>();
 
   if (!stub->LogServiceActive()) {
-    Logger::GetOrCreateInstance().Log(filename, line, level, message);
+    Logger::GetOrCreateInstance()->Log(filename, line, level, message);
   } else {
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
     stub->EnqueueLogRequest(log_msg);
@@ -1195,6 +1207,7 @@ main(int argc, char** argv)
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
 
+  std::unique_ptr<Logger>& logger = Logger::GetOrCreateInstance();
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
@@ -1213,7 +1226,7 @@ main(int argc, char** argv)
 
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread =
-      std::thread([&parent_pid, &background_thread_running, &stub] {
+      std::thread([&parent_pid, &background_thread_running, &stub, &logger] {
         while (background_thread_running) {
           // Every 300ms set the health variable to true. This variable is in
           // shared memory and will be set to false by the parent process.
@@ -1235,6 +1248,7 @@ main(int argc, char** argv)
             non_graceful_exit = true;
 
             // Destroy stub and exit.
+            logger.reset();
             stub.reset();
             exit(1);
           }
@@ -1264,6 +1278,7 @@ main(int argc, char** argv)
   // objects. If the scoped_interpreter is destroyed before the stub object,
   // this process will no longer hold the GIL lock and destruction of the stub
   // will result in segfault.
+  logger.reset();
   stub.reset();
 
   return 0;
