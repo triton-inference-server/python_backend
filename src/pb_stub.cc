@@ -858,13 +858,13 @@ Stub::LaunchLogRequestThread()
 {
   log_thread_ = true;
   log_monitor_ = std::thread(&Stub::ServiceLogRequests, this);
-  logger->SetBackendLoggingActive(true);
+  Logger::GetOrCreateInstance()->SetBackendLoggingActive(true);
 }
 
 void
 Stub::TerminateLogRequestThread()
 {
-  logger->SetBackendLoggingActive(false);
+  Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
     std::lock_guard<std::mutex> guard{log_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
