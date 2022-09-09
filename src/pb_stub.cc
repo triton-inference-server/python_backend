@@ -858,11 +858,13 @@ Stub::LaunchLogRequestThread()
 {
   log_thread_ = true;
   log_monitor_ = std::thread(&Stub::ServiceLogRequests, this);
+  logger->SetBackendLoggingActive(true);
 }
 
 void
 Stub::TerminateLogRequestThread()
 {
+  logger->SetBackendLoggingActive(false);
   {
     std::lock_guard<std::mutex> guard{log_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
@@ -1233,7 +1235,6 @@ main(int argc, char** argv)
     logger.reset();
     exit(1);
   }
-  logger->SetBackendLoggingActive(true);
 
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
@@ -1256,7 +1257,6 @@ main(int argc, char** argv)
             // messages to the backend ASAP.
             if (stub->LogServiceActive()) {
               stub->TerminateLogRequestThread();
-              logger->SetBackendLoggingActive(false);
             }
             // Destroy Stub
             LOG_INFO << "Non-graceful termination detected. ";
@@ -1281,7 +1281,6 @@ main(int argc, char** argv)
       // Need check or may receive not joinable error
       if (stub->LogServiceActive()) {
         stub->TerminateLogRequestThread();
-        logger->SetBackendLoggingActive(false);
       }
       background_thread_running = false;
       background_thread.join();
