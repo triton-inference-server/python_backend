@@ -858,11 +858,13 @@ Stub::LaunchLogRequestThread()
 {
   log_thread_ = true;
   log_monitor_ = std::thread(&Stub::ServiceLogRequests, this);
+  Logger::GetOrCreateInstance()->SetBackendLoggingActive(true);
 }
 
 void
 Stub::TerminateLogRequestThread()
 {
+  Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
     std::lock_guard<std::mutex> guard{log_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
@@ -889,10 +891,9 @@ Stub::ServiceLogRequests()
     while (log_request_buffer_.empty()) {
       log_message_cv_.wait(guard);
     }
-    // On exit, will send messages until 
+    // On exit, will send messages until
     // DUMMY_MESSAGE is reached
-    std::unique_ptr<PbLog> log_request =
-          std::move(log_request_buffer_.front());
+    std::unique_ptr<PbLog> log_request = std::move(log_request_buffer_.front());
     if (log_request == DUMMY_MESSAGE) {
       log_request_buffer_.pop();
       break;
@@ -979,10 +980,9 @@ Logger::Log(
     const std::string& filename, uint32_t lineno, LogLevel level,
     const std::string& message)
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   // If the log monitor service is not active yet, format
   // and pass messages to cerr
-  if (!stub->LogServiceActive()) {
+  if (!BackendLoggingActive()) {
     std::string path(filename);
     size_t pos = path.rfind('/');
     if (pos != std::string::npos) {
@@ -1001,6 +1001,8 @@ Logger::Log(
        << ' ' << path << ':' << lineno << "] ";
     std::cerr << ss.str() << " " << message << std::endl;
   } else {
+    // Ensure we do not create a stub instance before it has initialized
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, lineno, message, level));
     stub->EnqueueLogRequest(log_msg);
   }
@@ -1043,6 +1045,18 @@ Logger::LeadingLogChar(const LogLevel& level)
     default:
       return "I";
   }
+}
+
+void
+Logger::SetBackendLoggingActive(bool status)
+{
+  backend_logging_active_ = status;
+}
+
+bool
+Logger::BackendLoggingActive()
+{
+  return backend_logging_active_;
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
@@ -1155,8 +1169,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def_static("log_info", &Logger::LogInfo, py::arg("message"));
   logger.def_static("log_warn", &Logger::LogWarn, py::arg("message"));
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));
-  logger.def_static(
-      "log_verbose", &Logger::LogVerbose, py::arg("message"));
+  logger.def_static("log_verbose", &Logger::LogVerbose, py::arg("message"));
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
@@ -1172,8 +1185,10 @@ extern "C" {
 int
 main(int argc, char** argv)
 {
+  std::unique_ptr<Logger>& logger = Logger::GetOrCreateInstance();
   if (argc < 9) {
     LOG_INFO << "Expected 9 arguments, found " << argc << " arguments.";
+    logger.reset();
     exit(1);
   }
   signal(SIGINT, SignalHandler);
@@ -1200,6 +1215,7 @@ main(int argc, char** argv)
 
   if (model_path_tokens.size() < 2) {
     LOG_INFO << "Model path does not look right: " << model_path;
+    logger.reset();
     exit(1);
   }
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
@@ -1207,7 +1223,6 @@ main(int argc, char** argv)
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
 
-  std::unique_ptr<Logger>& logger = Logger::GetOrCreateInstance();
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
@@ -1217,6 +1232,7 @@ main(int argc, char** argv)
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
+    logger.reset();
     exit(1);
   }
 
