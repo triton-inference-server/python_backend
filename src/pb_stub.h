@@ -77,8 +77,8 @@ namespace triton { namespace backend { namespace python {
 
 class Logger {
  public:
-  Logger(){};
-  ~Logger(){ log_instance_.reset(); };
+  Logger() { backend_logging_active_ = false; };
+  ~Logger() { log_instance_.reset(); };
   /// Python client log function
   static void Log(const std::string& message, LogLevel level = LogLevel::INFO);
 
@@ -102,6 +102,12 @@ class Logger {
   /// Log format helper function
   const std::string LeadingLogChar(const LogLevel& level);
 
+  /// Set PYBE Logging Status
+  void SetBackendLoggingActive(bool status);
+
+  /// Get PYBE Logging Status
+  bool BackendLoggingActive();
+
   /// Singleton Getter Function
   static std::unique_ptr<Logger>& GetOrCreateInstance();
 
@@ -112,6 +118,7 @@ class Logger {
 
  private:
   static std::unique_ptr<Logger> log_instance_;
+  bool backend_logging_active_;
 };
 
 class LogMessage {
@@ -146,7 +153,7 @@ class LogMessage {
 
 class Stub {
  public:
-  Stub(){ log_thread_ = false; };
+  Stub() { log_thread_ = false; };
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
