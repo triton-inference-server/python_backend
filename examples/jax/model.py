@@ -39,6 +39,7 @@ def AddSub(input_0, input_1):
     """
     Simple AddSub operations in JAX. This outputs the sum and subtraction of
     the inputs.
+    JAX API: https://jax.readthedocs.io/en/latest/jax.html
     """
     output_0 = jnp.add(input_0, input_1)
     output_1 = jnp.subtract(input_0, input_1)
