@@ -62,7 +62,7 @@ class TritonPythonModel:
           * model_config: A JSON string containing the model configuration
           * model_instance_kind: A string containing model instance kind
           * model_instance_device_id: A string containing model instance device ID
-          * model_repository: Model repository path
+          * model_repository: Absolute model repository path
           * model_version: Model version
           * model_name: Model name
         """
@@ -111,8 +111,8 @@ class TritonPythonModel:
 
         responses = []
 
-        # Every Python backend must iterate over everyone of the requests
-        # and create a pb_utils.InferenceResponse for each of them.
+        # Every Python backend must iterate over every one of the requests and
+        # create a pb_utils.InferenceResponse for each of them.
         for request in requests:
             # Get INPUT0
             in_0 = pb_utils.get_input_tensor_by_name(request, "INPUT0")
