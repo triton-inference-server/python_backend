@@ -71,6 +71,7 @@ any C++ code.
   - [Business Logic Scripting](#business-logic-scripting-1)
   - [Preprocessing](#preprocessing)
   - [Decoupled Models](#decoupled-models)
+  - [AddSub in JAX](#addsub-in-jax)
 - [Running with Inferentia](#running-with-inferentia)
 - [Logging](#logging)
 - [Reporting problems, asking questions](#reporting-problems-asking-questions)
@@ -1049,6 +1050,15 @@ You can find the complete example instructions in [examples/preprocessing](examp
 The examples of decoupled models shows how to develop and serve
 [decoupled models](../../README.md#decoupled-mode) in Triton using Python backend.
 You can find the complete example instructions in [examples/decoupled](examples/decoupled/README.md).
+
+## AddSub in JAX
+
+To use this model, JAX needs to be installed. We recommend using the `pip`
+method mentioned in the
+[JAX documentation](https://github.com/google/jax#pip-installation-gpu-cuda).
+Make sure that JAX is available in the same Python environment as other
+dependencies. You can find the files for this example in
+[examples/jax](examples/jax).
 
 # Running with Inferentia
 
