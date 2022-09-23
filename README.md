@@ -68,10 +68,10 @@ any C++ code.
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
+  - [AddSub in JAX](#addsub-in-jax)
   - [Business Logic Scripting](#business-logic-scripting-1)
   - [Preprocessing](#preprocessing)
   - [Decoupled Models](#decoupled-models)
-  - [AddSub in JAX](#addsub-in-jax)
 - [Running with Inferentia](#running-with-inferentia)
 - [Logging](#logging)
 - [Reporting problems, asking questions](#reporting-problems-asking-questions)
@@ -1035,6 +1035,11 @@ Make sure that PyTorch is available in the same Python environment as other
 dependencies. Alternatively, you can create a [Python Execution Environment](#using-custom-python-execution-environments).
 You can find the files for this example in [examples/pytorch](examples/pytorch).
 
+## AddSub in JAX
+
+The JAX example shows how to serve JAX in Triton using Python Backend.
+You can find the complete example instructions in [examples/jax](examples/jax/README.md).
+
 ## Business Logic Scripting
 
 The BLS example needs the dependencies required for both of the above examples.
@@ -1050,15 +1055,6 @@ You can find the complete example instructions in [examples/preprocessing](examp
 The examples of decoupled models shows how to develop and serve
 [decoupled models](../../README.md#decoupled-mode) in Triton using Python backend.
 You can find the complete example instructions in [examples/decoupled](examples/decoupled/README.md).
-
-## AddSub in JAX
-
-To use this model, JAX needs to be installed. We recommend using the `pip`
-method mentioned in the
-[JAX documentation](https://github.com/google/jax#pip-installation-gpu-cuda).
-Make sure that JAX is available in the same Python environment as other
-dependencies. You can find the files for this example in
-[examples/jax](examples/jax).
 
 # Running with Inferentia
 
