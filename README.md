@@ -68,6 +68,7 @@ any C++ code.
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
+  - [AddSub in JAX](#addsub-in-jax)
   - [Business Logic Scripting](#business-logic-scripting-1)
   - [Preprocessing](#preprocessing)
   - [Decoupled Models](#decoupled-models)
@@ -1033,6 +1034,11 @@ In order to use this model, you need to install PyTorch. We recommend using
 Make sure that PyTorch is available in the same Python environment as other
 dependencies. Alternatively, you can create a [Python Execution Environment](#using-custom-python-execution-environments).
 You can find the files for this example in [examples/pytorch](examples/pytorch).
+
+## AddSub in JAX
+
+The JAX example shows how to serve JAX in Triton using Python Backend.
+You can find the complete example instructions in [examples/jax](examples/jax/README.md).
 
 ## Business Logic Scripting
 
