@@ -104,4 +104,11 @@ At the directory where the client.py is located, run the following command:
 $ docker run --rm --net=host -v `pwd`:/jax nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk python3 /jax/client.py
 ```
 
-A successful inference will print `PASS: jax` at the end.
+A successful inference will print the following at the end:
+```
+INPUT0 ([0.89262384 0.645457   0.18913145 0.17099917]) + INPUT1 ([0.5703733  0.21917151 0.22854741 0.97336507]) = OUTPUT0 ([1.4629972  0.86462855 0.41767886 1.1443642 ])
+INPUT0 ([0.89262384 0.645457   0.18913145 0.17099917]) - INPUT1 ([0.5703733  0.21917151 0.22854741 0.97336507]) = OUTPUT0 ([ 0.32225055  0.4262855  -0.03941596 -0.8023659 ])
+PASS: jax
+```
+Note: You inputs can be different from the above, but the outputs always
+correspond to its inputs.
