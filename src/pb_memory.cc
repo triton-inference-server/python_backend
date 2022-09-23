@@ -295,7 +295,7 @@ PbMemory::GetGPUStartAddress()
 {
   if (memory_shm_ptr_->memory_type == TRITONSERVER_MEMORY_GPU) {
     CUDAHandler& cuda_api = CUDAHandler::getInstance();
-    CUdeviceptr start_address;
+    CUdeviceptr start_address = 0;
 
     // Skip this step for empty tensor as the CUDA API 'cuPointerGetAttribute'
     // we use in this function does not accept nullptr.
