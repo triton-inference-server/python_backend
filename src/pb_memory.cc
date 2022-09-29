@@ -295,11 +295,15 @@ PbMemory::GetGPUStartAddress()
 {
   if (memory_shm_ptr_->memory_type == TRITONSERVER_MEMORY_GPU) {
     CUDAHandler& cuda_api = CUDAHandler::getInstance();
-    CUdeviceptr start_address;
+    CUdeviceptr start_address = 0;
 
-    cuda_api.PointerGetAttribute(
-        &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
-        reinterpret_cast<CUdeviceptr>(data_ptr_));
+    // Skip this step for empty tensor as the CUDA API 'cuPointerGetAttribute'
+    // we use in this function does not accept nullptr.
+    if (data_ptr_) {
+      cuda_api.PointerGetAttribute(
+          &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+          reinterpret_cast<CUdeviceptr>(data_ptr_));
+    }
 
     return reinterpret_cast<void*>(start_address);
   }
