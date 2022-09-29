@@ -33,7 +33,7 @@ serving [decoupled models](../../README.md#decoupled-mode) in Python backend.
 
 [repeat_model.py](repeat_model.py) and [square_model.py](square_model.py) demonstrate
 how to write a decoupled model where each request can generate 0 to many responses.
-These files are heavily commented to describe each fuinction call.
+These files are heavily commented to describe each function call.
 These example models are designed to show the flexibility available to decoupled models
 and in no way should be used in production. These examples circumvents
 the restriction placed by the [instance count](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#instance-groups)
