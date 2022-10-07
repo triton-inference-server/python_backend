@@ -220,7 +220,7 @@ class TritonPythonModel:
         ----------
         auto_complete_model_config : pb_utils.ModelConfig
           An object containing the existing model configuration. You can build upon
-          the configuration given by this object when setting the properties for 
+          the configuration given by this object when setting the properties for
           this model.
 
         Returns
@@ -274,9 +274,9 @@ class TritonPythonModel:
                 auto_complete_model_config.add_output(output)
 
         auto_complete_model_config.set_max_batch_size(0)
-        
-        # To enable a dynamic batcher with default settings, you can use 
-        # auto_complete_model_config set_dynamic_batching() function. It is 
+
+        # To enable a dynamic batcher with default settings, you can use
+        # auto_complete_model_config set_dynamic_batching() function. It is
         # commented in this example because the max_batch_size is zero.
         #
         # auto_complete_model_config.set_dynamic_batching()
@@ -348,22 +348,22 @@ Every Python backend can implement four main functions:
 ### `auto_complete_config`
 
 `auto_complete_config` is called only once when loading the model assuming
-the server was not started with [`--disable-auto-complete-config`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#auto-generated-model-configuration).
+the server was not started with [`--disable-auto-complete-config`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#auto-generated-model-configuration).
 
 Implementing this function is optional. No implementation of
-`auto_complete_config` will do nothing. This function can be used to set 
+`auto_complete_config` will do nothing. This function can be used to set
 [`max_batch_size`](
-  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#maximum-batch-size),
 [dynamic_batching](
-  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#dynamic-batcher),
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#dynamic-batcher),
 [`input`](
-  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs) and
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs) and
 [`output`](
-  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs)
 properties of the model using `set_max_batch_size`, `set_dynamic_batching`, `add_input`, and
 `add_output`. These properties will allow Triton to load the model with
 [minimal model configuration](
-  https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file. This function returns the
 `pb_utils.ModelConfig` object with these properties. You can use the `as_dict`
 function to gain read-only access to the `pb_utils.ModelConfig` object.
@@ -463,7 +463,7 @@ This mode allows user to send multiple responses for a request or
 not send any responses for a request. A model may also send
 responses out-of-order relative to the order that the request batches
 are executed. Such models are called *decoupled* models. In
-order to use this mode, the [transaction policy](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#model-transaction-policy)
+order to use this mode, the [transaction policy](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-transaction-policy)
 in the model configuration must be set to decoupled.
 
 
@@ -514,7 +514,7 @@ The decoupled mode is powerful and supports various other use cases:
 
 The [decoupled examples](examples/decoupled/README.md) demonstrate
 full power of what can be acheived from decoupled API. Read
-[Decoupled Backends and Models](https://github.com/triton-inference-server/server/blob/main/docs/decoupled_models.md)
+[Decoupled Backends and Models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/decoupled_models.md)
 for more details on how to host a decoupled model.
 
 ##### Known Issues
@@ -611,7 +611,7 @@ linked shared libraries. If you use a different Python version, you should see
 that version instead. You need to copy the `triton_python_backend_stub` to the
 model directory of the models that want to use the custom Python backend
 stub. For example, if you have `model_a` in your
-[model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md),
+[model repository](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_repository.md),
 the folder structure should look like below:
 
 ```
@@ -778,7 +778,7 @@ Because of GIL, it is not possible have multiple threads running in the same
 Python interpreter simultaneously as each thread requires to acquire the GIL
 when accessing Python objects which will serialize all the operations. In order
 to work around this issue, Python backend spawns a separate process for each
-[model instance](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#multiple-model-instances).
+[model instance](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#multiple-model-instances).
 This is in contrast with how other Triton backends such as
 [ONNXRuntime](https://github.com/triton-inference-server/onnxruntime_backend),
 [TensorFlow](https://github.com/triton-inference-server/tensorflow_backend), and
@@ -789,7 +789,7 @@ additional threads instead of spawning separate processes.
 # Business Logic Scripting
 
 Triton's
-[ensemble](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#ensemble-models)
+[ensemble](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/architecture.md#ensemble-models)
 feature supports many use cases where multiple models are composed into a
 pipeline (or more generally a DAG, directed acyclic graph). However, there are
 many other use cases that are not supported because as part of the model
@@ -906,11 +906,11 @@ that you can execute in your model without running into the out of GPU or shared
 memory error.
 
 Note: Async BLS is not supported on Python 3.6 or lower due to the `async` keyword
-and `asyncio.run` being introduced in Python 3.7. 
+and `asyncio.run` being introduced in Python 3.7.
 
 ## Using BLS with Stateful Models
 
-[Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/architecture.md#stateful-models)
+[Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/architecture.md#stateful-models)
 require setting additional flags in the inference request to indicate the
 start and of a sequence. The `flags` argument in the `pb_utils.InferenceRequest`
 object can be used to indicate whether the request is the first or last request
@@ -924,7 +924,7 @@ inference_request = pb_utils.InferenceRequest(model_name='model_name',
   request_id="1", correlation_id=4, flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
 ```
 
-For indicating the ending of the sequence you can use the 
+For indicating the ending of the sequence you can use the
 `pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END` flag. If the request is both
 starting and ending a sequence at the same time (i.e. the sequence has only a
 single request), you can use the bitwise OR operator to enable both of the
@@ -1084,7 +1084,7 @@ Note that the Triton server's settings determine which log messages appear
 within the server log. For example, if a model attempts to log a verbose-level
 message, but Triton is not set to log verbose-level messages, it will not
 appear in the server log. For more information on Triton's log settings and
-how to adjust them dynamically, please see Triton's 
+how to adjust them dynamically, please see Triton's
 [logging extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_logging.md)
 documentation.
 
