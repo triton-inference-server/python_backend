@@ -1053,7 +1053,7 @@ You can find the complete example instructions in [examples/preprocessing](examp
 ## Decoupled Models
 
 The examples of decoupled models shows how to develop and serve
-[decoupled models](../../README.md#decoupled-mode) in Triton using Python backend.
+[decoupled models](#decoupled-mode) in Triton using Python backend.
 You can find the complete example instructions in [examples/decoupled](examples/decoupled/README.md).
 
 # Running with Inferentia
