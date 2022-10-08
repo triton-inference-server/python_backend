@@ -718,7 +718,16 @@ default version of the stub is Python 3.8.
 provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
 `config.pbtxt` of all the models that want to use the execution environment.
 
-4. If you need to compile the Python backend stub, it is recommended that you
+4. The `EXECUTION_ENV_PATH` **should not** point to anywhere outside the
+`$$TRITON_MODEL_DIRECTORY`, the behavior of accessing anywhere outside the
+`$$TRITON_MODEL_DIRECTORY` is **undefined**.
+
+5. An *experimental* feature has been added to allow the `EXECUTION_ENV_PATH`
+to access one level outside the `$$TRITON_MODEL_DIRECTORY` for local and S3
+storages. The *experimental* feature can be modified or removed without any
+advance notice.
+
+6. If you need to compile the Python backend stub, it is recommended that you
 compile it in the official Triton NGC containers. Otherwise, your compiled stub
 may use dependencies that are not available in the Triton container that you are
 using for deployment. For example, compiling the Python backend stub on an OS
