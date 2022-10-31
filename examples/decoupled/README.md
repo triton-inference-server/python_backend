@@ -36,7 +36,8 @@ how to write a decoupled model where each request can generate 0 to many respons
 These files are heavily commented to describe each function call.
 These example models are designed to show the flexibility available to decoupled models
 and in no way should be used in production. These examples circumvents
-the restriction placed by the [instance count](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#instance-groups)
+the restriction placed by the
+[instance count](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups)
 and allows multiple requests to be in process even for single instance. In
 real deployment, the model should not allow the caller thread to return from
 `execute` until that instance is ready to handle another set of requests.

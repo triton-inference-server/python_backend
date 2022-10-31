@@ -31,15 +31,15 @@
 This example shows how to implement
 [`auto_complete_config`](https://github.com/triton-inference-server/python_backend/#auto_complete_config)
 function in Python backend to provide
-[`max_batch_size`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size),
-[`input`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
-and [`output`](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#inputs-and-outputs)
+[`max_batch_size`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#maximum-batch-size),
+[`input`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs)
+and [`output`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs)
 properties. These properties will allow Triton to load the Python model with
-[Minimal Model Configuration](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#minimal-model-configuration)
+[Minimal Model Configuration](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file.
 
 The
-[model repository](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md)
+[model repository](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_repository.md)
 should contain [nobatch_auto_complete](./nobatch_model.py), and
 [batch_auto_complete](./batch_model.py) models.
 The max_batch_size of [nobatch_auto_complete](./nobatch_model.py) model is set
