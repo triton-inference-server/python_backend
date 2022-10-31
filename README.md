@@ -50,9 +50,9 @@ any C++ code.
         - [Known Issues](#known-issues)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
-  - [Using Custom Python Execution Environments](#using-custom-python-execution-environments)
-    - [1. Building Custom Python Backend Stub](#1-building-custom-python-backend-stub)
-    - [2. Packaging the Conda Environment](#2-packaging-the-conda-environment)
+  - [Managing Python Runtime and Libraries](#managing-python-runtime-and-libraries)
+    - [Building Custom Python Backend Stub](#building-custom-python-backend-stub)
+    - [Creating Custom Execution Environments](#creating-custom-execution-environments)
     - [Important Notes](#important-notes)
   - [Error Handling](#error-handling)
   - [Managing Shared Memory](#managing-shared-memory)
@@ -547,21 +547,26 @@ models
     └── config.pbtxt
 ```
 
-## Using Custom Python Execution Environments
+## Managing Python Runtime and Libraries
 
 Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
-containers uses Python 3.8. If your Python model is compatible with Python 3.8
-and requires only modules already included in the Triton container, then you can
-skip this section. If you need to use a different version of Python or if you
-have additional dependencies, you need to recompile the stub executable and
-create an execution environment as described below and include that with your
-model.
+containers uses Python 3.8. Python backend is able to use the libaries
+that exist in the current Python environment. These libraries can
+be installed in a virtualenv, conda environment, or the global system
+Python. These libraries will only be used if the Python version matches
+the Python version of the Python backend's stub executable. For example,
+if you install a set of libraries in a Python 3.9 environment and your
+Python backend stub is compiled with Python 3.8 these libraries will NOT
+be available in your Python model served using Triton. You would need to
+compile the stub executble with Python 3.9 using the instructions in
+[Building Custom Python Backend Stub](#building-custom-python-backend-stub)
+section.
 
-### 1. Building Custom Python Backend Stub
+### Building Custom Python Backend Stub
 
-**Important Note: If your Python model and its dependencies use Python 3.8,
-you can skip this section and start from section 2 since the Python backend stub
-shipped in Triton containers uses Python 3.8 by default.**
+**Important Note: You only need to compile a custom Python backend stub if the
+Python version is different from Python 3.8 which is shipped by
+default in the Triton containers.**
 
 Python backend uses a *stub* process to connect your `model.py` file to the
 Triton C++ core. This stub process has an embedded Python interpreter with
@@ -570,19 +575,19 @@ different version from the default Python backend stub, you need to compile your
 Python backend stub by following the steps below:
 
 1. Install the software packages below:
-* [conda](https://docs.conda.io/en/latest/)
 * [cmake](https://cmake.org)
 * rapidjson and libarchive (instructions for installing these packages in Ubuntu or Debian are included in [Building from Source Section](#building-from-source))
 
+2. Make sure that the expected Python version is available in your environment.
 
-2. Create and activate a [conda](https://docs.conda.io/en/latest/) environment with your desired Python version. In this example, we will be using Python 3.6:
-```bash
-conda create -n python-3-6 python=3.6
-conda activate python-3-6
+If you are using `conda`, you should make sure to activate the environment by
+`conda activate <conda-env-name>`. Note that you don't have to use `conda` and
+can install Python however you wish. Python backend relies on
+[pybind11](https://github.com/pybind/pybind11) to find the correct Python
+version. If you noticed that the correct Python version is not picked up, you
+can read more on how
+[pybind11 decides which Python to use](https://pybind11.readthedocs.io/en/stable/faq.html?highlight=cmake#cmake-doesn-t-detect-the-right-python-version).
 
-# NumPy is required for Python models
-conda install numpy
-```
 3. Clone the Python backend repository and compile the Python backend stub
    (replace \<GIT\_BRANCH\_NAME\> with the branch name that you want to use,
    for release branches it should be r\<xx.yy\>):
@@ -595,7 +600,7 @@ $ cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRI
 $ make triton-python-backend-stub
 ```
 
-Now, you have access to a Python backend stub with Python 3.6. You can verify
+Now, you have access to a Python backend stub with your Python version. You can verify
 that using `ldd`:
 
 ```
@@ -606,10 +611,11 @@ libpython3.6m.so.1.0 => /home/ubuntu/envs/miniconda3/envs/python-3-6/lib/libpyth
 ```
 
 There are many other shared libraries printed in addition to the library posted
-above. However, it is important to see `libpython3.6m.so.1.0` in the list of
-linked shared libraries. If you use a different Python version, you should see
-that version instead. You need to copy the `triton_python_backend_stub` to the
-model directory of the models that want to use the custom Python backend
+above. However, it is important to see `libpython<major>.<minor>m.so.1.0` in the
+list of linked shared libraries. If you use a different Python version, you
+should see that version instead. You need to copy the
+`triton_python_backend_stub` to the model directory of the models that want to
+use the custom Python backend
 stub. For example, if you have `model_a` in your
 [model repository](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_repository.md),
 the folder structure should look like below:
@@ -625,9 +631,11 @@ models
 
 Note the location of `triton_python_backend_stub` in the directory structure above.
 
-### 2. Packaging the Conda Environment
+### Creating Custom Execution Environments
 
-It is also required to create a tar file that contains your conda environment.
+If you want to create a tar file that contains all your Python dependencies or
+you want to use different Python environments for each Python model you need to
+create a *Custom Execution Environment* in Python backend.
 Currently, Python backend only supports
 [conda-pack](https://conda.github.io/conda-pack/) for this purpose.
 [conda-pack](https://conda.github.io/conda-pack/) ensures that your conda
@@ -648,8 +656,9 @@ have exported [`PYTHONNOUSERSITE`](https://docs.python.org/3/using/cmdline.html#
 export PYTHONNOUSERSITE=True
 ```
 
-If this variable is not exported and similar packages are installed outside your conda environment,
-your tar file may not contain all the dependencies required for an isolated Python environment.
+If this variable is not exported and similar packages are installed outside your
+conda environment, your tar file may not contain all the dependencies required
+for an isolated Python environment.
 
 After creating the tar file from the conda environment, you need to tell Python
 backend to use that environment for your model. You can do this by adding the
@@ -707,7 +716,7 @@ storage service.
 the version of triton_python_backend_stub.
 
 2. If you don't want to use a different Python interpreter, you can skip
-[Building Custom Python Backend Stub Step](#1-building-custom-python-backend-stub).
+[Building Custom Python Backend Stub](#building-custom-python-backend-stub).
 In this case you only need to pack your environment using `conda-pack` and
 provide the path to tar file in the model config. However, the previous note
 still applies here and the version of the Python interpreter inside the conda
