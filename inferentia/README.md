@@ -239,14 +239,14 @@ their need.
 
 To enable dynamic batching, `--enable_dynamic_batching`
 flag needs to be specified. `gen_triton_model.py` supports following three 
-options for configuring [Triton's dynamic batching](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md):
+options for configuring [Triton's dynamic batching](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md):
 
-1. `--preferred_batch_size`: Please refer to [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#preferred-batch-sizes) for details on preferred batch size. To optimize
+1. `--preferred_batch_size`: Please refer to [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#preferred-batch-sizes) for details on preferred batch size. To optimize
    performance, this is recommended to be multiples of engaged neuron cores.
    For example, if each instance is using 2 neuron cores, `preferred_batch_size`
    could be 2, 4 or 6. 
 2. `--max_queue_delay_microseconds`: Please refer to
-   [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#delayed-batching) for details.
+   [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#delayed-batching) for details.
 3. `--disable_batch_requests_to_neuron`: Enable the non-default way for Triton to
    handle batched requests. Triton backend will send each request to neuron
    separately, irrespective of if the Triton server requests are batched.
@@ -254,7 +254,8 @@ options for configuring [Triton's dynamic batching](https://github.com/triton-in
    that do not perform well with batching without the flag.
 
 Additionally, `--max_batch_size` will affect the maximum batching limit. Please
-refer to the [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size)
+refer to the
+[model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#maximum-batch-size)
 for details.
 
 ## Testing Inferentia Setup for Accuracy
