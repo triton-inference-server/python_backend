@@ -1084,13 +1084,24 @@ Your Python model can log information using the following methods:
 
 ```python
 import triton_python_backend_utils as pb_utils
-...
-logger = pb_utils.Logger
-logger.log_info("Info Msg!")
-logger.log_warn("Warning Msg!")
-logger.log_error("Error Msg!")
-logger.log_verbose("Verbose Msg!")
+
+class TritonPythonModel:
+
+  def execute(self, requests):
+    ...
+    logger = pb_utils.Logger
+    logger.log_info("Info Msg!")
+    logger.log_warn("Warning Msg!")
+    logger.log_error("Error Msg!")
+    logger.log_verbose("Verbose Msg!")
+
 ```
+*Note:* The logger can be defined and used in following class methods:
+
+* initialize
+* execute
+* finalize
+
 Log messages can also be sent with their log-level explcitiy specified:
 ```python
 # log-level options: INFO, WARNING, ERROR, VERBOSE
