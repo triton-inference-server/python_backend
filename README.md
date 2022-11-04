@@ -1080,7 +1080,7 @@ Please see the [README.md](https://github.com/triton-inference-server/python_bac
 
 # Logging
 
-Starting from release 22.09, Your Python model can log information using the following methods:
+Starting from 22.09 release, your Python model can log information using the following methods:
 
 ```python
 import triton_python_backend_utils as pb_utils
