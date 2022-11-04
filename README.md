@@ -80,45 +80,45 @@ any C++ code.
 
 1. Run the Triton Inference Server container.
 ```
-$ docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
+docker run --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
 Replace \<xx.yy\> with the Triton version (e.g. 21.05).
 
 2. Inside the container, clone the Python backend repository.
 
 ```
-$ git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy>
+git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy>
 ```
 
 3. Install example model.
 ```
-$ cd python_backend
-$ mkdir -p models/add_sub/1/
-$ cp examples/add_sub/model.py models/add_sub/1/model.py
-$ cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
+cd python_backend
+mkdir -p models/add_sub/1/
+cp examples/add_sub/model.py models/add_sub/1/model.py
+cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
 ```
 
 4. Start the Triton server.
 
 ```
-$ tritonserver --model-repository `pwd`/models
+tritonserver --model-repository `pwd`/models
 ```
 
 5. In the host machine, start the client container.
 
 ```
- docker run -ti --net host nvcr.io/nvidia/tritonserver:<xx.yy>-py3-sdk /bin/bash
+docker run -ti --net host nvcr.io/nvidia/tritonserver:<xx.yy>-py3-sdk /bin/bash
 ```
 
 6. In the client container, clone the Python backend repository.
 
 ```
-$ git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy>
+git clone https://github.com/triton-inference-server/python_backend -b r<xx.yy>
 ```
 
 7. Run the example client.
 ```
-$ python3 python_backend/examples/add_sub/client.py
+python3 python_backend/examples/add_sub/client.py
 ```
 
 ## Building from Source
@@ -145,10 +145,10 @@ sudo apt-get install rapidjson-dev libarchive-dev zlib1g-dev
    r21.06).
 
 ```
-$ mkdir build
-$ cd build
-$ cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
-$ make install
+mkdir build
+cd build
+cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+make install
 ```
 
 The following required Triton repositories will be pulled and used in
@@ -167,21 +167,21 @@ this location is `/opt/tritonserver`.
 3. Copy example model and configuration
 
 ```
-$ mkdir -p models/add_sub/1/
-$ cp examples/add_sub/model.py models/add_sub/1/model.py
-$ cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
+mkdir -p models/add_sub/1/
+cp examples/add_sub/model.py models/add_sub/1/model.py
+cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
 ```
 
 4. Start the Triton Server
 
 ```
-$ /opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models
+/opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models
 ```
 
 5. Use the client app to perform inference
 
 ```
-$ python3 examples/add_sub/client.py
+python3 examples/add_sub/client.py
 ```
 
 ## Usage
@@ -592,19 +592,19 @@ can read more on how
    (replace \<GIT\_BRANCH\_NAME\> with the branch name that you want to use,
    for release branches it should be r\<xx.yy\>):
 ```bash
-$ git clone https://github.com/triton-inference-server/python_backend -b
+git clone https://github.com/triton-inference-server/python_backend -b
 <GIT_BRANCH_NAME>
-$ cd python_backend
-$ mkdir build && cd build
-$ cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
-$ make triton-python-backend-stub
+cd python_backend
+mkdir build && cd build
+cmake -DTRITON_ENABLE_GPU=ON -DTRITON_BACKEND_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_COMMON_REPO_TAG=<GIT_BRANCH_NAME> -DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME> -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
+make triton-python-backend-stub
 ```
 
 Now, you have access to a Python backend stub with your Python version. You can verify
 that using `ldd`:
 
 ```
-$ ldd triton_python_backend_stub
+ldd triton_python_backend_stub
 ...
 libpython3.6m.so.1.0 => /home/ubuntu/envs/miniconda3/envs/python-3-6/lib/libpython3.6m.so.1.0 (0x00007fbb69cf3000)
 ...
@@ -643,7 +643,7 @@ environment is portable. You can create a tar file for your conda environment
 using `conda-pack` command:
 
 ```
-$ conda-pack
+conda-pack
 Collecting packages...
 Packing environment at '/home/iman/miniconda3/envs/python-3-6' to 'python-3-6.tar.gz'
 [########################################] | 100% Completed |  4.5s
@@ -1080,7 +1080,7 @@ Please see the [README.md](https://github.com/triton-inference-server/python_bac
 
 # Logging
 
-Your Python model can log information using the following methods:
+Starting from 22.09 release, your Python model can log information using the following methods:
 
 ```python
 import triton_python_backend_utils as pb_utils
