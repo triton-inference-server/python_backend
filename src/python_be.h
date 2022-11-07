@@ -229,6 +229,9 @@ class ModelState : public BackendModel {
   // Force CPU only tensors
   bool ForceCPUOnlyInputTensors() { return force_cpu_only_input_tensors_; }
 
+  // Allocate GPU buffers on the same device as the python model.
+  bool AllocateBuffersOnInstanceDevice() { return allocate_buffers_on_instance_device_; }
+
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
@@ -246,6 +249,7 @@ class ModelState : public BackendModel {
   BackendState* backend_state_;
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
+  bool allocate_buffers_on_instance_device_;
   bool decoupled_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
 };

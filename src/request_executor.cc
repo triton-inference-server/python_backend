@@ -73,12 +73,24 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
+  UserpAndDeviceID* userp_and_device_id =
+      reinterpret_cast<UserpAndDeviceID*>(userp);
   std::unique_ptr<SharedMemoryManager> shm_pool(
-      reinterpret_cast<SharedMemoryManager*>(userp));
+      reinterpret_cast<SharedMemoryManager*>(userp_and_device_id->userp));
 
   ScopedDefer _([&shm_pool] { shm_pool.release(); });
   *actual_memory_type = preferred_memory_type;
-  *actual_memory_type_id = preferred_memory_type_id;
+  if (preferred_memory_type == TRITONSERVER_MEMORY_GPU) {
+    // We have a response data from a GPU model and need to allocate
+    // the response buffer.
+    if (userp_and_device_id->buffer_device_id != -1){
+      // The buffer must be allocated on the BLS instance device id.
+      *actual_memory_type_id = userp_and_device_id->buffer_device_id;
+    }else{
+      // We allocate the buffer on the same device as response.
+      *actual_memory_type_id = preferred_memory_type_id;
+    }
+  }
 
   // If 'byte_size' is zero just return 'buffer' == nullptr, we don't
   // need to do any other book-keeping.
@@ -174,7 +186,7 @@ RequestExecutor::RequestExecutor(
 std::unique_ptr<InferResponse>
 RequestExecutor::Infer(
     const std::shared_ptr<InferRequest>& infer_request,
-    TRITONSERVER_InferenceResponse** triton_response)
+    TRITONSERVER_InferenceResponse** triton_response, const int32_t buffer_device_id)
 {
   std::unique_ptr<InferResponse> infer_response;
   bool is_ready = false;
@@ -248,9 +260,15 @@ RequestExecutor::Infer(
       auto p = new std::promise<TRITONSERVER_InferenceResponse*>();
       std::future<TRITONSERVER_InferenceResponse*> completed = p->get_future();
 
+      // the data structure is allocated on the stack and will be deleted
+      // automatically when the function exits.
+      UserpAndDeviceID userp_and_device_id;
+      userp_and_device_id.userp = shm_pool_.get();
+      userp_and_device_id.buffer_device_id = buffer_device_id;
+
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
-          irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
-          reinterpret_cast<void*>(p)));
+          irequest, response_allocator_, &userp_and_device_id,
+          InferResponseComplete, reinterpret_cast<void*>(p)));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));

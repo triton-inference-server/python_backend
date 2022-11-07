@@ -65,6 +65,7 @@ any C++ code.
   - [`pb_utils.Tensor.from_dlpack() -> Tensor`](#pb_utilstensorfrom_dlpack---tensor)
   - [`pb_utils.Tensor.is_cpu() -> bool`](#pb_utilstensoris_cpu---bool)
   - [Input Tensor Device Placement](#input-tensor-device-placement)
+  - [Inference Reponse Device Placement](#inference-reponse-device-placement)
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
@@ -1032,6 +1033,14 @@ CPU and GPU memory. To enable this setting, you need to add this setting to the
 ```
 parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
 ```
+
+## Inference Reponse Device Placement
+To collect the response from other models during BLS execution, the default
+behaviour is to allocate a buffer on the same device as the model response.
+As a result, when the response is retrieved in Python, it may be on a different
+device than the original Python BLS instance device. You can force the Python
+backend to keep all memory allocations on the same device as the BLS instance
+by setting `ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE` to `yes`.
 
 # Examples
 

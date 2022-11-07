@@ -712,8 +712,12 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
       }
 
       if (pb_exception.what() != nullptr) {
-        infer_response =
-            request_executor->Infer(infer_request, &inference_response);
+        int32_t instance_device_id = DeviceId();
+        if (!model_state->AllocateBuffersOnInstanceDevice()){
+          instance_device_id = -1; // No preference.
+        }
+        infer_response = request_executor->Infer(
+            infer_request, &inference_response, instance_device_id);
 
         if (infer_response) {
           infer_response->SaveToSharedMemory(Stub()->ShmPool());
@@ -1480,6 +1484,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
       TRITONBACKEND_ModelRepository(triton_model, &artifact_type, &path));
   python_execution_env_ = "";
   force_cpu_only_input_tensors_ = true;
+  allocate_buffers_on_instance_device_ = false;
   decoupled_ = false;
 
   void* bstate;
@@ -1544,6 +1549,39 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
             TRITONSERVER_ERROR_UNSUPPORTED,
             (std::string("Incorrect value for FORCE_CPU_ONLY_INPUT_TENSORS: ") +
              force_cpu_only_input_tensor + "'")
+                .c_str()));
+      }
+    } else {
+      // Delete the error
+      TRITONSERVER_ErrorDelete(error);
+    }
+
+    // Skip the ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE variable if it doesn't
+    // exits.
+    std::string allocate_buffers_on_instance_device;
+    error = nullptr;
+    error = GetParameterValue(
+        params, "ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE",
+        &allocate_buffers_on_instance_device);
+    if (error == nullptr) {
+      if (allocate_buffers_on_instance_device == "yes") {
+        allocate_buffers_on_instance_device_ = true;
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO,
+            (std::string("Allocating buffers on same device.")).c_str());
+      } else if (allocate_buffers_on_instance_device == "no") {
+        allocate_buffers_on_instance_device_ = false;
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_INFO,
+            (std::string("Allocating buffers on output device. "
+                         "ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE is off."))
+                .c_str());
+      } else {
+        throw BackendModelException(TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_UNSUPPORTED,
+            (std::string(
+                 "Incorrect value for ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE: ") +
+             allocate_buffers_on_instance_device + "'")
                 .c_str()));
       }
     } else {

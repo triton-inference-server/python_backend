@@ -27,6 +27,7 @@
 #pragma once
 
 #include <memory>
+
 #include "infer_request.h"
 #include "infer_response.h"
 
@@ -34,6 +35,15 @@ namespace triton { namespace backend { namespace python {
 
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
+
+struct UserpAndDeviceID {
+  // This data structure is used to pass the userp and device ID to the
+  // TRITONSERVER_InferenceRequestSetResponseCallback function.
+  // We need the buffer device id to allocate memory for the response
+  // on the correct device.
+  void* userp;
+  int32_t buffer_device_id;
+};
 
 class RequestExecutor {
   TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
@@ -43,7 +53,7 @@ class RequestExecutor {
  public:
   std::unique_ptr<InferResponse> Infer(
       const std::shared_ptr<InferRequest>& infer_request,
-      TRITONSERVER_InferenceResponse** response);
+      TRITONSERVER_InferenceResponse** response, const int32_t device_id);
 
   RequestExecutor(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
