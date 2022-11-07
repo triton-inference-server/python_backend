@@ -1040,7 +1040,13 @@ behaviour is to allocate a buffer on the same device as the model response.
 As a result, when the response is retrieved in Python, it may be on a different
 device than the original Python BLS instance device. You can force the Python
 backend to keep all memory allocations on the same device as the BLS instance
-by setting `ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE` to `yes`.
+by setting `ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE` to `yes`. To use this, simply 
+add this setting to the `parameters` section of model configuration:
+
+```
+parameters: { key: "ALLOCATE_BUFFERS_ON_INSTANCE_DEVICE" value: {string_value:"yes"}}
+```
+
 
 # Examples
 
