@@ -123,6 +123,12 @@ endif() # TRITON_ENABLE_NVTX
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
+# Gperftools
+#
+link_directories(/usr/local/lib)
+LIST(APPEND CMAKE_MODULE_PATH "${repo-common_SOURCE_DIR}/cmake")
+find_package(Gperftools REQUIRED)
+
 include_directories(${CMAKE_BINARY_DIR})
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
@@ -248,6 +254,7 @@ target_link_libraries(
    pybind11::embed
    -lrt                           # shared memory 
    -larchive                      # libarchive
+   tcmalloc
 )
 
 set_target_properties(
