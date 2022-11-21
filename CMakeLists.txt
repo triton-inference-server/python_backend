@@ -243,6 +243,7 @@ target_link_libraries(
     triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
     -larchive
+    tcmalloc
 )
 
 target_link_libraries(

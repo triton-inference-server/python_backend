@@ -38,6 +38,7 @@ target_link_libraries(
   triton-shm-monitor
   PRIVATE
     -lrt # shared memory
+    tcmalloc
 )
 
 set_property(TARGET triton-shm-monitor PROPERTY OUTPUT_NAME triton_shm_monitor)
