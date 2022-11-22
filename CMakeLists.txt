@@ -217,6 +217,11 @@ add_library(
   TritonPythonBackend::triton-python-backend ALIAS triton-python-backend
 )
 
+target_include_directories(
+  triton-python-backend
+  PRIVATE ${GPERFTOOLS_INCLUDE_DIR}
+)
+
 target_compile_features(triton-python-backend PRIVATE cxx_std_11)
 target_compile_options(
   triton-python-backend PRIVATE
@@ -243,7 +248,6 @@ target_link_libraries(
     triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
     -larchive
-    tcmalloc
 )
 
 target_link_libraries(
@@ -255,7 +259,6 @@ target_link_libraries(
    pybind11::embed
    -lrt                           # shared memory 
    -larchive                      # libarchive
-   tcmalloc
 )
 
 set_target_properties(
