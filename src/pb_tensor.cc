@@ -247,6 +247,9 @@ PbTensor::ToDLPack()
   dlpack_tensor->dl_tensor.strides = nullptr;
   dlpack_tensor->manager_ctx = this;
   dlpack_tensor->deleter = [](DLManagedTensor* m) {
+    // We need to acquire GIL since the framework that deleted the dlpack tensor
+    // may not have acquired GIL when calling this function.
+    py::gil_scoped_acquire gil;
     if (m->manager_ctx == nullptr) {
       return;
     }
