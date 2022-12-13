@@ -89,7 +89,6 @@ class IPCMessage {
   bi::interprocess_mutex* ResponseMutex();
   bi::managed_external_buffer::handle_t& Args();
   bi::managed_external_buffer::handle_t ShmHandle();
-  void Release();
 
  private:
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm_;
