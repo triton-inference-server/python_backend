@@ -133,20 +133,4 @@ IPCMessage::IPCMessage(
   ipc_message_handle_ = ipc_message_shm_.handle_;
 }
 
-void
-IPCMessage::Release()
-{
-  if (ipc_message_shm_.data_ != nullptr) {
-    ipc_message_shm_.data_.release();
-  }
-
-  if (response_mutex_shm_.data_ != nullptr) {
-    response_mutex_shm_.data_.release();
-  }
-
-  if (response_cond_shm_.data_ != nullptr) {
-    response_cond_shm_.data_.release();
-  }
-}
-
 }}};  // namespace triton::backend::python
