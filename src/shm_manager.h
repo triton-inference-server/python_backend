@@ -179,6 +179,11 @@ class SharedMemoryManager {
                                        shm_ownership_data](T* memory) {
       bool destroy = false;
       bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      // Before using any shared memory function you need to make sure that you
+      // are using the correct mapping. For example, shared memory growth may
+      // happen between the time an object was created and the time the object
+      // gets destructed.
+      GrowIfNeeded(0);
       shm_ownership_data->ref_count_ -= 1;
       if (shm_ownership_data->ref_count_ == 0) {
         destroy = true;
