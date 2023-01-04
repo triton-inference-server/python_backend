@@ -117,6 +117,9 @@ class PbMemory {
 
   void SetMemoryReleaseCallback(std::function<void(void)> release_callback);
 
+  /// For debugging purposes
+  void Print();
+
   ~PbMemory();
 
  private:

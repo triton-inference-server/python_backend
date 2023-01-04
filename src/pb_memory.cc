@@ -141,6 +141,16 @@ PbMemory::CopyBuffer(
     kind = cudaMemcpyDeviceToDevice;
   }
 
+  cudaError_t err;
+  if ((src->MemoryType() == TRITONSERVER_MEMORY_GPU &&
+       dst->MemoryType() == TRITONSERVER_MEMORY_GPU) &&
+      (src->MemoryTypeId() != dst->MemoryTypeId())) {
+    err = cudaMemcpyPeer(
+        dst->DataPtr(), dst->MemoryTypeId(), src->DataPtr(),
+        src->MemoryTypeId(), src->ByteSize());
+  } else {
+    err = cudaMemcpy(dst->DataPtr(), src->DataPtr(), src->ByteSize(), kind);
+  }
   cudaError_t err =
       cudaMemcpy(dst->DataPtr(), src->DataPtr(), src->ByteSize(), kind);
 
@@ -414,6 +424,27 @@ uint64_t
 PbMemory::MemoryReleaseId()
 {
   return memory_shm_ptr_->memory_release_id;
+}
+
+void
+PbMemory::Print()
+{
+  char* temp_buffer = new char[ByteSize()];
+  if (MemoryType() == TRITONSERVER_MEMORY_GPU) {
+#ifdef TRITON_ENABLE_GPU
+    THROW_IF_CUDA_ERROR(cudaSetDevice(MemoryTypeId()));
+    THROW_IF_CUDA_ERROR(
+        cudaMemcpy(temp_buffer, DataPtr(), ByteSize(), cudaMemcpyDeviceToHost));
+#endif
+  } else {
+    temp_buffer = DataPtr();
+  }
+
+  std::cout << "Buffer is [ ";
+  for (size_t i = 0; i < ByteSize(); i++) {
+    std::cout << temp_buffer[i] << " ";
+  }
+  std::cout << "]" << std::endl;
 }
 
 }}}  // namespace triton::backend::python
