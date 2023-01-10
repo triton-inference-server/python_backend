@@ -309,7 +309,7 @@ class ModelInstanceState : public BackendModelInstance {
   void DecoupledMessageQueueMonitor();
 
   // This function is executed on a separate thread and monitors the log message
-  // queue. When it receives a message from the stub, it will load it from 
+  // queue. When it receives a message from the stub, it will load it from
   // shared memory and log it using the triton server core logging facilities.
   void LogMessageQueueMonitor();
 
@@ -333,13 +333,20 @@ class ModelInstanceState : public BackendModelInstance {
   bool ExistsInClosedRequests(intptr_t closed_request);
 
   // Execute a BLS Request
-  void ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message);
+  void ExecuteBLSRequest(
+      std::shared_ptr<IPCMessage> ipc_message,
+      const bool is_decoupled_supported);
 
   // Cleanup BLS responses
   void CleanupBLSResponses();
 
   // Wait for BLS requests to complete
   void WaitForBLSRequestsToFinish();
+
+  // Get BLS responses
+  void GetBLSResponses(
+      std::vector<std::unique_ptr<InferResponse>>& responses,
+      std::future<std::unique_ptr<InferResponse>> future);
 
   // Check the incoming requests for errors
   TRITONSERVER_Error* CheckIncomingRequests(

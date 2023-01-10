@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <future>
 #include <string>
 #include "infer_response.h"
 #include "pb_tensor.h"
@@ -35,6 +36,8 @@
 #endif
 
 namespace triton { namespace backend { namespace python {
+
+class Stub;
 
 //
 // Inference Request
@@ -59,6 +62,7 @@ class InferRequest {
       const uint32_t flags = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0);
 
+  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   uint64_t CorrelationId();
@@ -69,8 +73,15 @@ class InferRequest {
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
 
+  void SetPrevPromise(std::promise<std::unique_ptr<InferResponse>>** promise);
+  void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
+  void ResetPrevPromise();
+  bool IsDecoupled();
+  void SetIsDecoupled(const bool is_decoupled);
+
 #ifdef TRITON_PB_STUB
-  std::shared_ptr<InferResponse> Exec();
+  std::vector<std::shared_ptr<InferResponse>> Exec(
+      const bool is_decoupled_supported);
   std::shared_ptr<ResponseSender> GetResponseSender();
 #endif
 
@@ -118,6 +129,7 @@ class InferRequest {
   uint32_t flags_;
   intptr_t response_factory_address_;
   intptr_t request_address_;
+  bool is_decoupled_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;

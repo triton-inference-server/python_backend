@@ -41,9 +41,9 @@ class RequestExecutor {
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
 
  public:
-  std::unique_ptr<InferResponse> Infer(
-      const std::shared_ptr<InferRequest>& infer_request,
-      TRITONSERVER_InferenceResponse** response);
+  std::future<std::unique_ptr<InferResponse>> Infer(
+      std::shared_ptr<InferRequest>& infer_request,
+      const bool is_decoupled_supported);
 
   RequestExecutor(
       std::unique_ptr<SharedMemoryManager>& shm_pool,

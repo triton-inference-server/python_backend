@@ -1088,7 +1088,19 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("correlation_id", &InferRequest::CorrelationId)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
-      .def("exec", &InferRequest::Exec)
+      .def(
+          "exec",
+          [](std::shared_ptr<InferRequest>& infer_request) {
+            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+            if (stub->IsDecoupled()) {
+              throw PythonBackendException(
+                  "Async BLS request execution is not support in the decoupled "
+                  "API.");
+            }
+            auto responses =
+                infer_request->Exec(false /* is_decoupled_supported*/);
+            return responses[0];
+          })
       .def(
           "async_exec",
           [](std::shared_ptr<InferRequest>& infer_request) {
@@ -1101,8 +1113,30 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [infer_request]() {
-              auto response = infer_request->Exec();
-              return response;
+              auto responses =
+                  infer_request->Exec(false /* is_decoupled_supported*/);
+              return responses[0];
+            };
+            py::object future =
+                loop.attr("run_in_executor")(py::none(), callback);
+            return future;
+          })
+      .def(
+          "stream_exec",
+          [](std::shared_ptr<InferRequest>& infer_request) {
+            auto responses =
+                infer_request->Exec(true /* is_decoupled_supported*/);
+            return responses;
+          })
+      .def(
+          "async_stream_exec",
+          [](std::shared_ptr<InferRequest>& infer_request) {
+            py::object loop =
+                py::module_::import("asyncio").attr("get_running_loop")();
+            py::cpp_function callback = [infer_request]() {
+              auto responses =
+                  infer_request->Exec(true /* is_decoupled_supported*/);
+              return responses;
             };
             py::object future =
                 loop.attr("run_in_executor")(py::none(), callback);

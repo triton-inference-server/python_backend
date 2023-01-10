@@ -152,6 +152,8 @@ struct ResponseBatch {
 
   // Indicates whether this error has a message or not.
   bool is_error_set;
+
+  uint32_t response_size;
 };
 
 struct LogSendMessageBase {

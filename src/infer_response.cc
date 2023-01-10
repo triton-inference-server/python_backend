@@ -179,6 +179,47 @@ InferResponse::Error()
   return error_;
 }
 
+void
+InferResponse::SetNextResponseFuture(
+    std::promise<std::unique_ptr<InferResponse>>* promise)
+{
+  next_response_future_ =
+      std::make_unique<std::future<std::unique_ptr<InferResponse>>>(
+          promise->get_future());
+  ;
+}
+
+void
+InferResponse::ResetNextResponseFuture()
+{
+  next_response_future_.reset();
+}
+
+void
+InferResponse::SetCompletedResponse(TRITONSERVER_InferenceResponse* response)
+{
+  completed_response_ = reinterpret_cast<void*>(response);
+}
+
+void*
+InferResponse::CompletedResponse()
+{
+  return completed_response_;
+}
+
+std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+InferResponse::GetNextResponse()
+{
+  return std::move(next_response_future_);
+}
+
+void
+InferResponse::SetNextResponseHandle(
+    bi::managed_external_buffer::handle_t next_response_handle)
+{
+  next_response_handle_ = next_response_handle;
+}
+
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*>
 InferResponse::Send(

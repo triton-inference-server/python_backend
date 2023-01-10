@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <future>
 #include "pb_error.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -79,6 +80,16 @@ class InferResponse {
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();
   void PruneOutputTensors(const std::set<std::string>& requested_output_names);
+  void SetNextResponseFuture(
+      std::promise<std::unique_ptr<InferResponse>>* promise);
+  void ResetNextResponseFuture();
+  void SetCompletedResponse(TRITONSERVER_InferenceResponse* response);
+  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+  GetNextResponse();
+  void* CompletedResponse();
+  void SetNextResponseHandle(
+      bi::managed_external_buffer::handle_t next_response_handle);
+  bi::managed_external_buffer::handle_t NextResponseHandle();
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
@@ -110,5 +121,11 @@ class InferResponse {
   AllocatedSharedMemory<char> response_shm_;
   std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
   std::unique_ptr<ScopedDefer> deferred_send_callback_;
+
+  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+      next_response_future_;
+  bi::managed_external_buffer::handle_t next_response_handle_;
+  // The TRITONSERVER_InferenceResponse object associated with this response.
+  void* completed_response_;
 };
 }}}  // namespace triton::backend::python
