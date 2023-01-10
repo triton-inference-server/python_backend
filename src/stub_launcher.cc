@@ -256,10 +256,10 @@ StubLauncher::Launch()
          << " " << ipc_control_handle_ << " " << stub_name;
       bash_argument = ss.str();
     }
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_VERBOSE,
-        (std::string("Starting Python backend stub: ") + bash_argument)
-            .c_str());
+    // Might be a good idea to print `"Starting Python backend stub: " + 
+    // bash_argument` here for debugging purpose, but be careful when using
+    // LOG_MESSAGE() because there are underlying mutexes that could be forked
+    // when it is locked by other thread(s).
 
     stub_args[2] = bash_argument.c_str();
 
@@ -293,7 +293,9 @@ StubLauncher::Launch()
          << '\n'
          << "Shared Memory Growth Byte Size: " << shm_growth_byte_size_ << '\n';
       std::string log_message = ss.str();
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, log_message.c_str());
+      // Print the error message directly because the underlying mutexes in
+      // LOG_MESSAGE() could be forked when it is locked by other thread(s).
+      std::cerr << '\n' << log_message << '\n';
 
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
