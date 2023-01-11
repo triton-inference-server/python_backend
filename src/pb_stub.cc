@@ -1123,25 +1123,68 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           })
       .def(
           "stream_exec",
-          [](std::shared_ptr<InferRequest>& infer_request) {
-            auto responses =
-                infer_request->Exec(true /* is_decoupled_supported*/);
+          [](std::shared_ptr<InferRequest>& infer_request,
+             const int32_t execution_timeout) {
+            std::mutex timeout_mu;
+            std::condition_variable timeout_cv;
+            std::vector<std::shared_ptr<InferResponse>> responses;
+            std::thread t([&timeout_cv, &responses, &infer_request]() {
+              responses = infer_request->Exec(true /* is_decoupled_supported*/);
+              timeout_cv.notify_one();
+            });
+
+            t.detach();
+
+            {
+              std::unique_lock<std::mutex> lock(timeout_mu);
+              std::chrono::seconds wait_timeout(execution_timeout);
+              if (timeout_cv.wait_for(lock, wait_timeout) ==
+                  std::cv_status::timeout) {
+                throw PythonBackendException(
+                    "BLS stream request execution timeout exceeded while "
+                    "processing request.");
+              }
+            }
+
             return responses;
-          })
+          },
+          py::arg("execution_timeout").none(false) = 60)
       .def(
           "async_stream_exec",
-          [](std::shared_ptr<InferRequest>& infer_request) {
-            py::object loop =
-                py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [infer_request]() {
-              auto responses =
-                  infer_request->Exec(true /* is_decoupled_supported*/);
-              return responses;
-            };
-            py::object future =
-                loop.attr("run_in_executor")(py::none(), callback);
+          [](std::shared_ptr<InferRequest>& infer_request,
+             const int32_t execution_timeout) {
+            std::mutex timeout_mu;
+            std::condition_variable timeout_cv;
+            py::object future;
+
+            std::thread t([&timeout_cv, &future, &infer_request]() {
+              py::object loop =
+                  py::module_::import("asyncio").attr("get_running_loop")();
+              py::cpp_function callback = [infer_request]() {
+                auto responses =
+                    infer_request->Exec(true /* is_decoupled_supported*/);
+                return responses;
+              };
+              future = loop.attr("run_in_executor")(py::none(), callback);
+              timeout_cv.notify_one();
+            });
+
+            t.detach();
+
+            {
+              std::unique_lock<std::mutex> lock(timeout_mu);
+              std::chrono::seconds wait_timeout(execution_timeout);
+              if (timeout_cv.wait_for(lock, wait_timeout) ==
+                  std::cv_status::timeout) {
+                throw PythonBackendException(
+                    "Async BLS stream request execution timeout exceeded while "
+                    "processing request.");
+              }
+            }
+
             return future;
-          })
+          },
+          py::arg("execution_timeout").none(false) = 60)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
