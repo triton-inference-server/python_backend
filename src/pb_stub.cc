@@ -1091,12 +1091,6 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request) {
-            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-            if (stub->IsDecoupled()) {
-              throw PythonBackendException(
-                  "Async BLS request execution is not support in the decoupled "
-                  "API.");
-            }
             auto responses =
                 infer_request->Exec(false /* is_decoupled_supported*/);
             return responses[0];
