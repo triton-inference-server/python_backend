@@ -1091,8 +1091,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request) {
-            auto responses =
-                infer_request->Exec(false /* is_decoupled_supported*/);
+            auto responses = infer_request->Exec(false /* is_stream*/);
             return responses[0];
           })
       .def(
@@ -1107,8 +1106,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [infer_request]() {
-              auto responses =
-                  infer_request->Exec(false /* is_decoupled_supported*/);
+              auto responses = infer_request->Exec(false /* is_stream*/);
               return responses[0];
             };
             py::object future =
@@ -1123,7 +1121,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             std::condition_variable timeout_cv;
             std::vector<std::shared_ptr<InferResponse>> responses;
             std::thread t([&timeout_cv, &responses, &infer_request]() {
-              responses = infer_request->Exec(true /* is_decoupled_supported*/);
+              responses = infer_request->Exec(true /* is_stream*/);
               timeout_cv.notify_one();
             });
 
@@ -1155,8 +1153,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               py::object loop =
                   py::module_::import("asyncio").attr("get_running_loop")();
               py::cpp_function callback = [infer_request]() {
-                auto responses =
-                    infer_request->Exec(true /* is_decoupled_supported*/);
+                auto responses = infer_request->Exec(true /* is_stream*/);
                 return responses;
               };
               future = loop.attr("run_in_executor")(py::none(), callback);

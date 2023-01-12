@@ -334,8 +334,7 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Execute a BLS Request
   void ExecuteBLSRequest(
-      std::shared_ptr<IPCMessage> ipc_message,
-      const bool is_decoupled_supported);
+      std::shared_ptr<IPCMessage> ipc_message, const bool is_stream);
 
   // Cleanup BLS responses
   void CleanupBLSResponses();

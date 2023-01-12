@@ -614,7 +614,7 @@ ModelInstanceState::GetBLSResponses(
 
 void
 ModelInstanceState::ExecuteBLSRequest(
-    std::shared_ptr<IPCMessage> ipc_message, const bool is_decoupled_supported)
+    std::shared_ptr<IPCMessage> ipc_message, const bool is_stream)
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   auto request_executor = std::make_unique<RequestExecutor>(
@@ -733,7 +733,7 @@ ModelInstanceState::ExecuteBLSRequest(
 
       if (pb_exception.what() != nullptr) {
         auto response_future =
-            request_executor->Infer(infer_request, is_decoupled_supported);
+            request_executor->Infer(infer_request, is_stream);
         GetBLSResponses(infer_responses, std::move(response_future));
 
         size_t response_length = infer_responses.size();

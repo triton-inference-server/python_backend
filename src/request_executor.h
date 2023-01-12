@@ -42,8 +42,7 @@ class RequestExecutor {
 
  public:
   std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      const bool is_decoupled_supported);
+      std::shared_ptr<InferRequest>& infer_request, const bool is_stream);
 
   RequestExecutor(
       std::unique_ptr<SharedMemoryManager>& shm_pool,

@@ -381,7 +381,7 @@ InferRequest::GetResponseSender()
 }
 
 std::vector<std::shared_ptr<InferResponse>>
-InferRequest::Exec(const bool is_decoupled_supported)
+InferRequest::Exec(const bool is_stream)
 {
   ResponseBatch* response_batch = nullptr;
   bool responses_is_set = false;
@@ -406,7 +406,7 @@ InferRequest::Exec(const bool is_decoupled_supported)
     bool has_exception = false;
     PythonBackendException pb_exception(std::string{});
 
-    if (is_decoupled_supported) {
+    if (is_stream) {
       ipc_message->Command() =
           PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest;
     } else {

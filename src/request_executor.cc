@@ -271,8 +271,7 @@ RequestExecutor::RequestExecutor(
 
 std::future<std::unique_ptr<InferResponse>>
 RequestExecutor::Infer(
-    std::shared_ptr<InferRequest>& infer_request,
-    const bool is_decoupled_supported)
+    std::shared_ptr<InferRequest>& infer_request, const bool is_stream)
 {
   std::future<std::unique_ptr<InferResponse>> response_future;
   std::unique_ptr<InferResponse> infer_response;
@@ -298,12 +297,14 @@ RequestExecutor::Infer(
     infer_request->SetIsDecoupled(
         (txn_flags & TRITONSERVER_TXN_DECOUPLED) != 0);
 
-    if (!is_decoupled_supported && infer_request->IsDecoupled()) {
-      // Decoupled API is not supported in the current BLS interface
+    if (!is_stream && infer_request->IsDecoupled()) {
+      // Decoupled API is only supported by using stream API
       throw PythonBackendException(
           std::string("Model ") + model_name +
-          " is using the decoupled. BLS doesn't support models using the "
-          "decoupled transaction policy.");
+          " is using the decoupled. The current BLS request call doesn't "
+          "support models using the decoupled transaction policy. Please use "
+          "stream API 'stream_exec()' or 'async_stream_exec() for decoupled "
+          "models.'");
     }
 
     // Inference
