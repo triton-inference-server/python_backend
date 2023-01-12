@@ -118,15 +118,14 @@ class TritonPythonModel:
         # request.
         infer_responses = infer_request.stream_exec()
 
-        if infer_responses:
-            for infer_response in infer_responses:
-                # If inference response has an error, raise an exception
-                if infer_response.has_error():
-                    raise pb_utils.TritonModelException(
-                        infer_response.error().message())
+        for infer_response in infer_responses:
+            # If inference response has an error, raise an exception
+            if infer_response.has_error():
+                raise pb_utils.TritonModelException(
+                    infer_response.error().message())
 
-                response_sum += pb_utils.get_output_tensor_by_name(
-                    infer_response, "OUT").as_numpy()
+            response_sum += pb_utils.get_output_tensor_by_name(
+                infer_response, "OUT").as_numpy()
 
         response = [
             pb_utils.InferenceResponse(
