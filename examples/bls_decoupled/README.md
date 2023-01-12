@@ -31,22 +31,18 @@
 In this section we demonstrate an end-to-end example for
 [BLS](../../README.md#business-logic-scripting) in Python backend. The
 [model repository](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_repository.md)
-should contain [pytorch](../pytorch), [addsub](../add_sub).  The
-[pytorch](../pytorch) and [addsub](../add_sub) models calculate the sum and
-difference of the `INPUT0` and `INPUT1` and put the results in `OUTPUT0` and
-`OUTPUT1` respectively. This example is broken into two sections. The first
-section demonstrates how to perform synchronous BLS requests and the second
-section shows how to execute asynchronous BLS requests.
+should contain [square](../decoupled) model. The [square](../decoupled) model
+will send 'n' responses where 'n' is the value of input `IN`. For each response,
+output `OUT` will equal the value of `IN`. This example is broken into two
+sections. The first section demonstrates how to perform synchronous BLS requests
+and the second section shows how to execute asynchronous BLS requests.
 
-## Synchronous BLS Requests
+## Synchronous BLS Requests with decoupled models
 
-The goal of sync BLS model is the same as [pytorch](../pytorch) and
-[addsub](../add_sub) models but the difference is that the BLS model will not
-calculate the sum and difference by itself. The sync BLS model will pass the
-input tensors to the [pytorch](../pytorch) or [addsub](../add_sub) models and
-return the responses of that model as the final response. The additional
-parameter `MODEL_NAME` determines which model will be used for calculating the
-final outputs.
+The goal of `bls_decoupled_sync` model is to caculate the sum of the responses
+returned from the [square](../decoupled) model and return the summation as the final response. The value of input 'IN' will be passed as an input to the
+[square](../decoupled) model which determines how many responses the
+[square](../decoupled) model will generate.
 
 1. Create the model repository:
 
@@ -96,25 +92,22 @@ explanations about each of the function calls.
 
 ### Explanation of the Client Output
 
-The [client.py](./sync_client.py) sends three inference requests to the 'bls_sync'
-model with different values for the "MODEL_NAME" input. As explained earlier,
-"MODEL_NAME" determines the model name that the "bls" model will use for
-calculating the final outputs. In the first request, it will use the "add_sub"
-model and in the second request it will use the "pytorch" model. The third
-request uses an incorrect model name to demonstrate error handling during
-the inference request execution.
+The [client.py](./sync_client.py) sends 4 inference requests to the
+`bls_decoupled_sync` model with the input as: [4], [2], [0] and [1]
+respectively. In compliance with the behavior of the sync BLS model,
+it will expect the output to be the square value of the input.
 
-## Asynchronous BLS Requests
+## Asynchronous BLS Requests with decoupled models
 
 In this section we explain how to send multiple BLS requests without waiting for
 their response. Asynchronous execution of BLS requests will not block your
 model execution and can lead to speedups under certain conditions.
 
-The `bls_async` model will perform two async BLS requests on the
-[pytorch](../pytorch) and [addsub](../add_sub) models. Then, it will wait until
-the inference requests on these models is completed. It will extract `OUTPUT0`
-from the [pytorch](../pytorch) and `OUTPUT1` from the [addsub](../add_sub) model
-to construct the final inference response object using these tensors.
+The `bls_decoupled_async` model will perform two async BLS requests on the
+[square](../decoupled) model. Then, it will wait until the inference requests
+are completed. It will caculate the sum of the output `OUT` from the
+[square](../decoupled) model in both two requests to construct the final
+inference response object using these tensors.
 
 1. Create the model repository:
 
@@ -158,3 +151,13 @@ Two times the square value of [1] is [2]
 
 PASS: BLS Decoupled Async
 ```
+
+The [async_model.py](./async_model.py) model file is heavily commented with
+explanations about each of the function calls.
+
+### Explanation of the Client Output
+
+The [client.py](./async_client.py) sends 4 inference requests to the
+'bls_decoupled_sync' model with the input as: [4], [2], [0] and [1]
+respectively. In compliance with the behavior of sync BLS model model,
+it will expect the output to be two time the square value of the input.

@@ -917,6 +917,110 @@ class TritonPythonModel:
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
+Starting from 23.02 release, you can execute inference requests on decoupled
+models in both [default mode](#default-mode) and
+[decoupled mode](#decoupled-mode). By using function `stream_exec`, you can get
+a list of responses returned by a decouple model. Example below shows how to use
+this feature:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+  ...
+    def execute(self, requests):
+      ...
+      # Create an InferenceRequest object. `model_name`,
+      # `requested_output_names`, and `inputs` are the required arguments and
+      # must be provided when constructing an InferenceRequest object. Make sure
+      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      inference_request = pb_utils.InferenceRequest(
+          model_name='model_name',
+          requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+          inputs=[<pb_utils.Tensor object>])
+
+      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and model
+      # version in addition to the arguments described above. These arguments
+      # are optional. An example containing all the arguments:
+      # inference_request = pb_utils.InferenceRequest(model_name='model_name',
+      #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+      #   inputs=[<list of pb_utils.Tensor objects>],
+      #   request_id="1", correlation_id=4, model_version=1, flags=0)
+
+      # Execute the inference_request and wait for the response
+      inference_responses = inference_request.stream_exec()
+
+      for inference_response in inference_responses:
+        # Check if the inference response has an error
+        if inference_response.has_error():
+            raise pb_utils.TritonModelException(inference_response.error().message())
+        else:
+            # Extract the output tensors from the inference response.
+            output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
+            output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+
+            # Decide the next steps for model execution based on the received output
+            # tensors. It is possible to use the same output tensors to for the final
+            # inference response too.
+```
+
+
+In addition to the `inference_request.stream_exec` function that allows you to
+execute blocking inference requests, `inference_request.async_stream_exec`
+allows you to perform async inference requests. This can be useful when you do
+not need the result of the inference immediately. Using `async_exec` function,
+it is possible to have multiple inflight inference requests and wait for the
+responses only when needed. Example below shows how to use `async_stream_exec`:
+
+```python
+import triton_python_backend_utils as pb_utils
+import asyncio
+
+
+class TritonPythonModel:
+  ...
+
+    # You must add the Python 'async' keyword to the beginning of `execute`
+    # function if you want to use `async_exec` function.
+    async def execute(self, requests):
+      ...
+      # Create an InferenceRequest object. `model_name`,
+      # `requested_output_names`, and `inputs` are the required arguments and
+      # must be provided when constructing an InferenceRequest object. Make sure
+      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      inference_request = pb_utils.InferenceRequest(
+          model_name='model_name',
+          requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
+          inputs=[<pb_utils.Tensor object>])
+
+      infer_response_awaits = []
+      for i in range(4):
+        # async_exec function returns an
+        # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
+        # object.
+        infer_response_awaits.append(inference_request.async_stream_exec())
+
+      # Wait for all of the inference requests to complete.
+      async_responses = await asyncio.gather(*infer_response_awaits)
+
+      for infer_responses in async_responses:
+        for infer_response in infer_responses:
+          # Check if the inference response has an error
+          if inference_response.has_error():
+              raise pb_utils.TritonModelException(inference_response.error().message())
+          else:
+              # Extract the output tensors from the inference response.
+              output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
+              output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+
+              # Decide the next steps for model execution based on the received output
+              # tensors.
+```
+
+A complete example for sync and async BLS for decoupled models is included in
+the [Examples](#examples) section.
+
 Starting from the 22.04 release, the lifetime of the BLS output tensors have
 been improved such that if a tensor is no longer needed in your Python model it
 will be automatically deallocated. This can increase the number of BLS requests
@@ -959,7 +1063,8 @@ do not create a circular dependency. For example, if model A performs an inferen
 on itself and there are no more model instances ready to execute the inference request, the
 model will block on the inference execution forever.
 
-- Currently, BLS can not run inference on a decoupled model.
+- BLS can not run inference on a decoupled model using functions
+`inference_request.exec` and `inference_request.async_exec`.
 
 
 # Interoperability and GPU Support
@@ -1061,7 +1166,7 @@ You can find the complete example instructions in [examples/jax](examples/jax/RE
 ## Business Logic Scripting
 
 The BLS example needs the dependencies required for both of the above examples.
-You can find the complete example instructions in [examples/bls](examples/bls/README.md).
+You can find the complete example instructions in [examples/bls](examples/bls/README.md) and [examples/bls_decoupled](examples/bls_decoupled/README.md).
 
 ## Preprocessing
 
