@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -43,10 +43,27 @@ SharedMemoryManager::SharedMemoryManager(
 
   try {
     if (create) {
-      shm_obj_ = std::make_unique<bi::shared_memory_object>(
-          bi::open_or_create, shm_region_name.c_str(), bi::read_write);
-      shm_obj_->truncate(shm_size);
+      // Remove (if any) and create the region. Truncate the shm region could
+      // occasionally fail, allow up to max_retry for stability.
+      int max_retry = 3;
+      while (true) {
+        try {
+          bi::shared_memory_object::remove(shm_region_name.c_str());
+          shm_obj_ = std::make_unique<bi::shared_memory_object>(
+              bi::create_only, shm_region_name.c_str(), bi::read_write);
+          shm_obj_->truncate(shm_size);
+          break;
+        }
+        catch (bi::interprocess_exception& ex) {
+          if (--max_retry > 0) {
+            sleep(1);
+          } else {
+            throw ex;
+          }
+        }
+      }
     } else {
+      // Open the existing region.
       shm_obj_ = std::make_unique<bi::shared_memory_object>(
           bi::open_only, shm_region_name.c_str(), bi::read_write);
     }
