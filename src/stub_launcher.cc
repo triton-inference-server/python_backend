@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -62,12 +62,12 @@ StubLauncher::Initialize(ModelState* model_state)
   is_decoupled_ = model_state->IsDecoupled();
   model_repository_path_ = model_state->RepositoryPath();
 
-  // Increase the stub process count to avoid shared memory region name
-  // collision
-  model_state->StateForBackend()->number_of_instance_inits++;
+  // Atomically increase and read the stub process count to avoid shared memory
+  // region name collision
+  int num_init = ++model_state->StateForBackend()->number_of_instance_inits;
   shm_region_name_ =
       model_state->StateForBackend()->shared_memory_region_prefix +
-      std::to_string(model_state->StateForBackend()->number_of_instance_inits);
+      std::to_string(num_init);
 
   model_version_ = model_state->Version();
 
