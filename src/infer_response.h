@@ -128,4 +128,21 @@ class InferResponse {
   // The TRITONSERVER_InferenceResponse object associated with this response.
   void* completed_response_;
 };
+
+#ifdef TRITON_PB_STUB
+class ResponseGenerator {
+ public:
+  ResponseGenerator(
+      const std::vector<std::shared_ptr<InferResponse>>& responses);
+
+  std::shared_ptr<InferResponse> Next();
+  std::vector<std::shared_ptr<InferResponse>>::iterator Begin();
+  std::vector<std::shared_ptr<InferResponse>>::iterator End();
+
+ private:
+  std::vector<std::shared_ptr<InferResponse>> responses_;
+  size_t index_;
+};
+#endif
+
 }}}  // namespace triton::backend::python

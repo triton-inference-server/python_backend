@@ -161,8 +161,8 @@ as the Python backend repository branch that you are trying to compile.
 * triton-inference-server/core: `-DTRITON_CORE_REPO_TAG=<GIT_BRANCH_NAME>`
 
 
-Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is installed. In the released containers,
-this location is `/opt/tritonserver`.
+Set `-DCMAKE_INSTALL_PREFIX` to the location where the Triton Server is
+installed. In the released containers, this location is `/opt/tritonserver`.
 
 3. Copy example model and configuration
 
@@ -348,7 +348,8 @@ Every Python backend can implement four main functions:
 ### `auto_complete_config`
 
 `auto_complete_config` is called only once when loading the model assuming
-the server was not started with [`--disable-auto-complete-config`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#auto-generated-model-configuration).
+the server was not started with
+[`--disable-auto-complete-config`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#auto-generated-model-configuration).
 
 Implementing this function is optional. No implementation of
 `auto_complete_config` will do nothing. This function can be used to set
@@ -463,7 +464,8 @@ This mode allows user to send multiple responses for a request or
 not send any responses for a request. A model may also send
 responses out-of-order relative to the order that the request batches
 are executed. Such models are called *decoupled* models. In
-order to use this mode, the [transaction policy](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-transaction-policy)
+order to use this mode, the
+[transaction policy](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-transaction-policy)
 in the model configuration must be set to decoupled.
 
 
@@ -571,12 +573,14 @@ default in the Triton containers.**
 Python backend uses a *stub* process to connect your `model.py` file to the
 Triton C++ core. This stub process has an embedded Python interpreter with
 a fixed Python version. If you intend to use a Python interpreter with
-different version from the default Python backend stub, you need to compile your own
-Python backend stub by following the steps below:
+different version from the default Python backend stub, you need to compile
+your own Python backend stub by following the steps below:
 
 1. Install the software packages below:
 * [cmake](https://cmake.org)
-* rapidjson and libarchive (instructions for installing these packages in Ubuntu or Debian are included in [Building from Source Section](#building-from-source))
+* rapidjson and libarchive (instructions for installing these packages in
+Ubuntu or Debian are included in
+[Building from Source Section](#building-from-source))
 
 2. Make sure that the expected Python version is available in your environment.
 
@@ -629,7 +633,8 @@ models
     `-- triton_python_backend_stub
 ```
 
-Note the location of `triton_python_backend_stub` in the directory structure above.
+Note the location of `triton_python_backend_stub` in the directory structure
+above.
 
 ### Creating Custom Execution Environments
 
@@ -649,8 +654,10 @@ Packing environment at '/home/iman/miniconda3/envs/python-3-6' to 'python-3-6.ta
 [########################################] | 100% Completed |  4.5s
 ```
 
-**Important Note:** Before installing the packages in your conda environment, make sure that you
-have exported [`PYTHONNOUSERSITE`](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONNOUSERSITE) environment variable:
+**Important Note:** Before installing the packages in your conda environment,
+make sure that you have exported
+[`PYTHONNOUSERSITE`](https://docs.python.org/3/using/cmdline.html#envvar-PYTHONNOUSERSITE)
+environment variable:
 
 ```
 export PYTHONNOUSERSITE=True
@@ -704,7 +711,8 @@ models
 |   `-- triton_python_backend_stub
 ```
 
-In the example above, `$$TRITON_MODEL_DIRECTORY` is resolved to `$pwd/models/model_a`.
+In the example above, `$$TRITON_MODEL_DIRECTORY` is resolved to
+`$pwd/models/model_a`.
 
 This is useful if you want to use S3, GCS, or Azure and you do not have access
 to the absolute path of the execution env that is stored in the cloud object
@@ -723,8 +731,8 @@ still applies here and the version of the Python interpreter inside the conda
 environment must match the Python version of stub used by Python backend. The
 default version of the stub is Python 3.8.
 
-3. You can share a single execution environment across multiple models. You need to
-provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
+3. You can share a single execution environment across multiple models. You
+need to provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
 `config.pbtxt` of all the models that want to use the execution environment.
 
 4. If `$$TRITON_MODEL_DIRECTORY` is used in the `EXECUTION_ENV_PATH`, the final
@@ -920,8 +928,9 @@ A complete example for sync and async BLS in Python backend is included in the
 Starting from 23.02 release, you can execute inference requests on decoupled
 models in both [default mode](#default-mode) and
 [decoupled mode](#decoupled-mode). By using function `stream_exec`, you can get
-a list of responses returned by a decouple model. Example below shows how to use
-this feature:
+a [generator](https://docs.python.org/3/glossary.html#term-generator) of
+responses returned by a decouple model. Example below shows how to use this
+feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -1141,7 +1150,8 @@ parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
 # Examples
 
 For using the Triton Python client in these examples you need to install
-the [Triton Python Client Library](https://github.com/triton-inference-server/client#getting-the-client-libraries-and-examples).
+the
+[Triton Python Client Library](https://github.com/triton-inference-server/client#getting-the-client-libraries-and-examples).
 The Python client for each of the examples is in the `client.py` file.
 
 ## AddSub in NumPy
@@ -1153,9 +1163,11 @@ find the files in [examples/add_sub](examples/add_sub).
 ## AddSubNet in PyTorch
 
 In order to use this model, you need to install PyTorch. We recommend using
-`pip` method mentioned in the [PyTorch website](https://pytorch.org/get-started/locally/).
+`pip` method mentioned in the
+[PyTorch website](https://pytorch.org/get-started/locally/).
 Make sure that PyTorch is available in the same Python environment as other
-dependencies. Alternatively, you can create a [Python Execution Environment](#using-custom-python-execution-environments).
+dependencies. Alternatively, you can create a
+[Python Execution Environment](#using-custom-python-execution-environments).
 You can find the files for this example in [examples/pytorch](examples/pytorch).
 
 ## AddSub in JAX
@@ -1166,7 +1178,9 @@ You can find the complete example instructions in [examples/jax](examples/jax/RE
 ## Business Logic Scripting
 
 The BLS example needs the dependencies required for both of the above examples.
-You can find the complete example instructions in [examples/bls](examples/bls/README.md) and [examples/bls_decoupled](examples/bls_decoupled/README.md).
+You can find the complete example instructions in
+[examples/bls](examples/bls/README.md) and
+[examples/bls_decoupled](examples/bls_decoupled/README.md).
 
 ## Preprocessing
 
@@ -1181,7 +1195,9 @@ You can find the complete example instructions in [examples/decoupled](examples/
 
 # Running with Inferentia
 
-Please see the [README.md](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/README.md) located in the python_backend/inferentia sub folder.
+Please see the
+[README.md](https://github.com/triton-inference-server/python_backend/tree/main/inferentia/README.md)
+located in the python_backend/inferentia sub folder.
 
 # Logging
 

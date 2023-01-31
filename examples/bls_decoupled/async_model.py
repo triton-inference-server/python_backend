@@ -131,9 +131,9 @@ class TritonPythonModel:
         # The variable that will store the sum of the responses.
         response_sum = np.array([0])
 
-        # Iterate over the list of responses returned by the BLS request. This
-        # interface can support zero, one, and many inference responses per
-        # request.
+        # Iterate over the list of generators of responses returned by the BLS
+        # request. This interface can support zero, one, and many inference
+        # responses per request.
         for infer_responses in async_responses:
             for infer_response in infer_responses:
                 # If inference response has an error, raise an exception

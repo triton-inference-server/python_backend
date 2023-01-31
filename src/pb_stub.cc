@@ -1138,7 +1138,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               }
             }
 
-            return responses;
+            return ResponseGenerator(responses);
           },
           py::arg("execution_timeout").none(false) = 60)
       .def(
@@ -1154,7 +1154,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                   py::module_::import("asyncio").attr("get_running_loop")();
               py::cpp_function callback = [infer_request]() {
                 auto responses = infer_request->Exec(true /* is_stream*/);
-                return responses;
+                return ResponseGenerator(responses);
               };
               future = loop.attr("run_in_executor")(py::none(), callback);
               timeout_cv.notify_one();
@@ -1216,6 +1216,18 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
           py::arg("flags") = 0);
+
+  py::class_<ResponseGenerator, std::shared_ptr<ResponseGenerator>>(
+      module, "ResponseGenerator")
+      .def(py::init<const std::vector<std::shared_ptr<InferResponse>>&>())
+      .def(
+          "__iter__",
+          [](ResponseGenerator& self) {
+            return py::make_iterator(self.Begin(), self.End());
+          },
+          py::keep_alive<0, 1>())
+      .def("__next__", &ResponseGenerator::Next)
+      .def("__len__", &ResponseGenerator::Length);
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")

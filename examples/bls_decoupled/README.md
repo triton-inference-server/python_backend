@@ -37,7 +37,7 @@ output `OUT` will equal the value of `IN`. This example is broken into two
 sections. The first section demonstrates how to perform synchronous BLS requests
 and the second section shows how to execute asynchronous BLS requests.
 
-## Synchronous BLS Requests with decoupled models
+## Synchronous BLS Requests with Decoupled Models
 
 The goal of `bls_decoupled_sync` model is to caculate the sum of the responses
 returned from the [square](../decoupled) model and return the summation as the final response. The value of input 'IN' will be passed as an input to the
@@ -97,7 +97,7 @@ The [client.py](./sync_client.py) sends 4 inference requests to the
 respectively. In compliance with the behavior of the sync BLS model,
 it will expect the output to be the square value of the input.
 
-## Asynchronous BLS Requests with decoupled models
+## Asynchronous BLS Requests with Decoupled Models
 
 In this section we explain how to send multiple BLS requests without waiting for
 their response. Asynchronous execution of BLS requests will not block your
