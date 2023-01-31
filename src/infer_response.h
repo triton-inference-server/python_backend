@@ -83,10 +83,8 @@ class InferResponse {
   void SetNextResponseFuture(
       std::promise<std::unique_ptr<InferResponse>>* promise);
   void ResetNextResponseFuture();
-  void SetCompletedResponse(TRITONSERVER_InferenceResponse* response);
   std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
   GetNextResponse();
-  void* CompletedResponse();
   void SetNextResponseHandle(
       bi::managed_external_buffer::handle_t next_response_handle);
   bi::managed_external_buffer::handle_t NextResponseHandle();
@@ -136,6 +134,7 @@ class ResponseGenerator {
       const std::vector<std::shared_ptr<InferResponse>>& responses);
 
   std::shared_ptr<InferResponse> Next();
+  int Length();
   std::vector<std::shared_ptr<InferResponse>>::iterator Begin();
   std::vector<std::shared_ptr<InferResponse>>::iterator End();
 

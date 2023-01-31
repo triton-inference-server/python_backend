@@ -813,19 +813,6 @@ ModelInstanceState::ExecuteBLSRequest(
     ipc_message->ResponseCondition()->notify_all();
     ipc_message->ResponseCondition()->wait(lock);
   }
-
-  for (auto& response : infer_responses) {
-    if (response) {
-      auto inference_response =
-          reinterpret_cast<TRITONSERVER_InferenceResponse*>(
-              response->CompletedResponse());
-      if (inference_response != nullptr) {
-        LOG_IF_ERROR(
-            TRITONSERVER_InferenceResponseDelete(inference_response),
-            " failed to release BLS inference response.");
-      }
-    }
-  }
 }
 
 void

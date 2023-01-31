@@ -129,8 +129,6 @@ InferResponseComplete(
           std::vector<std::shared_ptr<PbTensor>>{}, pb_error);
     }
 
-    infer_response->SetCompletedResponse(response);
-
     if (!(*p)->IsDecoupled()) {
       infer_response->ResetNextResponseFuture();
       (*p)->SetValueForPrevPromise(std::move(infer_response));
@@ -150,6 +148,10 @@ InferResponseComplete(
         (*p)->ResetPrevPromise();
       }
     }
+
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceResponseDelete(response),
+        " failed to release BLS inference response.");
   } else if (
       (*p)->IsDecoupled() &&
       (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
@@ -343,7 +345,6 @@ RequestExecutor::Infer(
     {
       auto p = new std::promise<std::unique_ptr<InferResponse>>();
       response_future = p->get_future();
-      // infer_request->SetPrevPromise(&p);
       infer_request->prev_promise_.reset(std::move(p));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(

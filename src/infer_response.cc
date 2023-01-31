@@ -195,18 +195,6 @@ InferResponse::ResetNextResponseFuture()
   next_response_future_.reset();
 }
 
-void
-InferResponse::SetCompletedResponse(TRITONSERVER_InferenceResponse* response)
-{
-  completed_response_ = reinterpret_cast<void*>(response);
-}
-
-void*
-InferResponse::CompletedResponse()
-{
-  return completed_response_;
-}
-
 std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
 InferResponse::GetNextResponse()
 {
@@ -406,6 +394,13 @@ ResponseGenerator::Next()
 
   return responses_[index_++];
 }
+
+int
+ResponseGenerator::Length()
+{
+  return responses_.size();
+}
+
 std::vector<std::shared_ptr<InferResponse>>::iterator
 ResponseGenerator::Begin()
 {
