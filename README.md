@@ -200,28 +200,31 @@ class TritonPythonModel:
 
     @staticmethod
     def auto_complete_config(auto_complete_model_config):
-        """`auto_complete_config` is called only once when loading the model assuming
-        the server was not started with `--disable-auto-complete-config`. Implementing
-        this function is optional. No implementation of `auto_complete_config` will
-        do nothing. This function can be used to set `max_batch_size`, `input` and
-        `output` properties of the model using `set_max_batch_size`, `add_input`, and
-        `add_output`. These properties will allow Triton to load the model with minimal
-        model configuration in absence of a configuration file. This function returns
-        the `pb_utils.ModelConfig` object with these properties. You can use the `as_dict`
-        function to gain read-only access to the `pb_utils.ModelConfig` object.
-        The `pb_utils.ModelConfig` object being returned from here will be used as
-        the final configuration for the model.
+        """`auto_complete_config` is called only once when loading the model
+        assuming the server was not started with
+        `--disable-auto-complete-config`. Implementing this function is
+        optional. No implementation of `auto_complete_config` will do nothing.
+        This function can be used to set `max_batch_size`, `input` and `output`
+        properties of the model using `set_max_batch_size`, `add_input`, and
+        `add_output`. These properties will allow Triton to load the model with
+        minimal model configuration in absence of a configuration file. This
+        function returns the `pb_utils.ModelConfig` object with these
+        properties. You can use the `as_dict` function to gain read-only access
+        to the `pb_utils.ModelConfig` object. The `pb_utils.ModelConfig` object
+        being returned from here will be used as the final configuration for
+        the model.
 
-        Note: The Python interpreter used to invoke this function will be destroyed
-        upon returning from this function and as a result none of the objects created
-        here will be available in the `initialize`, `execute`, or `finalize` functions.
+        Note: The Python interpreter used to invoke this function will be
+        destroyed upon returning from this function and as a result none of the
+        objects created here will be available in the `initialize`, `execute`,
+        or `finalize` functions.
 
         Parameters
         ----------
         auto_complete_model_config : pb_utils.ModelConfig
-          An object containing the existing model configuration. You can build upon
-          the configuration given by this object when setting the properties for
-          this model.
+          An object containing the existing model configuration. You can build
+          upon the configuration given by this object when setting the
+          properties for this model.
 
         Returns
         -------
@@ -294,7 +297,8 @@ class TritonPythonModel:
           Both keys and values are strings. The dictionary keys and values are:
           * model_config: A JSON string containing the model configuration
           * model_instance_kind: A string containing model instance kind
-          * model_instance_device_id: A string containing model instance device ID
+          * model_instance_device_id: A string containing model instance device
+            ID
           * model_repository: Model repository path
           * model_version: Model version
           * model_name: Model name
@@ -328,7 +332,8 @@ class TritonPythonModel:
         # make a copy of the underlying NumPy array and store it if it is
         # required.
         for request in requests:
-            # Perform inference on the request and append it to responses list...
+            # Perform inference on the request and append it to responses
+            # list...
 
         # You must return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
@@ -358,11 +363,13 @@ Implementing this function is optional. No implementation of
 [dynamic_batching](
   https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#dynamic-batcher),
 [`input`](
-  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs) and
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs)
+and
 [`output`](
   https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#inputs-and-outputs)
-properties of the model using `set_max_batch_size`, `set_dynamic_batching`, `add_input`, and
-`add_output`. These properties will allow Triton to load the model with
+properties of the model using `set_max_batch_size`, `set_dynamic_batching`,
+`add_input`, and `add_output`. These properties will allow Triton to load the
+model with
 [minimal model configuration](
   https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#minimal-model-configuration)
 in absence of a configuration file. This function returns the
@@ -397,11 +404,12 @@ below:
 
 ### `execute`
 
-`execute` function is called whenever an inference request is made. Every Python
-model must implement `execute` function. In the `execute` function you are given
-a list of `InferenceRequest` objects. There are two modes of implementing this
-function. The mode you choose should depend on your use case. That is whether
-or not you want to return decoupled responses from this model or not.
+`execute` function is called whenever an inference request is made. Every
+Python model must implement `execute` function. In the `execute` function you
+are given a list of `InferenceRequest` objects. There are two modes of
+implementing this function. The mode you choose should depend on your use case.
+That is whether or not you want to return decoupled responses from this model
+or not.
 
 #### Default Mode
 
@@ -452,7 +460,8 @@ class TritonPythonModel:
             if an_error_occurred:
               # If there is an error, the output_tensors are ignored
               responses.append(pb_utils.InferenceResponse(
-                output_tensors=[], error=pb_utils.TritonError("An Error Occurred")))
+                output_tensors=[],
+                error=pb_utils.TritonError("An Error Occurred")))
 
         return responses
 ```
@@ -485,9 +494,10 @@ request. The workflow in this mode may look like:
   2. Create and populate pb_utils.InferenceResponse to be sent back.
 
   3. Use InferenceResponseSender.send() to send the above response. If
-     this is the last request then pass pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL
-     as a flag with InferenceResponseSender.send(). Otherwise continue with
-     Step 1 for sending next request.
+     this is the last request then pass
+     pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL as a flag with
+     InferenceResponseSender.send(). Otherwise continue with Step 1 for sending
+     next request.
 
 * The return value for `execute` function in this mode should be None.
 
@@ -536,9 +546,9 @@ necessary functions, you should save this file as `model.py`.
 ## Model Config File
 
 Every Python Triton model must provide a `config.pbtxt` file describing
-the model configuration. In order to use this backend you must set the `backend`
-field of your model `config.pbtxt` file to `python`. You shouldn't set
-`platform` field of the configuration.
+the model configuration. In order to use this backend you must set the
+`backend` field of your model `config.pbtxt` file to `python`. You
+shouldn't set `platform` field of the configuration.
 
 Your models directory should look like below:
 ```
@@ -765,7 +775,8 @@ class TritonPythonModel:
 
     def finalize(self):
       if error_during_finalize:
-        raise pb_utils.TritonModelException("An error occurred during finalize.")
+        raise pb_utils.TritonModelException(
+          "An error occurred during finalize.")
 ```
 
 ## Managing Shared Memory
@@ -784,8 +795,8 @@ You can also configure the timeout used for connecting Triton main process
 to the Python backend stubs using the `stub-timeout-seconds`. The default
 value is 30 seconds.
 
-The config values described above can be passed to Triton using `--backend-config`
-flag:
+The config values described above can be passed to Triton using
+`--backend-config` flag:
 
 ```
 /opt/tritonserver/bin/tritonserver --model-repository=`pwd`/models --backend-config=python,<config-key>=<config-value>
@@ -807,10 +818,10 @@ to work around this issue, Python backend spawns a separate process for each
 [model instance](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#multiple-model-instances).
 This is in contrast with how other Triton backends such as
 [ONNXRuntime](https://github.com/triton-inference-server/onnxruntime_backend),
-[TensorFlow](https://github.com/triton-inference-server/tensorflow_backend), and
-[PyTorch](https://github.com/triton-inference-server/pytorch_backend) handle
-multiple instances. Increasing the instance count for these backends will create
-additional threads instead of spawning separate processes.
+[TensorFlow](https://github.com/triton-inference-server/tensorflow_backend),
+and [PyTorch](https://github.com/triton-inference-server/pytorch_backend)
+handle multiple instances. Increasing the instance count for these backends
+will create additional threads instead of spawning separate processes.
 
 # Business Logic Scripting
 
@@ -825,9 +836,9 @@ call this combination of custom logic and model executions *Business Logic
 Scripting (BLS)*.
 
 Starting from 21.08, you can implement BLS in your Python model. A new set of
-utility functions allows you to execute inference requests on other models being
-served by Triton as a part of executing your Python model. Example below shows
-how to use this feature:
+utility functions allows you to execute inference requests on other models
+being served by Triton as a part of executing your Python model. Example below
+shows how to use this feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -839,16 +850,17 @@ class TritonPythonModel:
       ...
       # Create an InferenceRequest object. `model_name`,
       # `requested_output_names`, and `inputs` are the required arguments and
-      # must be provided when constructing an InferenceRequest object. Make sure
-      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      # must be provided when constructing an InferenceRequest object. Make
+      # sure to replace `inputs` argument with a list of `pb_utils.Tensor`
+      # objects.
       inference_request = pb_utils.InferenceRequest(
           model_name='model_name',
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
           inputs=[<pb_utils.Tensor object>])
 
-      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and model
-      # version in addition to the arguments described above. These arguments
-      # are optional. An example containing all the arguments:
+      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and
+      # model version in addition to the arguments described above. These
+      # arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
@@ -859,15 +871,18 @@ class TritonPythonModel:
 
       # Check if the inference response has an error
       if inference_response.has_error():
-          raise pb_utils.TritonModelException(inference_response.error().message())
+          raise pb_utils.TritonModelException(
+            inference_response.error().message())
       else:
           # Extract the output tensors from the inference response.
-          output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
-          output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+          output1 = pb_utils.get_output_tensor_by_name(
+            inference_response, 'REQUESTED_OUTPUT_1')
+          output2 = pb_utils.get_output_tensor_by_name(
+            inference_response, 'REQUESTED_OUTPUT_2')
 
-          # Decide the next steps for model execution based on the received output
-          # tensors. It is possible to use the same output tensors to for the final
-          # inference response too.
+          # Decide the next steps for model execution based on the received
+          # output tensors. It is possible to use the same output tensors
+          # to for the final inference response too.
 ```
 
 
@@ -892,8 +907,9 @@ class TritonPythonModel:
       ...
       # Create an InferenceRequest object. `model_name`,
       # `requested_output_names`, and `inputs` are the required arguments and
-      # must be provided when constructing an InferenceRequest object. Make sure
-      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      # must be provided when constructing an InferenceRequest object. Make
+      # sure to replace `inputs` argument with a list of `pb_utils.Tensor`
+      # objects.
       inference_request = pb_utils.InferenceRequest(
           model_name='model_name',
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
@@ -912,14 +928,17 @@ class TritonPythonModel:
       for infer_response in infer_responses:
         # Check if the inference response has an error
         if inference_response.has_error():
-            raise pb_utils.TritonModelException(inference_response.error().message())
+            raise pb_utils.TritonModelException(
+              inference_response.error().message())
         else:
             # Extract the output tensors from the inference response.
-            output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
-            output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+            output1 = pb_utils.get_output_tensor_by_name(
+              inference_response, 'REQUESTED_OUTPUT_1')
+            output2 = pb_utils.get_output_tensor_by_name(
+              inference_response, 'REQUESTED_OUTPUT_2')
 
-            # Decide the next steps for model execution based on the received output
-            # tensors.
+            # Decide the next steps for model execution based on the received
+            # output tensors.
 ```
 
 A complete example for sync and async BLS in Python backend is included in the
@@ -942,40 +961,44 @@ class TritonPythonModel:
       ...
       # Create an InferenceRequest object. `model_name`,
       # `requested_output_names`, and `inputs` are the required arguments and
-      # must be provided when constructing an InferenceRequest object. Make sure
-      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      # must be provided when constructing an InferenceRequest object. Make
+      # sure to replace `inputs` argument with a list of `pb_utils.Tensor`
+      # objects.
       inference_request = pb_utils.InferenceRequest(
           model_name='model_name',
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
           inputs=[<pb_utils.Tensor object>])
 
-      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and model
-      # version in addition to the arguments described above. These arguments
-      # are optional. An example containing all the arguments:
+      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and
+      # model version in addition to the arguments described above. These
+      # arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
       #   request_id="1", correlation_id=4, model_version=1, flags=0)
 
-      # Execute the inference_request and wait for the response. You can set the
-      # exectuion timeout via the parameter 'execution_timeout' in microseconds.
-      # If the request times out, the request will respond with an error. The
-      # default of 'execution_timeout' is 0 which indicates that the request has
-      # no timeout.
+      # Execute the inference_request and wait for the response. You can set
+      # the exectuion timeout via the parameter 'execution_timeout' in
+      # microseconds. If the request times out, the request will respond with
+      # an error. The default of 'execution_timeout' is 0 which indicates that
+      # the request has no timeout.
       inference_responses = inference_request.stream_exec(execution_timeout=10)
 
       for inference_response in inference_responses:
         # Check if the inference response has an error
         if inference_response.has_error():
-            raise pb_utils.TritonModelException(inference_response.error().message())
+            raise pb_utils.TritonModelException(
+              inference_response.error().message())
         else:
             # Extract the output tensors from the inference response.
-            output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
-            output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+            output1 = pb_utils.get_output_tensor_by_name(
+              inference_response, 'REQUESTED_OUTPUT_1')
+            output2 = pb_utils.get_output_tensor_by_name(
+              inference_response, 'REQUESTED_OUTPUT_2')
 
-            # Decide the next steps for model execution based on the received output
-            # tensors. It is possible to use the same output tensors to for the final
-            # inference response too.
+            # Decide the next steps for model execution based on the received
+            # output tensors. It is possible to use the same output tensors to
+            # for the final inference response too.
 ```
 
 
@@ -1000,8 +1023,9 @@ class TritonPythonModel:
       ...
       # Create an InferenceRequest object. `model_name`,
       # `requested_output_names`, and `inputs` are the required arguments and
-      # must be provided when constructing an InferenceRequest object. Make sure
-      # to replace `inputs` argument with a list of `pb_utils.Tensor` objects.
+      # must be provided when constructing an InferenceRequest object. Make
+      # sure to replace `inputs` argument with a list of `pb_utils.Tensor`
+      # objects.
       inference_request = pb_utils.InferenceRequest(
           model_name='model_name',
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
@@ -1012,7 +1036,8 @@ class TritonPythonModel:
         # async_exec function returns an
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
-        infer_response_awaits.append(inference_request.async_stream_exec(execution_timeout=10))
+        infer_response_awaits.append(
+          inference_request.async_stream_exec(execution_timeout=10))
 
       # Wait for all of the inference requests to complete.
       async_responses = await asyncio.gather(*infer_response_awaits)
@@ -1021,14 +1046,17 @@ class TritonPythonModel:
         for infer_response in infer_responses:
           # Check if the inference response has an error
           if inference_response.has_error():
-              raise pb_utils.TritonModelException(inference_response.error().message())
+              raise pb_utils.TritonModelException(
+                inference_response.error().message())
           else:
               # Extract the output tensors from the inference response.
-              output1 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_1')
-              output2 = pb_utils.get_output_tensor_by_name(inference_response, 'REQUESTED_OUTPUT_2')
+              output1 = pb_utils.get_output_tensor_by_name(
+                inference_response, 'REQUESTED_OUTPUT_1')
+              output2 = pb_utils.get_output_tensor_by_name(
+                inference_response, 'REQUESTED_OUTPUT_2')
 
-              # Decide the next steps for model execution based on the received output
-              # tensors.
+              # Decide the next steps for model execution based on the received
+              # output tensors.
 ```
 
 A complete example for sync and async BLS for decoupled models is included in
@@ -1037,11 +1065,11 @@ the [Examples](#examples) section.
 Starting from the 22.04 release, the lifetime of the BLS output tensors have
 been improved such that if a tensor is no longer needed in your Python model it
 will be automatically deallocated. This can increase the number of BLS requests
-that you can execute in your model without running into the out of GPU or shared
-memory error.
+that you can execute in your model without running into the out of GPU or
+shared memory error.
 
-Note: Async BLS is not supported on Python 3.6 or lower due to the `async` keyword
-and `asyncio.run` being introduced in Python 3.7.
+Note: Async BLS is not supported on Python 3.6 or lower due to the `async`
+keyword and `asyncio.run` being introduced in Python 3.7.
 
 ## Using BLS with Stateful Models
 
@@ -1056,7 +1084,8 @@ sequence:
 inference_request = pb_utils.InferenceRequest(model_name='model_name',
   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
   inputs=[<list of pb_utils.Tensor objects>],
-  request_id="1", correlation_id=4, flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
+  request_id="1", correlation_id=4,
+  flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
 ```
 
 For indicating the ending of the sequence you can use the
@@ -1071,10 +1100,11 @@ flags = pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START | pb_utils.TRITONSERVE
 
 ## Limitation
 
-- You need to make sure that the inference requests performed as a part of your model
-do not create a circular dependency. For example, if model A performs an inference request
-on itself and there are no more model instances ready to execute the inference request, the
-model will block on the inference execution forever.
+- You need to make sure that the inference requests performed as a part of your
+model do not create a circular dependency. For example, if model A performs an
+inference request on itself and there are no more model instances ready to
+execute the inference request, the model will block on the inference execution
+forever.
 
 - BLS can not run inference on a decoupled model using functions
 `inference_request.exec` and `inference_request.async_exec`.
@@ -1178,7 +1208,8 @@ You can find the files for this example in [examples/pytorch](examples/pytorch).
 ## AddSub in JAX
 
 The JAX example shows how to serve JAX in Triton using Python Backend.
-You can find the complete example instructions in [examples/jax](examples/jax/README.md).
+You can find the complete example instructions in
+[examples/jax](examples/jax/README.md).
 
 ## Business Logic Scripting
 
@@ -1189,14 +1220,17 @@ You can find the complete example instructions in
 
 ## Preprocessing
 
-The Preprocessing example shows how to use Python Backend to do model preprocessing.
-You can find the complete example instructions in [examples/preprocessing](examples/preprocessing/README.md).
+The Preprocessing example shows how to use Python Backend to do model
+preprocessing.
+You can find the complete example instructions in
+[examples/preprocessing](examples/preprocessing/README.md).
 
 ## Decoupled Models
 
 The examples of decoupled models shows how to develop and serve
 [decoupled models](#decoupled-mode) in Triton using Python backend.
-You can find the complete example instructions in [examples/decoupled](examples/decoupled/README.md).
+You can find the complete example instructions in
+[examples/decoupled](examples/decoupled/README.md).
 
 # Running with Inferentia
 
@@ -1206,7 +1240,8 @@ located in the python_backend/inferentia sub folder.
 
 # Logging
 
-Starting from 22.09 release, your Python model can log information using the following methods:
+Starting from 22.09 release, your Python model can log information using the
+following methods:
 
 ```python
 import triton_python_backend_utils as pb_utils
