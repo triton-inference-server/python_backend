@@ -58,6 +58,8 @@ InferResponseComplete(
 {
   auto p = reinterpret_cast<std::shared_ptr<InferRequest>*>(userp);
   std::unique_ptr<InferResponse> infer_response;
+  std::vector<std::shared_ptr<PbTensor>> output_tensors;
+  std::shared_ptr<PbError> pb_error;
 
   if (response != nullptr) {
     try {
@@ -67,7 +69,6 @@ InferResponseComplete(
       THROW_IF_TRITON_ERROR(
           TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
 
-      std::vector<std::shared_ptr<PbTensor>> output_tensors;
       for (uint32_t idx = 0; idx < output_count; ++idx) {
         const char* cname;
         TRITONSERVER_DataType datatype;
@@ -111,9 +112,6 @@ InferResponseComplete(
               nullptr /* DLManagedTensor */));
         }
       }
-      std::shared_ptr<PbError> pb_error;
-      infer_response =
-          std::make_unique<InferResponse>(output_tensors, pb_error);
     }
     catch (const PythonBackendException& pb_exception) {
       if (response != nullptr) {
@@ -123,14 +121,13 @@ InferResponseComplete(
 
         response = nullptr;
       }
-      std::shared_ptr<PbError> pb_error =
-          std::make_shared<PbError>(pb_exception.what());
-      infer_response = std::make_unique<InferResponse>(
-          std::vector<std::shared_ptr<PbTensor>>{}, pb_error);
+      pb_error = std::make_shared<PbError>(pb_exception.what());
+      output_tensors.clear();
     }
 
     if (!(*p)->IsDecoupled()) {
-      infer_response->ResetNextResponseFuture();
+      infer_response =
+          std::make_unique<InferResponse>(output_tensors, pb_error);
       (*p)->SetValueForPrevPromise(std::move(infer_response));
       (*p)->ResetPrevPromise();
     } else {
@@ -138,12 +135,14 @@ InferResponseComplete(
         // Not the last reponse. Need to store the promise associated with the
         // next future.
         auto promise = new std::promise<std::unique_ptr<InferResponse>>();
-        infer_response->SetNextResponseFuture(promise);
+        infer_response =
+            std::make_unique<InferResponse>(output_tensors, promise, pb_error);
         (*p)->SetValueForPrevPromise(std::move(infer_response));
         (*p)->SetPrevPromise(&promise);
       } else {
         // The last response.
-        infer_response->ResetNextResponseFuture();
+        infer_response =
+            std::make_unique<InferResponse>(output_tensors, pb_error);
         (*p)->SetValueForPrevPromise(std::move(infer_response));
         (*p)->ResetPrevPromise();
       }
@@ -151,7 +150,7 @@ InferResponseComplete(
 
     LOG_IF_ERROR(
         TRITONSERVER_InferenceResponseDelete(response),
-        " failed to release BLS inference response.");
+        "Failed to release BLS inference response.");
   } else if (
       (*p)->IsDecoupled() &&
       (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
@@ -159,9 +158,10 @@ InferResponseComplete(
     (*p)->SetValueForPrevPromise(std::unique_ptr<InferResponse>{});
     (*p)->ResetPrevPromise();
   } else {
-    (*p)->SetValueForPrevPromise(std::unique_ptr<InferResponse>{});
+    pb_error = std::make_shared<PbError>("Unexpected empty response.");
+    infer_response = std::make_unique<InferResponse>(output_tensors, pb_error);
+    (*p)->SetValueForPrevPromise(std::move(infer_response));
     (*p)->ResetPrevPromise();
-    throw PythonBackendException("Unexpected empty response.");
   }
 }
 
@@ -345,7 +345,7 @@ RequestExecutor::Infer(
     {
       auto p = new std::promise<std::unique_ptr<InferResponse>>();
       response_future = p->get_future();
-      infer_request->prev_promise_.reset(std::move(p));
+      infer_request->SetPrevPromise(std::move(&p));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
           irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,

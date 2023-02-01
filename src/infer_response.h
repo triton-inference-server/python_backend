@@ -69,6 +69,10 @@ class InferResponse {
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
       std::shared_ptr<PbError> error = nullptr);
+  InferResponse(
+      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
+      std::promise<std::unique_ptr<InferResponse>>* promise,
+      std::shared_ptr<PbError> error = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);

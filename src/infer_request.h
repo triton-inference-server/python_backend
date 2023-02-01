@@ -62,7 +62,6 @@ class InferRequest {
       const uint32_t flags = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0);
 
-  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   uint64_t CorrelationId();
@@ -140,6 +139,8 @@ class InferRequest {
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
+
+  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<ResponseSender> response_sender_;
