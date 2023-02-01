@@ -273,7 +273,7 @@ RequestExecutor::RequestExecutor(
 
 std::future<std::unique_ptr<InferResponse>>
 RequestExecutor::Infer(
-    std::shared_ptr<InferRequest>& infer_request, const bool is_stream)
+    std::shared_ptr<InferRequest>& infer_request, const bool is_decoupled)
 {
   std::future<std::unique_ptr<InferResponse>> response_future;
   std::unique_ptr<InferResponse> infer_response;
@@ -299,7 +299,7 @@ RequestExecutor::Infer(
     infer_request->SetIsDecoupled(
         (txn_flags & TRITONSERVER_TXN_DECOUPLED) != 0);
 
-    if (!is_stream && infer_request->IsDecoupled()) {
+    if (!is_decoupled && infer_request->IsDecoupled()) {
       // Decoupled API is only supported by using stream API
       throw PythonBackendException(
           std::string("Model ") + model_name +
@@ -321,6 +321,9 @@ RequestExecutor::Infer(
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
         irequest, infer_request->Flags()));
+
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetTimeoutMicroseconds(
+        irequest, infer_request->ExecTimeout()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));

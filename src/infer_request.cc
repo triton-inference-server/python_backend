@@ -46,7 +46,7 @@ InferRequest::InferRequest(
       requested_output_names_(requested_output_names), model_name_(model_name),
       model_version_(model_version), flags_(flags),
       response_factory_address_(response_factory_address),
-      request_address_(request_address)
+      request_address_(request_address), execution_timeout_(0)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -133,6 +133,18 @@ InferRequest::ShmHandle()
   return shm_handle_;
 }
 
+int32_t
+InferRequest::ExecTimeout()
+{
+  return execution_timeout_;
+}
+
+void
+InferRequest::SetExecTimeout(int32_t execution_timeout)
+{
+  execution_timeout_ = execution_timeout;
+}
+
 void
 InferRequest::SetPrevPromise(
     std::promise<std::unique_ptr<InferResponse>>** promise)
@@ -186,6 +198,8 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->flags = Flags();
   infer_request_shm_ptr_->address = request_address_;
   infer_request_shm_ptr_->response_factory_address = response_factory_address_;
+  infer_request_shm_ptr_->is_decoupled = is_decoupled_;
+  infer_request_shm_ptr_->execution_timeout = execution_timeout_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -344,6 +358,8 @@ InferRequest::InferRequest(
   correlation_id_ = infer_request_shm_ptr_->correlation_id;
   request_address_ = infer_request_shm_ptr_->address;
   response_factory_address_ = infer_request_shm_ptr_->response_factory_address;
+  is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
+  execution_timeout_ = infer_request_shm_ptr_->execution_timeout;
 
 #ifdef TRITON_PB_STUB
   response_sender_ = std::make_shared<ResponseSender>(
@@ -381,7 +397,7 @@ InferRequest::GetResponseSender()
 }
 
 std::vector<std::shared_ptr<InferResponse>>
-InferRequest::Exec(const bool is_stream)
+InferRequest::Exec(const bool is_decoupled)
 {
   ResponseBatch* response_batch = nullptr;
   bool responses_is_set = false;
@@ -406,7 +422,7 @@ InferRequest::Exec(const bool is_stream)
     bool has_exception = false;
     PythonBackendException pb_exception(std::string{});
 
-    if (is_stream) {
+    if (is_decoupled) {
       ipc_message->Command() =
           PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest;
     } else {

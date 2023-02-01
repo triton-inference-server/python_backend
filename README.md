@@ -957,8 +957,12 @@ class TritonPythonModel:
       #   inputs=[<list of pb_utils.Tensor objects>],
       #   request_id="1", correlation_id=4, model_version=1, flags=0)
 
-      # Execute the inference_request and wait for the response
-      inference_responses = inference_request.stream_exec()
+      # Execute the inference_request and wait for the response. You can set the
+      # exectuion timeout via the parameter 'execution_timeout' in microseconds.
+      # If the request times out, the request will respond with an error. The
+      # default of 'execution_timeout' is 0 which indicates that the request has
+      # no timeout.
+      inference_responses = inference_request.stream_exec(execution_timeout=10)
 
       for inference_response in inference_responses:
         # Check if the inference response has an error
@@ -1008,7 +1012,7 @@ class TritonPythonModel:
         # async_exec function returns an
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
-        infer_response_awaits.append(inference_request.async_stream_exec())
+        infer_response_awaits.append(inference_request.async_stream_exec(execution_timeout=10))
 
       # Wait for all of the inference requests to complete.
       async_responses = await asyncio.gather(*infer_response_awaits)
@@ -1075,6 +1079,7 @@ model will block on the inference execution forever.
 - BLS can not run inference on a decoupled model using functions
 `inference_request.exec` and `inference_request.async_exec`.
 
+- BLS can not run inference on a decoupled model in *async* decoupled mode.
 
 # Interoperability and GPU Support
 
