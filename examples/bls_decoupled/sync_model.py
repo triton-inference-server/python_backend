@@ -116,7 +116,7 @@ class TritonPythonModel:
         # Iterate over the generator of responses returned by the BLS request.
         # This interface can support zero, one, and many inference responses
         # per request.
-        infer_responses = infer_request.stream_exec()
+        infer_responses = infer_request.exec(decoupled=True)
 
         for infer_response in infer_responses:
             # If inference response has an error, raise an exception

@@ -946,10 +946,15 @@ A complete example for sync and async BLS in Python backend is included in the
 
 Starting from 23.02 release, you can execute inference requests on decoupled
 models in both [default mode](#default-mode) and
-[decoupled mode](#decoupled-mode). By using function `stream_exec`, you can get
-a [generator](https://docs.python.org/3/glossary.html#term-generator) of
-responses returned by a decouple model. Example below shows how to use this
-feature:
+[decoupled mode](#decoupled-mode). By setting the parameter `decoupled` to
+`True` in function `exec`, you can get a
+[generator](https://docs.python.org/3/glossary.html#term-generator) of
+responses returned by a decouple model. (By default the parameter `decoupled`
+is set to `False`, which makes the function return a single response as the
+example above.) Besides, you can set the exectuion timeout via the parameter
+'execution_timeout' in microseconds. If the request times out, the request will
+respond with an error. The default of 'execution_timeout' is 0 which indicates
+that the request has no timeout. Example below shows how to use this feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -977,12 +982,11 @@ class TritonPythonModel:
       #   inputs=[<list of pb_utils.Tensor objects>],
       #   request_id="1", correlation_id=4, model_version=1, flags=0)
 
-      # Execute the inference_request and wait for the response. You can set
-      # the exectuion timeout via the parameter 'execution_timeout' in
-      # microseconds. If the request times out, the request will respond with
-      # an error. The default of 'execution_timeout' is 0 which indicates that
-      # the request has no timeout.
-      inference_responses = inference_request.stream_exec(execution_timeout=10)
+      # Execute the inference_request and wait for the response. Here we are
+      # running a BLS request on a decoupled model, hence setting the parameter
+      # 'decoupled' to 'True'.
+      inference_responses = inference_request.exec(
+        decoupled=True, execution_timeout=10)
 
       for inference_response in inference_responses:
         # Check if the inference response has an error
@@ -1002,12 +1006,13 @@ class TritonPythonModel:
 ```
 
 
-In addition to the `inference_request.stream_exec` function that allows you to
-execute blocking inference requests, `inference_request.async_stream_exec`
-allows you to perform async inference requests. This can be useful when you do
-not need the result of the inference immediately. Using `async_exec` function,
-it is possible to have multiple inflight inference requests and wait for the
-responses only when needed. Example below shows how to use `async_stream_exec`:
+In addition to the `inference_request.exec(decoupled=True)` function that
+allows you to execute blocking inference requests on decoupled models,
+`inference_request.async_exec(decoupled=True)` allows you to perform async
+inference requests. This can be useful when you do not need the result of the
+inference immediately. Using `async_exec` function, it is possible to have
+multiple inflight inference requests and wait for the responses only when
+needed. Example below shows how to use `async_exec`:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -1037,7 +1042,8 @@ class TritonPythonModel:
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
         infer_response_awaits.append(
-          inference_request.async_stream_exec(execution_timeout=10))
+          inference_request.async_exec(
+            decoupled=True, execution_timeout=10))
 
       # Wait for all of the inference requests to complete.
       async_responses = await asyncio.gather(*infer_response_awaits)

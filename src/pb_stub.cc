@@ -1090,62 +1090,52 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("set_flags", &InferRequest::SetFlags)
       .def(
           "exec",
-          [](std::shared_ptr<InferRequest>& infer_request) {
+          [](std::shared_ptr<InferRequest>& infer_request, const bool decoupled,
+             const int32_t execution_timeout) {
+            infer_request->SetExecTimeout(execution_timeout);
             std::vector<std::shared_ptr<InferResponse>> responses =
-                infer_request->Exec(false /* is_decoupled*/);
-            return responses[0];
-          })
+                infer_request->Exec(decoupled);
+            py::object response_object;
+            if (decoupled) {
+              response_object = py::cast(ResponseGenerator(responses));
+            } else {
+              response_object = py::cast(responses[0]);
+            }
+
+            return response_object;
+          },
+          py::arg("decoupled").none(false) = false,
+          py::arg("execution_timeout").none(false) = 0)
       .def(
           "async_exec",
-          [](std::shared_ptr<InferRequest>& infer_request) {
+          [](std::shared_ptr<InferRequest>& infer_request, const bool decoupled,
+             const int32_t execution_timeout) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             if (stub->IsDecoupled()) {
               throw PythonBackendException(
                   "Async BLS request execution is not support in the decoupled "
                   "API.");
             }
-            py::object loop =
-                py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [infer_request]() {
-              auto responses = infer_request->Exec(false /* is_decoupled*/);
-              return responses[0];
-            };
-            py::object future =
-                loop.attr("run_in_executor")(py::none(), callback);
-            return future;
-          })
-      .def(
-          "stream_exec",
-          [](std::shared_ptr<InferRequest>& infer_request,
-             const int32_t execution_timeout) {
             infer_request->SetExecTimeout(execution_timeout);
-            std::vector<std::shared_ptr<InferResponse>> responses =
-                infer_request->Exec(true /* is_decoupled*/);
-            return ResponseGenerator(responses);
-          },
-          py::arg("execution_timeout").none(false) = 0)
-      .def(
-          "async_stream_exec",
-          [](std::shared_ptr<InferRequest>& infer_request,
-             const int32_t execution_timeout) {
-            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-            if (stub->IsDecoupled()) {
-              throw PythonBackendException(
-                  "BLS request execution on decoupled model is not support in "
-                  "the decoupled "
-                  "API.");
-            }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [infer_request, execution_timeout]() {
-              infer_request->SetExecTimeout(execution_timeout);
-              auto responses = infer_request->Exec(true /* is_decoupled*/);
-              return ResponseGenerator(responses);
+            py::cpp_function callback = [infer_request, decoupled]() {
+              std::vector<std::shared_ptr<InferResponse>> responses =
+                  infer_request->Exec(decoupled);
+              py::object response_object;
+              if (decoupled) {
+                response_object = py::cast(ResponseGenerator(responses));
+              } else {
+                response_object = py::cast(responses[0]);
+              }
+
+              return response_object;
             };
             py::object future =
                 loop.attr("run_in_executor")(py::none(), callback);
             return future;
           },
+          py::arg("decoupled").none(false) = false,
           py::arg("execution_timeout").none(false) = 0)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
