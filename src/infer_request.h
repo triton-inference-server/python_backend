@@ -51,7 +51,7 @@ struct InferRequestShm {
   intptr_t address;
   intptr_t response_factory_address;
   bool is_decoupled;
-  int32_t execution_timeout;
+  int32_t timeout;
 };
 
 class InferRequest {
@@ -73,8 +73,8 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
-  void SetExecTimeout(int32_t execution_timeout);
-  int32_t ExecTimeout();
+  void SetTimeout(int32_t timeout);
+  int32_t Timeout();
 
   void SetPrevPromise(std::promise<std::unique_ptr<InferResponse>>** promise);
   void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
@@ -132,7 +132,7 @@ class InferRequest {
   intptr_t response_factory_address_;
   intptr_t request_address_;
   bool is_decoupled_;
-  int32_t execution_timeout_;
+  int32_t timeout_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;

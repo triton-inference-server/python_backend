@@ -323,7 +323,7 @@ RequestExecutor::Infer(
         irequest, infer_request->Flags()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetTimeoutMicroseconds(
-        irequest, infer_request->ExecTimeout()));
+        irequest, infer_request->Timeout()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));

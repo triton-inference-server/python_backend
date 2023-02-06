@@ -46,7 +46,7 @@ InferRequest::InferRequest(
       requested_output_names_(requested_output_names), model_name_(model_name),
       model_version_(model_version), flags_(flags),
       response_factory_address_(response_factory_address),
-      request_address_(request_address), execution_timeout_(0)
+      request_address_(request_address), timeout_(0)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -134,15 +134,15 @@ InferRequest::ShmHandle()
 }
 
 int32_t
-InferRequest::ExecTimeout()
+InferRequest::Timeout()
 {
-  return execution_timeout_;
+  return timeout_;
 }
 
 void
-InferRequest::SetExecTimeout(int32_t execution_timeout)
+InferRequest::SetTimeout(int32_t timeout)
 {
-  execution_timeout_ = execution_timeout;
+  timeout_ = timeout;
 }
 
 void
@@ -199,7 +199,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->address = request_address_;
   infer_request_shm_ptr_->response_factory_address = response_factory_address_;
   infer_request_shm_ptr_->is_decoupled = is_decoupled_;
-  infer_request_shm_ptr_->execution_timeout = execution_timeout_;
+  infer_request_shm_ptr_->timeout = timeout_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -359,7 +359,7 @@ InferRequest::InferRequest(
   request_address_ = infer_request_shm_ptr_->address;
   response_factory_address_ = infer_request_shm_ptr_->response_factory_address;
   is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
-  execution_timeout_ = infer_request_shm_ptr_->execution_timeout;
+  timeout_ = infer_request_shm_ptr_->timeout;
 
 #ifdef TRITON_PB_STUB
   response_sender_ = std::make_shared<ResponseSender>(

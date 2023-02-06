@@ -1091,8 +1091,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request, const bool decoupled,
-             const int32_t execution_timeout) {
-            infer_request->SetExecTimeout(execution_timeout);
+             const int32_t timeout) {
+            infer_request->SetTimeout(timeout);
             std::vector<std::shared_ptr<InferResponse>> responses =
                 infer_request->Exec(decoupled);
             py::object response_object;
@@ -1105,18 +1105,18 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             return response_object;
           },
           py::arg("decoupled").none(false) = false,
-          py::arg("execution_timeout").none(false) = 0)
+          py::arg("timeout").none(false) = 0)
       .def(
           "async_exec",
           [](std::shared_ptr<InferRequest>& infer_request, const bool decoupled,
-             const int32_t execution_timeout) {
+             const int32_t timeout) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             if (stub->IsDecoupled()) {
               throw PythonBackendException(
                   "Async BLS request execution is not support in the decoupled "
                   "API.");
             }
-            infer_request->SetExecTimeout(execution_timeout);
+            infer_request->SetTimeout(timeout);
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [infer_request, decoupled]() {
@@ -1136,7 +1136,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             return future;
           },
           py::arg("decoupled").none(false) = false,
-          py::arg("execution_timeout").none(false) = 0)
+          py::arg("timeout").none(false) = 0)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
