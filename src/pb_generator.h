@@ -36,7 +36,6 @@ class ResponseGenerator {
       const std::vector<std::shared_ptr<InferResponse>>& responses);
 
   std::shared_ptr<InferResponse> Next();
-  int Length();
   std::vector<std::shared_ptr<InferResponse>>::iterator Begin();
   std::vector<std::shared_ptr<InferResponse>>::iterator End();
 

@@ -1186,8 +1186,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             return py::make_iterator(self.Begin(), self.End());
           },
           py::keep_alive<0, 1>())
-      .def("__next__", &ResponseGenerator::Next)
-      .def("__len__", &ResponseGenerator::Length);
+      .def("__next__", &ResponseGenerator::Next);
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")

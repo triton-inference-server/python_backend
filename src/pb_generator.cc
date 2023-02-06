@@ -47,12 +47,6 @@ ResponseGenerator::Next()
   return responses_[index_++];
 }
 
-int
-ResponseGenerator::Length()
-{
-  return responses_.size();
-}
-
 std::vector<std::shared_ptr<InferResponse>>::iterator
 ResponseGenerator::Begin()
 {
