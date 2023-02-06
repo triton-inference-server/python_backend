@@ -84,9 +84,6 @@ class InferResponse {
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();
   void PruneOutputTensors(const std::set<std::string>& requested_output_names);
-  void SetNextResponseFuture(
-      std::promise<std::unique_ptr<InferResponse>>* promise);
-  void ResetNextResponseFuture();
   std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
   GetNextResponse();
   void SetNextResponseHandle(
@@ -127,8 +124,6 @@ class InferResponse {
   std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
       next_response_future_;
   bi::managed_external_buffer::handle_t next_response_handle_;
-  // The TRITONSERVER_InferenceResponse object associated with this response.
-  void* completed_response_;
 };
 
 #ifdef TRITON_PB_STUB
