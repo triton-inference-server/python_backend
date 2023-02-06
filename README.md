@@ -946,14 +946,14 @@ A complete example for sync and async BLS in Python backend is included in the
 
 Starting from 23.02 release, you can execute inference requests on decoupled
 models in both [default mode](#default-mode) and
-[decoupled mode](#decoupled-mode). By setting the parameter `decoupled` to
-`True` in function `exec`, you can get a
+[decoupled mode](#decoupled-mode). By setting the `decoupled` parameter to
+`True`, the `exec` and `async_exec` function will return a
 [generator](https://docs.python.org/3/glossary.html#term-generator) of
-responses returned by a decouple model. (By default the parameter `decoupled`
-is set to `False`, which makes the function return a single response as the
-example above.) Besides, you can set the exectuion timeout via the parameter
-'execution_timeout' in microseconds. If the request times out, the request will
-respond with an error. The default of 'execution_timeout' is 0 which indicates
+inference responses returned by a decouple model. If the `decoupled` parameter
+is set to `False`, the `exec` and `async_exec` function will return a single
+response as shown in the example above. Besides, you can set the timeout via
+the parameter 'timeout' in microseconds. If the request times out, the request
+will respond with an error. The default of 'timeout' is 0 which indicates
 that the request has no timeout. Example below shows how to use this feature:
 
 ```python
@@ -985,8 +985,7 @@ class TritonPythonModel:
       # Execute the inference_request and wait for the response. Here we are
       # running a BLS request on a decoupled model, hence setting the parameter
       # 'decoupled' to 'True'.
-      inference_responses = inference_request.exec(
-        decoupled=True, execution_timeout=10)
+      inference_responses = inference_request.exec(decoupled=True, timeout=10)
 
       for inference_response in inference_responses:
         # Check if the inference response has an error
@@ -1042,8 +1041,7 @@ class TritonPythonModel:
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
         infer_response_awaits.append(
-          inference_request.async_exec(
-            decoupled=True, execution_timeout=10))
+          inference_request.async_exec(decoupled=True, timeout=10))
 
       # Wait for all of the inference requests to complete.
       async_responses = await asyncio.gather(*infer_response_awaits)
@@ -1111,9 +1109,6 @@ model do not create a circular dependency. For example, if model A performs an
 inference request on itself and there are no more model instances ready to
 execute the inference request, the model will block on the inference execution
 forever.
-
-- BLS can not run inference on a decoupled model using functions
-`inference_request.exec` and `inference_request.async_exec`.
 
 - BLS can not run inference on a decoupled model in *async* decoupled mode.
 
