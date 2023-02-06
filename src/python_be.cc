@@ -373,12 +373,13 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), flags,
-          reinterpret_cast<intptr_t>(factory_ptr),
+          0 /* BLS request timeout*/, reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request));
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), flags, 0,
+          model_state->Name(), model_state->Version(), flags,
+          0 /* BLS request timeout*/, 0 /* response_factory_address */,
           reinterpret_cast<intptr_t>(request));
     }
 

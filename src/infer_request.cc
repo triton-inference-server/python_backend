@@ -40,13 +40,13 @@ InferRequest::InferRequest(
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
-    const uint32_t flags, const intptr_t response_factory_address,
-    const intptr_t request_address)
+    const uint32_t flags, const int32_t timeout,
+    const intptr_t response_factory_address, const intptr_t request_address)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
-      model_version_(model_version), flags_(flags),
+      model_version_(model_version), flags_(flags), timeout_(timeout),
       response_factory_address_(response_factory_address),
-      request_address_(request_address), timeout_(0)
+      request_address_(request_address)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -66,6 +66,7 @@ InferRequest::InferRequest(
 
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
+  std::cout << "=====infer request constructor: " << timeout_ << "=====\n";
 #ifdef TRITON_PB_STUB
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
@@ -137,12 +138,6 @@ int32_t
 InferRequest::Timeout()
 {
   return timeout_;
-}
-
-void
-InferRequest::SetTimeout(int32_t timeout)
-{
-  timeout_ = timeout;
 }
 
 void

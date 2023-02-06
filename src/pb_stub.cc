@@ -1065,14 +1065,15 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const std::vector<std::shared_ptr<PbTensor>>& inputs,
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
-                      const int64_t model_version, const uint32_t flags) {
+                      const int64_t model_version, const uint32_t flags,
+                      const int32_t timeout) {
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, flags);
+                model_name, model_version, flags, timeout);
           }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,
@@ -1080,7 +1081,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("requested_output_names").none(false),
           py::arg("model_name").none(false),
           py::arg("model_version").none(false) = -1,
-          py::arg("flags").none(false) = 0)
+          py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
@@ -1088,11 +1089,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("correlation_id", &InferRequest::CorrelationId)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
+      .def("timeout", &InferRequest::Timeout)
       .def(
           "exec",
-          [](std::shared_ptr<InferRequest>& infer_request, const bool decoupled,
-             const int32_t timeout) {
-            infer_request->SetTimeout(timeout);
+          [](std::shared_ptr<InferRequest>& infer_request,
+             const bool decoupled) {
             std::vector<std::shared_ptr<InferResponse>> responses =
                 infer_request->Exec(decoupled);
             py::object response_object;
@@ -1104,19 +1105,17 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
             return response_object;
           },
-          py::arg("decoupled").none(false) = false,
-          py::arg("timeout").none(false) = 0)
+          py::arg("decoupled").none(false) = false)
       .def(
           "async_exec",
-          [](std::shared_ptr<InferRequest>& infer_request, const bool decoupled,
-             const int32_t timeout) {
+          [](std::shared_ptr<InferRequest>& infer_request,
+             const bool decoupled) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             if (stub->IsDecoupled()) {
               throw PythonBackendException(
                   "Async BLS request execution is not support in the decoupled "
                   "API.");
             }
-            infer_request->SetTimeout(timeout);
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [infer_request, decoupled]() {
@@ -1135,8 +1134,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                 loop.attr("run_in_executor")(py::none(), callback);
             return future;
           },
-          py::arg("decoupled").none(false) = false,
-          py::arg("timeout").none(false) = 0)
+          py::arg("decoupled").none(false) = false)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
