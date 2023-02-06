@@ -66,7 +66,6 @@ InferRequest::InferRequest(
 
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
-  std::cout << "=====infer request constructor: " << timeout_ << "=====\n";
 #ifdef TRITON_PB_STUB
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
