@@ -194,6 +194,8 @@ set(
   src/response_sender.h
   src/pb_stub.h
   src/pb_stub.cc
+  src/pb_generator.h
+  src/pb_generator.cc
 )
 
 list(APPEND

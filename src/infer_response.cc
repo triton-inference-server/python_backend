@@ -381,40 +381,4 @@ InferResponse::DeferredSendCallback()
 }
 #endif
 
-#ifdef TRITON_PB_STUB
-ResponseGenerator::ResponseGenerator(
-    const std::vector<std::shared_ptr<InferResponse>>& responses)
-    : responses_(responses), index_(0)
-{
-}
-
-std::shared_ptr<InferResponse>
-ResponseGenerator::Next()
-{
-  if (index_ == responses_.size()) {
-    throw py::stop_iteration("Iteration is done for the responses.");
-  }
-
-  return responses_[index_++];
-}
-
-int
-ResponseGenerator::Length()
-{
-  return responses_.size();
-}
-
-std::vector<std::shared_ptr<InferResponse>>::iterator
-ResponseGenerator::Begin()
-{
-  return responses_.begin();
-}
-
-std::vector<std::shared_ptr<InferResponse>>::iterator
-ResponseGenerator::End()
-{
-  return responses_.end();
-}
-#endif
-
 }}}  // namespace triton::backend::python

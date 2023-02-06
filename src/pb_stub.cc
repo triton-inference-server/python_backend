@@ -43,6 +43,7 @@
 #include <unordered_map>
 #include "infer_response.h"
 #include "pb_error.h"
+#include "pb_generator.h"
 #include "pb_map.h"
 #include "pb_string.h"
 #include "pb_utils.h"
