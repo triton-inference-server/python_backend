@@ -858,13 +858,13 @@ class TritonPythonModel:
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
           inputs=[<pb_utils.Tensor object>])
 
-      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and
-      # model version in addition to the arguments described above. These
-      # arguments are optional. An example containing all the arguments:
+      # `pb_utils.InferenceRequest` supports request_id, correlation_id,
+      # model version and timeout in addition to the arguments described above.
+      # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1, flags=0)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5)
 
       # Execute the inference_request and wait for the response
       inference_response = inference_request.exec()
@@ -951,10 +951,13 @@ models in both [default mode](#default-mode) and
 [generator](https://docs.python.org/3/glossary.html#term-generator) of
 inference responses returned by a decouple model. If the `decoupled` parameter
 is set to `False`, the `exec` and `async_exec` function will return a single
-response as shown in the example above. Besides, you can set the timeout via
-the parameter 'timeout' in microseconds. If the request times out, the request
-will respond with an error. The default of 'timeout' is 0 which indicates
-that the request has no timeout. Example below shows how to use this feature:
+response as shown in the example above.
+
+Besides, you can set the timeout via the parameter 'timeout' in microseconds
+within the constructor of `InferenceRequest`. If the request times out, the
+request will respond with an error. The default of 'timeout' is 0 which
+indicates that the request has no timeout. Example below shows how to use this
+feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -974,18 +977,18 @@ class TritonPythonModel:
           requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
           inputs=[<pb_utils.Tensor object>])
 
-      # `pb_utils.InferenceRequest` supports request_id, correlation_id, and
-      # model version in addition to the arguments described above. These
-      # arguments are optional. An example containing all the arguments:
+      # `pb_utils.InferenceRequest` supports request_id, correlation_id,
+      # model version and timeout in addition to the arguments described above.
+      # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1, flags=0)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5)
 
       # Execute the inference_request and wait for the response. Here we are
       # running a BLS request on a decoupled model, hence setting the parameter
       # 'decoupled' to 'True'.
-      inference_responses = inference_request.exec(decoupled=True, timeout=10)
+      inference_responses = inference_request.exec(decoupled=True)
 
       for inference_response in inference_responses:
         # Check if the inference response has an error
@@ -1041,7 +1044,7 @@ class TritonPythonModel:
         # [Awaitable](https://docs.python.org/3/library/asyncio-task.html#awaitables)
         # object.
         infer_response_awaits.append(
-          inference_request.async_exec(decoupled=True, timeout=10))
+          inference_request.async_exec(decoupled=True))
 
       # Wait for all of the inference requests to complete.
       async_responses = await asyncio.gather(*infer_response_awaits)
