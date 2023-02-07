@@ -949,7 +949,7 @@ models in both [default mode](#default-mode) and
 [decoupled mode](#decoupled-mode). By setting the `decoupled` parameter to
 `True`, the `exec` and `async_exec` function will return a
 [generator](https://docs.python.org/3/glossary.html#term-generator) of
-inference responses returned by a decouple model. If the `decoupled` parameter
+inference responses returned by a decoupled model. If the `decoupled` parameter
 is set to `False`, the `exec` and `async_exec` function will return a single
 response as shown in the example above.
 
