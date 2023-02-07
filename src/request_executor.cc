@@ -56,7 +56,6 @@ void
 InferResponseComplete(
     TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
 {
-  // auto p = reinterpret_cast<std::shared_ptr<InferRequest>*>(userp);
   auto p = reinterpret_cast<std::shared_ptr<InferPayload>*>(userp);
   std::unique_ptr<InferResponse> infer_response;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
