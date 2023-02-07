@@ -140,26 +140,6 @@ InferRequest::Timeout()
 }
 
 void
-InferRequest::SetPrevPromise(
-    std::promise<std::unique_ptr<InferResponse>>** promise)
-{
-  prev_promise_.reset(std::move(*promise));
-}
-
-void
-InferRequest::SetValueForPrevPromise(
-    std::unique_ptr<InferResponse> infer_response)
-{
-  prev_promise_->set_value(std::move(infer_response));
-}
-
-void
-InferRequest::ResetPrevPromise()
-{
-  prev_promise_.reset();
-}
-
-void
 InferRequest::SetIsDecoupled(const bool is_decoupled)
 {
   is_decoupled_ = is_decoupled;

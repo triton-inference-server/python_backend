@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "python_be.h"
 
+#include "infer_payload.h"
 #include "pb_log.h"
 
 namespace triton { namespace backend { namespace python {
@@ -733,8 +734,10 @@ ModelInstanceState::ExecuteBLSRequest(
       }
 
       if (pb_exception.what() != nullptr) {
+        std::shared_ptr<InferPayload> infer_payload =
+            std::make_shared<InferPayload>(is_decoupled);
         auto response_future =
-            request_executor->Infer(infer_request, is_decoupled);
+            request_executor->Infer(infer_request, infer_payload);
         GetBLSResponses(infer_responses, std::move(response_future));
 
         size_t response_length = infer_responses.size();

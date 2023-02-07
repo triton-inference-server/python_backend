@@ -75,10 +75,6 @@ class InferRequest {
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
   int32_t Timeout();
-
-  void SetPrevPromise(std::promise<std::unique_ptr<InferResponse>>** promise);
-  void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
-  void ResetPrevPromise();
   bool IsDecoupled();
   void SetIsDecoupled(const bool is_decoupled);
 
@@ -144,8 +140,6 @@ class InferRequest {
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
-
-  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<ResponseSender> response_sender_;

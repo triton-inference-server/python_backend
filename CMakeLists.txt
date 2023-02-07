@@ -174,6 +174,8 @@ set(
   src/request_executor.h
   src/stub_launcher.h
   src/stub_launcher.cc
+  src/infer_payload.h
+  src/infer_payload.cc
 )
 
 list(APPEND

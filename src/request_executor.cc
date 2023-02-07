@@ -56,7 +56,8 @@ void
 InferResponseComplete(
     TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
 {
-  auto p = reinterpret_cast<std::shared_ptr<InferRequest>*>(userp);
+  // auto p = reinterpret_cast<std::shared_ptr<InferRequest>*>(userp);
+  auto p = reinterpret_cast<std::shared_ptr<InferPayload>*>(userp);
   std::unique_ptr<InferResponse> infer_response;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   std::shared_ptr<PbError> pb_error;
@@ -273,7 +274,8 @@ RequestExecutor::RequestExecutor(
 
 std::future<std::unique_ptr<InferResponse>>
 RequestExecutor::Infer(
-    std::shared_ptr<InferRequest>& infer_request, const bool is_decoupled)
+    std::shared_ptr<InferRequest>& infer_request,
+    std::shared_ptr<InferPayload>& infer_payload)
 {
   std::future<std::unique_ptr<InferResponse>> response_future;
   std::unique_ptr<InferResponse> infer_response;
@@ -299,7 +301,7 @@ RequestExecutor::Infer(
     infer_request->SetIsDecoupled(
         (txn_flags & TRITONSERVER_TXN_DECOUPLED) != 0);
 
-    if (!is_decoupled && infer_request->IsDecoupled()) {
+    if (!infer_payload->IsDecoupled() && infer_request->IsDecoupled()) {
       // Decoupled API is only supported by using stream API
       throw PythonBackendException(
           std::string("Model ") + model_name +
@@ -346,13 +348,11 @@ RequestExecutor::Infer(
     }
 
     {
-      auto p = new std::promise<std::unique_ptr<InferResponse>>();
-      response_future = p->get_future();
-      infer_request->SetPrevPromise(std::move(&p));
+      infer_payload->SetFuture(response_future);
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
           irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
-          reinterpret_cast<void*>(&infer_request)));
+          reinterpret_cast<void*>(&infer_payload)));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));
