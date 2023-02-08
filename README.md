@@ -1113,7 +1113,7 @@ inference request on itself and there are no more model instances ready to
 execute the inference request, the model will block on the inference execution
 forever.
 
-- BLS can not run inference on a decoupled model in *async* decoupled mode.
+- Async BLS is not supported when running a Python model in decoupled mode.
 
 # Interoperability and GPU Support
 
