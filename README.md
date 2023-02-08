@@ -944,7 +944,7 @@ class TritonPythonModel:
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
-Starting from 23.02 release, you can execute inference requests on decoupled
+Starting from 23.03 release, you can execute inference requests on decoupled
 models in both [default mode](#default-mode) and
 [decoupled mode](#decoupled-mode). By setting the `decoupled` parameter to
 `True`, the `exec` and `async_exec` function will return a
