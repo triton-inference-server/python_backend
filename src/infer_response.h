@@ -123,7 +123,6 @@ class InferResponse {
 
   std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
       next_response_future_;
-  bi::managed_external_buffer::handle_t next_response_handle_;
 };
 
 }}}  // namespace triton::backend::python

@@ -204,13 +204,6 @@ InferResponse::GetNextResponse()
   return std::move(next_response_future_);
 }
 
-void
-InferResponse::SetNextResponseHandle(
-    bi::managed_external_buffer::handle_t next_response_handle)
-{
-  next_response_handle_ = next_response_handle;
-}
-
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*>
 InferResponse::Send(

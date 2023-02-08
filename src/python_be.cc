@@ -766,27 +766,25 @@ ModelInstanceState::ExecuteBLSRequest(
           response_batch->response_size = response_length;
         }
 
-        for (size_t i = 0; i < infer_responses.size(); i++) {
-          if (infer_responses[i]) {
-            infer_responses[i]->SaveToSharedMemory(Stub()->ShmPool());
+        for (size_t i = 0; i < response_length; i++) {
+          infer_responses[i]->SaveToSharedMemory(Stub()->ShmPool());
 
-            for (auto& output_tensor : infer_responses[i]->OutputTensors()) {
-              // For GPU tensors we need to store the memory release id in
-              // memory manager.
-              if (!output_tensor->IsCPU()) {
+          for (auto& output_tensor : infer_responses[i]->OutputTensors()) {
+            // For GPU tensors we need to store the memory release id in
+            // memory manager.
+            if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-                std::unique_ptr<MemoryRecord> gpu_memory_record =
-                    std::make_unique<GPUMemoryRecord>(
-                        output_tensor->Memory()->DataPtr());
-                uint64_t memory_release_id =
-                    Stub()->GetMemoryManager()->AddRecord(
-                        std::move(gpu_memory_record));
-                output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
+              std::unique_ptr<MemoryRecord> gpu_memory_record =
+                  std::make_unique<GPUMemoryRecord>(
+                      output_tensor->Memory()->DataPtr());
+              uint64_t memory_release_id =
+                  Stub()->GetMemoryManager()->AddRecord(
+                      std::move(gpu_memory_record));
+              output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
 #endif
-              }
             }
-            response_handle[i] = infer_responses[i]->ShmHandle();
           }
+          response_handle[i] = infer_responses[i]->ShmHandle();
         }
       } else {
         throw pb_exception;
