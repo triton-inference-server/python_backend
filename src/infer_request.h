@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <future>
 #include <string>
 #include "infer_response.h"
 #include "pb_tensor.h"
@@ -35,6 +36,8 @@
 #endif
 
 namespace triton { namespace backend { namespace python {
+
+class Stub;
 
 //
 // Inference Request
@@ -47,6 +50,8 @@ struct InferRequestShm {
   uint32_t flags;
   intptr_t address;
   intptr_t response_factory_address;
+  bool is_decoupled;
+  int32_t timeout;
 };
 
 class InferRequest {
@@ -56,7 +61,8 @@ class InferRequest {
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
-      const uint32_t flags = 0, const intptr_t response_factory_address = 0,
+      const uint32_t flags = 0, const int32_t timeout = 0,
+      const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
@@ -68,9 +74,12 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
+  int32_t Timeout();
+  bool IsDecoupled();
+  void SetIsDecoupled(const bool is_decoupled);
 
 #ifdef TRITON_PB_STUB
-  std::shared_ptr<InferResponse> Exec();
+  std::vector<std::shared_ptr<InferResponse>> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
 #endif
 
@@ -116,8 +125,10 @@ class InferRequest {
   std::string model_name_;
   int64_t model_version_;
   uint32_t flags_;
+  int32_t timeout_;
   intptr_t response_factory_address_;
   intptr_t request_address_;
+  bool is_decoupled_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;

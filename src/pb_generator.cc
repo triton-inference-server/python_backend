@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,32 +24,39 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
+#include "pb_generator.h"
 
-#include <memory>
-#include "infer_payload.h"
-#include "infer_request.h"
-#include "infer_response.h"
+#include <pybind11/embed.h>
+namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
+ResponseGenerator::ResponseGenerator(
+    const std::vector<std::shared_ptr<InferResponse>>& responses)
+    : responses_(responses), index_(0)
+{
+}
 
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
+std::shared_ptr<InferResponse>
+ResponseGenerator::Next()
+{
+  if (index_ == responses_.size()) {
+    throw py::stop_iteration("Iteration is done for the responses.");
+  }
 
- public:
-  std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      std::shared_ptr<InferPayload>& infer_payload);
+  return responses_[index_++];
+}
 
-  RequestExecutor(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_Server* server);
+std::vector<std::shared_ptr<InferResponse>>::iterator
+ResponseGenerator::Begin()
+{
+  return responses_.begin();
+}
 
-  ~RequestExecutor();
-};
+std::vector<std::shared_ptr<InferResponse>>::iterator
+ResponseGenerator::End()
+{
+  return responses_.end();
+}
+
 }}}  // namespace triton::backend::python

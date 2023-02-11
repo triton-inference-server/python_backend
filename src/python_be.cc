@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "python_be.h"
 
+#include "infer_payload.h"
 #include "pb_log.h"
 
 namespace triton { namespace backend { namespace python {
@@ -373,12 +374,13 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), flags,
-          reinterpret_cast<intptr_t>(factory_ptr),
+          0 /* BLS request timeout*/, reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request));
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), flags, 0,
+          model_state->Name(), model_state->Version(), flags,
+          0 /* BLS request timeout*/, 0 /* response_factory_address */,
           reinterpret_cast<intptr_t>(request));
     }
 
@@ -595,15 +597,33 @@ ModelInstanceState::GetInputTensor(
 }
 
 void
-ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
+ModelInstanceState::GetBLSResponses(
+    std::vector<std::unique_ptr<InferResponse>>& responses,
+    std::future<std::unique_ptr<InferResponse>> future)
+{
+  responses.push_back(future.get());
+  size_t size = responses.size();
+  for (size_t i = 0; i < size; i++) {
+    if (responses[i]) {
+      auto next_future = responses[i]->GetNextResponse();
+      if (next_future) {
+        responses.push_back(next_future->get());
+        size++;
+      }
+    }
+  }
+}
+
+void
+ModelInstanceState::ExecuteBLSRequest(
+    std::shared_ptr<IPCMessage> ipc_message, const bool is_decoupled)
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   auto request_executor = std::make_unique<RequestExecutor>(
       Stub()->ShmPool(), model_state->TritonServer());
   bool is_response_batch_set = false;
-  std::unique_ptr<InferResponse> infer_response;
+  std::vector<std::unique_ptr<InferResponse>> infer_responses;
   ResponseBatch* response_batch;
-  TRITONSERVER_InferenceResponse* inference_response = nullptr;
   std::unique_ptr<PbString> pb_error_message;
   std::unique_ptr<IPCMessage> bls_response;
   AllocatedSharedMemory<char> response_batch_shm;
@@ -633,6 +653,7 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
     response_batch->has_error = false;
     response_batch->is_error_set = false;
     response_batch->cleanup = false;
+    response_batch->response_size = 1;
     is_response_batch_set = true;
     bool has_gpu_tensor = false;
 
@@ -713,15 +734,44 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
       }
 
       if (pb_exception.what() != nullptr) {
-        infer_response =
-            request_executor->Infer(infer_request, &inference_response);
+        std::shared_ptr<InferPayload> infer_payload =
+            std::make_shared<InferPayload>(is_decoupled);
+        auto response_future =
+            request_executor->Infer(infer_request, infer_payload);
+        GetBLSResponses(infer_responses, std::move(response_future));
 
-        if (infer_response) {
-          infer_response->SaveToSharedMemory(Stub()->ShmPool());
+        size_t response_length = infer_responses.size();
+        // It is possible that the last response from the decoupled model is an
+        // empty response.
+        if (infer_responses.back() == nullptr) {
+          response_length--;
+        }
 
-          for (auto& output_tensor : infer_response->OutputTensors()) {
-            // For GPU tensors we need to store the memory release id in memory
-            // manager.
+        if (response_length != 1) {
+          // Construct the response_batch_shm based on the length of the
+          // responses for decoupled support.
+          response_batch_shm = Stub()->ShmPool()->Construct<char>(
+              sizeof(ResponseBatch) +
+              response_length * sizeof(bi::managed_external_buffer::handle_t));
+          response_batch =
+              reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+          response_handle =
+              reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+                  response_batch_shm.data_.get() + sizeof(ResponseBatch));
+          bls_response->Args() = response_batch_shm.handle_;
+          response_batch->batch_size = 1;
+          response_batch->has_error = false;
+          response_batch->is_error_set = false;
+          response_batch->cleanup = false;
+          response_batch->response_size = response_length;
+        }
+
+        for (size_t i = 0; i < response_length; i++) {
+          infer_responses[i]->SaveToSharedMemory(Stub()->ShmPool());
+
+          for (auto& output_tensor : infer_responses[i]->OutputTensors()) {
+            // For GPU tensors we need to store the memory release id in
+            // memory manager.
             if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
               std::unique_ptr<MemoryRecord> gpu_memory_record =
@@ -734,9 +784,8 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
 #endif
             }
           }
-          *response_handle = infer_response->ShmHandle();
+          response_handle[i] = infer_responses[i]->ShmHandle();
         }
-
       } else {
         throw pb_exception;
       }
@@ -766,12 +815,6 @@ ModelInstanceState::ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message)
     ipc_message->ResponseCondition()->notify_all();
     ipc_message->ResponseCondition()->wait(lock);
   }
-
-  if (inference_response != nullptr) {
-    LOG_IF_ERROR(
-        TRITONSERVER_InferenceResponseDelete(inference_response),
-        " failed to release BLS inference response.");
-  }
 }
 
 void
@@ -800,10 +843,15 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
       std::future<void> future =
           boost::asio::post(*thread_pool_, std::move(task));
       futures_.emplace_back(std::move(future));
-    } else if (message->Command() == PYTHONSTUB_InferExecRequest) {
+    } else if (
+        message->Command() == PYTHONSTUB_InferExecRequest ||
+        message->Command() == PYTHONSTUB_InferStreamExecRequest) {
       std::shared_ptr<IPCMessage> bls_execute = std::move(message);
-      std::packaged_task<void()> task(
-          [this, bls_execute] { ExecuteBLSRequest(bls_execute); });
+      std::packaged_task<void()> task([this, bls_execute] {
+        ExecuteBLSRequest(
+            bls_execute,
+            (bls_execute->Command() == PYTHONSTUB_InferStreamExecRequest));
+      });
       std::future<void> future =
           boost::asio::post(*thread_pool_, std::move(task));
       futures_.emplace_back(std::move(future));
@@ -1188,9 +1236,15 @@ ModelInstanceState::ProcessRequests(
   // requests to execute. Otherwise, the Python backend will continuosly execute
   // BLS requests pushed to the message queue.
   while (ipc_message->Command() ==
-         PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest) {
-    std::packaged_task<void()> task(
-        [this, ipc_message] { ExecuteBLSRequest(ipc_message); });
+             PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest ||
+         ipc_message->Command() ==
+             PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest) {
+    std::packaged_task<void()> task([this, ipc_message] {
+      ExecuteBLSRequest(
+          ipc_message,
+          (ipc_message->Command() ==
+           PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest));
+    });
     std::future<void> future =
         boost::asio::post(*thread_pool_, std::move(task));
     futures_.emplace_back(std::move(future));

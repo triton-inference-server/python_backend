@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -39,6 +39,22 @@ namespace triton { namespace backend { namespace python {
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
     std::shared_ptr<PbError> error)
+    : error_(error), next_response_future_(nullptr)
+{
+  for (auto& output : output_tensors) {
+    if (!output) {
+      throw PythonBackendException(
+          "Output tensor for inference response should not be empty.");
+    }
+  }
+
+  output_tensors_ = output_tensors;
+}
+
+InferResponse::InferResponse(
+    const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
+    std::promise<std::unique_ptr<InferResponse>>* promise,
+    std::shared_ptr<PbError> error)
     : error_(error)
 {
   for (auto& output : output_tensors) {
@@ -49,6 +65,9 @@ InferResponse::InferResponse(
   }
 
   output_tensors_ = output_tensors;
+  next_response_future_ =
+      std::make_unique<std::future<std::unique_ptr<InferResponse>>>(
+          promise->get_future());
 }
 
 std::vector<std::shared_ptr<PbTensor>>&
@@ -177,6 +196,12 @@ std::shared_ptr<PbError>&
 InferResponse::Error()
 {
   return error_;
+}
+
+std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+InferResponse::GetNextResponse()
+{
+  return std::move(next_response_future_);
 }
 
 #ifndef TRITON_PB_STUB

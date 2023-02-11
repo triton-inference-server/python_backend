@@ -42,6 +42,10 @@ set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
 set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 #
 # Dependencies
 #
@@ -170,6 +174,8 @@ set(
   src/request_executor.h
   src/stub_launcher.h
   src/stub_launcher.cc
+  src/infer_payload.h
+  src/infer_payload.cc
 )
 
 list(APPEND
@@ -190,6 +196,8 @@ set(
   src/response_sender.h
   src/pb_stub.h
   src/pb_stub.cc
+  src/pb_generator.h
+  src/pb_generator.cc
 )
 
 list(APPEND

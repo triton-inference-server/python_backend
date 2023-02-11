@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -56,12 +56,112 @@ void
 InferResponseComplete(
     TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
 {
+  auto p = reinterpret_cast<std::shared_ptr<InferPayload>*>(userp);
+  std::unique_ptr<InferResponse> infer_response;
+  std::vector<std::shared_ptr<PbTensor>> output_tensors;
+  std::shared_ptr<PbError> pb_error;
+
   if (response != nullptr) {
-    // Send 'response' to the future.
-    std::promise<TRITONSERVER_InferenceResponse*>* p =
-        reinterpret_cast<std::promise<TRITONSERVER_InferenceResponse*>*>(userp);
-    p->set_value(response);
-    delete p;
+    try {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
+
+      uint32_t output_count;
+      THROW_IF_TRITON_ERROR(
+          TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
+
+      for (uint32_t idx = 0; idx < output_count; ++idx) {
+        const char* cname;
+        TRITONSERVER_DataType datatype;
+        const int64_t* shape;
+        uint64_t dim_count;
+        const void* base;
+        size_t byte_size;
+        TRITONSERVER_MemoryType memory_type;
+        int64_t memory_type_id;
+        void* userp;
+
+        THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseOutput(
+            response, idx, &cname, &datatype, &shape, &dim_count, &base,
+            &byte_size, &memory_type, &memory_type_id, &userp));
+        std::string sname = cname;
+        std::vector<int64_t> dims_vector{shape, shape + dim_count};
+
+        // userp is only set for the CPU tensors
+        if (memory_type != TRITONSERVER_MEMORY_GPU) {
+          if (byte_size != 0) {
+            std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
+                sname, dims_vector, datatype, memory_type, memory_type_id,
+                const_cast<void*>(base), byte_size,
+                nullptr /* DLManagedTensor */);
+
+            // Load the data so that it is deallocated automatically.
+            std::unique_ptr<PbMemory> pb_memory(
+                reinterpret_cast<PbMemory*>(userp));
+            pb_tensor->SetMemory(std::move(pb_memory));
+            output_tensors.push_back(pb_tensor);
+          } else {
+            output_tensors.push_back(std::make_shared<PbTensor>(
+                sname, dims_vector, datatype, memory_type, memory_type_id,
+                const_cast<void*>(base), byte_size,
+                nullptr /* DLManagedTensor */));
+          }
+        } else {
+          output_tensors.push_back(std::make_shared<PbTensor>(
+              sname, dims_vector, datatype, memory_type, memory_type_id,
+              const_cast<void*>(base), byte_size,
+              nullptr /* DLManagedTensor */));
+        }
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+      if (response != nullptr) {
+        LOG_IF_ERROR(
+            TRITONSERVER_InferenceResponseDelete(response),
+            "Failed to delete inference response.");
+
+        response = nullptr;
+      }
+      pb_error = std::make_shared<PbError>(pb_exception.what());
+      output_tensors.clear();
+    }
+
+    if (!(*p)->IsDecoupled()) {
+      infer_response =
+          std::make_unique<InferResponse>(output_tensors, pb_error);
+      (*p)->SetValueForPrevPromise(std::move(infer_response));
+      (*p)->ResetPrevPromise();
+    } else {
+      if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
+        // Not the last reponse. Need to store the promise associated with the
+        // next future.
+        auto promise = new std::promise<std::unique_ptr<InferResponse>>();
+        infer_response =
+            std::make_unique<InferResponse>(output_tensors, promise, pb_error);
+        (*p)->SetValueForPrevPromise(std::move(infer_response));
+        (*p)->SetPrevPromise(&promise);
+      } else {
+        // The last response.
+        infer_response =
+            std::make_unique<InferResponse>(output_tensors, pb_error);
+        (*p)->SetValueForPrevPromise(std::move(infer_response));
+        (*p)->ResetPrevPromise();
+      }
+    }
+
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceResponseDelete(response),
+        "Failed to release BLS inference response.");
+  } else if (
+      (*p)->IsDecoupled() &&
+      (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
+    // An empty response may be the last reponse for decoupled models.
+    (*p)->SetValueForPrevPromise(std::unique_ptr<InferResponse>{});
+    (*p)->ResetPrevPromise();
+  } else {
+    pb_error = std::make_shared<PbError>("Unexpected empty response.");
+    infer_response = std::make_unique<InferResponse>(output_tensors, pb_error);
+    (*p)->SetValueForPrevPromise(std::move(infer_response));
+    (*p)->ResetPrevPromise();
   }
 }
 
@@ -171,21 +271,16 @@ RequestExecutor::RequestExecutor(
   response_allocator_ = allocator;
 }
 
-std::unique_ptr<InferResponse>
+std::future<std::unique_ptr<InferResponse>>
 RequestExecutor::Infer(
-    const std::shared_ptr<InferRequest>& infer_request,
-    TRITONSERVER_InferenceResponse** triton_response)
+    std::shared_ptr<InferRequest>& infer_request,
+    std::shared_ptr<InferPayload>& infer_payload)
 {
+  std::future<std::unique_ptr<InferResponse>> response_future;
   std::unique_ptr<InferResponse> infer_response;
   bool is_ready = false;
   const char* model_name = infer_request->ModelName().c_str();
   TRITONSERVER_InferenceRequest* irequest = nullptr;
-  TRITONSERVER_InferenceResponse* response = nullptr;
-
-  // This variable indicates whether the InferenceRequest should be deleted as a
-  // part of the catch block or it will be automatically deleted using the
-  // InferResponseComplete callback.
-  bool delete_inference_request = true;
 
   try {
     int64_t model_version = infer_request->ModelVersion();
@@ -202,13 +297,17 @@ RequestExecutor::Infer(
     uint32_t txn_flags;
     THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelTransactionProperties(
         server_, model_name, model_version, &txn_flags, nullptr /* voidp */));
+    infer_request->SetIsDecoupled(
+        (txn_flags & TRITONSERVER_TXN_DECOUPLED) != 0);
 
-    // Decoupled API is not supported in the current BLS interface
-    if ((txn_flags & TRITONSERVER_TXN_DECOUPLED) != 0) {
+    if (!infer_payload->IsDecoupled() && infer_request->IsDecoupled()) {
+      // Decoupled API is only supported by using stream API
       throw PythonBackendException(
           std::string("Model ") + model_name +
-          " is using the decoupled. BLS doesn't support models using the "
-          "decoupled transaction policy.");
+          " is using the decoupled. The current BLS request call doesn't "
+          "support models using the decoupled transaction policy. Please use "
+          "stream API 'stream_exec()' or 'async_stream_exec() for decoupled "
+          "models.'");
     }
 
     // Inference
@@ -223,6 +322,9 @@ RequestExecutor::Infer(
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
         irequest, infer_request->Flags()));
+
+    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetTimeoutMicroseconds(
+        irequest, infer_request->Timeout()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));
@@ -245,98 +347,27 @@ RequestExecutor::Infer(
     }
 
     {
-      auto p = new std::promise<TRITONSERVER_InferenceResponse*>();
-      std::future<TRITONSERVER_InferenceResponse*> completed = p->get_future();
+      infer_payload->SetFuture(response_future);
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
           irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
-          reinterpret_cast<void*>(p)));
+          reinterpret_cast<void*>(&infer_payload)));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));
-
-      // Wait for the inference to complete.
-      response = completed.get();
-      *triton_response = response;
-      delete_inference_request = false;
-      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
-
-      uint32_t output_count;
-      THROW_IF_TRITON_ERROR(
-          TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
-
-      std::vector<std::shared_ptr<PbTensor>> output_tensors;
-      for (uint32_t idx = 0; idx < output_count; ++idx) {
-        const char* cname;
-        TRITONSERVER_DataType datatype;
-        const int64_t* shape;
-        uint64_t dim_count;
-        const void* base;
-        size_t byte_size;
-        TRITONSERVER_MemoryType memory_type;
-        int64_t memory_type_id;
-        void* userp;
-
-        THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseOutput(
-            response, idx, &cname, &datatype, &shape, &dim_count, &base,
-            &byte_size, &memory_type, &memory_type_id, &userp));
-        std::string sname = cname;
-        std::vector<int64_t> dims_vector{shape, shape + dim_count};
-
-        // userp is only set for the CPU tensors
-        if (memory_type != TRITONSERVER_MEMORY_GPU) {
-          if (byte_size != 0) {
-            std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
-                sname, dims_vector, datatype, memory_type, memory_type_id,
-                const_cast<void*>(base), byte_size,
-                nullptr /* DLManagedTensor */);
-
-            // Load the data so that it is deallocated automatically.
-            std::unique_ptr<PbMemory> pb_memory(
-                reinterpret_cast<PbMemory*>(userp));
-            pb_tensor->SetMemory(std::move(pb_memory));
-            output_tensors.push_back(pb_tensor);
-          } else {
-            output_tensors.push_back(std::make_shared<PbTensor>(
-                sname, dims_vector, datatype, memory_type, memory_type_id,
-                const_cast<void*>(base), byte_size,
-                nullptr /* DLManagedTensor */));
-          }
-        } else {
-          output_tensors.push_back(std::make_shared<PbTensor>(
-              sname, dims_vector, datatype, memory_type, memory_type_id,
-              const_cast<void*>(base), byte_size,
-              nullptr /* DLManagedTensor */));
-        }
-      }
-
-      std::shared_ptr<PbError> pb_error;
-      infer_response =
-          std::make_unique<InferResponse>(output_tensors, pb_error);
     }
   }
   catch (const PythonBackendException& pb_exception) {
-    if (response != nullptr) {
-      LOG_IF_ERROR(
-          TRITONSERVER_InferenceResponseDelete(response),
-          "Failed to delete inference response.");
+    LOG_IF_ERROR(
+        TRITONSERVER_InferenceRequestDelete(irequest),
+        "Failed to delete inference request.");
 
-      *triton_response = nullptr;
-    }
-
-    if (delete_inference_request) {
-      LOG_IF_ERROR(
-          TRITONSERVER_InferenceRequestDelete(irequest),
-          "Failed to delete inference request.");
-    }
-
-    std::shared_ptr<PbError> pb_error =
-        std::make_shared<PbError>(pb_exception.what());
-    infer_response = std::make_unique<InferResponse>(
-        std::vector<std::shared_ptr<PbTensor>>{}, pb_error);
+    throw PythonBackendException(
+        std::string("Model ") + model_name +
+        " - Error when running inference: " + pb_exception.what());
   }
 
-  return infer_response;
+  return response_future;
 }
 
 RequestExecutor::~RequestExecutor()
