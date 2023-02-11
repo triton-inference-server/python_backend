@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -43,6 +43,7 @@
 #include <unordered_map>
 #include "infer_response.h"
 #include "pb_error.h"
+#include "pb_generator.h"
 #include "pb_map.h"
 #include "pb_string.h"
 #include "pb_utils.h"
@@ -1065,14 +1066,15 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const std::vector<std::shared_ptr<PbTensor>>& inputs,
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
-                      const int64_t model_version, const uint32_t flags) {
+                      const int64_t model_version, const uint32_t flags,
+                      const int32_t timeout) {
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, flags);
+                model_name, model_version, flags, timeout);
           }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,
@@ -1080,7 +1082,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("requested_output_names").none(false),
           py::arg("model_name").none(false),
           py::arg("model_version").none(false) = -1,
-          py::arg("flags").none(false) = 0)
+          py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
@@ -1088,10 +1090,27 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("correlation_id", &InferRequest::CorrelationId)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
-      .def("exec", &InferRequest::Exec)
+      .def("timeout", &InferRequest::Timeout)
+      .def(
+          "exec",
+          [](std::shared_ptr<InferRequest>& infer_request,
+             const bool decoupled) {
+            std::vector<std::shared_ptr<InferResponse>> responses =
+                infer_request->Exec(decoupled);
+            py::object response_object;
+            if (decoupled) {
+              response_object = py::cast(ResponseGenerator(responses));
+            } else {
+              response_object = py::cast(responses[0]);
+            }
+
+            return response_object;
+          },
+          py::arg("decoupled").none(false) = false)
       .def(
           "async_exec",
-          [](std::shared_ptr<InferRequest>& infer_request) {
+          [](std::shared_ptr<InferRequest>& infer_request,
+             const bool decoupled) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             if (stub->IsDecoupled()) {
               throw PythonBackendException(
@@ -1100,14 +1119,23 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [infer_request]() {
-              auto response = infer_request->Exec();
-              return response;
+            py::cpp_function callback = [infer_request, decoupled]() {
+              std::vector<std::shared_ptr<InferResponse>> responses =
+                  infer_request->Exec(decoupled);
+              py::object response_object;
+              if (decoupled) {
+                response_object = py::cast(ResponseGenerator(responses));
+              } else {
+                response_object = py::cast(responses[0]);
+              }
+
+              return response_object;
             };
             py::object future =
                 loop.attr("run_in_executor")(py::none(), callback);
             return future;
-          })
+          },
+          py::arg("decoupled").none(false) = false)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
@@ -1148,6 +1176,17 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
           py::arg("flags") = 0);
+
+  py::class_<ResponseGenerator, std::shared_ptr<ResponseGenerator>>(
+      module, "ResponseGenerator")
+      .def(py::init<const std::vector<std::shared_ptr<InferResponse>>&>())
+      .def(
+          "__iter__",
+          [](ResponseGenerator& self) {
+            return py::make_iterator(self.Begin(), self.End());
+          },
+          py::keep_alive<0, 1>())
+      .def("__next__", &ResponseGenerator::Next);
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")

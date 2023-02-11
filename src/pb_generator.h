@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,30 +26,22 @@
 
 #pragma once
 
-#include <memory>
-#include "infer_payload.h"
-#include "infer_request.h"
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
-
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
-
+class ResponseGenerator {
  public:
-  std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      std::shared_ptr<InferPayload>& infer_payload);
+  ResponseGenerator(
+      const std::vector<std::shared_ptr<InferResponse>>& responses);
 
-  RequestExecutor(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_Server* server);
+  std::shared_ptr<InferResponse> Next();
+  std::vector<std::shared_ptr<InferResponse>>::iterator Begin();
+  std::vector<std::shared_ptr<InferResponse>>::iterator End();
 
-  ~RequestExecutor();
+ private:
+  std::vector<std::shared_ptr<InferResponse>> responses_;
+  size_t index_;
 };
+
 }}}  // namespace triton::backend::python

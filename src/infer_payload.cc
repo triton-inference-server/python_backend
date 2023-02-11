@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,32 +24,52 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-
-#include <memory>
 #include "infer_payload.h"
-#include "infer_request.h"
-#include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
+InferPayload::InferPayload(const bool is_decoupled)
+    : is_decoupled_(is_decoupled)
+{
+  prev_promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
+}
 
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
+InferPayload::~InferPayload()
+{
+  prev_promise_.reset();
+}
 
- public:
-  std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      std::shared_ptr<InferPayload>& infer_payload);
+void
+InferPayload::SetPrevPromise(
+    std::promise<std::unique_ptr<InferResponse>>** promise)
+{
+  prev_promise_.reset(std::move(*promise));
+}
 
-  RequestExecutor(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_Server* server);
+void
+InferPayload::SetValueForPrevPromise(
+    std::unique_ptr<InferResponse> infer_response)
+{
+  prev_promise_->set_value(std::move(infer_response));
+}
 
-  ~RequestExecutor();
-};
+void
+InferPayload::ResetPrevPromise()
+{
+  prev_promise_.reset();
+}
+
+void
+InferPayload::SetFuture(
+    std::future<std::unique_ptr<InferResponse>>& response_future)
+{
+  response_future = prev_promise_->get_future();
+}
+
+bool
+InferPayload::IsDecoupled()
+{
+  return is_decoupled_;
+}
+
 }}}  // namespace triton::backend::python

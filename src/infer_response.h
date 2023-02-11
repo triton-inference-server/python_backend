@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <future>
 #include "pb_error.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -68,6 +69,10 @@ class InferResponse {
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
       std::shared_ptr<PbError> error = nullptr);
+  InferResponse(
+      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
+      std::promise<std::unique_ptr<InferResponse>>* promise,
+      std::shared_ptr<PbError> error = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
@@ -79,6 +84,11 @@ class InferResponse {
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();
   void PruneOutputTensors(const std::set<std::string>& requested_output_names);
+  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+  GetNextResponse();
+  void SetNextResponseHandle(
+      bi::managed_external_buffer::handle_t next_response_handle);
+  bi::managed_external_buffer::handle_t NextResponseHandle();
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
@@ -110,5 +120,9 @@ class InferResponse {
   AllocatedSharedMemory<char> response_shm_;
   std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
   std::unique_ptr<ScopedDefer> deferred_send_callback_;
+
+  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+      next_response_future_;
 };
+
 }}}  // namespace triton::backend::python
