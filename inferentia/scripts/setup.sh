@@ -118,6 +118,7 @@ wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-py37_4.10.3-Linux-x8
     $(eval echo "${CONDA_PATH}/bin/conda clean -ya")
 export PATH=${CONDA_PATH}/bin:${PATH}
 conda info
+conda update -n base -c defaults conda -y
 
 # Install python_backend_stub installing dependencies
 apt-get update && \
