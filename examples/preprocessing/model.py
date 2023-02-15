@@ -63,11 +63,11 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = model_config = json.loads(args['model_config'])
+        self.model_config = json.loads(args['model_config'])
 
         # Get OUTPUT0 configuration
         output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT_0")
+            self.model_config, "OUTPUT_0")
 
         # Convert Triton types to numpy types
         self.output0_dtype = pb_utils.triton_string_to_numpy(
