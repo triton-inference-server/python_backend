@@ -28,8 +28,11 @@
 
 namespace triton { namespace backend { namespace python {
 
-InferPayload::InferPayload(const bool is_decoupled)
-    : is_decoupled_(is_decoupled)
+InferPayload::InferPayload(
+    const bool is_decoupled, std::mutex& mu, std::condition_variable& cv,
+    std::queue<std::unique_ptr<InferResponse>>& buffer)
+    : is_decoupled_(is_decoupled), mu_(mu), cv_(cv), buffer_(buffer),
+      is_promise_set_(false)
 {
   prev_promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
@@ -40,23 +43,12 @@ InferPayload::~InferPayload()
 }
 
 void
-InferPayload::SetPrevPromise(
-    std::promise<std::unique_ptr<InferResponse>>** promise)
-{
-  prev_promise_.reset(std::move(*promise));
-}
-
-void
 InferPayload::SetValueForPrevPromise(
     std::unique_ptr<InferResponse> infer_response)
 {
   prev_promise_->set_value(std::move(infer_response));
-}
-
-void
-InferPayload::ResetPrevPromise()
-{
   prev_promise_.reset();
+  is_promise_set_ = true;
 }
 
 void
@@ -70,6 +62,22 @@ bool
 InferPayload::IsDecoupled()
 {
   return is_decoupled_;
+}
+
+void
+InferPayload::EnqueueBLSResponse(std::unique_ptr<InferResponse>& response_ptr)
+{
+  {
+    std::lock_guard<std::mutex> guard{mu_};
+    buffer_.push(std::move(response_ptr));
+  }
+  cv_.notify_one();
+}
+
+bool
+InferPayload::IsPromiseSet()
+{
+  return is_promise_set_;
 }
 
 }}}  // namespace triton::backend::python

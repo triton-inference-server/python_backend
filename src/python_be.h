@@ -55,6 +55,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include "infer_request.h"
 #include "infer_response.h"
@@ -272,6 +273,18 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<std::future<void>> futures_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
 
+  std::queue<std::unique_ptr<InferResponse>> bls_response_buffer_;
+  std::thread bls_response_monitor_;
+  bool bls_response_thread_;
+  std::mutex bls_response_mutex_;
+  std::condition_variable bls_response_cv_;
+  // Need to manage the lifetime of InferPayload and RequestExecutor objects for
+  // bls decoupled responses.
+  std::unordered_map<InferPayload*, std::shared_ptr<InferPayload>>
+      infer_payload_;
+  std::unordered_map<InferPayload*, std::unique_ptr<RequestExecutor>>
+      request_executor_;
+
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -313,6 +326,10 @@ class ModelInstanceState : public BackendModelInstance {
   // shared memory and log it using the triton server core logging facilities.
   void LogMessageQueueMonitor();
 
+  // This function is executed on a separate thread and monitors the bls
+  // response queue.
+  void BLSResponseQueueMonitor();
+
   // Convert TRITONBACKEND_Input to Python backend tensors.
   TRITONSERVER_Error* GetInputTensor(
       const uint32_t input_idx, std::shared_ptr<PbTensor>& input_tensor,
@@ -342,11 +359,6 @@ class ModelInstanceState : public BackendModelInstance {
   // Wait for BLS requests to complete
   void WaitForBLSRequestsToFinish();
 
-  // Get BLS responses
-  void GetBLSResponses(
-      std::vector<std::unique_ptr<InferResponse>>& responses,
-      std::future<std::unique_ptr<InferResponse>> future);
-
   // Check the incoming requests for errors
   TRITONSERVER_Error* CheckIncomingRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -367,10 +379,12 @@ class ModelInstanceState : public BackendModelInstance {
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
 
-  // Stop the log monitor thread
-  void TerminateLogMonitor();
+  // Stop the log monitor and bls response monitor threads
+  void TerminateMonitors();
 
-  // Start the log monitor thread
-  void StartLogMonitor();
+  // Start the log monitor and bls response monitor threads
+  void StartMonitors();
+
+  void SendBLSDecoupledResponse(std::unique_ptr<InferResponse> response_ptr);
 };
 }}}  // namespace triton::backend::python

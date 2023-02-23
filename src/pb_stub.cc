@@ -85,6 +85,7 @@ Stub::Instantiate(
   health_mutex_ = nullptr;
   initialized_ = false;
   log_thread_ = false;
+  bls_response_thread_ = false;
 
   try {
     shm_pool_ = std::make_unique<SharedMemoryManager>(
@@ -105,6 +106,9 @@ Stub::Instantiate(
 
     log_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
         LoadFromSharedMemory(shm_pool_, ipc_control_->log_message_queue);
+
+    bls_response_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->bls_response_queue);
 
     memory_manager_message_queue_ =
         MessageQueue<uint64_t>::LoadFromSharedMemory(
@@ -494,6 +498,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   }
 
   LaunchLogRequestThread();
+  LaunchBLSResponseQueueMonitor();
+
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
     model_instance_.attr("initialize")(model_config_params);
@@ -934,6 +940,109 @@ Stub::LogServiceActive()
   return log_thread_;
 }
 
+void
+Stub::LaunchBLSResponseQueueMonitor()
+{
+  bls_response_thread_ = true;
+  bls_response_monitor_ = std::thread(&Stub::BLSResponseQueueMonitor, this);
+}
+
+void
+Stub::TerminateBLSResponseQueueMonitor()
+{
+  if (bls_response_thread_) {
+    bls_response_thread_ = false;
+    bls_response_queue_->Push(DUMMY_MESSAGE);
+    bls_response_monitor_.join();
+  }
+}
+
+void
+Stub::BLSResponseQueueMonitor()
+{
+  while (bls_response_thread_) {
+    bi::managed_external_buffer::handle_t handle = bls_response_queue_->Pop();
+    if (handle == DUMMY_MESSAGE) {
+      break;
+    }
+
+    std::unique_ptr<IPCMessage> ipc_message;
+    ResponseBatch* response_batch = nullptr;
+    bi::managed_external_buffer::handle_t* response_handle = nullptr;
+    std::unique_ptr<InferResponse> infer_response;
+    bool responses_is_set = false;
+    PythonBackendException pb_exception(std::string{});
+
+    try {
+      // py::gil_scoped_release release;
+      ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
+      AllocatedSharedMemory<char> response_batch_shm =
+          shm_pool_->Load<char>(ipc_message->Args());
+      response_batch =
+          reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+      response_handle =
+          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+              response_batch_shm.data_.get() + sizeof(ResponseBatch));
+      responses_is_set = true;
+
+      if (response_batch->has_error) {
+        if (response_batch->is_error_set) {
+          std::unique_ptr<PbString> pb_string =
+              PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
+          auto error_response = std::make_unique<InferResponse>(
+              std::vector<std::shared_ptr<PbTensor>>{},
+              std::make_shared<PbError>(pb_string->String()));
+        } else {
+          auto error_response = std::make_unique<InferResponse>(
+              std::vector<std::shared_ptr<PbTensor>>{},
+              std::make_shared<PbError>(
+                  "An error occurred while performing BLS request."));
+        }
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+      auto error_response = std::make_unique<InferResponse>(
+          std::vector<std::shared_ptr<PbTensor>>{},
+          std::make_shared<PbError>(pb_exception.what()));
+      std::unique_ptr<InferResponse> infer_response = std::move(error_response);
+    }
+    if (responses_is_set) {
+      std::unique_ptr<InferResponse> response =
+          InferResponse::LoadFromSharedMemory(
+              shm_pool_, *response_handle, true /* open cuda handle */);
+
+      for (auto& output_tensor : response->OutputTensors()) {
+        if (!output_tensor->IsCPU()) {
+          uint64_t memory_release_id =
+              output_tensor->Memory()->MemoryReleaseId();
+          output_tensor->Memory()->SetMemoryReleaseCallback(
+              [this, memory_release_id]() {
+                this->MemoryManagerQueue()->Push(memory_release_id);
+              });
+        }
+      }
+    } else {
+      auto error_response = std::make_unique<InferResponse>(
+          std::vector<std::shared_ptr<PbTensor>>{},
+          std::make_shared<PbError>(
+              "An error occurred while performing BLS request."));
+      infer_response = std::move(error_response);
+    }
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      ipc_message->ResponseCondition()->notify_all();
+    }
+  }
+}
+
+bool
+Stub::BLSResponseServiceActive()
+{
+  return bls_response_thread_;
+}
+
 std::unique_ptr<Logger> Logger::log_instance_;
 
 std::unique_ptr<Logger>&
@@ -1290,6 +1399,9 @@ main(int argc, char** argv)
             if (stub->LogServiceActive()) {
               stub->TerminateLogRequestThread();
             }
+            if (stub->BLSResponseServiceActive()) {
+              stub->TerminateBLSResponseQueueMonitor();
+            }
             // Destroy Stub
             LOG_INFO << "Non-graceful termination detected. ";
             background_thread_running = false;
@@ -1313,6 +1425,9 @@ main(int argc, char** argv)
       // Need check or may receive not joinable error
       if (stub->LogServiceActive()) {
         stub->TerminateLogRequestThread();
+      }
+      if (stub->BLSResponseServiceActive()) {
+        stub->TerminateBLSResponseQueueMonitor();
       }
       background_thread_running = false;
       background_thread.join();

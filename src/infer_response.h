@@ -68,11 +68,8 @@ class InferResponse {
  public:
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error = nullptr);
-  InferResponse(
-      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::promise<std::unique_ptr<InferResponse>>* promise,
-      std::shared_ptr<PbError> error = nullptr);
+      std::shared_ptr<PbError> error = nullptr,
+      const bool is_last_response = true);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
@@ -89,6 +86,7 @@ class InferResponse {
   void SetNextResponseHandle(
       bi::managed_external_buffer::handle_t next_response_handle);
   bi::managed_external_buffer::handle_t NextResponseHandle();
+  bool IsLastResponse();
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
@@ -120,9 +118,7 @@ class InferResponse {
   AllocatedSharedMemory<char> response_shm_;
   std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
   std::unique_ptr<ScopedDefer> deferred_send_callback_;
-
-  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
-      next_response_future_;
+  bool is_last_response_;
 };
 
 }}}  // namespace triton::backend::python

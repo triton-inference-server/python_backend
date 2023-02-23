@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -233,6 +233,18 @@ class Stub {
   /// Check if log handler is running
   bool LogServiceActive();
 
+  ///
+  void LaunchBLSResponseQueueMonitor();
+
+  ///
+  void TerminateBLSResponseQueueMonitor();
+
+  /// Check if bls response handler is running
+  bool BLSResponseServiceActive();
+
+  /// Thread process
+  void BLSResponseQueueMonitor();
+
  private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
@@ -254,6 +266,8 @@ class Stub {
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       log_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      bls_response_queue_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
@@ -263,5 +277,7 @@ class Stub {
   bool log_thread_;
   std::mutex log_message_mutex_;
   std::condition_variable log_message_cv_;
+  std::thread bls_response_monitor_;
+  bool bls_response_thread_;
 };
 }}}  // namespace triton::backend::python

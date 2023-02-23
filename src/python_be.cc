@@ -34,9 +34,9 @@ namespace bi = boost::interprocess;
 
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
-    : BackendModelInstance(model_state, triton_model_instance)
+    : BackendModelInstance(model_state, triton_model_instance),
+      log_thread_(false), bls_response_thread_(false)
 {
-  log_thread_ = false;
 }
 
 TRITONSERVER_Error*
@@ -401,7 +401,7 @@ ModelInstanceState::LaunchStubProcess()
       TRITONSERVER_InstanceGroupKindString(Kind()));
   RETURN_IF_ERROR(Stub()->Initialize(model_state));
   RETURN_IF_ERROR(Stub()->Setup());
-  StartLogMonitor();
+  StartMonitors();
   RETURN_IF_ERROR(Stub()->Launch());
 
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
@@ -597,24 +597,6 @@ ModelInstanceState::GetInputTensor(
 }
 
 void
-ModelInstanceState::GetBLSResponses(
-    std::vector<std::unique_ptr<InferResponse>>& responses,
-    std::future<std::unique_ptr<InferResponse>> future)
-{
-  responses.push_back(future.get());
-  size_t size = responses.size();
-  for (size_t i = 0; i < size; i++) {
-    if (responses[i]) {
-      auto next_future = responses[i]->GetNextResponse();
-      if (next_future) {
-        responses.push_back(next_future->get());
-        size++;
-      }
-    }
-  }
-}
-
-void
 ModelInstanceState::ExecuteBLSRequest(
     std::shared_ptr<IPCMessage> ipc_message, const bool is_decoupled)
 {
@@ -735,10 +717,14 @@ ModelInstanceState::ExecuteBLSRequest(
 
       if (pb_exception.what() != nullptr) {
         std::shared_ptr<InferPayload> infer_payload =
-            std::make_shared<InferPayload>(is_decoupled);
+            std::make_shared<InferPayload>(
+                is_decoupled, bls_response_mutex_, bls_response_cv_,
+                bls_response_buffer_);
+        infer_payload_[infer_payload.get()] = infer_payload;
         auto response_future =
             request_executor->Infer(infer_request, infer_payload);
-        GetBLSResponses(infer_responses, std::move(response_future));
+        request_executor_[infer_payload.get()] = std::move(request_executor);
+        infer_responses.push_back(response_future.get());
 
         size_t response_length = infer_responses.size();
         // It is possible that the last response from the decoupled model is an
@@ -924,19 +910,52 @@ ModelInstanceState::LogMessageQueueMonitor()
 }
 
 void
-ModelInstanceState::StartLogMonitor()
+ModelInstanceState::BLSResponseQueueMonitor()
 {
-  log_thread_ = true;
-  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
+  while (bls_response_thread_) {
+    std::unique_lock<std::mutex> guard{bls_response_mutex_};
+    while (bls_response_buffer_.empty()) {
+      bls_response_cv_.wait(guard);
+    }
+    std::unique_ptr<InferResponse> infer_response =
+        std::move(bls_response_buffer_.front());
+    if (infer_response == DUMMY_MESSAGE) {
+      bls_response_buffer_.pop();
+      break;
+    } else {
+      bls_response_buffer_.pop();
+      SendBLSDecoupledResponse(std::move(infer_response));
+    }
+  }
 }
 
 void
-ModelInstanceState::TerminateLogMonitor()
+ModelInstanceState::StartMonitors()
+{
+  log_thread_ = true;
+  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
+
+  bls_response_thread_ = true;
+  bls_response_monitor_ =
+      std::thread(&ModelInstanceState::BLSResponseQueueMonitor, this);
+}
+
+void
+ModelInstanceState::TerminateMonitors()
 {
   if (log_thread_) {
     log_thread_ = false;
     Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
     log_monitor_.join();
+  }
+
+  if (bls_response_thread_) {
+    {
+      std::lock_guard<std::mutex> guard{bls_response_mutex_};
+      bls_response_buffer_.push(DUMMY_MESSAGE);
+    }
+    bls_response_cv_.notify_one();
+    bls_response_monitor_.join();
   }
 }
 
@@ -1468,6 +1487,80 @@ ModelInstanceState::ProcessRequests(
   return;
 }
 
+void
+ModelInstanceState::SendBLSDecoupledResponse(
+    std::unique_ptr<InferResponse> response_ptr)
+{
+  bool is_response_batch_set = false;
+  ResponseBatch* response_batch;
+  std::unique_ptr<PbString> pb_error_message;
+  std::unique_ptr<IPCMessage> ipc_message;
+  AllocatedSharedMemory<char> response_batch_shm;
+
+  try {
+    ipc_message =
+        IPCMessage::Create(Stub()->ShmPool(), true /* inline_response */);
+    response_batch_shm = Stub()->ShmPool()->Construct<char>(
+        sizeof(ResponseBatch) + sizeof(bi::managed_external_buffer::handle_t));
+    response_batch =
+        reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+    bi::managed_external_buffer::handle_t* response_handle =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_batch_shm.data_.get() + sizeof(ResponseBatch));
+    ipc_message->Args() = response_batch_shm.handle_;
+
+    response_batch->batch_size = 1;
+    response_batch->has_error = false;
+    response_batch->is_error_set = false;
+    response_batch->cleanup = false;
+    response_batch->response_size = 1;
+    is_response_batch_set = true;
+
+    response_ptr->SaveToSharedMemory(Stub()->ShmPool());
+    for (auto& output_tensor : response_ptr->OutputTensors()) {
+      // For GPU tensors we need to store the memory release id in
+      // memory manager.
+      if (!output_tensor->IsCPU()) {
+#ifdef TRITON_ENABLE_GPU
+        std::unique_ptr<MemoryRecord> gpu_memory_record =
+            std::make_unique<GPUMemoryRecord>(
+                output_tensor->Memory()->DataPtr());
+        uint64_t memory_release_id =
+            Stub()->GetMemoryManager()->AddRecord(std::move(gpu_memory_record));
+        output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
+#endif
+      }
+    }
+
+    *response_handle = response_ptr->ShmHandle();
+  }
+  catch (const PythonBackendException& pb_exception) {
+    if (is_response_batch_set) {
+      response_batch->has_error = true;
+      LOG_IF_EXCEPTION(
+          pb_error_message =
+              PbString::Create(Stub()->ShmPool(), pb_exception.what()));
+
+      if (pb_error_message != nullptr) {
+        response_batch->is_error_set = true;
+        response_batch->error = pb_error_message->ShmHandle();
+      }
+    } else {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    bool success = false;
+    while (!success) {
+      Stub()->BLSResponseQueue()->Push(ipc_message->ShmHandle(), 1000, success);
+    }
+    ipc_message->ResponseCondition()->wait(lock);
+  }
+}
+
 ModelInstanceState::~ModelInstanceState()
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
@@ -1480,12 +1573,11 @@ ModelInstanceState::~ModelInstanceState()
     }
     thread_pool_->wait();
   }
-  // Terminate stub first to allow any last
-  // messages to be received by the back end
-  // before deallocating the queue memory
+  // Terminate stub first to allow any last messages to be received by the back
+  // end before deallocating the queue memory
   Stub()->TerminateStub();
-  TerminateLogMonitor();
-  Stub()->ClearLogQueue();
+  TerminateMonitors();
+  Stub()->ClearQueues();
   received_message_.reset();
   Stub().reset();
 }
@@ -1514,7 +1606,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 
     (*state)->Stub()->UpdateHealth();
     (*state)->Stub()->TerminateStub();
-    (*state)->Stub()->ClearLogQueue();
+    (*state)->Stub()->ClearQueues();
     (*state)->Stub().reset();
   }
 
@@ -1628,7 +1720,7 @@ ModelState::LaunchAutoCompleteStubProcess()
   catch (const BackendModelException& ex) {
     Stub()->UpdateHealth();
     Stub()->TerminateStub();
-    Stub()->ClearLogQueue();
+    Stub()->ClearQueues();
     Stub().reset();
     RETURN_ERROR_IF_TRUE(
         ex.err_ == nullptr, TRITONSERVER_ERROR_INTERNAL,
@@ -1963,11 +2055,11 @@ TRITONBACKEND_ModelInstanceExecute(
       LOG_MESSAGE(
           TRITONSERVER_LOG_ERROR,
           "Stub process is unhealthy and it will be restarted.");
-      instance_state->TerminateLogMonitor();
+      instance_state->TerminateMonitors();
       instance_state->Stub()->KillStubProcess();
       TRITONSERVER_Error* err = instance_state->Stub()->Setup();
       if (err == nullptr) {
-        instance_state->StartLogMonitor();
+        instance_state->StartMonitors();
       }
       LOG_IF_ERROR(err, "Failed to restart the stub process.");
       err = instance_state->Stub()->Launch();

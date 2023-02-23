@@ -38,8 +38,8 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error)
-    : error_(error), next_response_future_(nullptr)
+    std::shared_ptr<PbError> error, const bool is_last_response)
+    : error_(error), is_last_response_(is_last_response)
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -49,25 +49,6 @@ InferResponse::InferResponse(
   }
 
   output_tensors_ = output_tensors;
-}
-
-InferResponse::InferResponse(
-    const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::promise<std::unique_ptr<InferResponse>>* promise,
-    std::shared_ptr<PbError> error)
-    : error_(error)
-{
-  for (auto& output : output_tensors) {
-    if (!output) {
-      throw PythonBackendException(
-          "Output tensor for inference response should not be empty.");
-    }
-  }
-
-  output_tensors_ = output_tensors;
-  next_response_future_ =
-      std::make_unique<std::future<std::unique_ptr<InferResponse>>>(
-          promise->get_future());
 }
 
 std::vector<std::shared_ptr<PbTensor>>&
@@ -198,10 +179,10 @@ InferResponse::Error()
   return error_;
 }
 
-std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
-InferResponse::GetNextResponse()
+bool
+InferResponse::IsLastResponse()
 {
-  return std::move(next_response_future_);
+  return is_last_response_;
 }
 
 #ifndef TRITON_PB_STUB

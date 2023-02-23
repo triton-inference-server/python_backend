@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -104,6 +104,13 @@ class StubLauncher {
     return log_message_queue_;
   }
 
+  // BLS decoupled response queue
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  BLSResponseQueue()
+  {
+    return bls_response_queue_;
+  }
+
   // Memory Manager
   std::unique_ptr<MemoryManager>& GetMemoryManager() { return memory_manager_; }
 
@@ -132,8 +139,8 @@ class StubLauncher {
   // Destruct Stub process
   void TerminateStub();
 
-  // Reset log queue pointer
-  void ClearLogQueue();
+  // Reset log queue and bls decoupled queue pointers
+  void ClearQueues();
 
   // Kill stub process
   void KillStubProcess();
@@ -175,6 +182,8 @@ class StubLauncher {
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       log_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      bls_response_queue_;
   std::unique_ptr<MemoryManager> memory_manager_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;

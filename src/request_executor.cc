@@ -126,25 +126,17 @@ InferResponseComplete(
     }
 
     if (!(*p)->IsDecoupled()) {
-      infer_response =
-          std::make_unique<InferResponse>(output_tensors, pb_error);
-      (*p)->SetValueForPrevPromise(std::move(infer_response));
-      (*p)->ResetPrevPromise();
+      infer_response = std::make_unique<InferResponse>(
+          output_tensors, pb_error, true /* is_last_response */);
     } else {
       if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
-        // Not the last reponse. Need to store the promise associated with the
-        // next future.
-        auto promise = new std::promise<std::unique_ptr<InferResponse>>();
-        infer_response =
-            std::make_unique<InferResponse>(output_tensors, promise, pb_error);
-        (*p)->SetValueForPrevPromise(std::move(infer_response));
-        (*p)->SetPrevPromise(&promise);
+        // Not the last reponse.
+        infer_response = std::make_unique<InferResponse>(
+            output_tensors, pb_error, false /* is_last_response */);
       } else {
         // The last response.
-        infer_response =
-            std::make_unique<InferResponse>(output_tensors, pb_error);
-        (*p)->SetValueForPrevPromise(std::move(infer_response));
-        (*p)->ResetPrevPromise();
+        infer_response = std::make_unique<InferResponse>(
+            output_tensors, pb_error, true /* is_last_response */);
       }
     }
 
@@ -155,13 +147,21 @@ InferResponseComplete(
       (*p)->IsDecoupled() &&
       (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
     // An empty response may be the last reponse for decoupled models.
-    (*p)->SetValueForPrevPromise(std::unique_ptr<InferResponse>{});
-    (*p)->ResetPrevPromise();
+    output_tensors.clear();
+    infer_response = std::make_unique<InferResponse>(
+        output_tensors, pb_error, true /* is_last_response */);
   } else {
     pb_error = std::make_shared<PbError>("Unexpected empty response.");
-    infer_response = std::make_unique<InferResponse>(output_tensors, pb_error);
+    infer_response = std::make_unique<InferResponse>(
+        output_tensors, pb_error, true /* is_last_response */);
+  }
+
+  // Only set value to the promise with the first response. Enqueue decoupled
+  // responses to the buffer and send to the stub.
+  if ((*p)->IsPromiseSet()) {
+    (*p)->EnqueueBLSResponse(infer_response);
+  } else {
     (*p)->SetValueForPrevPromise(std::move(infer_response));
-    (*p)->ResetPrevPromise();
   }
 }
 

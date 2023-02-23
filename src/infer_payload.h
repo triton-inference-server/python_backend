@@ -26,24 +26,31 @@
 
 #pragma once
 
+#include <queue>
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
 
 class InferPayload {
  public:
-  InferPayload(const bool is_decoupled);
+  InferPayload(
+      const bool is_decoupled, std::mutex& mu, std::condition_variable& cv,
+      std::queue<std::unique_ptr<InferResponse>>& buffer);
   ~InferPayload();
 
-  void SetPrevPromise(std::promise<std::unique_ptr<InferResponse>>** promise);
   void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
-  void ResetPrevPromise();
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
   bool IsDecoupled();
+  void EnqueueBLSResponse(std::unique_ptr<InferResponse>& response_ptr);
+  bool IsPromiseSet();
 
  private:
   std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
   bool is_decoupled_;
+  std::mutex& mu_;
+  std::condition_variable& cv_;
+  std::queue<std::unique_ptr<InferResponse>>& buffer_;
+  bool is_promise_set_;
 };
 
 }}}  // namespace triton::backend::python
