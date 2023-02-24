@@ -40,6 +40,8 @@ struct ResponseShm {
   bool has_error;
   // Indicates whether this error has a message or not.
   bool is_error_set;
+  void* memory_ptr;
+  bool is_last_response;
 };
 
 #define SET_ERROR_AND_RETURN(E, X)           \
@@ -69,7 +71,8 @@ class InferResponse {
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
       std::shared_ptr<PbError> error = nullptr,
-      const bool is_last_response = true);
+      const bool is_last_response = true,
+      void* memory_ptr = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
@@ -86,6 +89,7 @@ class InferResponse {
   void SetNextResponseHandle(
       bi::managed_external_buffer::handle_t next_response_handle);
   bi::managed_external_buffer::handle_t NextResponseHandle();
+  void* MemoryPtr();
   bool IsLastResponse();
 
 #ifndef TRITON_PB_STUB
@@ -111,14 +115,17 @@ class InferResponse {
   InferResponse(
       AllocatedSharedMemory<char>& response_shm,
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error);
+      std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* memory_ptr);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
+
   std::shared_ptr<PbError> error_;
   bi::managed_external_buffer::handle_t shm_handle_;
   AllocatedSharedMemory<char> response_shm_;
   std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
   std::unique_ptr<ScopedDefer> deferred_send_callback_;
   bool is_last_response_;
+  // The memory pointer used to determine which request this response belongs to. 
+  void* memory_ptr_;
 };
 
 }}}  // namespace triton::backend::python

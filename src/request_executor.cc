@@ -132,11 +132,11 @@ InferResponseComplete(
       if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
         // Not the last reponse.
         infer_response = std::make_unique<InferResponse>(
-            output_tensors, pb_error, false /* is_last_response */);
+            output_tensors, pb_error, false /* is_last_response */, userp);
       } else {
         // The last response.
         infer_response = std::make_unique<InferResponse>(
-            output_tensors, pb_error, true /* is_last_response */);
+            output_tensors,  pb_error, true /* is_last_response */, userp);
       }
     }
 
@@ -149,11 +149,11 @@ InferResponseComplete(
     // An empty response may be the last reponse for decoupled models.
     output_tensors.clear();
     infer_response = std::make_unique<InferResponse>(
-        output_tensors, pb_error, true /* is_last_response */);
+        output_tensors, pb_error, true /* is_last_response */, userp);
   } else {
     pb_error = std::make_shared<PbError>("Unexpected empty response.");
     infer_response = std::make_unique<InferResponse>(
-        output_tensors, pb_error, true /* is_last_response */);
+        output_tensors, pb_error, true /* is_last_response */, userp);
   }
 
   // Only set value to the promise with the first response. Enqueue decoupled

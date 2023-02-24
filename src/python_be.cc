@@ -604,7 +604,7 @@ ModelInstanceState::ExecuteBLSRequest(
   auto request_executor = std::make_unique<RequestExecutor>(
       Stub()->ShmPool(), model_state->TritonServer());
   bool is_response_batch_set = false;
-  std::vector<std::unique_ptr<InferResponse>> infer_responses;
+  std::unique_ptr<InferResponse> infer_response;
   ResponseBatch* response_batch;
   std::unique_ptr<PbString> pb_error_message;
   std::unique_ptr<IPCMessage> bls_response;
@@ -720,58 +720,31 @@ ModelInstanceState::ExecuteBLSRequest(
             std::make_shared<InferPayload>(
                 is_decoupled, bls_response_mutex_, bls_response_cv_,
                 bls_response_buffer_);
-        infer_payload_[infer_payload.get()] = infer_payload;
         auto response_future =
             request_executor->Infer(infer_request, infer_payload);
+        infer_response = response_future.get();
+
+        infer_payload_[infer_payload.get()] = infer_payload;
         request_executor_[infer_payload.get()] = std::move(request_executor);
-        infer_responses.push_back(response_future.get());
 
-        size_t response_length = infer_responses.size();
-        // It is possible that the last response from the decoupled model is an
-        // empty response.
-        if (infer_responses.back() == nullptr) {
-          response_length--;
-        }
+        infer_response->SaveToSharedMemory(Stub()->ShmPool());
 
-        if (response_length != 1) {
-          // Construct the response_batch_shm based on the length of the
-          // responses for decoupled support.
-          response_batch_shm = Stub()->ShmPool()->Construct<char>(
-              sizeof(ResponseBatch) +
-              response_length * sizeof(bi::managed_external_buffer::handle_t));
-          response_batch =
-              reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
-          response_handle =
-              reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-                  response_batch_shm.data_.get() + sizeof(ResponseBatch));
-          bls_response->Args() = response_batch_shm.handle_;
-          response_batch->batch_size = 1;
-          response_batch->has_error = false;
-          response_batch->is_error_set = false;
-          response_batch->cleanup = false;
-          response_batch->response_size = response_length;
-        }
-
-        for (size_t i = 0; i < response_length; i++) {
-          infer_responses[i]->SaveToSharedMemory(Stub()->ShmPool());
-
-          for (auto& output_tensor : infer_responses[i]->OutputTensors()) {
-            // For GPU tensors we need to store the memory release id in
-            // memory manager.
-            if (!output_tensor->IsCPU()) {
+        for (auto& output_tensor : infer_response->OutputTensors()) {
+          // For GPU tensors we need to store the memory release id in
+          // memory manager.
+          if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-              std::unique_ptr<MemoryRecord> gpu_memory_record =
-                  std::make_unique<GPUMemoryRecord>(
-                      output_tensor->Memory()->DataPtr());
-              uint64_t memory_release_id =
-                  Stub()->GetMemoryManager()->AddRecord(
-                      std::move(gpu_memory_record));
-              output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
+            std::unique_ptr<MemoryRecord> gpu_memory_record =
+                std::make_unique<GPUMemoryRecord>(
+                    output_tensor->Memory()->DataPtr());
+            uint64_t memory_release_id =
+                Stub()->GetMemoryManager()->AddRecord(
+                    std::move(gpu_memory_record));
+            output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
 #endif
-            }
           }
-          response_handle[i] = infer_responses[i]->ShmHandle();
         }
+        *response_handle = infer_response->ShmHandle();
       } else {
         throw pb_exception;
       }

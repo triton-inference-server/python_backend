@@ -32,9 +32,10 @@ namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 
 ResponseGenerator::ResponseGenerator(
-    const std::vector<std::shared_ptr<InferResponse>>& responses)
-    : responses_(responses), index_(0)
+    const std::shared_ptr<InferResponse>& responses)
+    : index_(0)
 {
+  responses_.push_back(responses);
 }
 
 std::shared_ptr<InferResponse>

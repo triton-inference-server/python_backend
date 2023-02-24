@@ -38,8 +38,8 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error, const bool is_last_response)
-    : error_(error), is_last_response_(is_last_response)
+    std::shared_ptr<PbError> error, const bool is_last_response, void* memory_ptr)
+    : error_(error), is_last_response_(is_last_response), memory_ptr_(memory_ptr)
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -90,7 +90,8 @@ InferResponse::SaveToSharedMemory(
 
     response_shm_ptr->is_error_set = true;
     response_shm_ptr->error = Error()->ShmHandle();
-    response_shm_ptr->outputs_size = 0;
+    response_shm_ptr->outputs_size = 0; 
+    response_shm_ptr->is_last_response = true;
   } else {
     bi::managed_external_buffer::handle_t* tensor_handle_shm_ptr =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -103,6 +104,8 @@ InferResponse::SaveToSharedMemory(
       tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
+    response_shm_ptr->is_last_response = is_last_response_;
+    response_shm_ptr->memory_ptr = memory_ptr_;
   }
 }
 
@@ -140,6 +143,7 @@ InferResponse::LoadFromSharedMemory(
 
   std::shared_ptr<PbError> pb_error;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
+  bool is_last_response = response_shm_ptr->is_last_response;
 
   // If the error field is set, do not load output tensors from shared memory.
   if (response_shm_ptr->has_error && response_shm_ptr->is_error_set) {
@@ -147,6 +151,7 @@ InferResponse::LoadFromSharedMemory(
   } else if (response_shm_ptr->has_error && !response_shm_ptr->is_error_set) {
     pb_error =
         std::make_shared<PbError>("Failed to retrieve the response error.");
+    is_last_response = true;
   } else {
     bi::managed_external_buffer::handle_t* tensor_handle_shm =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -159,24 +164,32 @@ InferResponse::LoadFromSharedMemory(
   }
 
   return std::unique_ptr<InferResponse>(
-      new InferResponse(response_shm, output_tensors, pb_error));
+      new InferResponse(response_shm, output_tensors, pb_error, is_last_response, response_shm_ptr->memory_ptr));
 }
 
 InferResponse::InferResponse(
     AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error)
+    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* memory_ptr)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
   shm_handle_ = response_shm_.handle_;
+  memory_ptr_ = memory_ptr;
+  is_last_response_ = is_last_response;
 }
 
 std::shared_ptr<PbError>&
 InferResponse::Error()
 {
   return error_;
+}
+
+void*
+InferResponse::MemoryPtr()
+{
+  return memory_ptr_;
 }
 
 bool

@@ -33,7 +33,7 @@ namespace triton { namespace backend { namespace python {
 class ResponseGenerator {
  public:
   ResponseGenerator(
-      const std::vector<std::shared_ptr<InferResponse>>& responses);
+      const std::shared_ptr<InferResponse>& response);
 
   std::shared_ptr<InferResponse> Next();
   std::vector<std::shared_ptr<InferResponse>>::iterator Begin();
@@ -42,6 +42,7 @@ class ResponseGenerator {
  private:
   std::vector<std::shared_ptr<InferResponse>> responses_;
   size_t index_;
+  void* memory_ptr_;
 };
 
 }}}  // namespace triton::backend::python

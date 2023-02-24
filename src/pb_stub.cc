@@ -974,7 +974,6 @@ Stub::BLSResponseQueueMonitor()
     PythonBackendException pb_exception(std::string{});
 
     try {
-      // py::gil_scoped_release release;
       ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
       AllocatedSharedMemory<char> response_batch_shm =
           shm_pool_->Load<char>(ipc_message->Args());
@@ -1007,13 +1006,15 @@ Stub::BLSResponseQueueMonitor()
       std::unique_ptr<InferResponse> infer_response = std::move(error_response);
     }
     if (responses_is_set) {
+      // Need to acquire the gil lock to avoid hangs.
+      py::gil_scoped_acquire acquire;
       std::unique_ptr<InferResponse> response =
           InferResponse::LoadFromSharedMemory(
               shm_pool_, *response_handle, true /* open cuda handle */);
 
       for (auto& output_tensor : response->OutputTensors()) {
         if (!output_tensor->IsCPU()) {
-          uint64_t memory_release_id =
+          uint64_t memory_release_id = 
               output_tensor->Memory()->MemoryReleaseId();
           output_tensor->Memory()->SetMemoryReleaseCallback(
               [this, memory_release_id]() {
@@ -1021,6 +1022,8 @@ Stub::BLSResponseQueueMonitor()
               });
         }
       }
+
+      std::cout << "=====memory ptr:" << response->MemoryPtr() << "=====\n";
     } else {
       auto error_response = std::make_unique<InferResponse>(
           std::vector<std::shared_ptr<PbTensor>>{},
@@ -1204,13 +1207,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
-            std::vector<std::shared_ptr<InferResponse>> responses =
+            std::shared_ptr<InferResponse> response =
                 infer_request->Exec(decoupled);
             py::object response_object;
             if (decoupled) {
-              response_object = py::cast(ResponseGenerator(responses));
+              response_object = py::cast(ResponseGenerator(response));
             } else {
-              response_object = py::cast(responses[0]);
+              response_object = py::cast(response);
             }
 
             return response_object;
@@ -1229,13 +1232,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [infer_request, decoupled]() {
-              std::vector<std::shared_ptr<InferResponse>> responses =
+              std::shared_ptr<InferResponse> response =
                   infer_request->Exec(decoupled);
               py::object response_object;
               if (decoupled) {
-                response_object = py::cast(ResponseGenerator(responses));
+                response_object = py::cast(ResponseGenerator(response));
               } else {
-                response_object = py::cast(responses[0]);
+                response_object = py::cast(response);
               }
 
               return response_object;
@@ -1288,7 +1291,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<ResponseGenerator, std::shared_ptr<ResponseGenerator>>(
       module, "ResponseGenerator")
-      .def(py::init<const std::vector<std::shared_ptr<InferResponse>>&>())
+      .def(py::init<const std::shared_ptr<InferResponse>&>())
       .def(
           "__iter__",
           [](ResponseGenerator& self) {

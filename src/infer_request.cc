@@ -370,7 +370,7 @@ InferRequest::GetResponseSender()
   return response_sender_;
 }
 
-std::vector<std::shared_ptr<InferResponse>>
+std::shared_ptr<InferResponse>
 InferRequest::Exec(const bool is_decoupled)
 {
   ResponseBatch* response_batch = nullptr;
@@ -378,7 +378,6 @@ InferRequest::Exec(const bool is_decoupled)
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<SharedMemoryManager>& shm_pool = stub->SharedMemory();
   bi::managed_external_buffer::handle_t* response_handle = nullptr;
-  std::vector<std::shared_ptr<InferResponse>> infer_responses;
 
   PythonBackendException pb_exception(std::string{});
   std::unique_ptr<IPCMessage> ipc_message;
@@ -502,17 +501,15 @@ InferRequest::Exec(const bool is_decoupled)
         auto error_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
             std::make_shared<PbError>(pb_string->String()));
-        infer_responses.emplace_back(std::move(error_response));
 
-        return infer_responses;
+        return error_response;
       } else {
         auto error_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
             std::make_shared<PbError>(
                 "An error occurred while performing BLS request."));
-        infer_responses.emplace_back(std::move(error_response));
 
-        return infer_responses;
+        return error_response;
       }
     }
   }
@@ -520,41 +517,35 @@ InferRequest::Exec(const bool is_decoupled)
     auto error_response = std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
         std::make_shared<PbError>(pb_exception.what()));
-    infer_responses.emplace_back(std::move(error_response));
 
-    return infer_responses;
+    return error_response;
   }
 
   if (responses_is_set) {
-    uint32_t response_count = response_batch->response_size;
     auto& memory_manager_message_queue = stub->MemoryManagerQueue();
-    for (size_t idx = 0; idx < response_count; idx++) {
-      std::unique_ptr<InferResponse> response =
-          InferResponse::LoadFromSharedMemory(
-              shm_pool, response_handle[idx], true /* open cuda handle */);
+    std::unique_ptr<InferResponse> error_response =
+        InferResponse::LoadFromSharedMemory(
+            shm_pool, *response_handle, true /* open cuda handle */);
 
-      for (auto& output_tensor : response->OutputTensors()) {
-        if (!output_tensor->IsCPU()) {
-          uint64_t memory_release_id =
-              output_tensor->Memory()->MemoryReleaseId();
-          output_tensor->Memory()->SetMemoryReleaseCallback(
-              [&memory_manager_message_queue, memory_release_id]() {
-                memory_manager_message_queue->Push(memory_release_id);
-              });
-        }
+    for (auto& output_tensor : error_response->OutputTensors()) {
+      if (!output_tensor->IsCPU()) {
+        uint64_t memory_release_id =
+            output_tensor->Memory()->MemoryReleaseId();
+        output_tensor->Memory()->SetMemoryReleaseCallback(
+            [&memory_manager_message_queue, memory_release_id]() {
+              memory_manager_message_queue->Push(memory_release_id);
+            });
       }
-      infer_responses.emplace_back(std::move(response));
     }
 
-    return infer_responses;
+    return error_response;
   } else {
     auto error_response = std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
         std::make_shared<PbError>(
             "An error occurred while performing BLS request."));
-    infer_responses.emplace_back(std::move(error_response));
 
-    return infer_responses;
+    return error_response;
   }
 }
 
