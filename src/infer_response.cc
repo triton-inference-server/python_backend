@@ -38,8 +38,8 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error, const bool is_last_response, void* memory_ptr)
-    : error_(error), is_last_response_(is_last_response), memory_ptr_(memory_ptr)
+    std::shared_ptr<PbError> error, const bool is_last_response, void* id)
+    : error_(error), is_last_response_(is_last_response), id_(id)
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -90,7 +90,7 @@ InferResponse::SaveToSharedMemory(
 
     response_shm_ptr->is_error_set = true;
     response_shm_ptr->error = Error()->ShmHandle();
-    response_shm_ptr->outputs_size = 0; 
+    response_shm_ptr->outputs_size = 0;
     response_shm_ptr->is_last_response = true;
   } else {
     bi::managed_external_buffer::handle_t* tensor_handle_shm_ptr =
@@ -105,7 +105,7 @@ InferResponse::SaveToSharedMemory(
       j++;
     }
     response_shm_ptr->is_last_response = is_last_response_;
-    response_shm_ptr->memory_ptr = memory_ptr_;
+    response_shm_ptr->id = id_;
   }
 }
 
@@ -163,20 +163,21 @@ InferResponse::LoadFromSharedMemory(
     }
   }
 
-  return std::unique_ptr<InferResponse>(
-      new InferResponse(response_shm, output_tensors, pb_error, is_last_response, response_shm_ptr->memory_ptr));
+  return std::unique_ptr<InferResponse>(new InferResponse(
+      response_shm, output_tensors, pb_error, is_last_response,
+      response_shm_ptr->id));
 }
 
 InferResponse::InferResponse(
     AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* memory_ptr)
+    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
   shm_handle_ = response_shm_.handle_;
-  memory_ptr_ = memory_ptr;
+  id_ = id;
   is_last_response_ = is_last_response;
 }
 
@@ -187,9 +188,9 @@ InferResponse::Error()
 }
 
 void*
-InferResponse::MemoryPtr()
+InferResponse::Id()
 {
-  return memory_ptr_;
+  return id_;
 }
 
 bool

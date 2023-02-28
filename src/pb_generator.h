@@ -26,23 +26,28 @@
 
 #pragma once
 
+#include <queue>
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
 
 class ResponseGenerator {
  public:
-  ResponseGenerator(
-      const std::shared_ptr<InferResponse>& response);
+  ResponseGenerator(const std::shared_ptr<InferResponse>& response);
+  ~ResponseGenerator();
 
   std::shared_ptr<InferResponse> Next();
-  std::vector<std::shared_ptr<InferResponse>>::iterator Begin();
-  std::vector<std::shared_ptr<InferResponse>>::iterator End();
+  py::iterator Iter();
+  void EnqueueResponse(std::unique_ptr<InferResponse> infer_response);
+  void* Id();
 
  private:
   std::vector<std::shared_ptr<InferResponse>> responses_;
-  size_t index_;
-  void* memory_ptr_;
+  std::queue<std::shared_ptr<InferResponse>> response_buffer_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  void* id_;
+  bool is_finished_;
 };
 
 }}}  // namespace triton::backend::python

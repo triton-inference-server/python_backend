@@ -44,6 +44,7 @@
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
+#include "pb_generator.h"
 #include "pb_log.h"
 #include "pb_utils.h"
 
@@ -233,10 +234,10 @@ class Stub {
   /// Check if log handler is running
   bool LogServiceActive();
 
-  ///
+  /// Start bls decoupled responses handler process
   void LaunchBLSResponseQueueMonitor();
 
-  ///
+  /// End bls decoupled responses handler process
   void TerminateBLSResponseQueueMonitor();
 
   /// Check if bls response handler is running
@@ -244,6 +245,10 @@ class Stub {
 
   /// Thread process
   void BLSResponseQueueMonitor();
+
+  /// Keep track of the ResponseGenerator object
+  void SaveResponseGenerator(
+      std::shared_ptr<ResponseGenerator> response_generator);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -279,5 +284,8 @@ class Stub {
   std::condition_variable log_message_cv_;
   std::thread bls_response_monitor_;
   bool bls_response_thread_;
+  std::mutex response_generator_map_mu_;
+  std::unordered_map<void*, std::shared_ptr<ResponseGenerator>>
+      response_generator_map_;
 };
 }}}  // namespace triton::backend::python

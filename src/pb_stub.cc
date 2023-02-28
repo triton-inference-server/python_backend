@@ -988,48 +988,50 @@ Stub::BLSResponseQueueMonitor()
         if (response_batch->is_error_set) {
           std::unique_ptr<PbString> pb_string =
               PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
-          auto error_response = std::make_unique<InferResponse>(
+          infer_response = std::make_unique<InferResponse>(
               std::vector<std::shared_ptr<PbTensor>>{},
               std::make_shared<PbError>(pb_string->String()));
         } else {
-          auto error_response = std::make_unique<InferResponse>(
+          infer_response = std::make_unique<InferResponse>(
               std::vector<std::shared_ptr<PbTensor>>{},
               std::make_shared<PbError>(
                   "An error occurred while performing BLS request."));
         }
       }
+
+      if (responses_is_set) {
+        // Need to acquire the GIL to avoid hangs.
+        py::gil_scoped_acquire acquire;
+        infer_response = InferResponse::LoadFromSharedMemory(
+            shm_pool_, *response_handle, true /* open cuda handle */);
+
+        for (auto& output_tensor : infer_response->OutputTensors()) {
+          if (!output_tensor->IsCPU()) {
+            uint64_t memory_release_id =
+                output_tensor->Memory()->MemoryReleaseId();
+            output_tensor->Memory()->SetMemoryReleaseCallback(
+                [this, memory_release_id]() {
+                  this->MemoryManagerQueue()->Push(memory_release_id);
+                });
+          }
+        }
+      } else {
+        infer_response = std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(
+                "An error occurred while performing BLS request."));
+      }
     }
     catch (const PythonBackendException& pb_exception) {
-      auto error_response = std::make_unique<InferResponse>(
+      infer_response = std::make_unique<InferResponse>(
           std::vector<std::shared_ptr<PbTensor>>{},
           std::make_shared<PbError>(pb_exception.what()));
-      std::unique_ptr<InferResponse> infer_response = std::move(error_response);
     }
-    if (responses_is_set) {
-      // Need to acquire the gil lock to avoid hangs.
-      py::gil_scoped_acquire acquire;
-      std::unique_ptr<InferResponse> response =
-          InferResponse::LoadFromSharedMemory(
-              shm_pool_, *response_handle, true /* open cuda handle */);
 
-      for (auto& output_tensor : response->OutputTensors()) {
-        if (!output_tensor->IsCPU()) {
-          uint64_t memory_release_id = 
-              output_tensor->Memory()->MemoryReleaseId();
-          output_tensor->Memory()->SetMemoryReleaseCallback(
-              [this, memory_release_id]() {
-                this->MemoryManagerQueue()->Push(memory_release_id);
-              });
-        }
-      }
-
-      std::cout << "=====memory ptr:" << response->MemoryPtr() << "=====\n";
-    } else {
-      auto error_response = std::make_unique<InferResponse>(
-          std::vector<std::shared_ptr<PbTensor>>{},
-          std::make_shared<PbError>(
-              "An error occurred while performing BLS request."));
-      infer_response = std::move(error_response);
+    {
+      std::lock_guard<std::mutex> lock(response_generator_map_mu_);
+      response_generator_map_[infer_response->Id()]->EnqueueResponse(
+          std::move(infer_response));
     }
 
     {
@@ -1044,6 +1046,16 @@ bool
 Stub::BLSResponseServiceActive()
 {
   return bls_response_thread_;
+}
+
+void
+Stub::SaveResponseGenerator(
+    std::shared_ptr<ResponseGenerator> response_generator)
+{
+  std::lock_guard<std::mutex> lock(response_generator_map_mu_);
+  response_generator_map_.insert(
+      std::pair<void*, std::shared_ptr<ResponseGenerator>>(
+          response_generator->Id(), response_generator));
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
@@ -1207,11 +1219,15 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
+            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             std::shared_ptr<InferResponse> response =
                 infer_request->Exec(decoupled);
             py::object response_object;
             if (decoupled) {
-              response_object = py::cast(ResponseGenerator(response));
+              auto response_generator =
+                  std::make_shared<ResponseGenerator>(response);
+              response_object = py::cast(response_generator);
+              stub->SaveResponseGenerator(response_generator);
             } else {
               response_object = py::cast(response);
             }
@@ -1231,12 +1247,15 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [infer_request, decoupled]() {
+            py::cpp_function callback = [&stub, infer_request, decoupled]() {
               std::shared_ptr<InferResponse> response =
                   infer_request->Exec(decoupled);
               py::object response_object;
               if (decoupled) {
-                response_object = py::cast(ResponseGenerator(response));
+                auto response_generator =
+                    std::make_shared<ResponseGenerator>(response);
+                response_object = py::cast(response_generator);
+                stub->SaveResponseGenerator(response_generator);
               } else {
                 response_object = py::cast(response);
               }
@@ -1292,12 +1311,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<ResponseGenerator, std::shared_ptr<ResponseGenerator>>(
       module, "ResponseGenerator")
       .def(py::init<const std::shared_ptr<InferResponse>&>())
-      .def(
-          "__iter__",
-          [](ResponseGenerator& self) {
-            return py::make_iterator(self.Begin(), self.End());
-          },
-          py::keep_alive<0, 1>())
+      .def("__iter__", &ResponseGenerator::Iter, py::keep_alive<0, 1>())
       .def("__next__", &ResponseGenerator::Next);
 
   py::class_<Logger> logger(module, "Logger");

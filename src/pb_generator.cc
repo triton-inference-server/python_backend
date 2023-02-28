@@ -24,7 +24,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <chrono>
+
 #include "pb_generator.h"
+#include "pb_stub.h"
 
 #include <pybind11/embed.h>
 namespace py = pybind11;
@@ -32,32 +35,85 @@ namespace py = pybind11;
 namespace triton { namespace backend { namespace python {
 
 ResponseGenerator::ResponseGenerator(
-    const std::shared_ptr<InferResponse>& responses)
-    : index_(0)
+    const std::shared_ptr<InferResponse>& response)
+    : id_(response->Id()), is_finished_(response->IsLastResponse())
 {
-  responses_.push_back(responses);
+  response_buffer_.push(response);
+}
+
+ResponseGenerator::~ResponseGenerator()
+{
+  {
+    std::lock_guard<std::mutex> lock{mu_};
+    response_buffer_.push(DUMMY_MESSAGE);
+  }
+  cv_.notify_all();
 }
 
 std::shared_ptr<InferResponse>
 ResponseGenerator::Next()
 {
-  if (index_ == responses_.size()) {
+  if (is_finished_) {
     throw py::stop_iteration("Iteration is done for the responses.");
   }
 
-  return responses_[index_++];
+  std::shared_ptr<InferResponse> response;
+  {
+    py::gil_scoped_release release;
+
+    std::unique_lock<std::mutex> lock{mu_};
+    {
+      while (response_buffer_.empty()) {
+        cv_.wait(lock);
+      }
+      response = response_buffer_.front();
+      response_buffer_.pop();
+      is_finished_ = response->IsLastResponse();
+    }
+
+    // Handle the case where the last response is empty.
+    if (response->OutputTensors().empty()) {
+      throw py::stop_iteration("Iteration is done for the responses.");
+    }
+  }
+
+  return response;
 }
 
-std::vector<std::shared_ptr<InferResponse>>::iterator
-ResponseGenerator::Begin()
+py::iterator
+ResponseGenerator::Iter()
 {
-  return responses_.begin();
+  bool done = false;
+  while (!done) {
+    try {
+      responses_.push_back(Next());
+    }
+    catch (const py::stop_iteration& exception) {
+      done = true;
+    }
+  }
+
+  // TO-DO: Send message back to the parent process to clear the finished
+  // objects.
+
+  return py::make_iterator(responses_.begin(), responses_.end());
 }
 
-std::vector<std::shared_ptr<InferResponse>>::iterator
-ResponseGenerator::End()
+void
+ResponseGenerator::EnqueueResponse(
+    std::unique_ptr<InferResponse> infer_response)
 {
-  return responses_.end();
+  {
+    std::lock_guard<std::mutex> lock{mu_};
+    response_buffer_.push(std::move(infer_response));
+  }
+  cv_.notify_all();
+}
+
+void*
+ResponseGenerator::Id()
+{
+  return id_;
 }
 
 }}}  // namespace triton::backend::python
