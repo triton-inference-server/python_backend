@@ -262,8 +262,8 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
 
-  std::thread log_monitor_;
-  bool log_thread_;
+  std::thread utils_monitor_;
+  bool utils_thread_;
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
   bool decoupled_thread_;
@@ -321,10 +321,12 @@ class ModelInstanceState : public BackendModelInstance {
   // from the message queue in the decoupled mode.
   void DecoupledMessageQueueMonitor();
 
-  // This function is executed on a separate thread and monitors the log message
-  // queue. When it receives a message from the stub, it will load it from
-  // shared memory and log it using the triton server core logging facilities.
-  void LogMessageQueueMonitor();
+  // This function is executed on a separate thread and monitors the queue for
+  // general message.
+  void UtilsMessageQueueMonitor();
+
+  // Process the log request.
+  void ProcessLogRequest(const std::unique_ptr<IPCMessage>& message);
 
   // This function is executed on a separate thread and monitors the bls
   // response queue.

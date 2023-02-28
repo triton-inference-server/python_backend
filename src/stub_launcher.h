@@ -99,9 +99,9 @@ class StubLauncher {
 
   // Log message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
-  LogMessageQueue()
+  UtilsMessageQueue()
   {
-    return log_message_queue_;
+    return utils_message_queue_;
   }
 
   // BLS decoupled response queue
@@ -181,7 +181,7 @@ class StubLauncher {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      log_message_queue_;
+      utils_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       bls_response_queue_;
   std::unique_ptr<MemoryManager> memory_manager_;

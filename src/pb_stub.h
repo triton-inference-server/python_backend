@@ -154,7 +154,7 @@ class LogMessage {
 
 class Stub {
  public:
-  Stub() { log_thread_ = false; };
+  Stub() { utils_thread_ = false; };
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
@@ -188,8 +188,8 @@ class Stub {
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
 
-  /// Send a log message to the parent process.
-  void SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message);
+  /// Send a utils message to the parent process.
+  void SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message);
 
   /// Receive a message from the parent process.
   std::unique_ptr<IPCMessage> PopMessage();
@@ -216,23 +216,23 @@ class Stub {
   bool IsDecoupled();
   ~Stub();
 
-  /// Start client log handler process
-  void LaunchLogRequestThread();
+  /// Start utils message handler process
+  void LaunchUtilsRequestThread();
 
-  /// End client log handler process
-  void TerminateLogRequestThread();
+  /// End utils message handler process
+  void TerminateUtilsRequestThread();
 
   /// Add client log to queue
   void EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr);
 
   /// Thread process
-  void ServiceLogRequests();
+  void ServiceUtilsRequests();
 
   /// Send client log to the python backend
   void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
 
-  /// Check if log handler is running
-  bool LogServiceActive();
+  /// Check if utils handler is running
+  bool UtilsServiceActive();
 
   /// Start bls decoupled responses handler process
   void LaunchBLSResponseQueueMonitor();
@@ -270,7 +270,7 @@ class Stub {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      log_message_queue_;
+      utils_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       bls_response_queue_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
@@ -278,10 +278,10 @@ class Stub {
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
   std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
-  std::thread log_monitor_;
-  bool log_thread_;
-  std::mutex log_message_mutex_;
-  std::condition_variable log_message_cv_;
+  std::thread utils_monitor_;
+  bool utils_thread_;
+  std::mutex utils_message_mutex_;
+  std::condition_variable utils_message_cv_;
   std::thread bls_response_monitor_;
   bool bls_response_thread_;
   std::mutex response_generator_map_mu_;

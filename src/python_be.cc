@@ -35,7 +35,7 @@ namespace bi = boost::interprocess;
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
     : BackendModelInstance(model_state, triton_model_instance),
-      log_thread_(false), bls_response_thread_(false)
+      utils_thread_(false), bls_response_thread_(false)
 {
 }
 
@@ -737,9 +737,8 @@ ModelInstanceState::ExecuteBLSRequest(
             std::unique_ptr<MemoryRecord> gpu_memory_record =
                 std::make_unique<GPUMemoryRecord>(
                     output_tensor->Memory()->DataPtr());
-            uint64_t memory_release_id =
-                Stub()->GetMemoryManager()->AddRecord(
-                    std::move(gpu_memory_record));
+            uint64_t memory_release_id = Stub()->GetMemoryManager()->AddRecord(
+                std::move(gpu_memory_record));
             output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
 #endif
           }
@@ -819,65 +818,74 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
 }
 
 void
-ModelInstanceState::LogMessageQueueMonitor()
+ModelInstanceState::UtilsMessageQueueMonitor()
 {
-  while (log_thread_) {
+  while (utils_thread_) {
     bi::managed_external_buffer::handle_t handle =
-        Stub()->LogMessageQueue()->Pop();
+        Stub()->UtilsMessageQueue()->Pop();
     if (handle == DUMMY_MESSAGE) {
       break;
     }
     std::unique_ptr<IPCMessage> message =
         IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), handle);
 
-    AllocatedSharedMemory<LogSendMessage> log_message_response =
-        Stub()->ShmPool()->Load<LogSendMessage>(message->Args());
-    std::unique_ptr<PbLog> pb_log_message =
-        PbLogShm::LoadFromSharedMemory(Stub()->ShmPool(), message->Args());
-
-    const std::string& filename = pb_log_message->Filename();
-    uint32_t line = pb_log_message->Line();
-    const std::string& log_message = pb_log_message->Message();
-    LogLevel level = pb_log_message->Level();
-
-    switch (level) {
-      case LogLevel::INFO: {
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_INFO, (filename.c_str()), line,
-            (log_message.c_str()));
-        break;
-      }
-      case LogLevel::WARNING: {
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_WARN, (filename.c_str()), line,
-            (log_message.c_str()));
-        break;
-      }
-      case LogLevel::ERROR: {
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_ERROR, (filename.c_str()), line,
-            (log_message.c_str()));
-        break;
-      }
-      case LogLevel::VERBOSE: {
-        TRITONSERVER_LogMessage(
-            TRITONSERVER_LOG_VERBOSE, (filename.c_str()), line,
-            (log_message.c_str()));
-        break;
-      }
+    if (message->Command() == PYTHONSTUB_LogRequest) {
+      ProcessLogRequest(message);
     }
-    // Send confirmation back to pb_stub.cc that the message
-    // was received.
-    LogSendMessage* send_message_payload =
-        reinterpret_cast<LogSendMessage*>(log_message_response.data_.get());
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{
-          send_message_payload->log_mu};
-      send_message_payload->waiting_on_stub = true;
-      send_message_payload->log_cv.notify_all();
-      while (send_message_payload->waiting_on_stub) {
-        send_message_payload->log_cv.wait(guard);
-      }
+  }
+}
+
+
+void
+ModelInstanceState::ProcessLogRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  AllocatedSharedMemory<LogSendMessage> log_message_response =
+      Stub()->ShmPool()->Load<LogSendMessage>(message->Args());
+  std::unique_ptr<PbLog> pb_log_message =
+      PbLogShm::LoadFromSharedMemory(Stub()->ShmPool(), message->Args());
+
+  const std::string& filename = pb_log_message->Filename();
+  uint32_t line = pb_log_message->Line();
+  const std::string& log_message = pb_log_message->Message();
+  LogLevel level = pb_log_message->Level();
+
+  switch (level) {
+    case LogLevel::INFO: {
+      TRITONSERVER_LogMessage(
+          TRITONSERVER_LOG_INFO, (filename.c_str()), line,
+          (log_message.c_str()));
+      break;
+    }
+    case LogLevel::WARNING: {
+      TRITONSERVER_LogMessage(
+          TRITONSERVER_LOG_WARN, (filename.c_str()), line,
+          (log_message.c_str()));
+      break;
+    }
+    case LogLevel::ERROR: {
+      TRITONSERVER_LogMessage(
+          TRITONSERVER_LOG_ERROR, (filename.c_str()), line,
+          (log_message.c_str()));
+      break;
+    }
+    case LogLevel::VERBOSE: {
+      TRITONSERVER_LogMessage(
+          TRITONSERVER_LOG_VERBOSE, (filename.c_str()), line,
+          (log_message.c_str()));
+      break;
+    }
+  }
+  // Send confirmation back to pb_stub.cc that the message
+  // was received.
+  LogSendMessage* send_message_payload =
+      reinterpret_cast<LogSendMessage*>(log_message_response.data_.get());
+  {
+    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+    send_message_payload->waiting_on_stub = true;
+    send_message_payload->cv.notify_all();
+    while (send_message_payload->waiting_on_stub) {
+      send_message_payload->cv.wait(guard);
     }
   }
 }
@@ -905,8 +913,9 @@ ModelInstanceState::BLSResponseQueueMonitor()
 void
 ModelInstanceState::StartMonitors()
 {
-  log_thread_ = true;
-  log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
+  utils_thread_ = true;
+  utils_monitor_ =
+      std::thread(&ModelInstanceState::UtilsMessageQueueMonitor, this);
 
   bls_response_thread_ = true;
   bls_response_monitor_ =
@@ -916,10 +925,10 @@ ModelInstanceState::StartMonitors()
 void
 ModelInstanceState::TerminateMonitors()
 {
-  if (log_thread_) {
-    log_thread_ = false;
-    Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
-    log_monitor_.join();
+  if (utils_thread_) {
+    utils_thread_ = false;
+    Stub()->UtilsMessageQueue()->Push(DUMMY_MESSAGE);
+    utils_monitor_.join();
   }
 
   if (bls_response_thread_) {

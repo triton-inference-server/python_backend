@@ -84,7 +84,7 @@ Stub::Instantiate(
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
-  log_thread_ = false;
+  utils_thread_ = false;
   bls_response_thread_ = false;
 
   try {
@@ -104,8 +104,8 @@ Stub::Instantiate(
         MessageQueue<bi::managed_external_buffer::handle_t>::
             LoadFromSharedMemory(shm_pool_, ipc_control_->parent_message_queue);
 
-    log_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
-        LoadFromSharedMemory(shm_pool_, ipc_control_->log_message_queue);
+    utils_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->utils_message_queue);
 
     bls_response_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
         LoadFromSharedMemory(shm_pool_, ipc_control_->bls_response_queue);
@@ -497,7 +497,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_config_params[pair.first.c_str()] = pair.second;
   }
 
-  LaunchLogRequestThread();
+  LaunchUtilsRequestThread();
   LaunchBLSResponseQueueMonitor();
 
   // Call initialize if exists.
@@ -820,11 +820,11 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 }
 
 void
-Stub::SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message)
+Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
   while (!success) {
-    log_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
+    utils_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
   }
 }
 
@@ -837,7 +837,7 @@ Stub::~Stub()
   stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
-  log_message_queue_.reset();
+  utils_message_queue_.reset();
   memory_manager_message_queue_.reset();
 }
 
@@ -854,42 +854,42 @@ Stub::GetOrCreateInstance()
 }
 
 void
-Stub::LaunchLogRequestThread()
+Stub::LaunchUtilsRequestThread()
 {
-  log_thread_ = true;
-  log_monitor_ = std::thread(&Stub::ServiceLogRequests, this);
+  utils_thread_ = true;
+  utils_monitor_ = std::thread(&Stub::ServiceUtilsRequests, this);
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(true);
 }
 
 void
-Stub::TerminateLogRequestThread()
+Stub::TerminateUtilsRequestThread()
 {
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
-    std::lock_guard<std::mutex> guard{log_message_mutex_};
+    std::lock_guard<std::mutex> guard{utils_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
   }
-  log_message_cv_.notify_one();
-  log_monitor_.join();
+  utils_message_cv_.notify_one();
+  utils_monitor_.join();
 }
 
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
   {
-    std::lock_guard<std::mutex> guard{log_message_mutex_};
+    std::lock_guard<std::mutex> guard{utils_message_mutex_};
     log_request_buffer_.push(std::move(log_ptr));
   }
-  log_message_cv_.notify_one();
+  utils_message_cv_.notify_one();
 }
 
 void
-Stub::ServiceLogRequests()
+Stub::ServiceUtilsRequests()
 {
-  while (log_thread_) {
-    std::unique_lock<std::mutex> guard{log_message_mutex_};
+  while (utils_thread_) {
+    std::unique_lock<std::mutex> guard{utils_message_mutex_};
     while (log_request_buffer_.empty()) {
-      log_message_cv_.wait(guard);
+      utils_message_cv_.wait(guard);
     }
     // On exit, will send messages until
     // DUMMY_MESSAGE is reached
@@ -915,29 +915,29 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
   std::unique_ptr<IPCMessage> log_request_msg =
       IPCMessage::Create(shm_pool_, false /* inline_response */);
   log_request_msg->Args() = log_request_shm->ShmHandle();
+  log_request_msg->Command() = PYTHONSTUB_LogRequest;
   ScopedDefer _([send_message_payload] {
     {
-      bi::scoped_lock<bi::interprocess_mutex> guard{
-          send_message_payload->log_mu};
+      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
       send_message_payload->waiting_on_stub = false;
-      send_message_payload->log_cv.notify_all();
+      send_message_payload->cv.notify_all();
     }
   });
 
   {
     // Send a message to be caught by the log monitor thread in python_be.cc
-    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->log_mu};
-    SendIPCLogMessage(log_request_msg);
+    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+    SendIPCUtilsMessage(log_request_msg);
     while (!send_message_payload->waiting_on_stub) {
-      send_message_payload->log_cv.wait(guard);
+      send_message_payload->cv.wait(guard);
     }
   }
 }
 
 bool
-Stub::LogServiceActive()
+Stub::UtilsServiceActive()
 {
-  return log_thread_;
+  return utils_thread_;
 }
 
 void
@@ -1084,7 +1084,7 @@ Logger::Log(const std::string& message, LogLevel level)
   py::object lineno = caller_info.attr("lineno");
   uint32_t line = lineno.cast<uint32_t>();
 
-  if (!stub->LogServiceActive()) {
+  if (!stub->UtilsServiceActive()) {
     Logger::GetOrCreateInstance()->Log(filename, line, level, message);
   } else {
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
@@ -1413,8 +1413,8 @@ main(int argc, char** argv)
           if (kill(parent_pid, 0) != 0) {
             // When unhealthy, we should stop attempting to send
             // messages to the backend ASAP.
-            if (stub->LogServiceActive()) {
-              stub->TerminateLogRequestThread();
+            if (stub->UtilsServiceActive()) {
+              stub->TerminateUtilsRequestThread();
             }
             if (stub->BLSResponseServiceActive()) {
               stub->TerminateBLSResponseQueueMonitor();
@@ -1440,8 +1440,8 @@ main(int argc, char** argv)
     if (finalize) {
       stub->Finalize();
       // Need check or may receive not joinable error
-      if (stub->LogServiceActive()) {
-        stub->TerminateLogRequestThread();
+      if (stub->UtilsServiceActive()) {
+        stub->TerminateUtilsRequestThread();
       }
       if (stub->BLSResponseServiceActive()) {
         stub->TerminateBLSResponseQueueMonitor();

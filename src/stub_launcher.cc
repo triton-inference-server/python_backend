@@ -132,7 +132,7 @@ StubLauncher::Setup()
   ipc_control_ = nullptr;
   stub_message_queue_ = nullptr;
   parent_message_queue_ = nullptr;
-  log_message_queue_ = nullptr;
+  utils_message_queue_ = nullptr;
   bls_response_queue_ = nullptr;
   memory_manager_ = nullptr;
 
@@ -163,7 +163,7 @@ StubLauncher::Setup()
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
-      log_message_queue_ =
+      utils_message_queue_ =
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
@@ -184,7 +184,7 @@ StubLauncher::Setup()
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
-  ipc_control_->log_message_queue = log_message_queue_->ShmHandle();
+  ipc_control_->utils_message_queue = utils_message_queue_->ShmHandle();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
   ipc_control_->bls_response_queue = bls_response_queue_->ShmHandle();
 
@@ -193,7 +193,7 @@ StubLauncher::Setup()
 
   stub_message_queue_->ResetSemaphores();
   parent_message_queue_->ResetSemaphores();
-  log_message_queue_->ResetSemaphores();
+  utils_message_queue_->ResetSemaphores();
   bls_response_queue_->ResetSemaphores();
 
   is_initialized_ = false;
@@ -522,7 +522,7 @@ StubLauncher::TerminateStub()
 void
 StubLauncher::ClearQueues()
 {
-  log_message_queue_.reset();
+  utils_message_queue_.reset();
   bls_response_queue_.reset();
 }
 
