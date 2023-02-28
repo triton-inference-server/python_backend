@@ -724,8 +724,11 @@ ModelInstanceState::ExecuteBLSRequest(
             request_executor->Infer(infer_request, infer_payload);
         infer_response = response_future.get();
 
-        infer_payload_[infer_payload.get()] = infer_payload;
-        request_executor_[infer_payload.get()] = std::move(request_executor);
+        // Need to manage the lifetime of InferPayload and RequestExecutor
+        // objects for bls decoupled responses.
+        infer_payload_[reinterpret_cast<void*>(&infer_payload)] = infer_payload;
+        request_executor_[reinterpret_cast<void*>(&infer_payload)] =
+            std::move(request_executor);
 
         infer_response->SaveToSharedMemory(Stub()->ShmPool());
 
@@ -831,6 +834,8 @@ ModelInstanceState::UtilsMessageQueueMonitor()
 
     if (message->Command() == PYTHONSTUB_LogRequest) {
       ProcessLogRequest(message);
+    } else if (message->Command() == PYTHONSTUB_CleanupRequest) {
+      ProcessBLSCleanupRequest(message);
     }
   }
 }
@@ -887,6 +892,26 @@ ModelInstanceState::ProcessLogRequest(
     while (send_message_payload->waiting_on_stub) {
       send_message_payload->cv.wait(guard);
     }
+  }
+}
+
+void
+ModelInstanceState::ProcessBLSCleanupRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  AllocatedSharedMemory<char> cleanup_request_message =
+      Stub()->ShmPool()->Load<char>(message->Args());
+  CleanupMessage* cleanup_message_ptr =
+      reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
+
+  void* id = cleanup_message_ptr->id;
+  infer_payload_.erase(id);
+  request_executor_.erase(id);
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
+    message->ResponseCondition()->notify_all();
+    message->ResponseCondition()->wait(lock);
   }
 }
 

@@ -172,6 +172,11 @@ struct LogSendMessage : UtilsSendMessageBase {
   LogLevel level;
 };
 
+
+struct CleanupMessage {
+  void* id;
+};
+
 struct ResponseSenderBase {
   bi::interprocess_mutex mu;
   bi::interprocess_condition cv;

@@ -868,6 +868,7 @@ Stub::TerminateUtilsRequestThread()
   {
     std::lock_guard<std::mutex> guard{utils_message_mutex_};
     log_request_buffer_.push(DUMMY_MESSAGE);
+    bls_response_cleanup_buffer_.push(DUMMY_MESSAGE);
   }
   utils_message_cv_.notify_one();
   utils_monitor_.join();
@@ -888,18 +889,32 @@ Stub::ServiceUtilsRequests()
 {
   while (utils_thread_) {
     std::unique_lock<std::mutex> guard{utils_message_mutex_};
-    while (log_request_buffer_.empty()) {
+    while (log_request_buffer_.empty() &&
+           bls_response_cleanup_buffer_.empty()) {
       utils_message_cv_.wait(guard);
     }
-    // On exit, will send messages until
-    // DUMMY_MESSAGE is reached
-    std::unique_ptr<PbLog> log_request = std::move(log_request_buffer_.front());
-    if (log_request == DUMMY_MESSAGE) {
-      log_request_buffer_.pop();
-      break;
+    if (!log_request_buffer_.empty()) {
+      // On exit, will send messages until
+      // DUMMY_MESSAGE is reached
+      std::unique_ptr<PbLog> log_request =
+          std::move(log_request_buffer_.front());
+      if (log_request == DUMMY_MESSAGE) {
+        log_request_buffer_.pop();
+        break;
+      } else {
+        log_request_buffer_.pop();
+        SendLogMessage(log_request);
+      }
     } else {
-      log_request_buffer_.pop();
-      SendLogMessage(log_request);
+      void* id = std::move(bls_response_cleanup_buffer_.front());
+      if (id == DUMMY_MESSAGE) {
+        bls_response_cleanup_buffer_.pop();
+        break;
+      } else {
+        bls_response_cleanup_buffer_.pop();
+        SendCleanupId(id);
+        response_generator_map_.erase(id);
+      }
     }
   }
 }
@@ -932,6 +947,45 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
       send_message_payload->cv.wait(guard);
     }
   }
+}
+
+void
+Stub::SendCleanupId(void* id)
+{
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, true /* inline_response */);
+  ipc_message->Command() = PYTHONSTUB_CleanupRequest;
+  AllocatedSharedMemory<char> cleanup_request_message =
+      shm_pool_->Construct<char>(
+          sizeof(CleanupMessage) +
+          sizeof(bi::managed_external_buffer::handle_t));
+  CleanupMessage* cleanup_message_ptr =
+      reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
+  cleanup_message_ptr->id = id;
+  ipc_message->Args() = cleanup_request_message.handle_;
+
+  ScopedDefer data_load_complete([&ipc_message] {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    ipc_message->ResponseCondition()->notify_all();
+  });
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    SendIPCUtilsMessage(ipc_message);
+    ipc_message->ResponseCondition()->wait(lock);
+  }
+}
+
+void
+Stub::EnqueueCleanupId(void* id)
+{
+  {
+    std::lock_guard<std::mutex> guard{utils_message_mutex_};
+    bls_response_cleanup_buffer_.push(id);
+  }
+  utils_message_cv_.notify_one();
 }
 
 bool

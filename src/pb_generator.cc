@@ -36,7 +36,8 @@ namespace triton { namespace backend { namespace python {
 
 ResponseGenerator::ResponseGenerator(
     const std::shared_ptr<InferResponse>& response)
-    : id_(response->Id()), is_finished_(response->IsLastResponse())
+    : id_(response->Id()), is_finished_(response->IsLastResponse()),
+      is_cleared_(false)
 {
   response_buffer_.push(response);
 }
@@ -53,7 +54,12 @@ ResponseGenerator::~ResponseGenerator()
 std::shared_ptr<InferResponse>
 ResponseGenerator::Next()
 {
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   if (is_finished_) {
+    if (!is_cleared_) {
+      stub->EnqueueCleanupId(id_);
+      is_cleared_ = true;
+    }
     throw py::stop_iteration("Iteration is done for the responses.");
   }
 
@@ -70,8 +76,12 @@ ResponseGenerator::Next()
       response_buffer_.pop();
       is_finished_ = response->IsLastResponse();
     }
+  }
 
-    // Handle the case where the last response is empty.
+  // Handle the case where the last response is empty.
+  if (is_finished_) {
+    stub->EnqueueCleanupId(id_);
+    is_cleared_ = true;
     if (response->OutputTensors().empty()) {
       throw py::stop_iteration("Iteration is done for the responses.");
     }
@@ -92,9 +102,6 @@ ResponseGenerator::Iter()
       done = true;
     }
   }
-
-  // TO-DO: Send message back to the parent process to clear the finished
-  // objects.
 
   return py::make_iterator(responses_.begin(), responses_.end());
 }

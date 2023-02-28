@@ -278,12 +278,8 @@ class ModelInstanceState : public BackendModelInstance {
   bool bls_response_thread_;
   std::mutex bls_response_mutex_;
   std::condition_variable bls_response_cv_;
-  // Need to manage the lifetime of InferPayload and RequestExecutor objects for
-  // bls decoupled responses.
-  std::unordered_map<InferPayload*, std::shared_ptr<InferPayload>>
-      infer_payload_;
-  std::unordered_map<InferPayload*, std::unique_ptr<RequestExecutor>>
-      request_executor_;
+  std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
+  std::unordered_map<void*, std::unique_ptr<RequestExecutor>> request_executor_;
 
  public:
   static TRITONSERVER_Error* Create(
@@ -388,5 +384,8 @@ class ModelInstanceState : public BackendModelInstance {
   void StartMonitors();
 
   void SendBLSDecoupledResponse(std::unique_ptr<InferResponse> response_ptr);
+
+  // Process the bls decoupled cleanup request.
+  void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 };
 }}}  // namespace triton::backend::python

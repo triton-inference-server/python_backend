@@ -250,6 +250,13 @@ class Stub {
   void SaveResponseGenerator(
       std::shared_ptr<ResponseGenerator> response_generator);
 
+  /// Send the id to the python backend for object cleanup
+  void SendCleanupId(void* id);
+
+  /// Add cleanup id to queue
+  void EnqueueCleanupId(void* id);
+
+
  private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
@@ -278,6 +285,7 @@ class Stub {
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
   std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
+  std::queue<void*> bls_response_cleanup_buffer_;
   std::thread utils_monitor_;
   bool utils_thread_;
   std::mutex utils_message_mutex_;

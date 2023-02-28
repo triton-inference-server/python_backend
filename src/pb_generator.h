@@ -48,6 +48,7 @@ class ResponseGenerator {
   std::condition_variable cv_;
   void* id_;
   bool is_finished_;
+  bool is_cleared_;
 };
 
 }}}  // namespace triton::backend::python
