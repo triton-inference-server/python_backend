@@ -156,6 +156,10 @@ InferResponse::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t* tensor_handle_shm =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             response_shm.data_.get() + sizeof(ResponseShm));
+#ifdef TRITON_PB_STUB
+    // Need to acquire the GIL to avoid hangs.
+    py::gil_scoped_acquire acquire;
+#endif
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
       std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
           shm_pool, tensor_handle_shm[idx], open_cuda_handle);
