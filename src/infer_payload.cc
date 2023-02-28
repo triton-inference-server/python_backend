@@ -65,11 +65,11 @@ InferPayload::IsDecoupled()
 }
 
 void
-InferPayload::EnqueueBLSResponse(std::unique_ptr<InferResponse>& response_ptr)
+InferPayload::EnqueueBLSResponse(std::unique_ptr<InferResponse>& infer_response)
 {
   {
     std::lock_guard<std::mutex> guard{mu_};
-    buffer_.push(std::move(response_ptr));
+    buffer_.push(std::move(infer_response));
   }
   cv_.notify_one();
 }

@@ -154,7 +154,7 @@ class LogMessage {
 
 class Stub {
  public:
-  Stub() { utils_thread_ = false; };
+  Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
@@ -216,35 +216,35 @@ class Stub {
   bool IsDecoupled();
   ~Stub();
 
-  /// Start utils message handler process
-  void LaunchUtilsRequestThread();
+  /// Start stub to parent message handler process
+  void LaunchStubToParentQueueMonitor();
 
-  /// End utils message handler process
-  void TerminateUtilsRequestThread();
+  /// End stub to parent message handler process
+  void TerminateStubToParentQueueMonitor();
 
   /// Add client log to queue
   void EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr);
 
   /// Thread process
-  void ServiceUtilsRequests();
+  void ServiceStubToParentRequests();
 
   /// Send client log to the python backend
   void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
 
-  /// Check if utils handler is running
-  bool UtilsServiceActive();
+  /// Check if stub to parent message handler is running
+  bool StubToParentServiceActive();
 
-  /// Start bls decoupled responses handler process
-  void LaunchBLSResponseQueueMonitor();
+  /// Start parent to stub message handler process
+  void LaunchParentToStubQueueMonitor();
 
-  /// End bls decoupled responses handler process
-  void TerminateBLSResponseQueueMonitor();
+  /// End parent to stub message handler process
+  void TerminateParentToStubQueueMonitor();
 
-  /// Check if bls response handler is running
-  bool BLSResponseServiceActive();
+  /// Check if parent to stub message handler is running
+  bool ParentToStubServiceActive();
 
   /// Thread process
-  void BLSResponseQueueMonitor();
+  void ParentToStubMQMonitor();
 
   /// Keep track of the ResponseGenerator object
   void SaveResponseGenerator(
@@ -277,21 +277,21 @@ class Stub {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      utils_message_queue_;
+      stub_to_parent_mq_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      bls_response_queue_;
+      parent_to_stub_mq_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
   std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
   std::queue<void*> bls_response_cleanup_buffer_;
-  std::thread utils_monitor_;
-  bool utils_thread_;
-  std::mutex utils_message_mutex_;
-  std::condition_variable utils_message_cv_;
-  std::thread bls_response_monitor_;
-  bool bls_response_thread_;
+  std::thread stub_to_parent_queue_monitor_;
+  bool stub_to_parent_thread_;
+  std::mutex stub_to_parent_message_mu_;
+  std::condition_variable stub_to_parent_message_cv_;
+  std::thread parent_to_stub_queue_monitor_;
+  bool parent_to_stub_thread_;
   std::mutex response_generator_map_mu_;
   std::unordered_map<void*, std::shared_ptr<ResponseGenerator>>
       response_generator_map_;

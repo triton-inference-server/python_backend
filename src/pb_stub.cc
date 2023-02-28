@@ -84,8 +84,8 @@ Stub::Instantiate(
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
-  utils_thread_ = false;
-  bls_response_thread_ = false;
+  stub_to_parent_thread_ = false;
+  parent_to_stub_thread_ = false;
 
   try {
     shm_pool_ = std::make_unique<SharedMemoryManager>(
@@ -104,11 +104,11 @@ Stub::Instantiate(
         MessageQueue<bi::managed_external_buffer::handle_t>::
             LoadFromSharedMemory(shm_pool_, ipc_control_->parent_message_queue);
 
-    utils_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
-        LoadFromSharedMemory(shm_pool_, ipc_control_->utils_message_queue);
+    stub_to_parent_mq_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->stub_to_parent_mq);
 
-    bls_response_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
-        LoadFromSharedMemory(shm_pool_, ipc_control_->bls_response_queue);
+    parent_to_stub_mq_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->parent_to_stub_mq);
 
     memory_manager_message_queue_ =
         MessageQueue<uint64_t>::LoadFromSharedMemory(
@@ -497,8 +497,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_config_params[pair.first.c_str()] = pair.second;
   }
 
-  LaunchUtilsRequestThread();
-  LaunchBLSResponseQueueMonitor();
+  LaunchStubToParentQueueMonitor();
+  LaunchParentToStubQueueMonitor();
 
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
@@ -824,7 +824,7 @@ Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
   while (!success) {
-    utils_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
+    stub_to_parent_mq_->Push(ipc_message->ShmHandle(), 1000, success);
   }
 }
 
@@ -837,7 +837,7 @@ Stub::~Stub()
   stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
-  utils_message_queue_.reset();
+  stub_to_parent_mq_.reset();
   memory_manager_message_queue_.reset();
 }
 
@@ -854,44 +854,45 @@ Stub::GetOrCreateInstance()
 }
 
 void
-Stub::LaunchUtilsRequestThread()
+Stub::LaunchStubToParentQueueMonitor()
 {
-  utils_thread_ = true;
-  utils_monitor_ = std::thread(&Stub::ServiceUtilsRequests, this);
+  stub_to_parent_thread_ = true;
+  stub_to_parent_queue_monitor_ =
+      std::thread(&Stub::ServiceStubToParentRequests, this);
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(true);
 }
 
 void
-Stub::TerminateUtilsRequestThread()
+Stub::TerminateStubToParentQueueMonitor()
 {
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
-    std::lock_guard<std::mutex> guard{utils_message_mutex_};
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
     log_request_buffer_.push(DUMMY_MESSAGE);
     bls_response_cleanup_buffer_.push(DUMMY_MESSAGE);
   }
-  utils_message_cv_.notify_one();
-  utils_monitor_.join();
+  stub_to_parent_message_cv_.notify_one();
+  stub_to_parent_queue_monitor_.join();
 }
 
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
   {
-    std::lock_guard<std::mutex> guard{utils_message_mutex_};
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
     log_request_buffer_.push(std::move(log_ptr));
   }
-  utils_message_cv_.notify_one();
+  stub_to_parent_message_cv_.notify_one();
 }
 
 void
-Stub::ServiceUtilsRequests()
+Stub::ServiceStubToParentRequests()
 {
-  while (utils_thread_) {
-    std::unique_lock<std::mutex> guard{utils_message_mutex_};
+  while (stub_to_parent_thread_) {
+    std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
     while (log_request_buffer_.empty() &&
            bls_response_cleanup_buffer_.empty()) {
-      utils_message_cv_.wait(guard);
+      stub_to_parent_message_cv_.wait(guard);
     }
     if (!log_request_buffer_.empty()) {
       // On exit, will send messages until
@@ -982,40 +983,41 @@ void
 Stub::EnqueueCleanupId(void* id)
 {
   {
-    std::lock_guard<std::mutex> guard{utils_message_mutex_};
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
     bls_response_cleanup_buffer_.push(id);
   }
-  utils_message_cv_.notify_one();
+  stub_to_parent_message_cv_.notify_one();
 }
 
 bool
-Stub::UtilsServiceActive()
+Stub::StubToParentServiceActive()
 {
-  return utils_thread_;
+  return stub_to_parent_thread_;
 }
 
 void
-Stub::LaunchBLSResponseQueueMonitor()
+Stub::LaunchParentToStubQueueMonitor()
 {
-  bls_response_thread_ = true;
-  bls_response_monitor_ = std::thread(&Stub::BLSResponseQueueMonitor, this);
+  parent_to_stub_thread_ = true;
+  parent_to_stub_queue_monitor_ =
+      std::thread(&Stub::ParentToStubMQMonitor, this);
 }
 
 void
-Stub::TerminateBLSResponseQueueMonitor()
+Stub::TerminateParentToStubQueueMonitor()
 {
-  if (bls_response_thread_) {
-    bls_response_thread_ = false;
-    bls_response_queue_->Push(DUMMY_MESSAGE);
-    bls_response_monitor_.join();
+  if (parent_to_stub_thread_) {
+    parent_to_stub_thread_ = false;
+    parent_to_stub_mq_->Push(DUMMY_MESSAGE);
+    parent_to_stub_queue_monitor_.join();
   }
 }
 
 void
-Stub::BLSResponseQueueMonitor()
+Stub::ParentToStubMQMonitor()
 {
-  while (bls_response_thread_) {
-    bi::managed_external_buffer::handle_t handle = bls_response_queue_->Pop();
+  while (parent_to_stub_thread_) {
+    bi::managed_external_buffer::handle_t handle = parent_to_stub_mq_->Pop();
     if (handle == DUMMY_MESSAGE) {
       break;
     }
@@ -1097,9 +1099,9 @@ Stub::BLSResponseQueueMonitor()
 }
 
 bool
-Stub::BLSResponseServiceActive()
+Stub::ParentToStubServiceActive()
 {
-  return bls_response_thread_;
+  return parent_to_stub_thread_;
 }
 
 void
@@ -1138,7 +1140,7 @@ Logger::Log(const std::string& message, LogLevel level)
   py::object lineno = caller_info.attr("lineno");
   uint32_t line = lineno.cast<uint32_t>();
 
-  if (!stub->UtilsServiceActive()) {
+  if (!stub->StubToParentServiceActive()) {
     Logger::GetOrCreateInstance()->Log(filename, line, level, message);
   } else {
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
@@ -1467,11 +1469,11 @@ main(int argc, char** argv)
           if (kill(parent_pid, 0) != 0) {
             // When unhealthy, we should stop attempting to send
             // messages to the backend ASAP.
-            if (stub->UtilsServiceActive()) {
-              stub->TerminateUtilsRequestThread();
+            if (stub->StubToParentServiceActive()) {
+              stub->TerminateStubToParentQueueMonitor();
             }
-            if (stub->BLSResponseServiceActive()) {
-              stub->TerminateBLSResponseQueueMonitor();
+            if (stub->ParentToStubServiceActive()) {
+              stub->TerminateParentToStubQueueMonitor();
             }
             // Destroy Stub
             LOG_INFO << "Non-graceful termination detected. ";
@@ -1494,11 +1496,11 @@ main(int argc, char** argv)
     if (finalize) {
       stub->Finalize();
       // Need check or may receive not joinable error
-      if (stub->UtilsServiceActive()) {
-        stub->TerminateUtilsRequestThread();
+      if (stub->StubToParentServiceActive()) {
+        stub->TerminateStubToParentQueueMonitor();
       }
-      if (stub->BLSResponseServiceActive()) {
-        stub->TerminateBLSResponseQueueMonitor();
+      if (stub->ParentToStubServiceActive()) {
+        stub->TerminateParentToStubQueueMonitor();
       }
       background_thread_running = false;
       background_thread.join();

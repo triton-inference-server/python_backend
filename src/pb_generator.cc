@@ -24,9 +24,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <chrono>
-
 #include "pb_generator.h"
+#include <chrono>
 #include "pb_stub.h"
 
 #include <pybind11/embed.h>

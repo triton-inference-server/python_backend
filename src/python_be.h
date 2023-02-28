@@ -262,8 +262,8 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
 
-  std::thread utils_monitor_;
-  bool utils_thread_;
+  std::thread stub_to_parent_queue_monitor_;
+  bool stub_to_parent_thread_;
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
   bool decoupled_thread_;
@@ -274,10 +274,10 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
 
   std::queue<std::unique_ptr<InferResponse>> bls_response_buffer_;
-  std::thread bls_response_monitor_;
-  bool bls_response_thread_;
-  std::mutex bls_response_mutex_;
-  std::condition_variable bls_response_cv_;
+  std::thread parent_to_stub_queue_monitor_;
+  bool parent_to_stub_thread_;
+  std::mutex bls_buffer_mutex_;
+  std::condition_variable bls_buffer_cv_;
   std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
   std::unordered_map<void*, std::unique_ptr<RequestExecutor>> request_executor_;
 
@@ -318,15 +318,15 @@ class ModelInstanceState : public BackendModelInstance {
   void DecoupledMessageQueueMonitor();
 
   // This function is executed on a separate thread and monitors the queue for
-  // general message.
-  void UtilsMessageQueueMonitor();
+  // message sent from stub to parent process.
+  void StubToParentMQMonitor();
 
   // Process the log request.
   void ProcessLogRequest(const std::unique_ptr<IPCMessage>& message);
 
-  // This function is executed on a separate thread and monitors the bls
-  // response queue.
-  void BLSResponseQueueMonitor();
+  // This function is executed on a separate thread and monitors the queue for
+  // message sent from parent to stub process.
+  void ParentToStubMQMonitor();
 
   // Convert TRITONBACKEND_Input to Python backend tensors.
   TRITONSERVER_Error* GetInputTensor(

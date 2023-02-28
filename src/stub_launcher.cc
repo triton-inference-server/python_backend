@@ -132,8 +132,8 @@ StubLauncher::Setup()
   ipc_control_ = nullptr;
   stub_message_queue_ = nullptr;
   parent_message_queue_ = nullptr;
-  utils_message_queue_ = nullptr;
-  bls_response_queue_ = nullptr;
+  stub_to_parent_mq_ = nullptr;
+  parent_to_stub_mq_ = nullptr;
   memory_manager_ = nullptr;
 
   try {
@@ -163,11 +163,11 @@ StubLauncher::Setup()
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
-      utils_message_queue_ =
+      stub_to_parent_mq_ =
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
-      bls_response_queue_ =
+      parent_to_stub_mq_ =
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
 
@@ -184,17 +184,17 @@ StubLauncher::Setup()
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
-  ipc_control_->utils_message_queue = utils_message_queue_->ShmHandle();
+  ipc_control_->stub_to_parent_mq = stub_to_parent_mq_->ShmHandle();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
-  ipc_control_->bls_response_queue = bls_response_queue_->ShmHandle();
+  ipc_control_->parent_to_stub_mq = parent_to_stub_mq_->ShmHandle();
 
   new (&(ipc_control_->stub_health_mutex)) bi::interprocess_mutex;
   health_mutex_ = &(ipc_control_->stub_health_mutex);
 
   stub_message_queue_->ResetSemaphores();
   parent_message_queue_->ResetSemaphores();
-  utils_message_queue_->ResetSemaphores();
-  bls_response_queue_->ResetSemaphores();
+  stub_to_parent_mq_->ResetSemaphores();
+  parent_to_stub_mq_->ResetSemaphores();
 
   is_initialized_ = false;
 
@@ -522,8 +522,8 @@ StubLauncher::TerminateStub()
 void
 StubLauncher::ClearQueues()
 {
-  utils_message_queue_.reset();
-  bls_response_queue_.reset();
+  stub_to_parent_mq_.reset();
+  parent_to_stub_mq_.reset();
 }
 
 void

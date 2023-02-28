@@ -35,7 +35,7 @@ namespace bi = boost::interprocess;
 ModelInstanceState::ModelInstanceState(
     ModelState* model_state, TRITONBACKEND_ModelInstance* triton_model_instance)
     : BackendModelInstance(model_state, triton_model_instance),
-      utils_thread_(false), bls_response_thread_(false)
+      stub_to_parent_thread_(false), parent_to_stub_thread_(false)
 {
 }
 
@@ -718,7 +718,7 @@ ModelInstanceState::ExecuteBLSRequest(
       if (pb_exception.what() != nullptr) {
         std::shared_ptr<InferPayload> infer_payload =
             std::make_shared<InferPayload>(
-                is_decoupled, bls_response_mutex_, bls_response_cv_,
+                is_decoupled, bls_buffer_mutex_, bls_buffer_cv_,
                 bls_response_buffer_);
         auto response_future =
             request_executor->Infer(infer_request, infer_payload);
@@ -821,11 +821,11 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
 }
 
 void
-ModelInstanceState::UtilsMessageQueueMonitor()
+ModelInstanceState::StubToParentMQMonitor()
 {
-  while (utils_thread_) {
+  while (stub_to_parent_thread_) {
     bi::managed_external_buffer::handle_t handle =
-        Stub()->UtilsMessageQueue()->Pop();
+        Stub()->StubToParentMessageQueue()->Pop();
     if (handle == DUMMY_MESSAGE) {
       break;
     }
@@ -916,12 +916,12 @@ ModelInstanceState::ProcessBLSCleanupRequest(
 }
 
 void
-ModelInstanceState::BLSResponseQueueMonitor()
+ModelInstanceState::ParentToStubMQMonitor()
 {
-  while (bls_response_thread_) {
-    std::unique_lock<std::mutex> guard{bls_response_mutex_};
+  while (parent_to_stub_thread_) {
+    std::unique_lock<std::mutex> guard{bls_buffer_mutex_};
     while (bls_response_buffer_.empty()) {
-      bls_response_cv_.wait(guard);
+      bls_buffer_cv_.wait(guard);
     }
     std::unique_ptr<InferResponse> infer_response =
         std::move(bls_response_buffer_.front());
@@ -938,31 +938,31 @@ ModelInstanceState::BLSResponseQueueMonitor()
 void
 ModelInstanceState::StartMonitors()
 {
-  utils_thread_ = true;
-  utils_monitor_ =
-      std::thread(&ModelInstanceState::UtilsMessageQueueMonitor, this);
+  stub_to_parent_thread_ = true;
+  stub_to_parent_queue_monitor_ =
+      std::thread(&ModelInstanceState::StubToParentMQMonitor, this);
 
-  bls_response_thread_ = true;
-  bls_response_monitor_ =
-      std::thread(&ModelInstanceState::BLSResponseQueueMonitor, this);
+  parent_to_stub_thread_ = true;
+  parent_to_stub_queue_monitor_ =
+      std::thread(&ModelInstanceState::ParentToStubMQMonitor, this);
 }
 
 void
 ModelInstanceState::TerminateMonitors()
 {
-  if (utils_thread_) {
-    utils_thread_ = false;
-    Stub()->UtilsMessageQueue()->Push(DUMMY_MESSAGE);
-    utils_monitor_.join();
+  if (stub_to_parent_thread_) {
+    stub_to_parent_thread_ = false;
+    Stub()->StubToParentMessageQueue()->Push(DUMMY_MESSAGE);
+    stub_to_parent_queue_monitor_.join();
   }
 
-  if (bls_response_thread_) {
+  if (parent_to_stub_thread_) {
     {
-      std::lock_guard<std::mutex> guard{bls_response_mutex_};
+      std::lock_guard<std::mutex> guard{bls_buffer_mutex_};
       bls_response_buffer_.push(DUMMY_MESSAGE);
     }
-    bls_response_cv_.notify_one();
-    bls_response_monitor_.join();
+    bls_buffer_cv_.notify_one();
+    parent_to_stub_queue_monitor_.join();
   }
 }
 
@@ -1562,7 +1562,8 @@ ModelInstanceState::SendBLSDecoupledResponse(
         *(ipc_message->ResponseMutex())};
     bool success = false;
     while (!success) {
-      Stub()->BLSResponseQueue()->Push(ipc_message->ShmHandle(), 1000, success);
+      Stub()->ParentToStubMessageQueue()->Push(
+          ipc_message->ShmHandle(), 1000, success);
     }
     ipc_message->ResponseCondition()->wait(lock);
   }

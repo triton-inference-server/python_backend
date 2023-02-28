@@ -97,18 +97,18 @@ class StubLauncher {
     return parent_message_queue_;
   }
 
-  // Log message queue
+  // Stub to parent message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
-  UtilsMessageQueue()
+  StubToParentMessageQueue()
   {
-    return utils_message_queue_;
+    return stub_to_parent_mq_;
   }
 
-  // BLS decoupled response queue
+  // Parent to stub message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
-  BLSResponseQueue()
+  ParentToStubMessageQueue()
   {
-    return bls_response_queue_;
+    return parent_to_stub_mq_;
   }
 
   // Memory Manager
@@ -181,9 +181,9 @@ class StubLauncher {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      utils_message_queue_;
+      stub_to_parent_mq_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      bls_response_queue_;
+      parent_to_stub_mq_;
   std::unique_ptr<MemoryManager> memory_manager_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;

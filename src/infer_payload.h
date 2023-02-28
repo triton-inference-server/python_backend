@@ -41,7 +41,7 @@ class InferPayload {
   void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
   bool IsDecoupled();
-  void EnqueueBLSResponse(std::unique_ptr<InferResponse>& response_ptr);
+  void EnqueueBLSResponse(std::unique_ptr<InferResponse>& infer_response);
   bool IsPromiseSet();
 
  private:
