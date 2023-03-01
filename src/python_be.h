@@ -272,12 +272,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<IPCMessage> received_message_;
   std::vector<std::future<void>> futures_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
-
-  std::queue<std::unique_ptr<InferResponse>> bls_response_buffer_;
-  std::thread parent_to_stub_queue_monitor_;
-  bool parent_to_stub_thread_;
-  std::mutex bls_buffer_mutex_;
-  std::condition_variable bls_buffer_cv_;
   std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
   std::unordered_map<void*, std::unique_ptr<RequestExecutor>> request_executor_;
 
@@ -323,10 +317,6 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process the log request.
   void ProcessLogRequest(const std::unique_ptr<IPCMessage>& message);
-
-  // This function is executed on a separate thread and monitors the queue for
-  // message sent from parent to stub process.
-  void ParentToStubMQMonitor();
 
   // Convert TRITONBACKEND_Input to Python backend tensors.
   TRITONSERVER_Error* GetInputTensor(
@@ -377,15 +367,28 @@ class ModelInstanceState : public BackendModelInstance {
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
 
-  // Stop the log monitor and bls response monitor threads
-  void TerminateMonitors();
+  // Stop the log monitor threads
+  void TerminateMonitor();
 
-  // Start the log monitor and bls response monitor threads
-  void StartMonitors();
+  // Start the log monitor threads
+  void StartMonitor();
 
-  void SendBLSDecoupledResponse(std::unique_ptr<InferResponse> response_ptr);
+  // Send bls decoupled response to the stub process
+  void SendBLSDecoupledResponse(std::unique_ptr<InferResponse> infer_response);
 
-  // Process the bls decoupled cleanup request.
+  // Prepare the response batch object
+  void PrepareResponseBatch(
+      ResponseBatch** response_batch,
+      AllocatedSharedMemory<char>& response_batch_shm,
+      std::unique_ptr<IPCMessage>* ipc_message,
+      bi::managed_external_buffer::handle_t** response_handle);
+
+  // Prepare the response handle
+  void PrepareResponseHandle(
+      std::unique_ptr<InferResponse>* infer_response,
+      bi::managed_external_buffer::handle_t* response_handle);
+
+  // Process the bls decoupled cleanup request
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 };
 }}}  // namespace triton::backend::python

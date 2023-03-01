@@ -35,8 +35,7 @@ namespace triton { namespace backend { namespace python {
 
 ResponseGenerator::ResponseGenerator(
     const std::shared_ptr<InferResponse>& response)
-    : id_(response->Id()), is_finished_(response->IsLastResponse()),
-      is_cleared_(false)
+    : id_(response->Id()), is_finished_(false), is_cleared_(false)
 {
   response_buffer_.push(response);
 }

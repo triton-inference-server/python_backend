@@ -158,10 +158,10 @@ InferResponseComplete(
         output_tensors, pb_error, true /* is_last_response */, userp /* id */);
   }
 
-  // Only set value to the promise with the first response. Enqueue decoupled
-  // responses to the buffer and send to the stub.
+  // Only set value to the promise with the first response. Call the callback
+  // function to send decoupled response to the stub.
   if ((*p)->IsPromiseSet()) {
-    (*p)->EnqueueBLSResponse(infer_response);
+    (*p)->Callback(std::move(infer_response));
   } else {
     (*p)->SetValueForPrevPromise(std::move(infer_response));
   }

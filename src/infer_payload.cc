@@ -29,10 +29,9 @@
 namespace triton { namespace backend { namespace python {
 
 InferPayload::InferPayload(
-    const bool is_decoupled, std::mutex& mu, std::condition_variable& cv,
-    std::queue<std::unique_ptr<InferResponse>>& buffer)
-    : is_decoupled_(is_decoupled), mu_(mu), cv_(cv), buffer_(buffer),
-      is_promise_set_(false)
+    const bool is_decoupled,
+    std::function<void(std::unique_ptr<InferResponse>)> callback)
+    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
 {
   prev_promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
@@ -64,20 +63,16 @@ InferPayload::IsDecoupled()
   return is_decoupled_;
 }
 
-void
-InferPayload::EnqueueBLSResponse(std::unique_ptr<InferResponse>& infer_response)
-{
-  {
-    std::lock_guard<std::mutex> guard{mu_};
-    buffer_.push(std::move(infer_response));
-  }
-  cv_.notify_one();
-}
-
 bool
 InferPayload::IsPromiseSet()
 {
   return is_promise_set_;
+}
+
+void
+InferPayload::Callback(std::unique_ptr<InferResponse> infer_response)
+{
+  return callback_(std::move(infer_response));
 }
 
 }}}  // namespace triton::backend::python

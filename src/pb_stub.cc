@@ -963,19 +963,25 @@ Stub::SendCleanupId(void* id)
   CleanupMessage* cleanup_message_ptr =
       reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
   cleanup_message_ptr->id = id;
+  cleanup_message_ptr->waiting_on_stub = false;
   ipc_message->Args() = cleanup_request_message.handle_;
 
-  ScopedDefer data_load_complete([&ipc_message] {
-    bi::scoped_lock<bi::interprocess_mutex> lock{
-        *(ipc_message->ResponseMutex())};
-    ipc_message->ResponseCondition()->notify_all();
+  ScopedDefer _([&ipc_message, cleanup_message_ptr] {
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      cleanup_message_ptr->waiting_on_stub = false;
+      ipc_message->ResponseCondition()->notify_all();
+    }
   });
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
     SendIPCUtilsMessage(ipc_message);
-    ipc_message->ResponseCondition()->wait(lock);
+    while (!cleanup_message_ptr->waiting_on_stub) {
+      ipc_message->ResponseCondition()->wait(lock);
+    }
   }
 }
 
@@ -1056,8 +1062,6 @@ Stub::ParentToStubMQMonitor()
       }
 
       if (responses_is_set) {
-        // Need to acquire the GIL to avoid hangs.
-        py::gil_scoped_acquire acquire;
         infer_response = InferResponse::LoadFromSharedMemory(
             shm_pool_, *response_handle, true /* open cuda handle */);
 
@@ -1093,7 +1097,11 @@ Stub::ParentToStubMQMonitor()
     {
       bi::scoped_lock<bi::interprocess_mutex> lock{
           *(ipc_message->ResponseMutex())};
+      response_batch->waiting_on_stub = true;
       ipc_message->ResponseCondition()->notify_all();
+      while (response_batch->waiting_on_stub) {
+        ipc_message->ResponseCondition()->wait(lock);
+      }
     }
   }
 }
