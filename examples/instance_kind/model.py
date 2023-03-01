@@ -40,7 +40,9 @@ class TritonPythonModel:
 
         Depending on what `instance_group` was specified in 
         the config.pbtxt file (KIND_CPU, KIND_GPU, or both), the model instance
-        will be initialised on a cpu, a gpu, or both.
+        will be initialised on a cpu, a gpu, or both. If `instance_group` was
+        not specified in the config file, then models will be loaded onto 
+        the default device of the framework.
         """
         self.device = 'cuda' if args["model_instance_kind"] == "GPU" else 'cpu'
         self.model = torch.hub.load("pytorch/vision",

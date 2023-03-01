@@ -33,7 +33,7 @@ In Python Backend this can be achieved by specifying an
 [`instance_group`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups) 
 parameter in a config file.
 
-In this section, we demonstrate how to specify a `device kind` for your python model.
+In this section, we demonstrate how to specify a `instance kind` for your python model.
 We will use a `ResNet50` model as our base model for this example.
 
 ## Create a ResNet50 model repository
@@ -134,54 +134,7 @@ python client.py -v
 The `-v` argument asks the client to request model's confiuration from the server and prints it in your console:
 ```
 {
-    "name": "resnet50",
-    "platform": "",
-    "backend": "python",
-    "version_policy": {
-        "latest": {
-            "num_versions": 1
-        }
-    },
-    "max_batch_size": 128,
-    "input": [
-        {
-            "name": "INPUT",
-            "data_type": "TYPE_FP32",
-            "format": "FORMAT_NCHW",
-            "dims": [
-                3,
-                224,
-                224
-            ],
-            "is_shape_tensor": false,
-            "allow_ragged_batch": false,
-            "optional": false
-        }
-    ],
-    "output": [
-        {
-            "name": "OUTPUT",
-            "data_type": "TYPE_FP32",
-            "dims": [
-                1000
-            ],
-            "label_filename": "",
-            "is_shape_tensor": false
-        }
-    ],
-    "batch_input": [],
-    "batch_output": [],
-    "optimization": {
-        "priority": "PRIORITY_DEFAULT",
-        "input_pinned_memory": {
-            "enable": true
-        },
-        "output_pinned_memory": {
-            "enable": true
-        },
-        "gather_kernel_buffer_threshold": 0,
-        "eager_batching": false
-    },
+    ...,
     "instance_group": [
         {
             "name": "resnet50_0",
@@ -194,11 +147,7 @@ The `-v` argument asks the client to request model's confiuration from the serve
             "host_policy": ""
         }
     ],
-    "default_model_filename": "model.py",
-    "cc_model_filenames": {},
-    "metric_tags": {},
-    "parameters": {},
-    "model_warmup": []
+    ...
 }
 Results is class: TABBY
 PASS: ResNet50 instance kind
