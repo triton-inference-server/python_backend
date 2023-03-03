@@ -717,11 +717,14 @@ ModelInstanceState::ExecuteBLSRequest(
             request_executor->Infer(infer_request, infer_payload);
         infer_response = response_future.get();
 
-        // Need to manage the lifetime of InferPayload and RequestExecutor
-        // objects for bls decoupled responses.
-        infer_payload_[reinterpret_cast<void*>(&infer_payload)] = infer_payload;
-        request_executor_[reinterpret_cast<void*>(&infer_payload)] =
-            std::move(request_executor);
+        if (is_decoupled) {
+          // Need to manage the lifetime of InferPayload and RequestExecutor
+          // objects for bls decoupled responses.
+          infer_payload_[reinterpret_cast<void*>(&infer_payload)] =
+              infer_payload;
+          request_executor_[reinterpret_cast<void*>(&infer_payload)] =
+              std::move(request_executor);
+        }
 
         PrepareResponseHandle(&infer_response, response_handle);
       } else {
@@ -1536,11 +1539,7 @@ ModelInstanceState::SendBLSDecoupledResponse(
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
-    bool success = false;
-    while (!success) {
-      Stub()->ParentToStubMessageQueue()->Push(
-          ipc_message->ShmHandle(), 1000, success);
-    }
+    Stub()->ParentToStubMessageQueue()->Push(ipc_message->ShmHandle());
     while (!response_batch->waiting_on_stub) {
       ipc_message->ResponseCondition()->wait(lock);
     }
