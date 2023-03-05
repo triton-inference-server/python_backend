@@ -717,7 +717,7 @@ ModelInstanceState::ExecuteBLSRequest(
             request_executor->Infer(infer_request, infer_payload);
         infer_response = response_future.get();
 
-        if (is_decoupled) {
+        if (is_decoupled && (infer_response->Id() != nullptr)) {
           // Need to manage the lifetime of InferPayload and RequestExecutor
           // objects for bls decoupled responses.
           infer_payload_[reinterpret_cast<void*>(&infer_payload)] =

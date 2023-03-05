@@ -42,6 +42,7 @@ struct ResponseShm {
   bool is_error_set;
   void* id;
   bool is_last_response;
+  bool is_empty_response;
 };
 
 #define SET_ERROR_AND_RETURN(E, X)           \
@@ -71,7 +72,8 @@ class InferResponse {
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
       std::shared_ptr<PbError> error = nullptr,
-      const bool is_last_response = true, void* id = nullptr);
+      const bool is_last_response = true, void* id = nullptr,
+      const bool is_empty_response = false);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
@@ -90,6 +92,7 @@ class InferResponse {
   bi::managed_external_buffer::handle_t NextResponseHandle();
   void* Id();
   bool IsLastResponse();
+  bool IsEmptyResponse();
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
@@ -114,8 +117,8 @@ class InferResponse {
   InferResponse(
       AllocatedSharedMemory<char>& response_shm,
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error, const bool is_last_response,
-      void* id);
+      std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id,
+      const bool is_empty_response);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
 
   std::shared_ptr<PbError> error_;
@@ -126,6 +129,7 @@ class InferResponse {
   bool is_last_response_;
   // Representing the request id that the response was created from.
   void* id_;
+  bool is_empty_response_;
 };
 
 }}}  // namespace triton::backend::python

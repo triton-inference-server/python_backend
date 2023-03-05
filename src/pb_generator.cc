@@ -42,32 +42,28 @@ ResponseGenerator::ResponseGenerator(
 
 ResponseGenerator::~ResponseGenerator()
 {
-  {
-    std::lock_guard<std::mutex> lock{mu_};
-    response_buffer_.push(DUMMY_MESSAGE);
+  if (!is_cleared_) {
+    Clear();
   }
-  cv_.notify_all();
+  responses_.clear();
 }
 
 std::shared_ptr<InferResponse>
 ResponseGenerator::Next()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   if (is_finished_) {
     if (!is_cleared_) {
-      stub->EnqueueCleanupId(id_);
-      is_cleared_ = true;
+      Clear();
     }
     throw py::stop_iteration("Iteration is done for the responses.");
   }
 
   std::shared_ptr<InferResponse> response;
   {
-    py::gil_scoped_release release;
-
-    std::unique_lock<std::mutex> lock{mu_};
     {
+      std::unique_lock<std::mutex> lock{mu_};
       while (response_buffer_.empty()) {
+        py::gil_scoped_release release;
         cv_.wait(lock);
       }
       response = response_buffer_.front();
@@ -76,11 +72,10 @@ ResponseGenerator::Next()
     }
   }
 
-  // Handle the case where the last response is empty.
   if (is_finished_) {
-    stub->EnqueueCleanupId(id_);
-    is_cleared_ = true;
-    if (response->OutputTensors().empty()) {
+    Clear();
+    // Handle the case where the last response is empty.
+    if (response->IsEmptyResponse()) {
       throw py::stop_iteration("Iteration is done for the responses.");
     }
   }
@@ -112,13 +107,28 @@ ResponseGenerator::EnqueueResponse(
     std::lock_guard<std::mutex> lock{mu_};
     response_buffer_.push(std::move(infer_response));
   }
-  cv_.notify_all();
+  cv_.notify_one();
 }
 
 void*
 ResponseGenerator::Id()
 {
   return id_;
+}
+
+void
+ResponseGenerator::Clear()
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  stub->EnqueueCleanupId(id_);
+  {
+    std::lock_guard<std::mutex> lock{mu_};
+    response_buffer_.push(DUMMY_MESSAGE);
+  }
+  cv_.notify_all();
+  std::queue<std::shared_ptr<InferResponse>> empty;
+  std::swap(response_buffer_, empty);
+  is_cleared_ = true;
 }
 
 }}}  // namespace triton::backend::python

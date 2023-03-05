@@ -906,7 +906,8 @@ Stub::ServiceStubToParentRequests()
         log_request_buffer_.pop();
         SendLogMessage(log_request);
       }
-    } else {
+    }
+    if (!bls_response_cleanup_buffer_.empty()) {
       void* id = std::move(bls_response_cleanup_buffer_.front());
       if (id == DUMMY_MESSAGE) {
         bls_response_cleanup_buffer_.pop();
@@ -988,11 +989,13 @@ Stub::SendCleanupId(void* id)
 void
 Stub::EnqueueCleanupId(void* id)
 {
-  {
-    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-    bls_response_cleanup_buffer_.push(id);
+  if (id != nullptr) {
+    {
+      std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
+      bls_response_cleanup_buffer_.push(id);
+    }
+    stub_to_parent_message_cv_.notify_one();
   }
-  stub_to_parent_message_cv_.notify_one();
 }
 
 bool
@@ -1291,7 +1294,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               auto response_generator =
                   std::make_shared<ResponseGenerator>(response);
               response_object = py::cast(response_generator);
-              stub->SaveResponseGenerator(response_generator);
+              if (response_generator->Id() != nullptr) {
+                stub->SaveResponseGenerator(response_generator);
+              }
             } else {
               response_object = py::cast(response);
             }
@@ -1319,7 +1324,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                 auto response_generator =
                     std::make_shared<ResponseGenerator>(response);
                 response_object = py::cast(response_generator);
-                stub->SaveResponseGenerator(response_generator);
+                if (response_generator->Id() != nullptr) {
+                  stub->SaveResponseGenerator(response_generator);
+                }
               } else {
                 response_object = py::cast(response);
               }
