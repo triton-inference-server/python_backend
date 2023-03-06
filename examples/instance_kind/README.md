@@ -33,8 +33,8 @@ In Python Backend this can be achieved by specifying an
 [`instance_group`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups) 
 parameter in a config file.
 
-In this section, we demonstrate how to specify a `instance kind` for your python model.
-We will use a `ResNet50` model as our base model for this example.
+In this section, we demonstrate how to specify a `instance kind` for your python 
+model. We will use a `ResNet50` model as our base model for this example.
 
 ## Create a ResNet50 model repository
 
@@ -66,8 +66,8 @@ $ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
 ```
 See the installation steps above for the `<yy.mm>` version.
 
-For example, if the latest version is `23.01`, the above commands translate to the
-following:
+For example, if the latest version is `23.01`, the above commands translate
+to the following:
 ```
 $ docker pull nvcr.io/nvidia/tritonserver:23.01-py3
 $ docker pull nvcr.io/nvidia/tritonserver:23.01-py3-sdk
@@ -78,14 +78,14 @@ parts of this example.
 
 ## Start the Triton Server
 
-At the directory where we copied our resnet50 model (at where the "models" folder
-is located), run the following command:
+At the directory where we copied our resnet50 model (at where the "models" 
+folder is located), run the following command:
 ```
 $ docker run --gpus all --shm-size 1G -it --rm -p 8000:8000 -v `pwd`:/instance_kind nvcr.io/nvidia/tritonserver:<yy.mm>-py3 /bin/bash
 ```
 
-Inside the container, we need to install `torch` and `pillow` to run this example. 
-We recommend to use `pip` method for the installation:
+Inside the container, we need to install `torch` and `pillow` to run 
+this example. We recommend to use `pip` method for the installation:
 
 ```
 pip3 install torch==1.13.0+cu117 -f https://download.pytorch.org/whl/torch_stable.html pillow
@@ -105,8 +105,9 @@ To start the sdk container, run the following command:
 docker run --gpus all --network=host --pid=host --ipc=host -v `pwd`:/instance_kind -ti nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk /bin/bash
 ```
 
-The `client.py` requires the following packages to be installed: `torch`, `torchvision`, `pillow` and `validators`. 
-Similarly, we recommend to use `pip` method for the installation:
+The `client.py` requires the following packages to be installed: `torch`, 
+`torchvision`, `pillow` and `validators`.  Similarly, we recommend to use `pip` 
+method for the installation:
 
 ```
 pip3 install torch==1.13.0+cu117 -f https://download.pytorch.org/whl/torch_stable.html torchvision==0.14.0+cu117 pillow validators
@@ -122,16 +123,19 @@ Downloading: "https://github.com/NVIDIA/DeepLearningExamples/zipball/torchhub" t
 Results is class: TABBY
 PASS: ResNet50
 ```
-It may take some time due to `torchhub` downloads, but any future calls will be quicker, since the client will use already downloaded artifacts.
+It may take some time due to `torchhub` downloads, but any future calls 
+will be quicker, since the client will use already downloaded artifacts.
 
 ## Test Instance Kind
 
-Provided `config.pbtxt` sets the instance group setting to `KIND_CPU`, which enables the execution of a model on the CPU. 
+Provided `config.pbtxt` sets the instance group setting to `KIND_CPU`, 
+which enables the execution of a model on the CPU. 
 To test that your model is actually loaded onto CPU, run the following:
 ```
 python client.py -v
 ```
-The `-v` argument asks the client to request model's confiuration from the server and prints it in your console:
+The `-v` argument asks the client to request model's confiuration from 
+the server and prints it in your console:
 ```
 {
     ...,
@@ -153,12 +157,13 @@ Results is class: TABBY
 PASS: ResNet50 instance kind
 ```
 
-Based on the printed model config, we can see that `instance_group` field has `kind` entry, 
-which is set to `KIND_CPU`. 
+Based on the printed model config, we can see that `instance_group` field 
+has `kind` entry, which is set to `KIND_CPU`. 
 
-To change an `instance_group` parameter to `KIND_GPU`, a user can simply replace `KIND_CPU` with
-`KIND_GPU` in the `config.pbtxt`. After restarting the server with an updated config file, a successful 
-inference request with `-v` argument will result into the similar output, but with an updated `instance_group` entry:
+To change an `instance_group` parameter to `KIND_GPU`, a user can simply replace 
+`KIND_CPU` with `KIND_GPU` in the `config.pbtxt`. After restarting the server 
+with an updated config file, a successful inference request with `-v` argument 
+will result into the similar output, but with an updated `instance_group` entry:
 ```
 {
     ...,
@@ -187,4 +192,5 @@ To do this, make sure your config file has the following entry:
 instance_group [{ kind: KIND_CPU }, { kind: KIND_GPU}]
 ```
 
-For more information on possible model configurations, check out the Triton Server documentation [here](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-configuration)
+For more information on possible model configurations, 
+check out the Triton Server documentation [here](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-configuration)
