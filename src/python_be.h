@@ -273,7 +273,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::vector<std::future<void>> futures_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
   std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
-  std::unordered_map<void*, std::unique_ptr<RequestExecutor>> request_executor_;
+  std::unique_ptr<RequestExecutor> request_executor_;
 
  public:
   static TRITONSERVER_Error* Create(

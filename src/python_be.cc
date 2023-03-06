@@ -412,6 +412,8 @@ ModelInstanceState::LaunchStubProcess()
     decoupled_monitor_ =
         std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
   }
+  request_executor_ = std::make_unique<RequestExecutor>(
+      Stub()->ShmPool(), model_state->TritonServer());
 
   return nullptr;
 }
@@ -600,9 +602,6 @@ void
 ModelInstanceState::ExecuteBLSRequest(
     std::shared_ptr<IPCMessage> ipc_message, const bool is_decoupled)
 {
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-  auto request_executor = std::make_unique<RequestExecutor>(
-      Stub()->ShmPool(), model_state->TritonServer());
   bool is_response_batch_set = false;
   std::unique_ptr<InferResponse> infer_response;
   ResponseBatch* response_batch = nullptr;
@@ -714,7 +713,7 @@ ModelInstanceState::ExecuteBLSRequest(
             std::make_shared<InferPayload>(is_decoupled, callback);
 
         auto response_future =
-            request_executor->Infer(infer_request, infer_payload);
+            request_executor_->Infer(infer_request, infer_payload);
         infer_response = response_future.get();
 
         if (is_decoupled && (infer_response->Id() != nullptr)) {
@@ -722,8 +721,6 @@ ModelInstanceState::ExecuteBLSRequest(
           // objects for bls decoupled responses.
           infer_payload_[reinterpret_cast<void*>(&infer_payload)] =
               infer_payload;
-          request_executor_[reinterpret_cast<void*>(&infer_payload)] =
-              std::move(request_executor);
         }
 
         PrepareResponseHandle(&infer_response, response_handle);
@@ -886,7 +883,6 @@ ModelInstanceState::ProcessBLSCleanupRequest(
 
   void* id = cleanup_message_ptr->id;
   infer_payload_.erase(id);
-  request_executor_.erase(id);
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
