@@ -57,6 +57,7 @@ any C++ code.
   - [Error Handling](#error-handling)
   - [Managing Shared Memory](#managing-shared-memory)
   - [Multiple Model Instance Support](#multiple-model-instance-support)
+  - [Running Multiple Instances of Triton Server](#running-multiple-instances-of-triton-server)
 - [Business Logic Scripting](#business-logic-scripting)
   - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Limitation](#limitation)
@@ -822,6 +823,26 @@ This is in contrast with how other Triton backends such as
 and [PyTorch](https://github.com/triton-inference-server/pytorch_backend)
 handle multiple instances. Increasing the instance count for these backends
 will create additional threads instead of spawning separate processes.
+
+## Running Multiple Instances of Triton Server
+
+Python backend uses shared memory to transfer requests to the stub process. 
+When running multiple instances of Triton Server on the same machine that
+use Python models, there would shared memory region name conflicts that can
+result in segmentation faults or hangs. In order to avoid this issue, you 
+need to specify different `shm-region-prefix-name` using the `--backend-config` flag.
+
+```
+# Triton instance 1
+tritonserver --model-repository=/models --backend-config=python,shm-region-prefix-name=prefix1
+
+# Triton instance 2
+tritonserver --model-repository=/models --backend-config=python,shm-region-prefix-name=prefix2
+```
+
+Note that the hangs would only occur if the `/dev/shm` is shared between
+the two instances of the server. If you run the servers in different containers that
+don't share this location, you don't need to specify `shm-region-prefix-name`.
 
 # Business Logic Scripting
 
