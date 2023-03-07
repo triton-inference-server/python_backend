@@ -1016,16 +1016,18 @@ class TritonPythonModel:
         if inference_response.has_error():
             raise pb_utils.TritonModelException(
               inference_response.error().message())
-        else:
-            # Extract the output tensors from the inference response.
-            output1 = pb_utils.get_output_tensor_by_name(
-              inference_response, 'REQUESTED_OUTPUT_1')
-            output2 = pb_utils.get_output_tensor_by_name(
-              inference_response, 'REQUESTED_OUTPUT_2')
 
-            # Decide the next steps for model execution based on the received
-            # output tensors. It is possible to use the same output tensors to
-            # for the final inference response too.
+        # For some models, it is possible that the last response is empty
+        if len(infer_response.output_tensors()) > 0:
+          # Extract the output tensors from the inference response.
+          output1 = pb_utils.get_output_tensor_by_name(
+            inference_response, 'REQUESTED_OUTPUT_1')
+          output2 = pb_utils.get_output_tensor_by_name(
+            inference_response, 'REQUESTED_OUTPUT_2')
+
+          # Decide the next steps for model execution based on the received
+          # output tensors. It is possible to use the same output tensors to
+          # for the final inference response too.
 ```
 
 
@@ -1076,7 +1078,9 @@ class TritonPythonModel:
           if inference_response.has_error():
               raise pb_utils.TritonModelException(
                 inference_response.error().message())
-          else:
+
+          # For some models, it is possible that the last response is empty
+          if len(infer_response.output_tensors()) > 0:
               # Extract the output tensors from the inference response.
               output1 = pb_utils.get_output_tensor_by_name(
                 inference_response, 'REQUESTED_OUTPUT_1')

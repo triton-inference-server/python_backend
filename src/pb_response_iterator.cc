@@ -86,19 +86,13 @@ ResponseIterator::Next()
         response = response_buffer_.front();
         response_buffer_.pop();
         is_finished_ = response->IsLastResponse();
-        if (!response->IsEmptyResponse()) {
-          responses_.push_back(response);
-        }
+        responses_.push_back(response);
       }
     }
 
     if (is_finished_) {
       idx_ = responses_.size();
       Clear();
-      // Handle the case where the last response is empty.
-      if (response->IsEmptyResponse()) {
-        throw py::stop_iteration("Iteration is done for the responses.");
-      }
     }
     return response;
   }

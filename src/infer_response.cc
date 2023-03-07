@@ -38,10 +38,8 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error, const bool is_last_response, void* id,
-    const bool is_empty_response)
-    : error_(error), is_last_response_(is_last_response), id_(id),
-      is_empty_response_(is_empty_response)
+    std::shared_ptr<PbError> error, const bool is_last_response, void* id)
+    : error_(error), is_last_response_(is_last_response), id_(id)
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -84,7 +82,6 @@ InferResponse::SaveToSharedMemory(
   response_shm_ptr->is_error_set = false;
   shm_handle_ = response_shm_.handle_;
   response_shm_ptr->is_last_response = is_last_response_;
-  response_shm_ptr->is_empty_response = is_empty_response_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
@@ -169,15 +166,13 @@ InferResponse::LoadFromSharedMemory(
 
   return std::unique_ptr<InferResponse>(new InferResponse(
       response_shm, output_tensors, pb_error,
-      response_shm_ptr->is_last_response, response_shm_ptr->id,
-      response_shm_ptr->is_empty_response));
+      response_shm_ptr->is_last_response, response_shm_ptr->id));
 }
 
 InferResponse::InferResponse(
     AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id,
-    const bool is_empty_response)
+    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
@@ -185,7 +180,6 @@ InferResponse::InferResponse(
   shm_handle_ = response_shm_.handle_;
   id_ = id;
   is_last_response_ = is_last_response;
-  is_empty_response_ = is_empty_response;
 }
 
 std::shared_ptr<PbError>&
@@ -204,12 +198,6 @@ bool
 InferResponse::IsLastResponse()
 {
   return is_last_response_;
-}
-
-bool
-InferResponse::IsEmptyResponse()
-{
-  return is_empty_response_;
 }
 
 #ifndef TRITON_PB_STUB
