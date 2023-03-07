@@ -24,7 +24,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "pb_generator.h"
+#include "pb_response_iterator.h"
 #include <chrono>
 #include "pb_stub.h"
 
@@ -33,14 +33,14 @@ namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
-ResponseGenerator::ResponseGenerator(
+ResponseIterator::ResponseIterator(
     const std::shared_ptr<InferResponse>& response)
     : id_(response->Id()), is_finished_(false), is_cleared_(false), idx_(0)
 {
   response_buffer_.push(response);
 }
 
-ResponseGenerator::~ResponseGenerator()
+ResponseIterator::~ResponseIterator()
 {
   // Fetch all the remaining responses if not finished yet.
   if (!is_finished_) {
@@ -62,7 +62,7 @@ ResponseGenerator::~ResponseGenerator()
 }
 
 std::shared_ptr<InferResponse>
-ResponseGenerator::Next()
+ResponseIterator::Next()
 {
   if (is_finished_) {
     if (!is_cleared_) {
@@ -105,7 +105,7 @@ ResponseGenerator::Next()
 }
 
 py::iterator
-ResponseGenerator::Iter()
+ResponseIterator::Iter()
 {
   if (is_finished_) {
     // If the previous iteration is finished, reset the index so that it will
@@ -120,8 +120,7 @@ ResponseGenerator::Iter()
 }
 
 void
-ResponseGenerator::EnqueueResponse(
-    std::unique_ptr<InferResponse> infer_response)
+ResponseIterator::EnqueueResponse(std::unique_ptr<InferResponse> infer_response)
 {
   {
     std::lock_guard<std::mutex> lock{mu_};
@@ -131,13 +130,13 @@ ResponseGenerator::EnqueueResponse(
 }
 
 void*
-ResponseGenerator::Id()
+ResponseIterator::Id()
 {
   return id_;
 }
 
 void
-ResponseGenerator::Clear()
+ResponseIterator::Clear()
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   stub->EnqueueCleanupId(id_);

@@ -43,8 +43,8 @@
 #include <unordered_map>
 #include "infer_response.h"
 #include "pb_error.h"
-#include "pb_generator.h"
 #include "pb_map.h"
+#include "pb_response_iterator.h"
 #include "pb_string.h"
 #include "pb_utils.h"
 #include "response_sender.h"
@@ -1116,12 +1116,11 @@ Stub::ParentToStubServiceActive()
 }
 
 void
-Stub::SaveResponseGenerator(
-    std::shared_ptr<ResponseGenerator> response_generator)
+Stub::SaveResponseIterator(std::shared_ptr<ResponseIterator> response_generator)
 {
   std::lock_guard<std::mutex> lock(response_generator_map_mu_);
   response_generator_map_.insert(
-      std::pair<void*, std::shared_ptr<ResponseGenerator>>(
+      std::pair<void*, std::shared_ptr<ResponseIterator>>(
           response_generator->Id(), response_generator));
 }
 
@@ -1292,10 +1291,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             py::object response_object;
             if (decoupled) {
               auto response_generator =
-                  std::make_shared<ResponseGenerator>(response);
+                  std::make_shared<ResponseIterator>(response);
               response_object = py::cast(response_generator);
               if (response_generator->Id() != nullptr) {
-                stub->SaveResponseGenerator(response_generator);
+                stub->SaveResponseIterator(response_generator);
               }
             } else {
               response_object = py::cast(response);
@@ -1322,10 +1321,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
               py::object response_object;
               if (decoupled) {
                 auto response_generator =
-                    std::make_shared<ResponseGenerator>(response);
+                    std::make_shared<ResponseIterator>(response);
                 response_object = py::cast(response_generator);
                 if (response_generator->Id() != nullptr) {
-                  stub->SaveResponseGenerator(response_generator);
+                  stub->SaveResponseIterator(response_generator);
                 }
               } else {
                 response_object = py::cast(response);
@@ -1379,11 +1378,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
           py::arg("flags") = 0);
 
-  py::class_<ResponseGenerator, std::shared_ptr<ResponseGenerator>>(
-      module, "ResponseGenerator")
+  py::class_<ResponseIterator, std::shared_ptr<ResponseIterator>>(
+      module, "ResponseIterator")
       .def(py::init<const std::shared_ptr<InferResponse>&>())
-      .def("__iter__", &ResponseGenerator::Iter, py::keep_alive<0, 1>())
-      .def("__next__", &ResponseGenerator::Next);
+      .def("__iter__", &ResponseIterator::Iter, py::keep_alive<0, 1>())
+      .def("__next__", &ResponseIterator::Next);
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")

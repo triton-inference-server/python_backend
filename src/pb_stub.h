@@ -44,8 +44,8 @@
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
-#include "pb_generator.h"
 #include "pb_log.h"
+#include "pb_response_iterator.h"
 #include "pb_utils.h"
 
 
@@ -246,9 +246,9 @@ class Stub {
   /// Thread process
   void ParentToStubMQMonitor();
 
-  /// Keep track of the ResponseGenerator object
-  void SaveResponseGenerator(
-      std::shared_ptr<ResponseGenerator> response_generator);
+  /// Keep track of the ResponseIterator object
+  void SaveResponseIterator(
+      std::shared_ptr<ResponseIterator> response_generator);
 
   /// Send the id to the python backend for object cleanup
   void SendCleanupId(void* id);
@@ -293,7 +293,7 @@ class Stub {
   std::thread parent_to_stub_queue_monitor_;
   bool parent_to_stub_thread_;
   std::mutex response_generator_map_mu_;
-  std::unordered_map<void*, std::shared_ptr<ResponseGenerator>>
+  std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
       response_generator_map_;
 };
 }}}  // namespace triton::backend::python

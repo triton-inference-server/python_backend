@@ -31,10 +31,10 @@
 
 namespace triton { namespace backend { namespace python {
 
-class ResponseGenerator {
+class ResponseIterator {
  public:
-  ResponseGenerator(const std::shared_ptr<InferResponse>& response);
-  ~ResponseGenerator();
+  ResponseIterator(const std::shared_ptr<InferResponse>& response);
+  ~ResponseIterator();
 
   std::shared_ptr<InferResponse> Next();
   py::iterator Iter();
