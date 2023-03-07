@@ -42,6 +42,19 @@ ResponseIterator::ResponseIterator(
 
 ResponseIterator::~ResponseIterator()
 {
+  // Fetch all the remaining responses if not finished yet.
+  if (!is_finished_) {
+    bool done = false;
+    while (!done) {
+      try {
+        Next();
+      }
+      catch (const py::stop_iteration& exception) {
+        done = true;
+      }
+    }
+  }
+
   if (!is_cleared_) {
     Clear();
   }

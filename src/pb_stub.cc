@@ -1084,12 +1084,12 @@ Stub::ParentToStubMQMonitor()
 
     {
       std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-      // No need to enqueue the response if the response iterator has been
-      // cleaned up and removed from the map.
       if (response_iterator_map_.find(infer_response->Id()) !=
           response_iterator_map_.end()) {
         response_iterator_map_[infer_response->Id()]->EnqueueResponse(
             std::move(infer_response));
+      } else {
+        LOG_INFO << "Failed to enqueue the response to its response iterator.";
       }
     }
 
