@@ -50,6 +50,7 @@ class ResponseGenerator {
   void* id_;
   bool is_finished_;
   bool is_cleared_;
+  size_t idx_;
 };
 
 }}}  // namespace triton::backend::python

@@ -35,13 +35,26 @@ namespace triton { namespace backend { namespace python {
 
 ResponseGenerator::ResponseGenerator(
     const std::shared_ptr<InferResponse>& response)
-    : id_(response->Id()), is_finished_(false), is_cleared_(false)
+    : id_(response->Id()), is_finished_(false), is_cleared_(false), idx_(0)
 {
   response_buffer_.push(response);
 }
 
 ResponseGenerator::~ResponseGenerator()
 {
+  // Fetch all the remaining responses if not finished yet.
+  if (!is_finished_) {
+    bool done = false;
+    while (!done) {
+      try {
+        Next();
+      }
+      catch (const py::stop_iteration& exception) {
+        done = true;
+      }
+    }
+  }
+
   if (!is_cleared_) {
     Clear();
   }
@@ -55,48 +68,55 @@ ResponseGenerator::Next()
     if (!is_cleared_) {
       Clear();
     }
-    throw py::stop_iteration("Iteration is done for the responses.");
-  }
 
-  std::shared_ptr<InferResponse> response;
-  {
-    {
-      std::unique_lock<std::mutex> lock{mu_};
-      while (response_buffer_.empty()) {
-        py::gil_scoped_release release;
-        cv_.wait(lock);
-      }
-      response = response_buffer_.front();
-      response_buffer_.pop();
-      is_finished_ = response->IsLastResponse();
-    }
-  }
-
-  if (is_finished_) {
-    Clear();
-    // Handle the case where the last response is empty.
-    if (response->IsEmptyResponse()) {
+    if (idx_ < responses_.size()) {
+      return responses_[idx_++];
+    } else {
       throw py::stop_iteration("Iteration is done for the responses.");
     }
-  }
+  } else {
+    std::shared_ptr<InferResponse> response;
+    {
+      {
+        std::unique_lock<std::mutex> lock{mu_};
+        while (response_buffer_.empty()) {
+          py::gil_scoped_release release;
+          cv_.wait(lock);
+        }
+        response = response_buffer_.front();
+        response_buffer_.pop();
+        is_finished_ = response->IsLastResponse();
+        if (!response->IsEmptyResponse()) {
+          responses_.push_back(response);
+        }
+      }
+    }
 
-  return response;
+    if (is_finished_) {
+      idx_ = responses_.size();
+      Clear();
+      // Handle the case where the last response is empty.
+      if (response->IsEmptyResponse()) {
+        throw py::stop_iteration("Iteration is done for the responses.");
+      }
+    }
+    return response;
+  }
 }
 
 py::iterator
 ResponseGenerator::Iter()
 {
-  bool done = false;
-  while (!done) {
-    try {
-      responses_.push_back(Next());
-    }
-    catch (const py::stop_iteration& exception) {
-      done = true;
+  if (is_finished_) {
+    // If the previous iteration is finished, reset the index so that it will
+    // iterator from the begining of the responses. Otherwise just resume the
+    // iteration from the previous index.
+    if (idx_ >= responses_.size()) {
+      idx_ = 0;
     }
   }
 
-  return py::make_iterator(responses_.begin(), responses_.end());
+  return py::cast(*this);
 }
 
 void
