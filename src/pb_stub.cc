@@ -915,7 +915,7 @@ Stub::ServiceStubToParentRequests()
       } else {
         bls_response_cleanup_buffer_.pop();
         SendCleanupId(id);
-        response_generator_map_.erase(id);
+        response_iterator_map_.erase(id);
       }
     }
   }
@@ -966,15 +966,6 @@ Stub::SendCleanupId(void* id)
   cleanup_message_ptr->id = id;
   cleanup_message_ptr->waiting_on_stub = false;
   ipc_message->Args() = cleanup_request_message.handle_;
-
-  ScopedDefer _([&ipc_message, cleanup_message_ptr] {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock{
-          *(ipc_message->ResponseMutex())};
-      cleanup_message_ptr->waiting_on_stub = false;
-      ipc_message->ResponseCondition()->notify_all();
-    }
-  });
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
@@ -1092,9 +1083,14 @@ Stub::ParentToStubMQMonitor()
     }
 
     {
-      std::lock_guard<std::mutex> lock(response_generator_map_mu_);
-      response_generator_map_[infer_response->Id()]->EnqueueResponse(
-          std::move(infer_response));
+      std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+      // No need to enqueue the response if the response iterator has been
+      // cleaned up and removed from the map.
+      if (response_iterator_map_.find(infer_response->Id()) !=
+          response_iterator_map_.end()) {
+        response_iterator_map_[infer_response->Id()]->EnqueueResponse(
+            std::move(infer_response));
+      }
     }
 
     {
@@ -1116,12 +1112,12 @@ Stub::ParentToStubServiceActive()
 }
 
 void
-Stub::SaveResponseIterator(std::shared_ptr<ResponseIterator> response_generator)
+Stub::SaveResponseIterator(std::shared_ptr<ResponseIterator> response_iterator)
 {
-  std::lock_guard<std::mutex> lock(response_generator_map_mu_);
-  response_generator_map_.insert(
+  std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+  response_iterator_map_.insert(
       std::pair<void*, std::shared_ptr<ResponseIterator>>(
-          response_generator->Id(), response_generator));
+          response_iterator->Id(), response_iterator));
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
@@ -1290,11 +1286,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                 infer_request->Exec(decoupled);
             py::object response_object;
             if (decoupled) {
-              auto response_generator =
+              auto response_iterator =
                   std::make_shared<ResponseIterator>(response);
-              response_object = py::cast(response_generator);
-              if (response_generator->Id() != nullptr) {
-                stub->SaveResponseIterator(response_generator);
+              response_object = py::cast(response_iterator);
+              if (response_iterator->Id() != nullptr) {
+                stub->SaveResponseIterator(response_iterator);
               }
             } else {
               response_object = py::cast(response);
@@ -1320,11 +1316,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                   infer_request->Exec(decoupled);
               py::object response_object;
               if (decoupled) {
-                auto response_generator =
+                auto response_iterator =
                     std::make_shared<ResponseIterator>(response);
-                response_object = py::cast(response_generator);
-                if (response_generator->Id() != nullptr) {
-                  stub->SaveResponseIterator(response_generator);
+                response_object = py::cast(response_iterator);
+                if (response_iterator->Id() != nullptr) {
+                  stub->SaveResponseIterator(response_iterator);
                 }
               } else {
                 response_object = py::cast(response);

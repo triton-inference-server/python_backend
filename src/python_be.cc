@@ -717,8 +717,8 @@ ModelInstanceState::ExecuteBLSRequest(
         infer_response = response_future.get();
 
         if (is_decoupled && (infer_response->Id() != nullptr)) {
-          // Need to manage the lifetime of InferPayload and RequestExecutor
-          // objects for bls decoupled responses.
+          // Need to manage the lifetime of InferPayload object for bls
+          // decoupled responses.
           infer_payload_[reinterpret_cast<void*>(&infer_payload)] =
               infer_payload;
         }
@@ -888,9 +888,6 @@ ModelInstanceState::ProcessBLSCleanupRequest(
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
     cleanup_message_ptr->waiting_on_stub = true;
     message->ResponseCondition()->notify_all();
-    while (cleanup_message_ptr->waiting_on_stub) {
-      message->ResponseCondition()->wait(lock);
-    }
   }
 }
 

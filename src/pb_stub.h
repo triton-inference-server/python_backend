@@ -248,7 +248,7 @@ class Stub {
 
   /// Keep track of the ResponseIterator object
   void SaveResponseIterator(
-      std::shared_ptr<ResponseIterator> response_generator);
+      std::shared_ptr<ResponseIterator> response_iterator);
 
   /// Send the id to the python backend for object cleanup
   void SendCleanupId(void* id);
@@ -292,8 +292,8 @@ class Stub {
   std::condition_variable stub_to_parent_message_cv_;
   std::thread parent_to_stub_queue_monitor_;
   bool parent_to_stub_thread_;
-  std::mutex response_generator_map_mu_;
+  std::mutex response_iterator_map_mu_;
   std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
-      response_generator_map_;
+      response_iterator_map_;
 };
 }}}  // namespace triton::backend::python

@@ -968,7 +968,7 @@ A complete example for sync and async BLS in Python backend is included in the
 Starting from 23.03 release, you can execute inference requests on decoupled
 models in both [default mode](#default-mode) and
 [decoupled mode](#decoupled-mode). By setting the `decoupled` parameter to
-`True`, the `exec` and `async_exec` function will return a
+`True`, the `exec` and `async_exec` function will return an
 [iterator](https://docs.python.org/3/glossary.html#term-iterator) of
 inference responses returned by a decoupled model. If the `decoupled` parameter
 is set to `False`, the `exec` and `async_exec` function will return a single
