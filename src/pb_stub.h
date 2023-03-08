@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -45,6 +45,7 @@
 #include "ipc_message.h"
 #include "message_queue.h"
 #include "pb_log.h"
+#include "pb_response_iterator.h"
 #include "pb_utils.h"
 
 
@@ -153,7 +154,7 @@ class LogMessage {
 
 class Stub {
  public:
-  Stub() { log_thread_ = false; };
+  Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
@@ -187,8 +188,8 @@ class Stub {
   /// Send a message to the parent process.
   void SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message);
 
-  /// Send a log message to the parent process.
-  void SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message);
+  /// Send a utils message to the parent process.
+  void SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message);
 
   /// Receive a message from the parent process.
   std::unique_ptr<IPCMessage> PopMessage();
@@ -215,23 +216,46 @@ class Stub {
   bool IsDecoupled();
   ~Stub();
 
-  /// Start client log handler process
-  void LaunchLogRequestThread();
+  /// Start stub to parent message handler process
+  void LaunchStubToParentQueueMonitor();
 
-  /// End client log handler process
-  void TerminateLogRequestThread();
+  /// End stub to parent message handler process
+  void TerminateStubToParentQueueMonitor();
 
   /// Add client log to queue
   void EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr);
 
   /// Thread process
-  void ServiceLogRequests();
+  void ServiceStubToParentRequests();
 
   /// Send client log to the python backend
   void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
 
-  /// Check if log handler is running
-  bool LogServiceActive();
+  /// Check if stub to parent message handler is running
+  bool StubToParentServiceActive();
+
+  /// Start parent to stub message handler process
+  void LaunchParentToStubQueueMonitor();
+
+  /// End parent to stub message handler process
+  void TerminateParentToStubQueueMonitor();
+
+  /// Check if parent to stub message handler is running
+  bool ParentToStubServiceActive();
+
+  /// Thread process
+  void ParentToStubMQMonitor();
+
+  /// Keep track of the ResponseIterator object
+  void SaveResponseIterator(
+      std::shared_ptr<ResponseIterator> response_iterator);
+
+  /// Send the id to the python backend for object cleanup
+  void SendCleanupId(void* id);
+
+  /// Add cleanup id to queue
+  void EnqueueCleanupId(void* id);
+
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -253,15 +277,23 @@ class Stub {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      log_message_queue_;
+      stub_to_parent_mq_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      parent_to_stub_mq_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   bool initialized_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
   std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
-  std::thread log_monitor_;
-  bool log_thread_;
-  std::mutex log_message_mutex_;
-  std::condition_variable log_message_cv_;
+  std::queue<void*> bls_response_cleanup_buffer_;
+  std::thread stub_to_parent_queue_monitor_;
+  bool stub_to_parent_thread_;
+  std::mutex stub_to_parent_message_mu_;
+  std::condition_variable stub_to_parent_message_cv_;
+  std::thread parent_to_stub_queue_monitor_;
+  bool parent_to_stub_thread_;
+  std::mutex response_iterator_map_mu_;
+  std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
+      response_iterator_map_;
 };
 }}}  // namespace triton::backend::python

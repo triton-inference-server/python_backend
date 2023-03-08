@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -79,8 +79,8 @@ PbLogShm::Create(
       shm_pool->Construct<LogSendMessage>();
 
   LogSendMessage* send_message_payload = log_send_message.data_.get();
-  new (&(send_message_payload->log_mu)) bi::interprocess_mutex;
-  new (&(send_message_payload->log_cv)) bi::interprocess_condition;
+  new (&(send_message_payload->mu)) bi::interprocess_mutex;
+  new (&(send_message_payload->cv)) bi::interprocess_condition;
   send_message_payload->line = line;
   send_message_payload->level = level;
 

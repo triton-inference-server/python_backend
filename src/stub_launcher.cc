@@ -132,7 +132,8 @@ StubLauncher::Setup()
   ipc_control_ = nullptr;
   stub_message_queue_ = nullptr;
   parent_message_queue_ = nullptr;
-  log_message_queue_ = nullptr;
+  stub_to_parent_mq_ = nullptr;
+  parent_to_stub_mq_ = nullptr;
   memory_manager_ = nullptr;
 
   try {
@@ -162,7 +163,11 @@ StubLauncher::Setup()
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
-      log_message_queue_ =
+      stub_to_parent_mq_ =
+          MessageQueue<bi::managed_external_buffer::handle_t>::Create(
+              shm_pool_, shm_message_queue_size_));
+  RETURN_IF_EXCEPTION(
+      parent_to_stub_mq_ =
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
 
@@ -179,15 +184,17 @@ StubLauncher::Setup()
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
-  ipc_control_->log_message_queue = log_message_queue_->ShmHandle();
+  ipc_control_->stub_to_parent_mq = stub_to_parent_mq_->ShmHandle();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
+  ipc_control_->parent_to_stub_mq = parent_to_stub_mq_->ShmHandle();
 
   new (&(ipc_control_->stub_health_mutex)) bi::interprocess_mutex;
   health_mutex_ = &(ipc_control_->stub_health_mutex);
 
   stub_message_queue_->ResetSemaphores();
   parent_message_queue_->ResetSemaphores();
-  log_message_queue_->ResetSemaphores();
+  stub_to_parent_mq_->ResetSemaphores();
+  parent_to_stub_mq_->ResetSemaphores();
 
   is_initialized_ = false;
 
@@ -210,8 +217,7 @@ StubLauncher::Launch()
   stub_args[3] = nullptr;  // Last argument must be nullptr
 
   // Default Python backend stub
-  std::string python_backend_stub =
-      python_lib_ + "/triton_python_backend_stub";
+  std::string python_backend_stub = python_lib_ + "/triton_python_backend_stub";
 
   // Path to alternative Python backend stub
   std::string model_python_backend_stub =
@@ -233,19 +239,19 @@ StubLauncher::Launch()
     // Need to properly set the LD_LIBRARY_PATH so that Python environments
     // using different python versions load properly.
     ss << "source " << path_to_activate_
-        << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
-        << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
-        << " " << shm_region_name_ << " " << shm_default_byte_size_ << " "
-        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-        << " " << ipc_control_handle_ << " " << stub_name;
+       << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
+       << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
+       << " " << shm_region_name_ << " " << shm_default_byte_size_ << " "
+       << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
+       << " " << ipc_control_handle_ << " " << stub_name;
     ipc_control_->uses_env = true;
     bash_argument = ss.str();
   } else {
     std::stringstream ss;
     ss << " exec " << python_backend_stub << " " << model_path_ << " "
-        << shm_region_name_ << " " << shm_default_byte_size_ << " "
-        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-        << " " << ipc_control_handle_ << " " << stub_name;
+       << shm_region_name_ << " " << shm_default_byte_size_ << " "
+       << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
+       << " " << ipc_control_handle_ << " " << stub_name;
     bash_argument = ss.str();
   }
   LOG_MESSAGE(
@@ -268,9 +274,9 @@ StubLauncher::Launch()
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL,
           (std::string("Failed to give execute permission to "
-                        "triton_python_backend_stub in ") +
-            python_backend_stub + " " + stub_name +
-            " Error No.: " + std::to_string(error))
+                       "triton_python_backend_stub in ") +
+           python_backend_stub + " " + stub_name +
+           " Error No.: " + std::to_string(error))
               .c_str());
     }
   }
@@ -514,9 +520,10 @@ StubLauncher::TerminateStub()
 }
 
 void
-StubLauncher::ClearLogQueue()
+StubLauncher::ClearQueues()
 {
-  log_message_queue_.reset();
+  stub_to_parent_mq_.reset();
+  parent_to_stub_mq_.reset();
 }
 
 void

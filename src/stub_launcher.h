@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -97,11 +97,18 @@ class StubLauncher {
     return parent_message_queue_;
   }
 
-  // Log message queue
+  // Stub to parent message queue
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
-  LogMessageQueue()
+  StubToParentMessageQueue()
   {
-    return log_message_queue_;
+    return stub_to_parent_mq_;
+  }
+
+  // Parent to stub message queue
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  ParentToStubMessageQueue()
+  {
+    return parent_to_stub_mq_;
   }
 
   // Memory Manager
@@ -132,8 +139,8 @@ class StubLauncher {
   // Destruct Stub process
   void TerminateStub();
 
-  // Reset log queue pointer
-  void ClearLogQueue();
+  // Reset log queue and bls decoupled queue pointers
+  void ClearQueues();
 
   // Kill stub process
   void KillStubProcess();
@@ -174,7 +181,9 @@ class StubLauncher {
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      log_message_queue_;
+      stub_to_parent_mq_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      parent_to_stub_mq_;
   std::unique_ptr<MemoryManager> memory_manager_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;
