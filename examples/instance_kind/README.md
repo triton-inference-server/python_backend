@@ -61,16 +61,16 @@ to the
 
 To pull the latest containers, run the following commands:
 ```
-$ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3
-$ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
+docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3
+docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
 ```
 See the installation steps above for the `<yy.mm>` version.
 
 For example, if the latest version is `23.01`, the above commands translate
 to the following:
 ```
-$ docker pull nvcr.io/nvidia/tritonserver:23.01-py3
-$ docker pull nvcr.io/nvidia/tritonserver:23.01-py3-sdk
+docker pull nvcr.io/nvidia/tritonserver:23.01-py3
+docker pull nvcr.io/nvidia/tritonserver:23.01-py3-sdk
 ```
 
 Be sure to replace the `<yy.mm>` with the version pulled for all the remaining
@@ -81,7 +81,7 @@ parts of this example.
 At the directory where we copied our resnet50 model (at where the "models" 
 folder is located), run the following command:
 ```
-$ docker run --gpus all --shm-size 1G -it --rm -p 8000:8000 -v `pwd`:/instance_kind nvcr.io/nvidia/tritonserver:<yy.mm>-py3 /bin/bash
+docker run --gpus all --shm-size 1G -it --rm -p 8000:8000 -v `pwd`:/instance_kind nvcr.io/nvidia/tritonserver:<yy.mm>-py3 /bin/bash
 ```
 
 Inside the container, we need to install `torch` and `pillow` to run 
