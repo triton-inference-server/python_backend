@@ -377,7 +377,7 @@ InferRequest::Exec(const bool is_decoupled)
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   if (!stub->IsInitialized() || stub->IsFinalizing()) {
     throw PythonBackendException(
-        "BLS is only supported during 'execute' function.");
+        "BLS is only supported during the 'execute' function.");
   }
 
   ResponseBatch* response_batch = nullptr;
