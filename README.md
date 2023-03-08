@@ -1261,6 +1261,16 @@ The examples of decoupled models shows how to develop and serve
 You can find the complete example instructions in
 [examples/decoupled](examples/decoupled/README.md).
 
+## Model Instance Kind
+
+Triton model configuration allows users to provide kind to [instance group 
+settings.](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups)
+A python backend model can be written to respect the kind setting to control 
+the execution of a model instance either on CPU or GPU.
+
+In the [model instance kind example](examples/instance_kind/README.md) 
+we demonstrate how this can be achieved for your python model.
+
 # Running with Inferentia
 
 Please see the
