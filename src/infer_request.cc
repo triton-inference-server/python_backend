@@ -373,9 +373,15 @@ InferRequest::GetResponseSender()
 std::shared_ptr<InferResponse>
 InferRequest::Exec(const bool is_decoupled)
 {
+  // BLS should not be used in "initialize" or "finalize" function.
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (!stub->IsInitialized() || stub->IsFinalizing()) {
+    throw PythonBackendException(
+        "BLS is only supported during 'execute' function.");
+  }
+
   ResponseBatch* response_batch = nullptr;
   bool responses_is_set = false;
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<SharedMemoryManager>& shm_pool = stub->SharedMemory();
   bi::managed_external_buffer::handle_t* response_handle = nullptr;
 
@@ -529,8 +535,7 @@ InferRequest::Exec(const bool is_decoupled)
 
     for (auto& output_tensor : error_response->OutputTensors()) {
       if (!output_tensor->IsCPU()) {
-        uint64_t memory_release_id =
-            output_tensor->Memory()->MemoryReleaseId();
+        uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
             [&memory_manager_message_queue, memory_release_id]() {
               memory_manager_message_queue->Push(memory_release_id);
