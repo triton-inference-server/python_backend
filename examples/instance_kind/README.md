@@ -28,13 +28,13 @@
 
 # Model Instance Kind Example
 
-Triton allows an execution of a model to be performed on both CPU, and GPU. 
-In Python Backend this can be achieved by specifying an 
-[`instance_group`](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups) 
-parameter in a config file.
+Triton model configuration allows users to provide kind to [instance group 
+settings.](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups)
+A python backend model can be written to respect the kind setting to control 
+the execution of a model instance either on CPU or GPU.
 
-In this section, we demonstrate how to specify a `instance kind` for your python 
-model. We will use a `ResNet50` model as our base model for this example.
+In this example, we demonstrate how this can be achieved for your python model. 
+We will use a `ResNet50` model as our base model for this example.
 
 ## Create a ResNet50 model repository
 
@@ -186,8 +186,11 @@ will result into the similar output, but with an updated `instance_group` entry:
 Results is class: TABBY
 PASS: ResNet50 instance kind
 ```
-It is also possible to load your python model to both CPU and GPU if neccessary.
-To do this, make sure your config file has the following entry:
+It is also possible to load multiple model instances on CPU and GPU 
+if neccessary.
+
+Below the instance group setting will create two model instances, 
+one on CPU and other on GPU.
 ```
 instance_group [{ kind: KIND_CPU }, { kind: KIND_GPU}]
 ```

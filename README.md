@@ -1263,9 +1263,13 @@ You can find the complete example instructions in
 
 ## Model Instance Kind
 
-Triton allows an execution of a model to be performed on both CPU, and GPU. 
+Triton model configuration allows users to provide kind to [instance group 
+settings.](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#instance-groups)
+A python backend model can be written to respect the kind setting to control 
+the execution of a model instance either on CPU or GPU.
+
 In the [model instance kind example](examples/instance_kind/README.md) 
-we demonstrate how to allow CPU/GPU execution of your python model.
+we demonstrate how this can be achieved for your python model.
 
 # Running with Inferentia
 
