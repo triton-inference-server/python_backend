@@ -38,8 +38,8 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error)
-    : error_(error), next_response_future_(nullptr)
+    std::shared_ptr<PbError> error, const bool is_last_response, void* id)
+    : error_(error), is_last_response_(is_last_response), id_(id)
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -49,25 +49,6 @@ InferResponse::InferResponse(
   }
 
   output_tensors_ = output_tensors;
-}
-
-InferResponse::InferResponse(
-    const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::promise<std::unique_ptr<InferResponse>>* promise,
-    std::shared_ptr<PbError> error)
-    : error_(error)
-{
-  for (auto& output : output_tensors) {
-    if (!output) {
-      throw PythonBackendException(
-          "Output tensor for inference response should not be empty.");
-    }
-  }
-
-  output_tensors_ = output_tensors;
-  next_response_future_ =
-      std::make_unique<std::future<std::unique_ptr<InferResponse>>>(
-          promise->get_future());
 }
 
 std::vector<std::shared_ptr<PbTensor>>&
@@ -100,6 +81,7 @@ InferResponse::SaveToSharedMemory(
   response_shm_ptr->has_error = false;
   response_shm_ptr->is_error_set = false;
   shm_handle_ = response_shm_.handle_;
+  response_shm_ptr->is_last_response = is_last_response_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
@@ -122,6 +104,7 @@ InferResponse::SaveToSharedMemory(
       tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
+    response_shm_ptr->id = id_;
   }
 }
 
@@ -170,6 +153,10 @@ InferResponse::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t* tensor_handle_shm =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             response_shm.data_.get() + sizeof(ResponseShm));
+#ifdef TRITON_PB_STUB
+    // Need to acquire the GIL to avoid hangs.
+    py::gil_scoped_acquire acquire;
+#endif
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
       std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
           shm_pool, tensor_handle_shm[idx], open_cuda_handle);
@@ -177,19 +164,22 @@ InferResponse::LoadFromSharedMemory(
     }
   }
 
-  return std::unique_ptr<InferResponse>(
-      new InferResponse(response_shm, output_tensors, pb_error));
+  return std::unique_ptr<InferResponse>(new InferResponse(
+      response_shm, output_tensors, pb_error,
+      response_shm_ptr->is_last_response, response_shm_ptr->id));
 }
 
 InferResponse::InferResponse(
     AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error)
+    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
   shm_handle_ = response_shm_.handle_;
+  id_ = id;
+  is_last_response_ = is_last_response;
 }
 
 std::shared_ptr<PbError>&
@@ -198,10 +188,16 @@ InferResponse::Error()
   return error_;
 }
 
-std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
-InferResponse::GetNextResponse()
+void*
+InferResponse::Id()
 {
-  return std::move(next_response_future_);
+  return id_;
+}
+
+bool
+InferResponse::IsLastResponse()
+{
+  return is_last_response_;
 }
 
 #ifndef TRITON_PB_STUB

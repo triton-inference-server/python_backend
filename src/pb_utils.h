@@ -137,11 +137,18 @@ struct IPCControlShm {
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
   bi::managed_external_buffer::handle_t parent_message_queue;
-  bi::managed_external_buffer::handle_t log_message_queue;
+  bi::managed_external_buffer::handle_t stub_to_parent_mq;
+  bi::managed_external_buffer::handle_t parent_to_stub_mq;
   bi::managed_external_buffer::handle_t memory_manager_message_queue;
 };
 
-struct ResponseBatch {
+struct SendMessageBase {
+  bi::interprocess_mutex mu;
+  bi::interprocess_condition cv;
+  bool waiting_on_stub;
+};
+
+struct ResponseBatch : SendMessageBase {
   uint32_t batch_size;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
@@ -156,19 +163,18 @@ struct ResponseBatch {
   uint32_t response_size;
 };
 
-struct LogSendMessageBase {
-  bi::interprocess_mutex log_mu;
-  bi::interprocess_condition log_cv;
-  bool waiting_on_stub;
-};
-
 enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
 
-struct LogSendMessage : LogSendMessageBase {
+struct LogSendMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t filename;
   int32_t line;
   bi::managed_external_buffer::handle_t log_message;
   LogLevel level;
+};
+
+
+struct CleanupMessage : SendMessageBase {
+  void* id;
 };
 
 struct ResponseSenderBase {

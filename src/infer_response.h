@@ -40,6 +40,8 @@ struct ResponseShm {
   bool has_error;
   // Indicates whether this error has a message or not.
   bool is_error_set;
+  void* id;
+  bool is_last_response;
 };
 
 #define SET_ERROR_AND_RETURN(E, X)           \
@@ -68,11 +70,8 @@ class InferResponse {
  public:
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error = nullptr);
-  InferResponse(
-      const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::promise<std::unique_ptr<InferResponse>>* promise,
-      std::shared_ptr<PbError> error = nullptr);
+      std::shared_ptr<PbError> error = nullptr,
+      const bool is_last_response = true, void* id = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
@@ -89,6 +88,8 @@ class InferResponse {
   void SetNextResponseHandle(
       bi::managed_external_buffer::handle_t next_response_handle);
   bi::managed_external_buffer::handle_t NextResponseHandle();
+  void* Id();
+  bool IsLastResponse();
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
@@ -113,16 +114,18 @@ class InferResponse {
   InferResponse(
       AllocatedSharedMemory<char>& response_shm,
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error);
+      std::shared_ptr<PbError>& pb_error, const bool is_last_response,
+      void* id);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
+
   std::shared_ptr<PbError> error_;
   bi::managed_external_buffer::handle_t shm_handle_;
   AllocatedSharedMemory<char> response_shm_;
   std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
   std::unique_ptr<ScopedDefer> deferred_send_callback_;
-
-  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
-      next_response_future_;
+  bool is_last_response_;
+  // Representing the request id that the response was created from.
+  void* id_;
 };
 
 }}}  // namespace triton::backend::python

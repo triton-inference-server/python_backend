@@ -28,8 +28,10 @@
 
 namespace triton { namespace backend { namespace python {
 
-InferPayload::InferPayload(const bool is_decoupled)
-    : is_decoupled_(is_decoupled)
+InferPayload::InferPayload(
+    const bool is_decoupled,
+    std::function<void(std::unique_ptr<InferResponse>)> callback)
+    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
 {
   prev_promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
@@ -40,23 +42,12 @@ InferPayload::~InferPayload()
 }
 
 void
-InferPayload::SetPrevPromise(
-    std::promise<std::unique_ptr<InferResponse>>** promise)
-{
-  prev_promise_.reset(std::move(*promise));
-}
-
-void
 InferPayload::SetValueForPrevPromise(
     std::unique_ptr<InferResponse> infer_response)
 {
   prev_promise_->set_value(std::move(infer_response));
-}
-
-void
-InferPayload::ResetPrevPromise()
-{
   prev_promise_.reset();
+  is_promise_set_ = true;
 }
 
 void
@@ -70,6 +61,18 @@ bool
 InferPayload::IsDecoupled()
 {
   return is_decoupled_;
+}
+
+bool
+InferPayload::IsPromiseSet()
+{
+  return is_promise_set_;
+}
+
+void
+InferPayload::Callback(std::unique_ptr<InferResponse> infer_response)
+{
+  return callback_(std::move(infer_response));
 }
 
 }}}  // namespace triton::backend::python

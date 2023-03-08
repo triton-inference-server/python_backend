@@ -79,7 +79,7 @@ class InferRequest {
   void SetIsDecoupled(const bool is_decoupled);
 
 #ifdef TRITON_PB_STUB
-  std::vector<std::shared_ptr<InferResponse>> Exec(const bool is_decoupled);
+  std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
 #endif
 

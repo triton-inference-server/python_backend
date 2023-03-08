@@ -24,39 +24,33 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "pb_generator.h"
+#pragma once
 
-#include <pybind11/embed.h>
-namespace py = pybind11;
+#include <queue>
+#include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
 
-ResponseGenerator::ResponseGenerator(
-    const std::vector<std::shared_ptr<InferResponse>>& responses)
-    : responses_(responses), index_(0)
-{
-}
+class ResponseIterator {
+ public:
+  ResponseIterator(const std::shared_ptr<InferResponse>& response);
+  ~ResponseIterator();
 
-std::shared_ptr<InferResponse>
-ResponseGenerator::Next()
-{
-  if (index_ == responses_.size()) {
-    throw py::stop_iteration("Iteration is done for the responses.");
-  }
+  std::shared_ptr<InferResponse> Next();
+  py::iterator Iter();
+  void EnqueueResponse(std::unique_ptr<InferResponse> infer_response);
+  void* Id();
+  void Clear();
 
-  return responses_[index_++];
-}
-
-std::vector<std::shared_ptr<InferResponse>>::iterator
-ResponseGenerator::Begin()
-{
-  return responses_.begin();
-}
-
-std::vector<std::shared_ptr<InferResponse>>::iterator
-ResponseGenerator::End()
-{
-  return responses_.end();
-}
+ private:
+  std::vector<std::shared_ptr<InferResponse>> responses_;
+  std::queue<std::shared_ptr<InferResponse>> response_buffer_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  void* id_;
+  bool is_finished_;
+  bool is_cleared_;
+  size_t idx_;
+};
 
 }}}  // namespace triton::backend::python

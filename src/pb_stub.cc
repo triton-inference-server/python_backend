@@ -43,8 +43,8 @@
 #include <unordered_map>
 #include "infer_response.h"
 #include "pb_error.h"
-#include "pb_generator.h"
 #include "pb_map.h"
+#include "pb_response_iterator.h"
 #include "pb_string.h"
 #include "pb_utils.h"
 #include "response_sender.h"
@@ -84,7 +84,8 @@ Stub::Instantiate(
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
-  log_thread_ = false;
+  stub_to_parent_thread_ = false;
+  parent_to_stub_thread_ = false;
 
   try {
     shm_pool_ = std::make_unique<SharedMemoryManager>(
@@ -103,8 +104,11 @@ Stub::Instantiate(
         MessageQueue<bi::managed_external_buffer::handle_t>::
             LoadFromSharedMemory(shm_pool_, ipc_control_->parent_message_queue);
 
-    log_message_queue_ = MessageQueue<bi::managed_external_buffer::handle_t>::
-        LoadFromSharedMemory(shm_pool_, ipc_control_->log_message_queue);
+    stub_to_parent_mq_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->stub_to_parent_mq);
+
+    parent_to_stub_mq_ = MessageQueue<bi::managed_external_buffer::handle_t>::
+        LoadFromSharedMemory(shm_pool_, ipc_control_->parent_to_stub_mq);
 
     memory_manager_message_queue_ =
         MessageQueue<uint64_t>::LoadFromSharedMemory(
@@ -493,7 +497,9 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_config_params[pair.first.c_str()] = pair.second;
   }
 
-  LaunchLogRequestThread();
+  LaunchStubToParentQueueMonitor();
+  LaunchParentToStubQueueMonitor();
+
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
     model_instance_.attr("initialize")(model_config_params);
@@ -814,11 +820,11 @@ Stub::SendIPCMessage(std::unique_ptr<IPCMessage>& ipc_message)
 }
 
 void
-Stub::SendIPCLogMessage(std::unique_ptr<IPCMessage>& ipc_message)
+Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 {
   bool success = false;
   while (!success) {
-    log_message_queue_->Push(ipc_message->ShmHandle(), 1000, success);
+    stub_to_parent_mq_->Push(ipc_message->ShmHandle(), 1000, success);
   }
 }
 
@@ -831,7 +837,7 @@ Stub::~Stub()
   stub_instance_.reset();
   stub_message_queue_.reset();
   parent_message_queue_.reset();
-  log_message_queue_.reset();
+  stub_to_parent_mq_.reset();
   memory_manager_message_queue_.reset();
 }
 
@@ -848,52 +854,69 @@ Stub::GetOrCreateInstance()
 }
 
 void
-Stub::LaunchLogRequestThread()
+Stub::LaunchStubToParentQueueMonitor()
 {
-  log_thread_ = true;
-  log_monitor_ = std::thread(&Stub::ServiceLogRequests, this);
+  stub_to_parent_thread_ = true;
+  stub_to_parent_queue_monitor_ =
+      std::thread(&Stub::ServiceStubToParentRequests, this);
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(true);
 }
 
 void
-Stub::TerminateLogRequestThread()
+Stub::TerminateStubToParentQueueMonitor()
 {
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
-    std::lock_guard<std::mutex> guard{log_message_mutex_};
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
     log_request_buffer_.push(DUMMY_MESSAGE);
+    bls_response_cleanup_buffer_.push(DUMMY_MESSAGE);
   }
-  log_message_cv_.notify_one();
-  log_monitor_.join();
+  stub_to_parent_message_cv_.notify_one();
+  stub_to_parent_queue_monitor_.join();
 }
 
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
   {
-    std::lock_guard<std::mutex> guard{log_message_mutex_};
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
     log_request_buffer_.push(std::move(log_ptr));
   }
-  log_message_cv_.notify_one();
+  stub_to_parent_message_cv_.notify_one();
 }
 
 void
-Stub::ServiceLogRequests()
+Stub::ServiceStubToParentRequests()
 {
-  while (log_thread_) {
-    std::unique_lock<std::mutex> guard{log_message_mutex_};
-    while (log_request_buffer_.empty()) {
-      log_message_cv_.wait(guard);
+  while (stub_to_parent_thread_) {
+    std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
+    while (log_request_buffer_.empty() &&
+           bls_response_cleanup_buffer_.empty()) {
+      stub_to_parent_message_cv_.wait(guard);
     }
-    // On exit, will send messages until
-    // DUMMY_MESSAGE is reached
-    std::unique_ptr<PbLog> log_request = std::move(log_request_buffer_.front());
-    if (log_request == DUMMY_MESSAGE) {
-      log_request_buffer_.pop();
-      break;
-    } else {
-      log_request_buffer_.pop();
-      SendLogMessage(log_request);
+    if (!log_request_buffer_.empty()) {
+      // On exit, will send messages until
+      // DUMMY_MESSAGE is reached
+      std::unique_ptr<PbLog> log_request =
+          std::move(log_request_buffer_.front());
+      if (log_request == DUMMY_MESSAGE) {
+        log_request_buffer_.pop();
+        break;
+      } else {
+        log_request_buffer_.pop();
+        SendLogMessage(log_request);
+      }
+    }
+    if (!bls_response_cleanup_buffer_.empty()) {
+      void* id = std::move(bls_response_cleanup_buffer_.front());
+      if (id == DUMMY_MESSAGE) {
+        bls_response_cleanup_buffer_.pop();
+        break;
+      } else {
+        bls_response_cleanup_buffer_.pop();
+        SendCleanupId(id);
+        response_iterator_map_.erase(id);
+      }
     }
   }
 }
@@ -909,29 +932,192 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
   std::unique_ptr<IPCMessage> log_request_msg =
       IPCMessage::Create(shm_pool_, false /* inline_response */);
   log_request_msg->Args() = log_request_shm->ShmHandle();
+  log_request_msg->Command() = PYTHONSTUB_LogRequest;
   ScopedDefer _([send_message_payload] {
     {
-      bi::scoped_lock<bi::interprocess_mutex> guard{
-          send_message_payload->log_mu};
+      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
       send_message_payload->waiting_on_stub = false;
-      send_message_payload->log_cv.notify_all();
+      send_message_payload->cv.notify_all();
     }
   });
 
   {
     // Send a message to be caught by the log monitor thread in python_be.cc
-    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->log_mu};
-    SendIPCLogMessage(log_request_msg);
+    bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+    SendIPCUtilsMessage(log_request_msg);
     while (!send_message_payload->waiting_on_stub) {
-      send_message_payload->log_cv.wait(guard);
+      send_message_payload->cv.wait(guard);
+    }
+  }
+}
+
+void
+Stub::SendCleanupId(void* id)
+{
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, true /* inline_response */);
+  ipc_message->Command() = PYTHONSTUB_CleanupRequest;
+  AllocatedSharedMemory<char> cleanup_request_message =
+      shm_pool_->Construct<char>(
+          sizeof(CleanupMessage) +
+          sizeof(bi::managed_external_buffer::handle_t));
+  CleanupMessage* cleanup_message_ptr =
+      reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
+  cleanup_message_ptr->id = id;
+  cleanup_message_ptr->waiting_on_stub = false;
+  ipc_message->Args() = cleanup_request_message.handle_;
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    SendIPCUtilsMessage(ipc_message);
+    while (!cleanup_message_ptr->waiting_on_stub) {
+      ipc_message->ResponseCondition()->wait(lock);
+    }
+  }
+}
+
+void
+Stub::EnqueueCleanupId(void* id)
+{
+  if (id != nullptr) {
+    {
+      std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
+      bls_response_cleanup_buffer_.push(id);
+    }
+    stub_to_parent_message_cv_.notify_one();
+  }
+}
+
+bool
+Stub::StubToParentServiceActive()
+{
+  return stub_to_parent_thread_;
+}
+
+void
+Stub::LaunchParentToStubQueueMonitor()
+{
+  parent_to_stub_thread_ = true;
+  parent_to_stub_queue_monitor_ =
+      std::thread(&Stub::ParentToStubMQMonitor, this);
+}
+
+void
+Stub::TerminateParentToStubQueueMonitor()
+{
+  if (parent_to_stub_thread_) {
+    parent_to_stub_thread_ = false;
+    parent_to_stub_mq_->Push(DUMMY_MESSAGE);
+    parent_to_stub_queue_monitor_.join();
+  }
+}
+
+void
+Stub::ParentToStubMQMonitor()
+{
+  while (parent_to_stub_thread_) {
+    bi::managed_external_buffer::handle_t handle = parent_to_stub_mq_->Pop();
+    if (handle == DUMMY_MESSAGE) {
+      break;
+    }
+
+    std::unique_ptr<IPCMessage> ipc_message;
+    ResponseBatch* response_batch = nullptr;
+    bi::managed_external_buffer::handle_t* response_handle = nullptr;
+    std::unique_ptr<InferResponse> infer_response;
+    bool responses_is_set = false;
+    PythonBackendException pb_exception(std::string{});
+
+    try {
+      ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
+      AllocatedSharedMemory<char> response_batch_shm =
+          shm_pool_->Load<char>(ipc_message->Args());
+      response_batch =
+          reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+      response_handle =
+          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+              response_batch_shm.data_.get() + sizeof(ResponseBatch));
+      responses_is_set = true;
+
+      if (response_batch->has_error) {
+        if (response_batch->is_error_set) {
+          std::unique_ptr<PbString> pb_string =
+              PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
+          infer_response = std::make_unique<InferResponse>(
+              std::vector<std::shared_ptr<PbTensor>>{},
+              std::make_shared<PbError>(pb_string->String()));
+        } else {
+          infer_response = std::make_unique<InferResponse>(
+              std::vector<std::shared_ptr<PbTensor>>{},
+              std::make_shared<PbError>(
+                  "An error occurred while performing BLS request."));
+        }
+      }
+
+      if (responses_is_set) {
+        infer_response = InferResponse::LoadFromSharedMemory(
+            shm_pool_, *response_handle, true /* open cuda handle */);
+
+        for (auto& output_tensor : infer_response->OutputTensors()) {
+          if (!output_tensor->IsCPU()) {
+            uint64_t memory_release_id =
+                output_tensor->Memory()->MemoryReleaseId();
+            output_tensor->Memory()->SetMemoryReleaseCallback(
+                [this, memory_release_id]() {
+                  this->MemoryManagerQueue()->Push(memory_release_id);
+                });
+          }
+        }
+      } else {
+        infer_response = std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(
+                "An error occurred while performing BLS request."));
+      }
+    }
+    catch (const PythonBackendException& pb_exception) {
+      infer_response = std::make_unique<InferResponse>(
+          std::vector<std::shared_ptr<PbTensor>>{},
+          std::make_shared<PbError>(pb_exception.what()));
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+      if (response_iterator_map_.find(infer_response->Id()) !=
+          response_iterator_map_.end()) {
+        response_iterator_map_[infer_response->Id()]->EnqueueResponse(
+            std::move(infer_response));
+      } else {
+        LOG_INFO << "Failed to enqueue the response to its response iterator.";
+      }
+    }
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      response_batch->waiting_on_stub = true;
+      ipc_message->ResponseCondition()->notify_all();
+      while (response_batch->waiting_on_stub) {
+        ipc_message->ResponseCondition()->wait(lock);
+      }
     }
   }
 }
 
 bool
-Stub::LogServiceActive()
+Stub::ParentToStubServiceActive()
 {
-  return log_thread_;
+  return parent_to_stub_thread_;
+}
+
+void
+Stub::SaveResponseIterator(std::shared_ptr<ResponseIterator> response_iterator)
+{
+  std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+  response_iterator_map_.insert(
+      std::pair<void*, std::shared_ptr<ResponseIterator>>(
+          response_iterator->Id(), response_iterator));
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
@@ -960,7 +1146,7 @@ Logger::Log(const std::string& message, LogLevel level)
   py::object lineno = caller_info.attr("lineno");
   uint32_t line = lineno.cast<uint32_t>();
 
-  if (!stub->LogServiceActive()) {
+  if (!stub->StubToParentServiceActive()) {
     Logger::GetOrCreateInstance()->Log(filename, line, level, message);
   } else {
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
@@ -1095,13 +1281,19 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
-            std::vector<std::shared_ptr<InferResponse>> responses =
+            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+            std::shared_ptr<InferResponse> response =
                 infer_request->Exec(decoupled);
             py::object response_object;
             if (decoupled) {
-              response_object = py::cast(ResponseGenerator(responses));
+              auto response_iterator =
+                  std::make_shared<ResponseIterator>(response);
+              response_object = py::cast(response_iterator);
+              if (response_iterator->Id() != nullptr) {
+                stub->SaveResponseIterator(response_iterator);
+              }
             } else {
-              response_object = py::cast(responses[0]);
+              response_object = py::cast(response);
             }
 
             return response_object;
@@ -1119,14 +1311,19 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [infer_request, decoupled]() {
-              std::vector<std::shared_ptr<InferResponse>> responses =
+            py::cpp_function callback = [&stub, infer_request, decoupled]() {
+              std::shared_ptr<InferResponse> response =
                   infer_request->Exec(decoupled);
               py::object response_object;
               if (decoupled) {
-                response_object = py::cast(ResponseGenerator(responses));
+                auto response_iterator =
+                    std::make_shared<ResponseIterator>(response);
+                response_object = py::cast(response_iterator);
+                if (response_iterator->Id() != nullptr) {
+                  stub->SaveResponseIterator(response_iterator);
+                }
               } else {
-                response_object = py::cast(responses[0]);
+                response_object = py::cast(response);
               }
 
               return response_object;
@@ -1177,16 +1374,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
           py::arg("flags") = 0);
 
-  py::class_<ResponseGenerator, std::shared_ptr<ResponseGenerator>>(
-      module, "ResponseGenerator")
-      .def(py::init<const std::vector<std::shared_ptr<InferResponse>>&>())
-      .def(
-          "__iter__",
-          [](ResponseGenerator& self) {
-            return py::make_iterator(self.Begin(), self.End());
-          },
-          py::keep_alive<0, 1>())
-      .def("__next__", &ResponseGenerator::Next);
+  py::class_<ResponseIterator, std::shared_ptr<ResponseIterator>>(
+      module, "ResponseIterator")
+      .def(py::init<const std::shared_ptr<InferResponse>&>())
+      .def("__iter__", &ResponseIterator::Iter, py::keep_alive<0, 1>())
+      .def("__next__", &ResponseIterator::Next);
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")
@@ -1287,8 +1479,11 @@ main(int argc, char** argv)
           if (kill(parent_pid, 0) != 0) {
             // When unhealthy, we should stop attempting to send
             // messages to the backend ASAP.
-            if (stub->LogServiceActive()) {
-              stub->TerminateLogRequestThread();
+            if (stub->StubToParentServiceActive()) {
+              stub->TerminateStubToParentQueueMonitor();
+            }
+            if (stub->ParentToStubServiceActive()) {
+              stub->TerminateParentToStubQueueMonitor();
             }
             // Destroy Stub
             LOG_INFO << "Non-graceful termination detected. ";
@@ -1311,8 +1506,11 @@ main(int argc, char** argv)
     if (finalize) {
       stub->Finalize();
       // Need check or may receive not joinable error
-      if (stub->LogServiceActive()) {
-        stub->TerminateLogRequestThread();
+      if (stub->StubToParentServiceActive()) {
+        stub->TerminateStubToParentQueueMonitor();
+      }
+      if (stub->ParentToStubServiceActive()) {
+        stub->TerminateParentToStubQueueMonitor();
       }
       background_thread_running = false;
       background_thread.join();
