@@ -250,6 +250,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   LastModifiedTime(canonical_env_path, &last_modified_time);
 
   bool env_extracted = false;
+  bool re_extraction = false;
   const auto env_itr = env_map_.find(canonical_env_path);
   if (env_itr != env_map_.end()) {
     // Check if the environment has been modified and would
@@ -258,20 +259,26 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
       env_extracted = true;
     } else {
       // Environment file has been updated. Need to clear
-      // the previously extracted environment.
+      // the previously extracted environment and extract
+      // the environment to the same destination directory.
       RecursiveDirectoryDelete(env_itr->second.first.c_str());
-      env_map_.erase(canonical_env_path);
+      re_extraction = true;
     }
   }
 
   // Extract only if the env has not been extracted yet.
   if (!env_extracted) {
     LOG_MESSAGE(
-          TRITONSERVER_LOG_VERBOSE,
-          (std::string("Extracting Python execution env ") + canonical_env_path)
-              .c_str());
-    std::string dst_env_path(
-        std::string(base_path_) + "/" + std::to_string(env_map_.size()));
+        TRITONSERVER_LOG_VERBOSE,
+        (std::string("Extracting Python execution env ") + canonical_env_path)
+            .c_str());
+    std::string dst_env_path;
+    if (re_extraction) {
+      dst_env_path = env_map_[canonical_env_path].first;
+    } else {
+      dst_env_path =
+          std::string(base_path_) + "/" + std::to_string(env_map_.size());
+    }
 
     std::string canonical_env_path_str(canonical_env_path);
 
@@ -284,9 +291,13 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
           std::string("Failed to create environment directory for '") +
           dst_env_path.c_str() + "'.");
     }
-
-    // Add the path to the list of environments
-    env_map_.insert({canonical_env_path, {dst_env_path, last_modified_time}});
+    if (re_extraction) {
+      // Just update the last modified timestamp
+      env_map_[canonical_env_path].second = last_modified_time;
+    } else {
+      // Add the path to the list of environments
+      env_map_.insert({canonical_env_path, {dst_env_path, last_modified_time}});
+    }
     return dst_env_path;
   } else {
     return env_map_.find(canonical_env_path)->second.first;
