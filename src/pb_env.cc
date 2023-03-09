@@ -157,6 +157,19 @@ FileExists(std::string& path)
   return stat(path.c_str(), &buffer) == 0;
 }
 
+void
+LastModifiedTime(const std::string& path, time_t* last_modified_time)
+{
+  struct stat result;
+  if (stat(path.c_str(), &result) == 0) {
+    *last_modified_time = result.st_mtime;
+  } else {
+    throw PythonBackendException(std::string(
+        "LastModifiedTime() failed as file \'" + path +
+        std::string("\' does not exists.")));
+  }
+}
+
 
 void
 RecursiveDirectoryDelete(const char* dir)
@@ -233,8 +246,26 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
         std::string("Failed to get the canonical path for ") + env_path + ".");
   }
 
+  time_t last_modified_time;
+  LastModifiedTime(canonical_env_path, &last_modified_time);
+
+  bool env_extracted = false;
+  const auto env_itr = env_map_.find(canonical_env_path);
+  if (env_itr != env_map_.end()) {
+    // Check if the environment has been modified and would
+    // need to be extracted again.
+    if (env_itr->second.second == last_modified_time) {
+      env_extracted = true;
+    } else {
+      // Environment file has been updated. Need to clear
+      // the previously extracted environment.
+      RecursiveDirectoryDelete(env_itr->second.first.c_str());
+      env_map_.erase(canonical_env_path);
+    }
+  }
+
   // Extract only if the env has not been extracted yet.
-  if (env_map_.find(canonical_env_path) == env_map_.end()) {
+  if (!env_extracted) {
     std::string dst_env_path(
         std::string(base_path_) + "/" + std::to_string(env_map_.size()));
 
@@ -251,10 +282,10 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
     }
 
     // Add the path to the list of environments
-    env_map_.insert({canonical_env_path, dst_env_path});
+    env_map_.insert({canonical_env_path, {dst_env_path, last_modified_time}});
     return dst_env_path;
   } else {
-    return env_map_.find(canonical_env_path)->second;
+    return env_map_.find(canonical_env_path)->second.first;
   }
 }
 
