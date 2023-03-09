@@ -266,6 +266,10 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
 
   // Extract only if the env has not been extracted yet.
   if (!env_extracted) {
+    LOG_MESSAGE(
+          TRITONSERVER_LOG_VERBOSE,
+          (std::string("Extracting Python execution env ") + canonical_env_path)
+              .c_str());
     std::string dst_env_path(
         std::string(base_path_) + "/" + std::to_string(env_map_.size()));
 
