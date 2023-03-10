@@ -256,6 +256,12 @@ class Stub {
   /// Add cleanup id to queue
   void EnqueueCleanupId(void* id);
 
+  /// Is the stub initialized
+  bool IsInitialized();
+
+  /// Is the stub in the finalize stage
+  bool IsFinalizing();
+
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -282,6 +288,7 @@ class Stub {
       parent_to_stub_mq_;
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   bool initialized_;
+  bool finalizing_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
   std::queue<std::unique_ptr<PbLog>> log_request_buffer_;

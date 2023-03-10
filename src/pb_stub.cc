@@ -84,6 +84,7 @@ Stub::Instantiate(
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
+  finalizing_ = false;
   stub_to_parent_thread_ = false;
   parent_to_stub_thread_ = false;
 
@@ -799,6 +800,7 @@ Stub::UpdateHealth()
 void
 Stub::Finalize()
 {
+  finalizing_ = true;
   // Call finalize if exists.
   if (initialized_ && py::hasattr(model_instance_, "finalize")) {
     try {
@@ -1118,6 +1120,18 @@ Stub::SaveResponseIterator(std::shared_ptr<ResponseIterator> response_iterator)
   response_iterator_map_.insert(
       std::pair<void*, std::shared_ptr<ResponseIterator>>(
           response_iterator->Id(), response_iterator));
+}
+
+bool
+Stub::IsInitialized()
+{
+  return initialized_;
+}
+
+bool
+Stub::IsFinalizing()
+{
+  return finalizing_;
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
