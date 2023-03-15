@@ -29,6 +29,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
 #include <atomic>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
@@ -41,6 +42,7 @@
 #include <regex>
 #include <thread>
 #include <unordered_map>
+
 #include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
@@ -1272,9 +1274,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
+            // FIXME: InferenceRequest parameters are not supported in BLS now.
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, flags, timeout);
+                model_name, model_version, "" /*parameters*/, flags, timeout);
           }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,
@@ -1291,6 +1294,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
       .def("timeout", &InferRequest::Timeout)
+      .def("parameters", &InferRequest::Parameters)
       .def(
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,

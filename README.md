@@ -50,6 +50,7 @@ any C++ code.
         - [Known Issues](#known-issues)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
+  - [Inference Request Parameters](#inference-request-parameters)
   - [Managing Python Runtime and Libraries](#managing-python-runtime-and-libraries)
     - [Building Custom Python Backend Stub](#building-custom-python-backend-stub)
     - [Creating Custom Execution Environments](#creating-custom-execution-environments)
@@ -559,6 +560,17 @@ models
     │   └── model.py
     └── config.pbtxt
 ```
+
+## Inference Request Parameters
+
+You can retrieve the parameters associated with an inference request
+using the `inference_request.parameters()` function. This function
+returns a JSON object where the keys are the keys of the parameters
+object and the values are the values for the parameters field.
+
+You can read more about the inference request parameters in the [parameters
+extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
+documentation.
 
 ## Managing Python Runtime and Libraries
 
