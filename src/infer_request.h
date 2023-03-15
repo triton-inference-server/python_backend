@@ -61,12 +61,13 @@ class InferRequest {
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
-      const uint32_t flags = 0, const int32_t timeout = 0,
-      const intptr_t response_factory_address = 0,
+      const std::string& parameters, const uint32_t flags = 0,
+      const int32_t timeout = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
+  const std::string& Parameters();
   uint64_t CorrelationId();
   const std::string& ModelName();
   int64_t ModelVersion();
@@ -116,7 +117,8 @@ class InferRequest {
       std::unique_ptr<PbString>& request_id_shm,
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
-      std::vector<std::shared_ptr<PbTensor>>& input_tensors);
+      std::vector<std::shared_ptr<PbTensor>>& input_tensors,
+      std::unique_ptr<PbString>& parameters_shm);
 
   std::string request_id_;
   uint64_t correlation_id_;
@@ -124,6 +126,7 @@ class InferRequest {
   std::set<std::string> requested_output_names_;
   std::string model_name_;
   int64_t model_version_;
+  std::string parameters_;
   uint32_t flags_;
   int32_t timeout_;
   intptr_t response_factory_address_;
@@ -140,6 +143,7 @@ class InferRequest {
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
+  std::unique_ptr<PbString> parameters_shm_;
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<ResponseSender> response_sender_;

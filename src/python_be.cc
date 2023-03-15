@@ -356,6 +356,39 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       requested_output_names.emplace(requested_output_name);
     }
 
+    triton::common::TritonJson::Value parameters_json(
+        triton::common::TritonJson::ValueType::OBJECT);
+    uint32_t parameter_count;
+    RETURN_IF_ERROR(
+        TRITONBACKEND_RequestParameterCount(request, &parameter_count));
+    for (size_t i = 0; i < parameter_count; i++) {
+      const char* name;
+      TRITONSERVER_ParameterType type;
+      const void* vvalue;
+      RETURN_IF_ERROR(
+          TRITONBACKEND_RequestParameter(request, i, &name, &type, &vvalue));
+      if (type == TRITONSERVER_PARAMETER_INT) {
+        RETURN_IF_ERROR(parameters_json.AddInt(
+            name, *(reinterpret_cast<const int64_t*>(vvalue))));
+      } else if (type == TRITONSERVER_PARAMETER_BOOL) {
+        RETURN_IF_ERROR(parameters_json.AddBool(
+            name, *(reinterpret_cast<const bool*>(vvalue))));
+      } else if (type == TRITONSERVER_PARAMETER_STRING) {
+        std::string string = reinterpret_cast<const char*>(vvalue);
+        RETURN_IF_ERROR(parameters_json.AddString(name, string));
+      } else {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INVALID_ARG,
+            (std::string("Unsupported parameter type for parameter '") + name +
+             "'.")
+                .c_str());
+      }
+    }
+
+    triton::common::TritonJson::WriteBuffer buffer;
+    RETURN_IF_ERROR(parameters_json.Write(&buffer));
+    const auto& parameters_string = buffer.Contents();
+
     // request id
     const char* id;
     RETURN_IF_ERROR(TRITONBACKEND_RequestId(request, &id));
@@ -373,13 +406,13 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), flags,
+          model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request));
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), flags,
+          model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, 0 /* response_factory_address */,
           reinterpret_cast<intptr_t>(request));
     }

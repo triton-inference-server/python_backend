@@ -27,6 +27,7 @@
 #include "infer_request.h"
 
 #include <boost/interprocess/sync/scoped_lock.hpp>
+
 #include "pb_utils.h"
 #include "scoped_defer.h"
 #ifdef TRITON_PB_STUB
@@ -40,12 +41,12 @@ InferRequest::InferRequest(
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
-    const uint32_t flags, const int32_t timeout,
+    const std::string& parameters, const uint32_t flags, const int32_t timeout,
     const intptr_t response_factory_address, const intptr_t request_address)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
-      model_version_(model_version), flags_(flags), timeout_(timeout),
-      response_factory_address_(response_factory_address),
+      model_version_(model_version), parameters_(parameters), flags_(flags),
+      timeout_(timeout), response_factory_address_(response_factory_address),
       request_address_(request_address)
 {
   for (auto& input : inputs) {
@@ -77,6 +78,12 @@ const std::vector<std::shared_ptr<PbTensor>>&
 InferRequest::Inputs()
 {
   return inputs_;
+}
+
+const std::string&
+InferRequest::Parameters()
+{
+  return parameters_;
 }
 
 const std::string&
@@ -160,7 +167,8 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
        sizeof(bi::managed_external_buffer::handle_t)) +
       (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t)) +
       PbString::ShmStructSize(ModelName()) +
-      PbString::ShmStructSize(RequestId()));
+      PbString::ShmStructSize(RequestId()) +
+      PbString::ShmStructSize(Parameters()));
 
   infer_request_shm_ptr_ =
       reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
@@ -222,10 +230,18 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
       reinterpret_cast<char*>(infer_request_shm_ptr_) + request_id_offset,
       infer_request_shm.handle_ + request_id_offset);
 
+  size_t parameters_offset =
+      request_id_offset + PbString::ShmStructSize(RequestId());
+  std::unique_ptr<PbString> parameters_shm = PbString::Create(
+      Parameters(),
+      reinterpret_cast<char*>(infer_request_shm_ptr_) + parameters_offset,
+      infer_request_shm.handle_ + parameters_offset);
+
   // Save the references to shared memory.
   infer_request_shm_ = std::move(infer_request_shm);
   request_id_shm_ = std::move(request_id_shm);
   model_name_shm_ = std::move(model_name_shm);
+  parameters_shm_ = std::move(parameters_shm);
   shm_handle_ = infer_request_shm_.handle_;
   requested_output_names_shm_ = std::move(requested_output_names_shm);
 }
@@ -286,9 +302,14 @@ InferRequest::LoadFromSharedMemory(
       request_handle + request_id_offset,
       reinterpret_cast<char*>(infer_request_shm_ptr) + request_id_offset);
 
+  size_t parameters_offset = request_id_offset + request_id_shm->Size();
+  std::unique_ptr<PbString> parameters_shm = PbString::LoadFromSharedMemory(
+      request_handle + request_id_offset,
+      reinterpret_cast<char*>(infer_request_shm_ptr) + parameters_offset);
+
   return std::unique_ptr<InferRequest>(new InferRequest(
       infer_request_shm, request_id_shm, requested_output_names_shm,
-      model_name_shm, input_tensors));
+      model_name_shm, input_tensors, parameters_shm));
 }
 
 InferRequest::InferRequest(
@@ -296,11 +317,13 @@ InferRequest::InferRequest(
     std::unique_ptr<PbString>& request_id_shm,
     std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
     std::unique_ptr<PbString>& model_name_shm,
-    std::vector<std::shared_ptr<PbTensor>>& input_tensors)
+    std::vector<std::shared_ptr<PbTensor>>& input_tensors,
+    std::unique_ptr<PbString>& parameters_shm)
     : infer_request_shm_(std::move(infer_request_shm)),
       request_id_shm_(std::move(request_id_shm)),
       requested_output_names_shm_(std::move(requested_output_names_shm)),
-      model_name_shm_(std::move(model_name_shm))
+      model_name_shm_(std::move(model_name_shm)),
+      parameters_shm_(std::move(parameters_shm))
 {
   infer_request_shm_ptr_ =
       reinterpret_cast<InferRequestShm*>(infer_request_shm_.data_.get());
@@ -325,6 +348,7 @@ InferRequest::InferRequest(
   }
 
   request_id_ = request_id_shm_->String();
+  parameters_ = parameters_shm_->String();
   requested_output_names_ = std::move(requested_output_names);
   model_name_ = model_name_shm_->String();
   flags_ = infer_request_shm_ptr_->flags;
@@ -529,8 +553,7 @@ InferRequest::Exec(const bool is_decoupled)
 
     for (auto& output_tensor : error_response->OutputTensors()) {
       if (!output_tensor->IsCPU()) {
-        uint64_t memory_release_id =
-            output_tensor->Memory()->MemoryReleaseId();
+        uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
             [&memory_manager_message_queue, memory_release_id]() {
               memory_manager_message_queue->Push(memory_release_id);
