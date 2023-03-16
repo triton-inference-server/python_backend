@@ -40,7 +40,7 @@ bool FileExists(std::string& path);
 // A class that manages Python environments
 //
 class EnvironmentManager {
-  std::map<std::string, std::string> env_map_;
+  std::map<std::string, std::pair<std::string, time_t>> env_map_;
   char base_path_[PATH_MAX + 1];
   std::mutex mutex_;
 
