@@ -365,10 +365,10 @@ class ModelInstanceState : public BackendModelInstance {
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
 
-  // Stop the log monitor threads
+  // Stop the stub_to_parent_queue_monitor thread
   void TerminateMonitor();
 
-  // Start the log monitor threads
+  // Start the stub_to_parent_queue_monitor thread
   void StartMonitor();
 
   // Send bls decoupled response to the stub process

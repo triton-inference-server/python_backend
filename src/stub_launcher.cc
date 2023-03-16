@@ -428,8 +428,37 @@ StubLauncher::ModelInstanceStubProcess()
   initialize_message->Args() = initialize_map_handle;
   stub_message_queue_->Push(initialize_message->ShmHandle());
 
+  bool success = false;
+  uint64_t timeout_miliseconds = 1000;
+  bi::managed_external_buffer::handle_t message;
+  while (!success) {
+    is_healthy_ = false;
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
+      ipc_control_->stub_health = false;
+    }
+
+    message = parent_message_queue_->Pop(
+        timeout_miliseconds /* duration ms */, success);
+
+    sleep(1);
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
+      is_healthy_ = ipc_control_->stub_health;
+    }
+
+    if (!success && !is_healthy_) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Stub process '") + model_instance_name_ +
+           "' is not healthy during model intialization.")
+              .c_str());
+    }
+  }
+
   std::unique_ptr<IPCMessage> initialize_response_message =
-      IPCMessage::LoadFromSharedMemory(shm_pool_, parent_message_queue_->Pop());
+      IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
   if (initialize_response_message->Command() != PYTHONSTUB_InitializeResponse) {
     return TRITONSERVER_ErrorNew(
