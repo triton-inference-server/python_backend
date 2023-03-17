@@ -257,8 +257,6 @@ class ModelInstanceState : public BackendModelInstance {
 
   TRITONBACKEND_Model* triton_model_;
   std::unique_ptr<StubLauncher> model_instance_stub_;
-  std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
-  std::mutex bls_responses_mutex_;
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
 
