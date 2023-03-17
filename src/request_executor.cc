@@ -56,7 +56,7 @@ void
 InferResponseComplete(
     TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
 {
-  auto p = reinterpret_cast<std::shared_ptr<InferPayload>*>(userp);
+  auto p = reinterpret_cast<InferPayload*>(userp);
   std::unique_ptr<InferResponse> infer_response;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   std::shared_ptr<PbError> pb_error;
@@ -125,7 +125,7 @@ InferResponseComplete(
       output_tensors.clear();
     }
 
-    if (!(*p)->IsDecoupled()) {
+    if (!p->IsDecoupled()) {
       infer_response = std::make_unique<InferResponse>(
           output_tensors, pb_error, true /* is_last_response */);
     } else {
@@ -146,8 +146,7 @@ InferResponseComplete(
         TRITONSERVER_InferenceResponseDelete(response),
         "Failed to release BLS inference response.");
   } else if (
-      (*p)->IsDecoupled() &&
-      (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
+      p->IsDecoupled() && (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
     // An empty response may be the last reponse for decoupled models.
     infer_response = std::make_unique<InferResponse>(
         output_tensors, pb_error, true /* is_last_response */, userp /* id */);
@@ -159,10 +158,10 @@ InferResponseComplete(
 
   // Only set value to the promise with the first response. Call the callback
   // function to send decoupled response to the stub.
-  if ((*p)->IsPromiseSet()) {
-    (*p)->Callback(std::move(infer_response));
+  if (p->IsPromiseSet()) {
+    p->Callback(std::move(infer_response));
   } else {
-    (*p)->SetValueForPrevPromise(std::move(infer_response));
+    p->SetValueForPrevPromise(std::move(infer_response));
   }
 }
 
@@ -352,7 +351,7 @@ RequestExecutor::Infer(
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
           irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
-          reinterpret_cast<void*>(&infer_payload)));
+          reinterpret_cast<void*>(infer_payload.get())));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));
