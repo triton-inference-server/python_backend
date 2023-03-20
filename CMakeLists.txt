@@ -240,7 +240,7 @@ target_link_libraries(
     dlpack
     Threads::Threads
     triton-backend-utils          # from repo-backend
-    -ldl                          # dlopen
+    ${CMAKE_DL_LIBS}              # dlopen and dlclose
     -lrt                          # shared memory 
     triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
@@ -253,6 +253,7 @@ target_link_libraries(
    dlpack
    Threads::Threads
    triton-backend-utils           # from repo-backend
+   ${CMAKE_DL_LIBS}               # dlopen and dlclose
    pybind11::embed
    -lrt                           # shared memory 
    -larchive                      # libarchive
