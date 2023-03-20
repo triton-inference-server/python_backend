@@ -919,6 +919,7 @@ Stub::ServiceStubToParentRequests()
       } else {
         bls_response_cleanup_buffer_.pop();
         SendCleanupId(id);
+        std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
         response_iterator_map_.erase(id);
       }
     }
