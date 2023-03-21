@@ -144,19 +144,19 @@ ResponseIterator::Clear()
   is_cleared_ = true;
 }
 
-std::shared_ptr<InferResponse>
-ResponseIterator::Pop()
+std::vector<std::shared_ptr<InferResponse>>
+ResponseIterator::GetExistingResponses()
 {
+  std::vector<std::shared_ptr<InferResponse>> responses;
   std::unique_lock<std::mutex> lock{mu_};
-  if (!response_buffer_.empty()) {
-    auto response = response_buffer_.front();
+  while (!response_buffer_.empty()) {
+    responses.push_back(response_buffer_.front());
     response_buffer_.pop();
-    return response;
-  } else {
-    is_finished_ = true;
-    is_cleared_ = true;
-    throw py::stop_iteration("Iteration is done for the responses.");
   }
+  is_finished_ = true;
+  is_cleared_ = true;
+
+  return responses;
 }
 
 }}}  // namespace triton::backend::python

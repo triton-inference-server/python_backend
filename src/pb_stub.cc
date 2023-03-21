@@ -1132,17 +1132,12 @@ Stub::GetResponseIterator(std::shared_ptr<InferResponse> infer_response)
     // 'response_iterator_map_' to make sure the 'ResponseIterator' object has
     // the correct first response.
     auto response_iterator = std::make_shared<ResponseIterator>(infer_response);
-    bool done = false;
-    while (!done) {
-      try {
-        std::shared_ptr<InferResponse> next_response =
-            response_iterator_map_[infer_response->Id()]->Pop();
-        response_iterator->EnqueueResponse(next_response);
-      }
-      catch (const py::stop_iteration& exception) {
-        done = true;
-      }
+    std::vector<std::shared_ptr<InferResponse>> existing_responses =
+        response_iterator_map_[infer_response->Id()]->GetExistingResponses();
+    for (auto& response : existing_responses) {
+      response_iterator->EnqueueResponse(response);
     }
+
     response_iterator_map_[infer_response->Id()] = response_iterator;
   } else {
     auto response_iterator = std::make_shared<ResponseIterator>(infer_response);

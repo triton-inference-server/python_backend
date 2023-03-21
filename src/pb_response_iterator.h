@@ -41,7 +41,7 @@ class ResponseIterator {
   void EnqueueResponse(std::shared_ptr<InferResponse> infer_response);
   void* Id();
   void Clear();
-  std::shared_ptr<InferResponse> Pop();
+  std::vector<std::shared_ptr<InferResponse>> GetExistingResponses();
 
  private:
   std::vector<std::shared_ptr<InferResponse>> responses_;
