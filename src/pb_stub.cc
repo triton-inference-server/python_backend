@@ -918,8 +918,11 @@ Stub::ServiceStubToParentRequests()
         break;
       } else {
         bls_response_cleanup_buffer_.pop();
+        {
+          std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+          response_iterator_map_.erase(id);
+        }
         SendCleanupId(id);
-        response_iterator_map_.erase(id);
       }
     }
   }
@@ -1093,7 +1096,11 @@ Stub::ParentToStubMQMonitor()
         response_iterator_map_[infer_response->Id()]->EnqueueResponse(
             std::move(infer_response));
       } else {
-        LOG_INFO << "Failed to enqueue the response to its response iterator.";
+        auto response_iterator =
+            std::make_shared<ResponseIterator>(std::move(infer_response));
+        response_iterator_map_.insert(
+            std::pair<void*, std::shared_ptr<ResponseIterator>>(
+                response_iterator->Id(), response_iterator));
       }
     }
 
@@ -1115,13 +1122,31 @@ Stub::ParentToStubServiceActive()
   return parent_to_stub_thread_;
 }
 
-void
-Stub::SaveResponseIterator(std::shared_ptr<ResponseIterator> response_iterator)
+std::shared_ptr<ResponseIterator>
+Stub::GetResponseIterator(std::shared_ptr<InferResponse> infer_response)
 {
   std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-  response_iterator_map_.insert(
-      std::pair<void*, std::shared_ptr<ResponseIterator>>(
-          response_iterator->Id(), response_iterator));
+  if (response_iterator_map_.find(infer_response->Id()) !=
+      response_iterator_map_.end()) {
+    // Need to re-construct the 'ResponseIterator' and update the
+    // 'response_iterator_map_' to make sure the 'ResponseIterator' object has
+    // the correct first response.
+    auto response_iterator = std::make_shared<ResponseIterator>(infer_response);
+    std::vector<std::shared_ptr<InferResponse>> existing_responses =
+        response_iterator_map_[infer_response->Id()]->GetExistingResponses();
+    for (auto& response : existing_responses) {
+      response_iterator->EnqueueResponse(response);
+    }
+
+    response_iterator_map_[infer_response->Id()] = response_iterator;
+  } else {
+    auto response_iterator = std::make_shared<ResponseIterator>(infer_response);
+    response_iterator_map_.insert(
+        std::pair<void*, std::shared_ptr<ResponseIterator>>(
+            response_iterator->Id(), response_iterator));
+  }
+
+  return response_iterator_map_[infer_response->Id()];
 }
 
 bool
@@ -1304,12 +1329,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                 infer_request->Exec(decoupled);
             py::object response_object;
             if (decoupled) {
-              auto response_iterator =
-                  std::make_shared<ResponseIterator>(response);
+              auto response_iterator = stub->GetResponseIterator(response);
               response_object = py::cast(response_iterator);
-              if (response_iterator->Id() != nullptr) {
-                stub->SaveResponseIterator(response_iterator);
-              }
             } else {
               response_object = py::cast(response);
             }
@@ -1334,12 +1355,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                   infer_request->Exec(decoupled);
               py::object response_object;
               if (decoupled) {
-                auto response_iterator =
-                    std::make_shared<ResponseIterator>(response);
+                auto response_iterator = stub->GetResponseIterator(response);
                 response_object = py::cast(response_iterator);
-                if (response_iterator->Id() != nullptr) {
-                  stub->SaveResponseIterator(response_iterator);
-                }
               } else {
                 response_object = py::cast(response);
               }

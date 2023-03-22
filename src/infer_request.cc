@@ -553,11 +553,11 @@ InferRequest::Exec(const bool is_decoupled)
 
   if (responses_is_set) {
     auto& memory_manager_message_queue = stub->MemoryManagerQueue();
-    std::unique_ptr<InferResponse> error_response =
+    std::unique_ptr<InferResponse> return_response =
         InferResponse::LoadFromSharedMemory(
             shm_pool, *response_handle, true /* open cuda handle */);
 
-    for (auto& output_tensor : error_response->OutputTensors()) {
+    for (auto& output_tensor : return_response->OutputTensors()) {
       if (!output_tensor->IsCPU()) {
         uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
@@ -567,7 +567,7 @@ InferRequest::Exec(const bool is_decoupled)
       }
     }
 
-    return error_response;
+    return return_response;
   } else {
     auto error_response = std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
