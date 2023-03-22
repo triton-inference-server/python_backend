@@ -114,11 +114,11 @@ ResponseIterator::Iter()
 }
 
 void
-ResponseIterator::EnqueueResponse(std::unique_ptr<InferResponse> infer_response)
+ResponseIterator::EnqueueResponse(std::shared_ptr<InferResponse> infer_response)
 {
   {
     std::lock_guard<std::mutex> lock{mu_};
-    response_buffer_.push(std::move(infer_response));
+    response_buffer_.push(infer_response);
   }
   cv_.notify_one();
 }
@@ -142,6 +142,21 @@ ResponseIterator::Clear()
   std::queue<std::shared_ptr<InferResponse>> empty;
   std::swap(response_buffer_, empty);
   is_cleared_ = true;
+}
+
+std::vector<std::shared_ptr<InferResponse>>
+ResponseIterator::GetExistingResponses()
+{
+  std::vector<std::shared_ptr<InferResponse>> responses;
+  std::unique_lock<std::mutex> lock{mu_};
+  while (!response_buffer_.empty()) {
+    responses.push_back(response_buffer_.front());
+    response_buffer_.pop();
+  }
+  is_finished_ = true;
+  is_cleared_ = true;
+
+  return responses;
 }
 
 }}}  // namespace triton::backend::python

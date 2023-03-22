@@ -246,9 +246,9 @@ class Stub {
   /// Thread process
   void ParentToStubMQMonitor();
 
-  /// Keep track of the ResponseIterator object
-  void SaveResponseIterator(
-      std::shared_ptr<ResponseIterator> response_iterator);
+  /// Get the ResponseIterator object associated with the infer response
+  std::shared_ptr<ResponseIterator> GetResponseIterator(
+      std::shared_ptr<InferResponse> infer_response);
 
   /// Send the id to the python backend for object cleanup
   void SendCleanupId(void* id);
