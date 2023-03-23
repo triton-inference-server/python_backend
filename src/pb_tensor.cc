@@ -388,6 +388,7 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 
 PbTensor::~PbTensor() noexcept(false)
 {
+  pb_memory_.reset();
   DeleteDLPack();
 }
 

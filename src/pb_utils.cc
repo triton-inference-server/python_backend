@@ -78,6 +78,25 @@ CUDAHandler::CUDAHandler()
           dlerror());
     }
     *((void**)&cu_get_error_string_fn_) = cu_get_error_string_fn;
+
+    void* cu_init_fn = dlsym(dl_open_handle_, "cuInit");
+    if (cu_init_fn == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to dlsym 'cuInit'. Error: ") + dlerror());
+    }
+    *((void**)&cu_init_fn_) = cu_init_fn;
+
+    // Initialize the driver API.
+    CUresult cuda_err = (*cu_init_fn_)(0 /* flags */);
+    if (cuda_err != CUDA_SUCCESS) {
+      const char* error_string;
+      (*cu_get_error_string_fn_)(cuda_err, &error_string);
+      throw PythonBackendException(
+          std::string(
+              "failed to get cuda pointer device attribute: " +
+              std::string(error_string))
+              .c_str());
+    }
   }
 }
 
