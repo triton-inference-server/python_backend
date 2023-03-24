@@ -26,6 +26,7 @@
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
+#include "python_be.h"
 #endif  // TRITON_ENABLE_GPU
 
 #ifdef TRITON_PB_STUB
@@ -231,6 +232,44 @@ PbTensor::FromNumpy(const std::string& name, py::array& numpy_array)
   return std::make_shared<PbTensor>(name, numpy_array);
 }
 
+DLDeviceType
+PbTensor::DeviceType()
+{
+  DLDeviceType device_type{};
+
+  switch (memory_type_) {
+    case TRITONSERVER_MEMORY_GPU:
+      device_type = DLDeviceType::kDLCUDA;
+      break;
+    case TRITONSERVER_MEMORY_CPU:
+      device_type = DLDeviceType::kDLCPU;
+      break;
+    case TRITONSERVER_MEMORY_CPU_PINNED:
+      device_type = DLDeviceType::kDLCUDAHost;
+      break;
+  }
+
+  return device_type;
+}
+
+py::capsule
+PbTensor::DLPack(const py::object& stream)
+{
+  // Array API requirements for the stream argument:
+  // stream = None  producer must assume the legacy default stream, no sync 
+  // stream = -1 is a signal for the producer not to perform any synchronization
+  // stream = 1 the legacy default stream, since Python Backend does not support 
+  // async executions on PbTensor objects, this case also does not require 
+  // stream sync.
+  if (!stream.is(py::none()) && !stream.is(py::int_(-1)) 
+      && !stream.is(py::int_(1))) {
+    cudaStreamSynchronize(
+      reinterpret_cast<cudaStream_t>(py::cast<uint64_t>(stream)));
+  } 
+
+  return this->ToDLPack();
+}
+
 py::capsule
 PbTensor::ToDLPack()
 {
@@ -269,23 +308,19 @@ PbTensor::ToDLPack()
   tensor_handle.inc_ref();
 
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
+  dlpack_tensor->dl_tensor.device.device_type = this->DeviceType();
   dlpack_tensor->dl_tensor.dtype = triton_to_dlpack_type(dtype_);
-
-  switch (memory_type_) {
-    case TRITONSERVER_MEMORY_GPU:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
-      break;
-    case TRITONSERVER_MEMORY_CPU:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCPU;
-      break;
-    case TRITONSERVER_MEMORY_CPU_PINNED:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDAHost;
-      break;
-  }
 
   return py::capsule(
       static_cast<void*>(dlpack_tensor), "dltensor", &delete_unused_dltensor);
 }
+
+std::pair<int32_t, int64_t>
+PbTensor::DLPackDevice()
+{
+  return std::pair<int32_t, int64_t>(this->DeviceType(), memory_type_id_);
+}
+
 #endif  // TRITON_PB_STUB
 
 void
@@ -305,11 +340,30 @@ PbTensor::Memory()
 
 #ifdef TRITON_PB_STUB
 std::shared_ptr<PbTensor>
-PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
+PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
 {
   if (name == "") {
     throw PythonBackendException("Tensor name cannot be an empty string.");
   }
+  if(py::isinstance<py::capsule>(tensor)){
+    return FromDLPackCapsule(name, tensor);
+  } else if (py::hasattr(tensor, "__dlpack__")) {
+    // Python backend does not support async executions on PbTensor objects,
+    // thus we can count on the default `stream=None` argument.
+    // For CPU, `stream=None` is the only accepted argument 
+    // according to array API. For GPU, when `stream=None`  producer must 
+    // assume the legacy default stream.
+    // Reference:
+    // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
+    return FromDLPackCapsule(name, tensor.attr("__dlpack__")());
+  }else{
+    throw PythonBackendException("Provided tensor is not supported.");
+  }
+}
+
+std::shared_ptr<PbTensor>
+PbTensor::FromDLPackCapsule(const std::string& name, const py::capsule& dlpack_tensor)
+{
 
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());

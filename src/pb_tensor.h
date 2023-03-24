@@ -114,9 +114,11 @@ class PbTensor {
 #ifdef TRITON_PB_STUB
   /// Construct a Python backend tensor using a DLPack
   /// capsule.
+  static std::shared_ptr<PbTensor> FromDLPack(
+      const std::string& name, const py::object& dlpack);
   /// \param dlpack source dlpack tensor
   /// \param name name of the tensor
-  static std::shared_ptr<PbTensor> FromDLPack(
+  static std::shared_ptr<PbTensor> FromDLPackCapsule(
       const std::string& name, const py::capsule& dlpack);
 
   /// Construct a Python backend tensor using a NumPy object.
@@ -125,9 +127,14 @@ class PbTensor {
   static std::shared_ptr<PbTensor> FromNumpy(
       const std::string& name, py::array& numpy_array);
 
+  
+  
+  DLDeviceType DeviceType();
+  py::capsule DLPack(const py::object& stream);
   /// Get a PyCapsule object containing the DLPack representation of the tensor.
   /// \return Capsule object containing pointer to a DLPack object.
   py::capsule ToDLPack();
+  std::pair<int32_t, int64_t> DLPackDevice();
 #endif
 
   /// Get the name of the tensor
