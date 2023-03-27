@@ -225,6 +225,7 @@ class CUDAHandler {
   CUresult (*cu_pointer_get_attribute_fn_)(
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
+  CUresult (*cu_init_fn_)(unsigned int) = nullptr;
   CUDAHandler();
   ~CUDAHandler() noexcept(false);
 
