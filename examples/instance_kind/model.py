@@ -45,7 +45,7 @@ class TritonPythonModel:
         the default device of the framework.
         """
         self.device = 'cuda' if args["model_instance_kind"] == "GPU" else 'cpu'
-        self.model = torch.hub.load("pytorch/vision",
+        self.model = torch.hub.load("pytorch/vision:v0.14.1",
                                     "resnet50",
                                     weights="IMAGENET1K_V2",
                                     skip_validation=True)\
