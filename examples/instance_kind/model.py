@@ -45,6 +45,11 @@ class TritonPythonModel:
         the default device of the framework.
         """
         self.device = 'cuda' if args["model_instance_kind"] == "GPU" else 'cpu'
+        # This example is configured to work with torch=1.13 
+        # and torchvision=0.14. Thus, we need to provide a proper tag `0.14.1`
+        # to make sure loaded Resnet50 is compatible with 
+        # installed `torchvision`.
+        # Refer to README for installation instructions.
         self.model = torch.hub.load("pytorch/vision:v0.14.1",
                                     "resnet50",
                                     weights="IMAGENET1K_V2",
