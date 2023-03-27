@@ -146,7 +146,8 @@ class StubLauncher {
   void KillStubProcess();
 
   // Get a message from the stub process
-  TRITONSERVER_Error* ReceiveMessageFromStub(off_t& message);
+  TRITONSERVER_Error* ReceiveMessageFromStub(
+      bi::managed_external_buffer::handle_t& message);
 
  private:
   pid_t parent_pid_;
