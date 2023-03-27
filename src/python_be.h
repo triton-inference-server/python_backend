@@ -290,9 +290,6 @@ class ModelInstanceState : public BackendModelInstance {
   bool IsStubProcessAlive();
 
   // Get a message from the stub process
-  TRITONSERVER_Error* ReceiveMessageFromStub(off_t& message);
-
-  // Get a message from the stub process
   void SendMessageAndReceiveResponse(
       off_t message, off_t& response, bool& restart,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,

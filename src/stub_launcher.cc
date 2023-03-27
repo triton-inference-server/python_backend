@@ -428,34 +428,8 @@ StubLauncher::ModelInstanceStubProcess()
   initialize_message->Args() = initialize_map_handle;
   stub_message_queue_->Push(initialize_message->ShmHandle());
 
-  bool success = false;
-  uint64_t timeout_miliseconds = 1000;
   bi::managed_external_buffer::handle_t message;
-  while (!success) {
-    is_healthy_ = false;
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      ipc_control_->stub_health = false;
-    }
-
-    message = parent_message_queue_->Pop(
-        timeout_miliseconds /* duration ms */, success);
-
-    sleep(1);
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
-      is_healthy_ = ipc_control_->stub_health;
-    }
-
-    if (!success && !is_healthy_) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Stub process '") + model_instance_name_ +
-           "' is not healthy during model intialization.")
-              .c_str());
-    }
-  }
+  RETURN_IF_ERROR(ReceiveMessageFromStub(message));
 
   std::unique_ptr<IPCMessage> initialize_response_message =
       IPCMessage::LoadFromSharedMemory(shm_pool_, message);
@@ -564,4 +538,57 @@ StubLauncher::KillStubProcess()
   stub_pid_ = 0;
 }
 
+TRITONSERVER_Error*
+StubLauncher::ReceiveMessageFromStub(
+    bi::managed_external_buffer::handle_t& message)
+{
+  bool success = false;
+  while (!success) {
+    uint64_t timeout_miliseconds = 1000;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() +
+          boost::posix_time::milliseconds(timeout_miliseconds);
+
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+      // Check if lock has been acquired.
+      if (lock) {
+        ipc_control_->stub_health = false;
+      } else {
+        // If it failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
+      }
+    }
+
+    message = parent_message_queue_->Pop(
+        timeout_miliseconds /* duration ms */, success);
+
+    bool is_stub_alive = false;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() + boost::posix_time::seconds(1);
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+      if (lock) {
+        is_stub_alive = ipc_control_->stub_health;
+      } else {
+        // If It failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        is_stub_alive = false;
+      }
+    }
+
+    if (!success && !is_stub_alive) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Stub process '") + model_instance_name_ +
+           "' is not healthy.")
+              .c_str());
+    }
+  }
+
+  return nullptr;  // success
+}
 }}};  // namespace triton::backend::python
