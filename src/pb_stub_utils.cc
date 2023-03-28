@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -294,8 +294,8 @@ dlpack_to_triton_type(const DLDataType& data_type)
     }
   }
 
-  if (data_type.code == DLDataTypeCode::kDLBool){
-    if (data_type.bits == 8){
+  if (data_type.code == DLDataTypeCode::kDLBool) {
+    if (data_type.bits == 8) {
       return TRITONSERVER_TYPE_BOOL;
     }
   }

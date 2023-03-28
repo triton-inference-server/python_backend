@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -112,12 +112,15 @@ class PbTensor {
   DISALLOW_COPY_AND_ASSIGN(PbTensor);
 
 #ifdef TRITON_PB_STUB
-  /// Construct a Python backend tensor using a DLPack
-  /// capsule.
-  static std::shared_ptr<PbTensor> FromDLPack(
-      const std::string& name, const py::object& dlpack);
+  /// Construct a Python backend tensor from an
+  /// external tensor.
   /// \param dlpack source dlpack tensor
   /// \param name name of the tensor
+  static std::shared_ptr<PbTensor> FromDLPack(
+      const std::string& name, const py::object& dlpack);
+
+  /// Construct a Python backend tensor using a DLPack
+  /// capsule.
   static std::shared_ptr<PbTensor> FromDLPackCapsule(
       const std::string& name, const py::capsule& dlpack);
 
@@ -127,13 +130,22 @@ class PbTensor {
   static std::shared_ptr<PbTensor> FromNumpy(
       const std::string& name, py::array& numpy_array);
 
-  
-  
+  /// Get device type in DLPack format.
   DLDeviceType DeviceType();
+
+  /// Exports tensor for consumption by `from_dlpack()` as a DLPack capsule.
+  /// \param stream  a Python integer representing a pointer to a stream,
+  ///                on devices that support streams
+  /// \return Capsule object containing pointer to a DLPack object.
   py::capsule DLPack(const py::object& stream);
+
   /// Get a PyCapsule object containing the DLPack representation of the tensor.
   /// \return Capsule object containing pointer to a DLPack object.
   py::capsule ToDLPack();
+
+  /// Returns device type and device ID.
+  /// Meant for use within `from_dlpack()`.
+  /// \return a pair (device_type, device_id).
   std::pair<int32_t, int64_t> DLPackDevice();
 #endif
 
