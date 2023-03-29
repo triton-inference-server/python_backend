@@ -153,23 +153,36 @@ make triton-python-backend-stub -j16
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 
+# Install Python and Python venv 
+add-apt-repository ppa:deadsnakes/ppa
+apt-get install python3.7
+apt-get install -y python3.7-venv g++ 
+# Create Python venv
+python3.7 -m venv aws_neuron_venv
+# Activate Python venv 
+source aws_neuron_venv/bin/activate 
+python -m pip install -U pip
+# Set pip repository pointing to the Neuron repository 
+python -m pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 if [ $USE_TENSORFLOW -eq 1 ]; then
-    conda install tensorflow-neuron pillow -y
-    # Update Neuron TensorBoard
-    pip install --upgrade tensorboard-plugin-neuron
     # Update Neuron TensorFlow
     if [ $TENSORFLOW_VERSION -eq 1 ]; then
-        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4"
+        # Install TensorFlow Neuron
+        python -m pip install tensorflow-neuron[cc]==1.15.5.* "protobuf"
+        # Install Tensorflow Neuron model server
+        apt-get install tensorflow-model-server-neuronx=1.15.0.2.6.5.0 -y
     else
-        pip install --upgrade tensorflow-neuron[cc] "protobuf<4"
+        # Install TensorFlow Neuron
+        python -m pip install tensorflow-neuron[cc] "protobuf"
+        Install Tensorflow Neuron model server
+        apt-get install tensorflow-model-server-neuronx=2.10.1.2.6.5.0 -y
     fi
 fi
 
 if [ $USE_PYTORCH -eq 1 ]
 then
-    conda install torch-neuron torchvision -y
-    # Upgrade torch-neuron and install transformers
-    pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf<4" torchvision "transformers==4.6.0"
+    # Install PyTorch Neuron
+    python -m pip install torch-neuron neuron-cc[tensorflow] "protobuf" torchvision
 fi
 
 # Upgrade the python backend stub, rules and sockets

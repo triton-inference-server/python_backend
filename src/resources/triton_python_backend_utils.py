@@ -164,8 +164,8 @@ def get_output_tensor_by_name(inference_response, name):
             return output_tensor
 
     return None
-
-
+    
+    
 def get_input_config_by_name(model_config, name):
     """Get input properties corresponding to the input
     with given `name`

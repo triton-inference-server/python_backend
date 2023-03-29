@@ -39,6 +39,6 @@ sudo wget -qO - https://apt.repos.neuron.amazonaws.com/GPG-PUB-KEY-AMAZON-AWS-NE
 sudo apt-get update &&          \
     sudo apt-get install -y        \
         linux-headers-$(uname -r)  \
-        aws-neuron-dkms            \
-        aws-neuron-tools
+        aws-neuronx-dkms            \
+        aws-neuronx-tools
 
