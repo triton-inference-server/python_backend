@@ -31,7 +31,6 @@
 #ifdef TRITON_PB_STUB
 #include "pb_stub_utils.h"
 namespace py = pybind11;
-using namespace py::literals;
 #endif
 #include "pb_tensor.h"
 
@@ -255,26 +254,10 @@ PbTensor::DeviceType()
 py::capsule
 PbTensor::DLPack(const py::object& stream)
 {
-// Array API requirements for the stream argument:
-// stream = None, producer must assume the legacy default stream,
-// stream = -1 is a signal for the producer not to perform any synchronization
-// stream = 1 the legacy default stream (in this case should synchronize
-// on CUDA stream 0)
-#ifdef TRITON_ENABLE_GPU
-  if (!IsCPU() && !stream.is(py::int_(-1))) {
-    cudaStream_t cuda_stream =
-        (stream.is(py::int_(1)) || stream.is(py::none()))
-            ? 0
-            : reinterpret_cast<cudaStream_t>(py::cast<uint64_t>(stream));
-    cudaError_t err = cudaStreamSynchronize(cuda_stream);
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          "Failed to syncronize streams before PbTensor's dlpack capsule "
-          "creation.");
-    }
-  }
-#endif
-
+  // Here external tensor requests PbTensor's `__dlpack__` method to provide
+  // a PyCapsule. By the design of PbTensor, in a GPU case no pending work 
+  // is scheduled to work with PbTensor's data and we can simply pass 
+  // the capsule.
   return this->ToDLPack();
 }
 
@@ -356,6 +339,20 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
   if (py::isinstance<py::capsule>(tensor)) {
     return FromDLPackCapsule(name, tensor);
   } else if (py::hasattr(tensor, "__dlpack__")) {
+#ifdef TRITON_ENABLE_GPU
+  cudaError_t err = cudaStreamSynchronize(0);
+  if (err != cudaSuccess) {
+    throw PythonBackendException(
+        "Failed to syncronize on the default stream before\
+             dlpack capsule consumption.");
+  }
+#endif
+    // Array API requirements for the stream argument:
+    // stream = None, producer must assume the legacy default stream,
+    // stream = -1 is a signal for the producer not to perform any 
+    //          synchronization
+    // stream = 1 the legacy default stream (in this case should synchronize
+    //          on CUDA stream 0)
     // Python backend does not support async executions on PbTensor objects,
     // thus we can count on the default `stream=None` argument.
     // For CPU, `stream=None` is the only accepted argument
@@ -364,7 +361,7 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     // Reference:
     // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
     return FromDLPackCapsule(
-        name, tensor.attr("__dlpack__")("stream"_a = py::none()));
+        name, tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
   } else {
     throw PythonBackendException(
         "Provided tensor is not supported.\
@@ -376,6 +373,11 @@ std::shared_ptr<PbTensor>
 PbTensor::FromDLPackCapsule(
     const std::string& name, const py::capsule& dlpack_tensor)
 {
+
+// TO-DO ADD sync on the default stream either here for all apis 
+// or in __dlpack__ case for only new apis. Write tests and think about 
+// different contexts.
+
 #ifdef TRITON_ENABLE_GPU
   cudaError_t err = cudaStreamSynchronize(0);
   if (err != cudaSuccess) {
@@ -384,6 +386,7 @@ PbTensor::FromDLPackCapsule(
              dlpack capsule consumption.");
   }
 #endif
+
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 
