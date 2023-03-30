@@ -42,12 +42,13 @@ InferRequest::InferRequest(
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
     const std::string& parameters, const uint32_t flags, const int32_t timeout,
-    const intptr_t response_factory_address, const intptr_t request_address)
+    const intptr_t response_factory_address, const intptr_t request_address,
+    const PreferredMemory& preferred_memory)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
       model_version_(model_version), parameters_(parameters), flags_(flags),
       timeout_(timeout), response_factory_address_(response_factory_address),
-      request_address_(request_address)
+      request_address_(request_address), preferred_memory_(preferred_memory)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -158,6 +159,12 @@ InferRequest::IsDecoupled()
   return is_decoupled_;
 }
 
+PreferredMemory&
+InferRequest::GetPreferredMemory()
+{
+  return preferred_memory_;
+}
+
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
@@ -182,6 +189,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->response_factory_address = response_factory_address_;
   infer_request_shm_ptr_->is_decoupled = is_decoupled_;
   infer_request_shm_ptr_->timeout = timeout_;
+  infer_request_shm_ptr_->preferred_memory = preferred_memory_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -358,6 +366,7 @@ InferRequest::InferRequest(
   response_factory_address_ = infer_request_shm_ptr_->response_factory_address;
   is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
   timeout_ = infer_request_shm_ptr_->timeout;
+  preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
 
 #ifdef TRITON_PB_STUB
   response_sender_ = std::make_shared<ResponseSender>(

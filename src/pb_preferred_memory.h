@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,41 +26,32 @@
 
 #pragma once
 
-#include <memory>
-#include "infer_payload.h"
-#include "infer_request.h"
-#include "infer_response.h"
-#include "pb_preferred_memory.h"
-
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
-
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
-
+class PreferredMemory {
  public:
-  std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      std::shared_ptr<InferPayload>& infer_payload);
+  enum MemoryType { GPU, CPU, DEFAULT };
 
-  RequestExecutor(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_Server* server);
+  PreferredMemory()
+      : preferred_memory_type_(MemoryType::DEFAULT), preferred_device_id_(0)
+  {
+  }
 
-  ~RequestExecutor();
+  PreferredMemory(
+      const MemoryType& preferred_memory_type,
+      const int64_t& preferred_device_id)
+      : preferred_memory_type_(preferred_memory_type),
+        preferred_device_id_(preferred_device_id)
+  {
+  }
 
-  struct ResponseAllocatorUserp {
-    ResponseAllocatorUserp(
-        void* shm_pool, const PreferredMemory& preferred_memory)
-        : shm_pool(shm_pool), preferred_memory(preferred_memory)
-    {
-    }
-    void* shm_pool;
-    PreferredMemory preferred_memory;
-  };
+  MemoryType PreferredMemoryType() { return preferred_memory_type_; }
+
+  int64_t PreferredDeviceId() { return preferred_device_id_; }
+
+ private:
+  MemoryType preferred_memory_type_;
+  int64_t preferred_device_id_;
 };
+
 }}}  // namespace triton::backend::python

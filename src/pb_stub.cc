@@ -46,6 +46,7 @@
 #include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
+#include "pb_preferred_memory.h"
 #include "pb_response_iterator.h"
 #include "pb_string.h"
 #include "pb_utils.h"
@@ -418,6 +419,9 @@ Stub::StubSetup()
       c_python_backend_utils.attr("InferenceResponse"));
   py::setattr(
       python_backend_utils, "Logger", c_python_backend_utils.attr("Logger"));
+  py::setattr(
+      python_backend_utils, "PreferredMemory",
+      c_python_backend_utils.attr("PreferredMemory"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -1286,6 +1290,17 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(py::init<std::string>())
       .def("message", &PbError::Message);
 
+  py::class_<PreferredMemory, std::shared_ptr<PreferredMemory>>
+      preferred_memory(module, "PreferredMemory");
+  preferred_memory.def(
+      py::init<const PreferredMemory::MemoryType&, const int64_t&>(),
+      py::arg("preferred_memory_type").none(false),
+      py::arg("preferred_device_id").none(false) = 0);
+  py::enum_<PreferredMemory::MemoryType>(preferred_memory, "MemoryType")
+      .value("GPU", PreferredMemory::MemoryType::GPU)
+      .value("CPU", PreferredMemory::MemoryType::CPU)
+      .export_values();
+
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
@@ -1294,7 +1309,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
                       const int64_t model_version, const uint32_t flags,
-                      const int32_t timeout) {
+                      const int32_t timeout,
+                      const PreferredMemory& preferred_memory) {
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
@@ -1302,7 +1318,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             // FIXME: InferenceRequest parameters are not supported in BLS now.
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, "" /*parameters*/, flags, timeout);
+                model_name, model_version, "" /*parameters*/, flags, timeout,
+                0 /*response_factory_address*/, 0 /*request_address*/,
+                preferred_memory);
           }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,
@@ -1310,7 +1328,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("requested_output_names").none(false),
           py::arg("model_name").none(false),
           py::arg("model_version").none(false) = -1,
-          py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0)
+          py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
+          py::arg("preferred_memory").none(false) =
+              PreferredMemory(PreferredMemory::DEFAULT, 0))
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)

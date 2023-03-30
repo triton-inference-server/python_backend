@@ -41,6 +41,27 @@ CreateTritonErrorFromException(const PythonBackendException& pb_exception)
       TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
 }
 
+TRITONSERVER_Error*
+MemoryTypeToTritonMemoryType(
+    TRITONSERVER_MemoryType* triton_memory_type,
+    const PreferredMemory::MemoryType& memory_type)
+{
+  switch (memory_type) {
+    case PreferredMemory::MemoryType::CPU:
+      *triton_memory_type = TRITONSERVER_MEMORY_CPU;
+      break;
+    case PreferredMemory::MemoryType::GPU:
+      *triton_memory_type = TRITONSERVER_MEMORY_GPU;
+      break;
+
+    default:
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Unknown memory type");
+  }
+
+  return nullptr;
+}
+
 void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
@@ -165,6 +186,34 @@ InferResponseComplete(
   }
 }
 
+bool
+IsAllocateGPUBufferSuccess(int64_t device_id, void** buffer, size_t byte_size)
+{
+  auto err = cudaSetDevice(device_id);
+  if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
+      (err != cudaErrorInsufficientDriver)) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_ERROR, std::string(
+                                    "unable to set current CUDA device: " +
+                                    std::string(cudaGetErrorString(err)))
+                                    .c_str());
+
+    return false;
+  }
+
+  err = cudaMalloc(buffer, byte_size);
+  if (err != cudaSuccess) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_ERROR,
+        std::string(
+            "cudaMalloc failed: " + std::string(cudaGetErrorString(err)))
+            .c_str());
+    return false;
+  }
+
+  return true;
+}
+
 TRITONSERVER_Error*
 ResponseAlloc(
     TRITONSERVER_ResponseAllocator* allocator, const char* tensor_name,
@@ -173,12 +222,24 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
+  auto p = reinterpret_cast<RequestExecutor::ResponseAllocatorUserp*>(userp);
   std::unique_ptr<SharedMemoryManager> shm_pool(
-      reinterpret_cast<SharedMemoryManager*>(userp));
+      reinterpret_cast<SharedMemoryManager*>(p->shm_pool));
 
   ScopedDefer _([&shm_pool] { shm_pool.release(); });
-  *actual_memory_type = preferred_memory_type;
-  *actual_memory_type_id = preferred_memory_type_id;
+
+  if (p->preferred_memory.PreferredMemoryType() ==
+      PreferredMemory::MemoryType::DEFAULT) {
+    *actual_memory_type = preferred_memory_type;
+    *actual_memory_type_id = preferred_memory_type_id;
+  } else {
+    TRITONSERVER_MemoryType user_preferred_memory_type;
+    RETURN_IF_ERROR(MemoryTypeToTritonMemoryType(
+        &user_preferred_memory_type,
+        p->preferred_memory.PreferredMemoryType()));
+    *actual_memory_type = user_preferred_memory_type;
+    *actual_memory_type_id = p->preferred_memory.PreferredDeviceId();
+  }
 
   // If 'byte_size' is zero just return 'buffer' == nullptr, we don't
   // need to do any other book-keeping.
@@ -211,25 +272,36 @@ ResponseAlloc(
       } break;
 #ifdef TRITON_ENABLE_GPU
       case TRITONSERVER_MEMORY_GPU: {
-        auto err = cudaSetDevice(*actual_memory_type_id);
-        if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
-            (err != cudaErrorInsufficientDriver)) {
-          return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL,
-              std::string(
-                  "unable to set current CUDA device: " +
-                  std::string(cudaGetErrorString(err)))
-                  .c_str());
+        if (!IsAllocateGPUBufferSuccess(
+                *actual_memory_type_id, buffer, byte_size)) {
+          int num_devices = 0;
+          cudaError_t err = cudaGetDeviceCount(&num_devices);
+          if (err != cudaSuccess) {
+            return TRITONSERVER_ErrorNew(
+                TRITONSERVER_ERROR_INTERNAL,
+                std::string(
+                    "cudaGetDeviceCount failed: " +
+                    std::string(cudaGetErrorString(err)))
+                    .c_str());
+          }
+
+          bool is_buffer_allocated = false;
+          for (int i = 0; i < num_devices; i++) {
+            if (i != *actual_memory_type_id) {
+              if (IsAllocateGPUBufferSuccess(i, buffer, byte_size)) {
+                is_buffer_allocated = true;
+                break;
+              }
+            }
+          }
+
+          if (!is_buffer_allocated) {
+            return TRITONSERVER_ErrorNew(
+                TRITONSERVER_ERROR_INTERNAL,
+                "unable to allocate buffer on any available CUDA device");
+          }
         }
 
-        err = cudaMalloc(buffer, byte_size);
-        if (err != cudaSuccess) {
-          return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL,
-              std::string(
-                  "cudaMalloc failed: " + std::string(cudaGetErrorString(err)))
-                  .c_str());
-        }
         break;
       }
 #endif
@@ -349,9 +421,13 @@ RequestExecutor::Infer(
     {
       infer_payload->SetFuture(response_future);
 
+      ResponseAllocatorUserp response_allocator_userp(
+          shm_pool_.get(), infer_request->GetPreferredMemory());
+
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
-          irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
-          reinterpret_cast<void*>(infer_payload.get())));
+          irequest, response_allocator_,
+          reinterpret_cast<void*>(&response_allocator_userp),
+          InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));
