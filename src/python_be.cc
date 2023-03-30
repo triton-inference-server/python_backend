@@ -165,7 +165,7 @@ ModelInstanceState::SendMessageAndReceiveResponse(
   }
 
   bi::managed_external_buffer::handle_t response_message;
-  error = ReceiveMessageFromStub(response_message);
+  error = Stub()->ReceiveMessageFromStub(response_message);
   if (error != nullptr) {
     restart = true;
     RespondErrorToAllRequests(
@@ -205,44 +205,6 @@ ModelInstanceState::SendMessageToStub(
 
     Stub()->StubMessageQueue()->Push(
         message, timeout_miliseconds /* duration ms */, success);
-
-    if (!success && !IsStubProcessAlive()) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "Stub process is not healthy.");
-    }
-  }
-
-  return nullptr;  // success
-}
-
-TRITONSERVER_Error*
-ModelInstanceState::ReceiveMessageFromStub(
-    bi::managed_external_buffer::handle_t& message)
-{
-  bool success = false;
-  while (!success) {
-    uint64_t timeout_miliseconds = 1000;
-    {
-      boost::posix_time::ptime timeout =
-          boost::get_system_time() +
-          boost::posix_time::milliseconds(timeout_miliseconds);
-
-      bi::scoped_lock<bi::interprocess_mutex> lock(
-          *Stub()->HealthMutex(), timeout);
-
-      // Check if lock has been acquired.
-      if (lock) {
-        Stub()->IpcControl()->stub_health = false;
-      } else {
-        // If it failed to obtain the lock, it means that the stub has been
-        // stuck or exited while holding the health mutex lock.
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
-      }
-    }
-
-    message = Stub()->ParentMessageQueue()->Pop(
-        timeout_miliseconds /* duration ms */, success);
 
     if (!success && !IsStubProcessAlive()) {
       return TRITONSERVER_ErrorNew(
@@ -1251,7 +1213,7 @@ ModelInstanceState::ProcessRequests(
         boost::asio::post(*thread_pool_, std::move(task));
     futures_.emplace_back(std::move(future));
 
-    auto error = ReceiveMessageFromStub(response_message);
+    auto error = Stub()->ReceiveMessageFromStub(response_message);
     if (error != nullptr) {
       restart = true;
       RespondErrorToAllRequests(

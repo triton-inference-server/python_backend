@@ -290,9 +290,6 @@ class ModelInstanceState : public BackendModelInstance {
   bool IsStubProcessAlive();
 
   // Get a message from the stub process
-  TRITONSERVER_Error* ReceiveMessageFromStub(off_t& message);
-
-  // Get a message from the stub process
   void SendMessageAndReceiveResponse(
       off_t message, off_t& response, bool& restart,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
@@ -365,10 +362,10 @@ class ModelInstanceState : public BackendModelInstance {
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
 
-  // Stop the log monitor threads
+  // Stop the stub_to_parent_queue_monitor thread
   void TerminateMonitor();
 
-  // Start the log monitor threads
+  // Start the stub_to_parent_queue_monitor thread
   void StartMonitor();
 
   // Send bls decoupled response to the stub process
