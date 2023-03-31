@@ -892,12 +892,16 @@ class TritonPythonModel:
           inputs=[<pb_utils.Tensor object>])
 
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
-      # model version and timeout in addition to the arguments described above.
+      # model version timeout and  preferred_memory in addition to the
+      # arguments described above.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5,
+      #   preferred_memory=pb_utils.PreferredMemory(
+      #     pb_utils.PreferredMemory.GPU, # or pb_utils.PreferredMemory.CPU
+      #     0))
 
       # Execute the inference_request and wait for the response
       inference_response = inference_request.exec()
@@ -986,11 +990,22 @@ inference responses returned by a decoupled model. If the `decoupled` parameter
 is set to `False`, the `exec` and `async_exec` function will return a single
 response as shown in the example above.
 
-Besides, you can set the timeout via the parameter 'timeout' in microseconds
-within the constructor of `InferenceRequest`. If the request times out, the
-request will respond with an error. The default of 'timeout' is 0 which
-indicates that the request has no timeout. Example below shows how to use this
-feature:
+Additionally, starting from the 23.04 release, you have the flexibility to
+select a specific device to receive output tensors from BLS calls. This
+can be achieved by setting the optional `preferred_memory` parameter within the
+`InferenceRequest` constructor. To do this, you can create a `PreferredMemory`
+object and specify the `preferred_memory_type` as either `PreferredMemory.GPU`
+or `PreferredMemory.CPU`, as well as the `preferred_device_id` as an integer to
+indicate the memory type and device ID on which you wish to receive output
+tensors. In the event that the `preferred_memory_type` is set to
+`PreferredMemory.GPU` but the device with the specified `preferred_device_id`
+is unavailable for output allocation, the Python backend will attempt to
+allocate output tensors on other available devices and only return an error if
+none of the devices are available. If you do not specify the `preferred_memory`
+parameter, the output tensors will be allocated on the same device where the
+output tensors were received from the model to which the BLS call is made.
+
+Example below shows how to use this feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -1011,12 +1026,16 @@ class TritonPythonModel:
           inputs=[<pb_utils.Tensor object>])
 
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
-      # model version and timeout in addition to the arguments described above.
+      # model version timeout and  preferred_memory in addition to the
+      # arguments described above.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5)
+      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5,
+      #   preferred_memory=pb_utils.PreferredMemory(
+      #     pb_utils.PreferredMemory.GPU, # or pb_utils.PreferredMemory.CPU
+      #     0))
 
       # Execute the inference_request and wait for the response. Here we are
       # running a BLS request on a decoupled model, hence setting the parameter
