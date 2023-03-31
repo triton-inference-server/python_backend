@@ -29,8 +29,19 @@
 #include <functional>
 #include <queue>
 #include "infer_response.h"
+#include "pb_preferred_memory.h"
 
 namespace triton { namespace backend { namespace python {
+
+struct ResponseAllocatorUserp {
+  ResponseAllocatorUserp(
+      void* shm_pool, const PreferredMemory& preferred_memory)
+      : shm_pool(shm_pool), preferred_memory(preferred_memory)
+  {
+  }
+  void* shm_pool;
+  PreferredMemory preferred_memory;
+};
 
 class InferPayload {
  public:
@@ -44,12 +55,16 @@ class InferPayload {
   bool IsDecoupled();
   bool IsPromiseSet();
   void Callback(std::unique_ptr<InferResponse> infer_response);
+  void SetResponseAllocUserp(
+      const ResponseAllocatorUserp& response_alloc_userp);
+  std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
 
  private:
   std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
   bool is_decoupled_;
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;
+  std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
 };
 
 }}}  // namespace triton::backend::python

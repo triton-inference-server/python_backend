@@ -75,4 +75,18 @@ InferPayload::Callback(std::unique_ptr<InferResponse> infer_response)
   return callback_(std::move(infer_response));
 }
 
+void
+InferPayload::SetResponseAllocUserp(
+    const ResponseAllocatorUserp& response_alloc_userp)
+{
+  response_alloc_userp_ =
+      std::make_shared<ResponseAllocatorUserp>(response_alloc_userp);
+}
+
+std::shared_ptr<ResponseAllocatorUserp>
+InferPayload::ResponseAllocUserp()
+{
+  return response_alloc_userp_;
+}
+
 }}}  // namespace triton::backend::python

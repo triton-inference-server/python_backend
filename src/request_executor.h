@@ -30,7 +30,6 @@
 #include "infer_payload.h"
 #include "infer_request.h"
 #include "infer_response.h"
-#include "pb_preferred_memory.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -52,15 +51,5 @@ class RequestExecutor {
       TRITONSERVER_Server* server);
 
   ~RequestExecutor();
-
-  struct ResponseAllocatorUserp {
-    ResponseAllocatorUserp(
-        void* shm_pool, const PreferredMemory& preferred_memory)
-        : shm_pool(shm_pool), preferred_memory(preferred_memory)
-    {
-    }
-    void* shm_pool;
-    PreferredMemory preferred_memory;
-  };
 };
 }}}  // namespace triton::backend::python

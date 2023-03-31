@@ -222,7 +222,7 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
-  auto p = reinterpret_cast<RequestExecutor::ResponseAllocatorUserp*>(userp);
+  auto p = reinterpret_cast<ResponseAllocatorUserp*>(userp);
   std::unique_ptr<SharedMemoryManager> shm_pool(
       reinterpret_cast<SharedMemoryManager*>(p->shm_pool));
 
@@ -423,10 +423,11 @@ RequestExecutor::Infer(
 
       ResponseAllocatorUserp response_allocator_userp(
           shm_pool_.get(), infer_request->GetPreferredMemory());
+      infer_payload->SetResponseAllocUserp(response_allocator_userp);
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
           irequest, response_allocator_,
-          reinterpret_cast<void*>(&response_allocator_userp),
+          reinterpret_cast<void*>(infer_payload->ResponseAllocUserp().get()),
           InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
