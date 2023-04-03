@@ -186,34 +186,6 @@ InferResponseComplete(
   }
 }
 
-bool
-IsAllocateGPUBufferSuccess(int64_t device_id, void** buffer, size_t byte_size)
-{
-  auto err = cudaSetDevice(device_id);
-  if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
-      (err != cudaErrorInsufficientDriver)) {
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_ERROR, std::string(
-                                    "unable to set current CUDA device: " +
-                                    std::string(cudaGetErrorString(err)))
-                                    .c_str());
-
-    return false;
-  }
-
-  err = cudaMalloc(buffer, byte_size);
-  if (err != cudaSuccess) {
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_ERROR,
-        std::string(
-            "cudaMalloc failed: " + std::string(cudaGetErrorString(err)))
-            .c_str());
-    return false;
-  }
-
-  return true;
-}
-
 TRITONSERVER_Error*
 ResponseAlloc(
     TRITONSERVER_ResponseAllocator* allocator, const char* tensor_name,
@@ -272,36 +244,25 @@ ResponseAlloc(
       } break;
 #ifdef TRITON_ENABLE_GPU
       case TRITONSERVER_MEMORY_GPU: {
-        if (!IsAllocateGPUBufferSuccess(
-                *actual_memory_type_id, buffer, byte_size)) {
-          int num_devices = 0;
-          cudaError_t err = cudaGetDeviceCount(&num_devices);
-          if (err != cudaSuccess) {
-            return TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_INTERNAL,
-                std::string(
-                    "cudaGetDeviceCount failed: " +
-                    std::string(cudaGetErrorString(err)))
-                    .c_str());
-          }
-
-          bool is_buffer_allocated = false;
-          for (int i = 0; i < num_devices; i++) {
-            if (i != *actual_memory_type_id) {
-              if (IsAllocateGPUBufferSuccess(i, buffer, byte_size)) {
-                is_buffer_allocated = true;
-                break;
-              }
-            }
-          }
-
-          if (!is_buffer_allocated) {
-            return TRITONSERVER_ErrorNew(
-                TRITONSERVER_ERROR_INTERNAL,
-                "unable to allocate buffer on any available CUDA device");
-          }
+        auto err = cudaSetDevice(*actual_memory_type_id);
+        if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
+            (err != cudaErrorInsufficientDriver)) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "unable to set current CUDA device: " +
+                  std::string(cudaGetErrorString(err)))
+                  .c_str());
         }
 
+        err = cudaMalloc(buffer, byte_size);
+        if (err != cudaSuccess) {
+          return TRITONSERVER_ErrorNew(
+              TRITONSERVER_ERROR_INTERNAL,
+              std::string(
+                  "cudaMalloc failed: " + std::string(cudaGetErrorString(err)))
+                  .c_str());
+        }
         break;
       }
 #endif

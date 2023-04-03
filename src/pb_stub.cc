@@ -422,6 +422,8 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "PreferredMemory",
       c_python_backend_utils.attr("PreferredMemory"));
+  py::setattr(python_backend_utils, "GPU", c_python_backend_utils.attr("GPU"));
+  py::setattr(python_backend_utils, "CPU", c_python_backend_utils.attr("CPU"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -1290,13 +1292,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(py::init<std::string>())
       .def("message", &PbError::Message);
 
-  py::class_<PreferredMemory, std::shared_ptr<PreferredMemory>>
-      preferred_memory(module, "PreferredMemory");
-  preferred_memory.def(
-      py::init<const PreferredMemory::MemoryType&, const int64_t&>(),
-      py::arg("preferred_memory_type").none(false),
-      py::arg("preferred_device_id").none(false) = 0);
-  py::enum_<PreferredMemory::MemoryType>(preferred_memory, "MemoryType")
+  py::class_<PreferredMemory, std::shared_ptr<PreferredMemory>>(
+      module, "PreferredMemory")
+      .def(
+          py::init<const PreferredMemory::MemoryType&, const int64_t&>(),
+          py::arg("preferred_memory_type").none(false),
+          py::arg("preferred_device_id").none(false) = 0);
+
+  py::enum_<PreferredMemory::MemoryType>(module, "MemoryType")
       .value("GPU", PreferredMemory::MemoryType::GPU)
       .value("CPU", PreferredMemory::MemoryType::CPU)
       .export_values();

@@ -900,7 +900,7 @@ class TritonPythonModel:
       #   inputs=[<list of pb_utils.Tensor objects>],
       #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5,
       #   preferred_memory=pb_utils.PreferredMemory(
-      #     pb_utils.PreferredMemory.GPU, # or pb_utils.PreferredMemory.CPU
+      #     pb_utils.GPU, # or pb_utils.CPU
       #     0))
 
       # Execute the inference_request and wait for the response
@@ -994,16 +994,9 @@ Additionally, starting from the 23.04 release, you have the flexibility to
 select a specific device to receive output tensors from BLS calls. This
 can be achieved by setting the optional `preferred_memory` parameter within the
 `InferenceRequest` constructor. To do this, you can create a `PreferredMemory`
-object and specify the `preferred_memory_type` as either `PreferredMemory.GPU`
-or `PreferredMemory.CPU`, as well as the `preferred_device_id` as an integer to
-indicate the memory type and device ID on which you wish to receive output
-tensors. In the event that the `preferred_memory_type` is set to
-`PreferredMemory.GPU` but the device with the specified `preferred_device_id`
-is unavailable for output allocation, the Python backend will attempt to
-allocate output tensors on other available devices and only return an error if
-none of the devices are available. If you do not specify the `preferred_memory`
-parameter, the output tensors will be allocated on the same device where the
-output tensors were received from the model to which the BLS call is made.
+object and specify the `preferred_memory_type` as either `GPU` or `CPU`, as
+well as the `preferred_device_id` as an integer to indicate the memory type and
+device ID on which you wish to receive output tensors.
 
 Example below shows how to use this feature:
 
@@ -1034,7 +1027,7 @@ class TritonPythonModel:
       #   inputs=[<list of pb_utils.Tensor objects>],
       #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5,
       #   preferred_memory=pb_utils.PreferredMemory(
-      #     pb_utils.PreferredMemory.GPU, # or pb_utils.PreferredMemory.CPU
+      #     pb_utils.GPU, # or pb_utils.CPU
       #     0))
 
       # Execute the inference_request and wait for the response. Here we are
