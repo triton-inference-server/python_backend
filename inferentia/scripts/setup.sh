@@ -115,14 +115,16 @@ apt-get update && \
               libarchive-dev   \
               rapidjson-dev
 
-# CMake
-wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-      gpg --dearmor - |  \
-      tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null && \
-apt-add-repository 'deb https://apt.kitware.com/ubuntu/ focal main' && \
-apt-get update && \
-apt-get install -y --no-install-recommends \
-cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1 && \
+# Using CMAKE installation instruction from:: https://apt.kitware.com/
+apt install -y gpg wget && \
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
+        gpg --dearmor - |  \
+        tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $UBUNTU_CODENAME main" | \
+    tee /etc/apt/sources.list.d/kitware.list >/dev/null && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends cmake cmake-data
 cmake --version
 
 # First compile correct python stub
