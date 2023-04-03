@@ -892,7 +892,7 @@ class TritonPythonModel:
           inputs=[<pb_utils.Tensor object>])
 
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
-      # model version timeout and  preferred_memory in addition to the
+      # model version, timeout and preferred_memory in addition to the
       # arguments described above.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
@@ -988,7 +988,11 @@ models in both [default mode](#default-mode) and
 [iterator](https://docs.python.org/3/glossary.html#term-iterator) of
 inference responses returned by a decoupled model. If the `decoupled` parameter
 is set to `False`, the `exec` and `async_exec` function will return a single
-response as shown in the example above.
+response as shown in the example above. Besides, you can set the timeout via
+the parameter 'timeout' in microseconds within the constructor of
+`InferenceRequest`. If the request times out, the request will respond with an
+error. The default of 'timeout' is 0 which indicates that the request has no
+timeout.
 
 Additionally, starting from the 23.04 release, you have the flexibility to
 select a specific device to receive output tensors from BLS calls. This
@@ -996,7 +1000,10 @@ can be achieved by setting the optional `preferred_memory` parameter within the
 `InferenceRequest` constructor. To do this, you can create a `PreferredMemory`
 object and specify the `preferred_memory_type` as either `GPU` or `CPU`, as
 well as the `preferred_device_id` as an integer to indicate the memory type and
-device ID on which you wish to receive output tensors.
+device ID on which you wish to receive output tensors. If you do not specify
+the `preferred_memory` parameter, the output tensors will be allocated on the
+same device where the output tensors were received from the model to which the
+BLS call is made.
 
 Example below shows how to use this feature:
 
@@ -1019,7 +1026,7 @@ class TritonPythonModel:
           inputs=[<pb_utils.Tensor object>])
 
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
-      # model version timeout and  preferred_memory in addition to the
+      # model version, timeout and preferred_memory in addition to the
       # arguments described above.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
