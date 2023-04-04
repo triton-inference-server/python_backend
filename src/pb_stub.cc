@@ -422,8 +422,12 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "PreferredMemory",
       c_python_backend_utils.attr("PreferredMemory"));
-  py::setattr(python_backend_utils, "GPU", c_python_backend_utils.attr("GPU"));
-  py::setattr(python_backend_utils, "CPU", c_python_backend_utils.attr("CPU"));
+  py::setattr(
+      python_backend_utils, "TRITONSERVER_MEMORY_GPU",
+      c_python_backend_utils.attr("TRITONSERVER_MEMORY_GPU"));
+  py::setattr(
+      python_backend_utils, "TRITONSERVER_MEMORY_CPU",
+      c_python_backend_utils.attr("TRITONSERVER_MEMORY_CPU"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -1300,8 +1304,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("preferred_device_id").none(false) = 0);
 
   py::enum_<PreferredMemory::MemoryType>(module, "MemoryType")
-      .value("GPU", PreferredMemory::MemoryType::GPU)
-      .value("CPU", PreferredMemory::MemoryType::CPU)
+      .value("TRITONSERVER_MEMORY_GPU", PreferredMemory::MemoryType::GPU)
+      .value("TRITONSERVER_MEMORY_CPU", PreferredMemory::MemoryType::CPU)
       .export_values();
 
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
