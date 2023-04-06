@@ -565,8 +565,9 @@ models
 
 You can retrieve the parameters associated with an inference request
 using the `inference_request.parameters()` function. This function
-returns a JSON object where the keys are the keys of the parameters
-object and the values are the values for the parameters field.
+returns a JSON string where the keys are the keys of the parameters
+object and the values are the values for the parameters field. Note that
+you need to parse this string using `json.loads` to convert it to a dictionary.
 
 You can read more about the inference request parameters in the [parameters
 extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
