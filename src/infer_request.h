@@ -29,6 +29,7 @@
 #include <future>
 #include <string>
 #include "infer_response.h"
+#include "pb_preferred_memory.h"
 #include "pb_tensor.h"
 
 #ifdef TRITON_PB_STUB
@@ -52,6 +53,7 @@ struct InferRequestShm {
   intptr_t response_factory_address;
   bool is_decoupled;
   int32_t timeout;
+  PreferredMemory preferred_memory;
 };
 
 class InferRequest {
@@ -63,7 +65,9 @@ class InferRequest {
       const std::string& model_name, const int64_t model_version,
       const std::string& parameters, const uint32_t flags = 0,
       const int32_t timeout = 0, const intptr_t response_factory_address = 0,
-      const intptr_t request_address = 0);
+      const intptr_t request_address = 0,
+      const PreferredMemory& preferred_memory =
+          PreferredMemory(PreferredMemory::DEFAULT, 0));
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
@@ -78,6 +82,7 @@ class InferRequest {
   int32_t Timeout();
   bool IsDecoupled();
   void SetIsDecoupled(const bool is_decoupled);
+  PreferredMemory& GetPreferredMemory();
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
@@ -132,6 +137,7 @@ class InferRequest {
   intptr_t response_factory_address_;
   intptr_t request_address_;
   bool is_decoupled_;
+  PreferredMemory preferred_memory_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;

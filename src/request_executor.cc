@@ -41,6 +41,27 @@ CreateTritonErrorFromException(const PythonBackendException& pb_exception)
       TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
 }
 
+TRITONSERVER_Error*
+MemoryTypeToTritonMemoryType(
+    TRITONSERVER_MemoryType* triton_memory_type,
+    const PreferredMemory::MemoryType& memory_type)
+{
+  switch (memory_type) {
+    case PreferredMemory::MemoryType::CPU:
+      *triton_memory_type = TRITONSERVER_MEMORY_CPU;
+      break;
+    case PreferredMemory::MemoryType::GPU:
+      *triton_memory_type = TRITONSERVER_MEMORY_GPU;
+      break;
+
+    default:
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Unknown memory type");
+  }
+
+  return nullptr;
+}
+
 void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
@@ -173,12 +194,24 @@ ResponseAlloc(
     void** buffer_userp, TRITONSERVER_MemoryType* actual_memory_type,
     int64_t* actual_memory_type_id)
 {
+  auto p = reinterpret_cast<ResponseAllocatorUserp*>(userp);
   std::unique_ptr<SharedMemoryManager> shm_pool(
-      reinterpret_cast<SharedMemoryManager*>(userp));
+      reinterpret_cast<SharedMemoryManager*>(p->shm_pool));
 
   ScopedDefer _([&shm_pool] { shm_pool.release(); });
-  *actual_memory_type = preferred_memory_type;
-  *actual_memory_type_id = preferred_memory_type_id;
+
+  if (p->preferred_memory.PreferredMemoryType() ==
+      PreferredMemory::MemoryType::DEFAULT) {
+    *actual_memory_type = preferred_memory_type;
+    *actual_memory_type_id = preferred_memory_type_id;
+  } else {
+    TRITONSERVER_MemoryType user_preferred_memory_type;
+    RETURN_IF_ERROR(MemoryTypeToTritonMemoryType(
+        &user_preferred_memory_type,
+        p->preferred_memory.PreferredMemoryType()));
+    *actual_memory_type = user_preferred_memory_type;
+    *actual_memory_type_id = p->preferred_memory.PreferredDeviceId();
+  }
 
   // If 'byte_size' is zero just return 'buffer' == nullptr, we don't
   // need to do any other book-keeping.
@@ -349,9 +382,14 @@ RequestExecutor::Infer(
     {
       infer_payload->SetFuture(response_future);
 
+      ResponseAllocatorUserp response_allocator_userp(
+          shm_pool_.get(), infer_request->GetPreferredMemory());
+      infer_payload->SetResponseAllocUserp(response_allocator_userp);
+
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
-          irequest, response_allocator_, shm_pool_.get(), InferResponseComplete,
-          reinterpret_cast<void*>(infer_payload.get())));
+          irequest, response_allocator_,
+          reinterpret_cast<void*>(infer_payload->ResponseAllocUserp().get()),
+          InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));

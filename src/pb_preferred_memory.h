@@ -26,45 +26,32 @@
 
 #pragma once
 
-#include <functional>
-#include <queue>
-#include "infer_response.h"
-#include "pb_preferred_memory.h"
-
 namespace triton { namespace backend { namespace python {
 
-struct ResponseAllocatorUserp {
-  ResponseAllocatorUserp(
-      void* shm_pool, const PreferredMemory& preferred_memory)
-      : shm_pool(shm_pool), preferred_memory(preferred_memory)
+class PreferredMemory {
+ public:
+  enum MemoryType { GPU, CPU, DEFAULT };
+
+  PreferredMemory()
+      : preferred_memory_type_(MemoryType::DEFAULT), preferred_device_id_(0)
   {
   }
-  void* shm_pool;
-  PreferredMemory preferred_memory;
-};
 
-class InferPayload {
- public:
-  InferPayload(
-      const bool is_decouple,
-      std::function<void(std::unique_ptr<InferResponse>)> callback);
-  ~InferPayload();
+  PreferredMemory(
+      const MemoryType& preferred_memory_type,
+      const int64_t& preferred_device_id)
+      : preferred_memory_type_(preferred_memory_type),
+        preferred_device_id_(preferred_device_id)
+  {
+  }
 
-  void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
-  void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
-  bool IsDecoupled();
-  bool IsPromiseSet();
-  void Callback(std::unique_ptr<InferResponse> infer_response);
-  void SetResponseAllocUserp(
-      const ResponseAllocatorUserp& response_alloc_userp);
-  std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
+  MemoryType PreferredMemoryType() { return preferred_memory_type_; }
+
+  int64_t PreferredDeviceId() { return preferred_device_id_; }
 
  private:
-  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
-  bool is_decoupled_;
-  bool is_promise_set_;
-  std::function<void(std::unique_ptr<InferResponse>)> callback_;
-  std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
+  MemoryType preferred_memory_type_;
+  int64_t preferred_device_id_;
 };
 
 }}}  // namespace triton::backend::python

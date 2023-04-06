@@ -158,6 +158,7 @@ set(
   src/shm_manager.cc
   src/shm_manager.h
   src/pb_exception.h
+  src/pb_preferred_memory.h
 )
 
 set(
