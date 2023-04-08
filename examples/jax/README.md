@@ -60,11 +60,11 @@ $ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
 ```
 See the installation steps above for the `<yy.mm>` version.
 
-At the time of writing, the latest version is `22.08`, which translates to the
+At the time of writing, the latest version is `23.03`, which translates to the
 following commands:
 ```
-$ docker pull nvcr.io/nvidia/tritonserver:22.08-py3
-$ docker pull nvcr.io/nvidia/tritonserver:22.08-py3-sdk
+$ docker pull nvcr.io/nvidia/tritonserver:23.03-py3
+$ docker pull nvcr.io/nvidia/tritonserver:23.03-py3-sdk
 ```
 
 Be sure to replace the `<yy.mm>` with the version pulled for all the remaining
@@ -87,7 +87,7 @@ dependencies.
 
 To install for this example, run the following command:
 ```
-$ pip3 install --upgrade "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+$ pip3 install --upgrade "jax[cuda12_local]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 
 Finally, we need to start the Triton Server, run the following command:
