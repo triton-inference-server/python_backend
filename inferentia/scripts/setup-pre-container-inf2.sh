@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -24,7 +24,9 @@
 # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 cd /home/ubuntu
+
 
 # First stop and remove old neuron 1.X runtime
 sudo systemctl stop neuron-rtd
@@ -36,9 +38,7 @@ sudo tee /etc/apt/sources.list.d/neuron.list > /dev/null <<EOF
 deb https://apt.repos.neuron.amazonaws.com ${VERSION_CODENAME} main
 EOF
 sudo wget -qO - https://apt.repos.neuron.amazonaws.com/GPG-PUB-KEY-AMAZON-AWS-NEURON.PUB |  apt-key add -
-sudo apt-get update &&          \
-    sudo apt-get install -y        \
-        linux-headers-$(uname -r)  \
-        aws-neuronx-dkms            \
-        aws-neuronx-tools
 
+# Install Neuron Runtime 
+sudo apt-get install aws-neuronx-collectives=2.* -y
+sudo apt-get install aws-neuronx-runtime-lib=2.* -y
