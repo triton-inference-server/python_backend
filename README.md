@@ -67,6 +67,8 @@ any C++ code.
   - [`pb_utils.Tensor.from_dlpack() -> Tensor`](#pb_utilstensorfrom_dlpack---tensor)
   - [`pb_utils.Tensor.is_cpu() -> bool`](#pb_utilstensoris_cpu---bool)
   - [Input Tensor Device Placement](#input-tensor-device-placement)
+- [Frameworks](#frameworks)
+  - [PyTorch](#pytorch)
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
@@ -1243,6 +1245,54 @@ CPU and GPU memory. To enable this setting, you need to add this setting to the
 ```
 parameters: { key: "FORCE_CPU_ONLY_INPUT_TENSORS" value: {string_value:"no"}}
 ```
+
+# Frameworks
+
+Since Python Backend models can support most python packages, it is a common
+workflow for users to use Deep Learning Frameworks like PyTorch in their
+`model.py` implementation. This section will document some notes and FAQ about
+this workflow.
+
+> **Note**
+>
+> Using a deep learning framework/package in a Python Backend model is
+> not necessarily the same as using the corresponding Triton Backend 
+> implementation. For example, the 
+> [PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
+> is different from using a Python Backend model that uses `import torch`.
+> If you are seeing significantly different results from a model executed by
+> the framework (ex: PyTorch) compared to the Python Backend model running the
+> same framework, some of the first things you should check is that the
+> framework versions being used and the input/output preparation are the same.
+
+## PyTorch
+
+For a simple example of using PyTorch in a Python Backend model, see the
+[AddSubNet PyTorch example](#addsubnet-in-pytorch).
+
+### Determinism and Reproducibility
+
+When running PyTorch code, you may notice slight differences in output values
+across runs or across servers depending on hardware, system load, driver, etc. 
+For most intents and purposes, these differences aren't large enough to affect
+a model's final prediction. However, to understand where these differences come 
+from, see this [doc](https://pytorch.org/docs/stable/notes/randomness.html).
+
+On Ampere devices and later, there is an optimization related to
+FP32 operations called TensorFlow32 (TF32). Typically this optimization will
+improve overall performance at the cost of minor precision loss, but similarly
+this precision loss is acceptable for most model predictions. For more info on
+TF32 in PyTorch and how to enable/disable it as needed, see 
+[here](https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices).
+
+### PyTorch 2.0
+
+Currently, the
+[PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
+relies on LibTorch/TorchScript (C++) which has been deprecated from
+[PyTorch 2.0](https://pytorch.org/get-started/pytorch-2.0/). 
+So, users interested in new features introduced in PyTorch 2.0 should try the
+Python backend route instead.
 
 # Examples
 
