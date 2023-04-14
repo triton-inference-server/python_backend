@@ -1287,14 +1287,12 @@ TF32 in PyTorch and how to enable/disable it as needed, see
 
 ### PyTorch 2.0
 
-With the release of [PyTorch 2.0](https://pytorch.org/get-started/pytorch-2.0/),
-there is a larger divide between what LibTorch/TorchScript (C++) and 
-PyTorch (Python) currently support.
-
 Currently, the
 [PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
-doesn't support PyTorch 2.0, so users should try the Python Backend for these
-models instead.
+relies on LibTorch/TorchScript (C++) which has been deprecated from
+[PyTorch 2.0](https://pytorch.org/get-started/pytorch-2.0/). 
+So, users interested in new features introduced in PyTorch 2.0 should try the
+Python backend route instead.
 
 # Examples
 
