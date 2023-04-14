@@ -1253,17 +1253,17 @@ workflow for users to use Deep Learning Frameworks like PyTorch in their
 `model.py` implementation. This section will document some notes and FAQ about
 this workflow.
 
->> **Note**
->>
->> Using a deep learning framework/package in a Python Backend model is
->> not necessarily the same as using the corresponding Triton Backend 
->> implementation. For example, the 
->> [PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
->> is different from using a Python Backend model that uses `import torch`.
->> If you are seeing significantly different results from a model executed by
->> the framework (ex: PyTorch) compared to the Python Backend model running the
->> same framework, some of the first things you should check is that the
->> framework versions being used and the input/output preparation are the same.
+> **Note**
+>
+> Using a deep learning framework/package in a Python Backend model is
+> not necessarily the same as using the corresponding Triton Backend 
+> implementation. For example, the 
+> [PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
+> is different from using a Python Backend model that uses `import torch`.
+> If you are seeing significantly different results from a model executed by
+> the framework (ex: PyTorch) compared to the Python Backend model running the
+> same framework, some of the first things you should check is that the
+> framework versions being used and the input/output preparation are the same.
 
 ## PyTorch
 
