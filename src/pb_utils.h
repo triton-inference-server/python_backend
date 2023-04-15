@@ -172,7 +172,6 @@ struct LogSendMessage : SendMessageBase {
   LogLevel level;
 };
 
-
 struct CleanupMessage : SendMessageBase {
   void* id;
 };

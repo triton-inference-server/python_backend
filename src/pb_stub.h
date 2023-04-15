@@ -157,6 +157,16 @@ class Stub {
   Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
+  struct UtilsMessagePayload {
+    UtilsMessagePayload(
+        const PYTHONSTUB_CommandType& command_type, void* utils_message_ptr)
+        : command_type(command_type), utils_message_ptr(utils_message_ptr)
+    {
+    }
+    PYTHONSTUB_CommandType command_type;
+    void* utils_message_ptr;
+  };
+
   /// Instantiate a new Python backend Stub.
   void Instantiate(
       int64_t shm_growth_size, int64_t shm_default_size,
@@ -229,7 +239,7 @@ class Stub {
   void ServiceStubToParentRequests();
 
   /// Send client log to the python backend
-  void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
+  void SendLogMessage(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Check if stub to parent message handler is running
   bool StubToParentServiceActive();
@@ -251,7 +261,7 @@ class Stub {
       std::shared_ptr<InferResponse> infer_response);
 
   /// Send the id to the python backend for object cleanup
-  void SendCleanupId(void* id);
+  void SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Add cleanup id to queue
   void EnqueueCleanupId(void* id);
@@ -261,7 +271,6 @@ class Stub {
 
   /// Is the stub in the finalize stage
   bool IsFinalizing();
-
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -291,8 +300,7 @@ class Stub {
   bool finalizing_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
-  std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
-  std::queue<void*> bls_response_cleanup_buffer_;
+  std::queue<std::unique_ptr<UtilsMessagePayload>> stub_to_parent_buffer_;
   std::thread stub_to_parent_queue_monitor_;
   bool stub_to_parent_thread_;
   std::mutex stub_to_parent_message_mu_;

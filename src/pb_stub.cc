@@ -879,8 +879,7 @@ Stub::TerminateStubToParentQueueMonitor()
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
     std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-    log_request_buffer_.push(DUMMY_MESSAGE);
-    bls_response_cleanup_buffer_.push(DUMMY_MESSAGE);
+    stub_to_parent_buffer_.push(DUMMY_MESSAGE);
   }
   stub_to_parent_message_cv_.notify_one();
   stub_to_parent_queue_monitor_.join();
@@ -889,9 +888,13 @@ Stub::TerminateStubToParentQueueMonitor()
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+      std::make_unique<UtilsMessagePayload>(
+          PYTHONSTUB_LogRequest, log_ptr.release());
+
   {
     std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-    log_request_buffer_.push(std::move(log_ptr));
+    stub_to_parent_buffer_.push(std::move(utils_msg_payload));
   }
   stub_to_parent_message_cv_.notify_one();
 }
@@ -901,43 +904,35 @@ Stub::ServiceStubToParentRequests()
 {
   while (stub_to_parent_thread_) {
     std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
-    while (log_request_buffer_.empty() &&
-           bls_response_cleanup_buffer_.empty()) {
+    while (stub_to_parent_buffer_.empty()) {
       stub_to_parent_message_cv_.wait(guard);
     }
-    if (!log_request_buffer_.empty()) {
-      // On exit, will send messages until
-      // DUMMY_MESSAGE is reached
-      std::unique_ptr<PbLog> log_request =
-          std::move(log_request_buffer_.front());
-      if (log_request == DUMMY_MESSAGE) {
-        log_request_buffer_.pop();
-        break;
+    // On exit, will send messages to the parent process until
+    // DUMMY_MESSAGE is reached
+    std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+        std::move(stub_to_parent_buffer_.front());
+    if (utils_msg_payload == DUMMY_MESSAGE) {
+      stub_to_parent_buffer_.pop();
+      break;
+    } else {
+      stub_to_parent_buffer_.pop();
+      if (utils_msg_payload->command_type == PYTHONSTUB_LogRequest) {
+        SendLogMessage(utils_msg_payload);
+      } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
+        SendCleanupId(utils_msg_payload);
       } else {
-        log_request_buffer_.pop();
-        SendLogMessage(log_request);
-      }
-    }
-    if (!bls_response_cleanup_buffer_.empty()) {
-      void* id = std::move(bls_response_cleanup_buffer_.front());
-      if (id == DUMMY_MESSAGE) {
-        bls_response_cleanup_buffer_.pop();
-        break;
-      } else {
-        bls_response_cleanup_buffer_.pop();
-        {
-          std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-          response_iterator_map_.erase(id);
-        }
-        SendCleanupId(id);
+        std::cout << "=== unknown command ===\n";
       }
     }
   }
 }
 
 void
-Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
+Stub::SendLogMessage(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 {
+  std::unique_ptr<PbLog> log_send_message = std::unique_ptr<PbLog>(
+      reinterpret_cast<PbLog*>(utils_msg_payload->utils_message_ptr));
+
   std::unique_ptr<PbLogShm> log_request_shm = PbLogShm::Create(
       shm_pool_, log_send_message->Filename(), log_send_message->Line(),
       log_send_message->Message(), log_send_message->Level());
@@ -966,8 +961,14 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
 }
 
 void
-Stub::SendCleanupId(void* id)
+Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 {
+  void* id = utils_msg_payload->utils_message_ptr;
+  {
+    std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+    response_iterator_map_.erase(id);
+  }
+
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, true /* inline_response */);
   ipc_message->Command() = PYTHONSTUB_CleanupRequest;
@@ -995,9 +996,11 @@ void
 Stub::EnqueueCleanupId(void* id)
 {
   if (id != nullptr) {
+    std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+        std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
     {
       std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-      bls_response_cleanup_buffer_.push(id);
+      stub_to_parent_buffer_.push(std::move(utils_msg_payload));
     }
     stub_to_parent_message_cv_.notify_one();
   }
