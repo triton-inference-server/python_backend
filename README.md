@@ -1291,15 +1291,6 @@ model predictions. For more info on TF32 in PyTorch and how to enable/disable
 it as needed, see 
 [here](https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices).
 
-### PyTorch 2.0
-
-Currently, the
-[PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
-relies on LibTorch/TorchScript (C++) which has been deprecated from
-[PyTorch 2.0](https://pytorch.org/get-started/pytorch-2.0/). 
-So, users interested in new features introduced in PyTorch 2.0 should try the
-Python backend route instead.
-
 ## TensorFlow
 
 ### TensorFlow Determinism
