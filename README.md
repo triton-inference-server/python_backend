@@ -69,6 +69,7 @@ any C++ code.
   - [Input Tensor Device Placement](#input-tensor-device-placement)
 - [Frameworks](#frameworks)
   - [PyTorch](#pytorch)
+  - [TensorFlow](#tensorflow)
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
@@ -1270,29 +1271,36 @@ this workflow.
 For a simple example of using PyTorch in a Python Backend model, see the
 [AddSubNet PyTorch example](#addsubnet-in-pytorch).
 
-### Determinism and Reproducibility
+### PyTorch Determinism 
 
 When running PyTorch code, you may notice slight differences in output values
-across runs or across servers depending on hardware, system load, driver, etc. 
+across runs or across servers depending on hardware, system load, driver, or even
+batch size. These differences are generally related to the selection of CUDA
+kernels used to execute the operations, based on the factors mentioned.
+
 For most intents and purposes, these differences aren't large enough to affect
 a model's final prediction. However, to understand where these differences come 
 from, see this [doc](https://pytorch.org/docs/stable/notes/randomness.html).
 
 On Ampere devices and later, there is an optimization related to
-FP32 operations called TensorFlow32 (TF32). Typically this optimization will
-improve overall performance at the cost of minor precision loss, but similarly
-this precision loss is acceptable for most model predictions. For more info on
-TF32 in PyTorch and how to enable/disable it as needed, see 
+FP32 operations called 
+[TensorFloat32 (TF32)](https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/).
+Typically this optimization will improve overall performance at the cost of
+minor precision loss, but similarly this precision loss is acceptable for most
+model predictions. For more info on TF32 in PyTorch and how to enable/disable
+it as needed, see 
 [here](https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices).
 
-### PyTorch 2.0
+## TensorFlow
 
-Currently, the
-[PyTorch Backend](https://github.com/triton-inference-server/pytorch_backend)
-relies on LibTorch/TorchScript (C++) which has been deprecated from
-[PyTorch 2.0](https://pytorch.org/get-started/pytorch-2.0/). 
-So, users interested in new features introduced in PyTorch 2.0 should try the
-Python backend route instead.
+### TensorFlow Determinism
+
+Similar to the PyTorch determinism section above, TensorFlow can have slight 
+differences in outputs based on various factors like hardware, system
+configurations, or batch sizes due to the library's internal CUDA kernel
+selection process. For more information on improving the determinism of outputs
+in TensorFlow, see
+[here](https://www.tensorflow.org/api_docs/python/tf/config/experimental/enable_op_determinism).
 
 # Examples
 
