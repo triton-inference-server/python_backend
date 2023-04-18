@@ -69,6 +69,7 @@ any C++ code.
   - [Input Tensor Device Placement](#input-tensor-device-placement)
 - [Frameworks](#frameworks)
   - [PyTorch](#pytorch)
+  - [TensorFlow](#tensorflow)
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
@@ -1270,7 +1271,7 @@ this workflow.
 For a simple example of using PyTorch in a Python Backend model, see the
 [AddSubNet PyTorch example](#addsubnet-in-pytorch).
 
-### Determinism and Reproducibility
+### PyTorch Determinism 
 
 When running PyTorch code, you may notice slight differences in output values
 across runs or across servers depending on hardware, system load, driver, or even
@@ -1301,12 +1302,13 @@ Python backend route instead.
 
 ## TensorFlow
 
-### Determinism and Reproducibility
+### TensorFlow Determinism
 
-Similar to the PyTorch section above, TensorFlow can have slight differences 
-in outputs based on various factors like hardware, system configurations, or
-batch sizes due to the library's internal CUDA kernel selection process. For
-more information on improving the determinism of outputs in TensorFlow, see
+Similar to the PyTorch determinism section above, TensorFlow can have slight 
+differences in outputs based on various factors like hardware, system
+configurations, or batch sizes due to the library's internal CUDA kernel
+selection process. For more information on improving the determinism of outputs
+in TensorFlow, see
 [here](https://www.tensorflow.org/api_docs/python/tf/config/experimental/enable_op_determinism).
 
 # Examples
