@@ -1306,7 +1306,7 @@ Python backend route instead.
 Similar to the PyTorch section above, TensorFlow can have slight differences 
 in outputs based on various factors like hardware, system configurations, or
 batch sizes due to the library's internal CUDA kernel selection process. For
-more information on improving the determinism of these values in TensorFlow, see
+more information on improving the determinism of outputs in TensorFlow, see
 [here](https://www.tensorflow.org/api_docs/python/tf/config/experimental/enable_op_determinism).
 
 # Examples
