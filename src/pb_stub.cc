@@ -1483,7 +1483,7 @@ main(int argc, char** argv)
   // Path to model.py
   std::string model_path = argv[1];
   std::string shm_region_name = argv[2];
-  int64_t shm_default_size = std::stoi(argv[3]);
+  int64_t shm_default_size = std::stol(argv[3]);
 
   std::vector<std::string> model_path_tokens;
 
@@ -1505,7 +1505,7 @@ main(int argc, char** argv)
     exit(1);
   }
   std::string model_version = model_path_tokens[model_path_tokens.size() - 2];
-  int64_t shm_growth_size = std::stoi(argv[4]);
+  int64_t shm_growth_size = std::stol(argv[4]);
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
 
