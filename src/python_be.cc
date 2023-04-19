@@ -808,10 +808,13 @@ ModelInstanceState::StubToParentMQMonitor()
       ProcessLogRequest(message);
     } else if (message->Command() == PYTHONSTUB_CleanupRequest) {
       ProcessBLSCleanupRequest(message);
+    } else if (message->Command() == PYTHONSTUB_MetricFamilyRequest) {
+      ProcessMetricFamilyRequest(message);
+    } else if (message->Command() == PYTHONSTUB_MetricRequest) {
+      ProcessMetricRequest(message);
     }
   }
 }
-
 
 void
 ModelInstanceState::ProcessLogRequest(
@@ -883,6 +886,109 @@ ModelInstanceState::ProcessBLSCleanupRequest(
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
     cleanup_message_ptr->waiting_on_stub = true;
     message->ResponseCondition()->notify_all();
+  }
+}
+
+void
+ModelInstanceState::ProcessMetricFamilyRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  AllocatedSharedMemory<CustomMetricsMessage> metrics_message =
+      Stub()->ShmPool()->Load<CustomMetricsMessage>(message->Args());
+  CustomMetricsMessage* metrics_message_ptr =
+      reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
+  std::unique_ptr<PbString> pb_error_message;
+  PythonBackendException pb_exception(std::string{});
+  std::unique_ptr<CustomMetricFamily> metric_family =
+      CustomMetricFamily::LoadFromSharedMemory(
+          Stub()->ShmPool(), metrics_message_ptr->message);
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  ScopedDefer _([metrics_message_ptr] {
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{metrics_message_ptr->mu};
+      metrics_message_ptr->waiting_on_stub = true;
+      metrics_message_ptr->cv.notify_all();
+      while (metrics_message_ptr->waiting_on_stub) {
+        metrics_message_ptr->cv.wait(guard);
+      }
+    }
+  });
+
+  try {
+    if (metric_family->RequestKind() == MetricFamilyNew) {
+      model_state->RegisterMetricFamily(std::move(metric_family));
+    } else if (metric_family->RequestKind() == MetricFamilyDelete) {
+      model_state->ClearMetricFamily(
+          metric_family->Name() + metric_family->Description());
+    } else {
+      pb_exception =
+          PythonBackendException("Unknown metric family request kind");
+    }
+  }
+  catch (const PythonBackendException& exception) {
+    pb_exception = exception;
+  }
+
+  if (pb_exception.what() != std::string{}) {
+    metrics_message_ptr->has_error = true;
+    LOG_IF_EXCEPTION(
+        pb_error_message =
+            PbString::Create(Stub()->ShmPool(), pb_exception.what()));
+    metrics_message_ptr->error = pb_error_message->ShmHandle();
+    metrics_message_ptr->is_error_set = true;
+  }
+}
+
+void
+ModelInstanceState::ProcessMetricRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  AllocatedSharedMemory<CustomMetricsMessage> metrics_message =
+      Stub()->ShmPool()->Load<CustomMetricsMessage>(message->Args());
+  CustomMetricsMessage* metrics_message_ptr =
+      reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
+  std::unique_ptr<PbString> pb_error_message;
+  PythonBackendException pb_exception(std::string{});
+  std::unique_ptr<CustomMetric> metric = CustomMetric::LoadFromSharedMemory(
+      Stub()->ShmPool(), metrics_message_ptr->message);
+
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  ScopedDefer _([metrics_message_ptr] {
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{metrics_message_ptr->mu};
+      metrics_message_ptr->waiting_on_stub = true;
+      metrics_message_ptr->cv.notify_all();
+      while (metrics_message_ptr->waiting_on_stub) {
+        metrics_message_ptr->cv.wait(guard);
+      }
+    }
+  });
+
+  try {
+    if (metric->RequestKind() == MetricNew) {
+      model_state->RegisterMetric(std::move(metric));
+    } else if (
+        (metric->RequestKind() == MetricIncrement) ||
+        (metric->RequestKind() == MetricSet) ||
+        (metric->RequestKind() == MetricValue)) {
+      model_state->HandleMetricOperation(metric, &metrics_message_ptr);
+    } else if (metric->RequestKind() == MetricDelete) {
+      model_state->ClearMetric(metric->FamilyName(), metric->Labels());
+    } else {
+      throw PythonBackendException("Unknown metric request kind");
+    }
+  }
+  catch (const PythonBackendException& exception) {
+    pb_exception = exception;
+  }
+  if (pb_exception.what() != std::string{}) {
+    metrics_message_ptr->has_error = true;
+    LOG_IF_EXCEPTION(
+        pb_error_message =
+            PbString::Create(Stub()->ShmPool(), pb_exception.what()));
+    metrics_message_ptr->error = pb_error_message->ShmHandle();
+    metrics_message_ptr->is_error_set = true;
   }
 }
 
@@ -1706,6 +1812,100 @@ ModelState::ValidateModelConfig()
       (std::string("model configuration:\n") + buffer.Contents()).c_str());
 
   return nullptr;
+}
+
+void
+ModelState::RegisterMetricFamily(
+    std::unique_ptr<CustomMetricFamily> metric_family)
+{
+  std::lock_guard<std::mutex> lock(StateForBackend()->metric_family_map_mu);
+  std::string unique_name =
+      metric_family->Name() + metric_family->Description();
+  if (StateForBackend()->metric_family_map.find(unique_name) ==
+      StateForBackend()->metric_family_map.end()) {
+    StateForBackend()->metric_family_map[unique_name] =
+        std::make_unique<PbMetricFamily>(
+            metric_family->Name(), metric_family->Description(),
+            metric_family->Kind());
+  } else {
+    if (StateForBackend()->metric_family_map[unique_name]->Kind() !=
+        metric_family->Kind()) {
+      throw PythonBackendException((std::string("Metric family '") +
+                                    metric_family->Name() +
+                                    "' already exists with a different kind")
+                                       .c_str());
+    }
+  }
+}
+
+void
+ModelState::ClearMetricFamily(const std::string& name)
+{
+  std::lock_guard<std::mutex> lock(StateForBackend()->metric_family_map_mu);
+  if (StateForBackend()->metric_family_map.find(name) !=
+      StateForBackend()->metric_family_map.end()) {
+    StateForBackend()->metric_family_map.erase(name);
+  }
+}
+
+std::unordered_map<std::string, std::unique_ptr<PbMetric>>*
+ModelState::FetchMetricMap(
+    const std::string& family_name, const std::string& labels)
+{
+  std::lock_guard<std::mutex> lock(StateForBackend()->metric_family_map_mu);
+  if (StateForBackend()->metric_family_map.find(family_name) ==
+      StateForBackend()->metric_family_map.end()) {
+    throw PythonBackendException(
+        (std::string("Cannot find metric family '") + family_name + "'")
+            .c_str());
+  }
+  auto metric_map =
+      StateForBackend()->metric_family_map[family_name]->MetricMap();
+  if (metric_map->find(labels) == metric_map->end()) {
+    throw PythonBackendException(
+        (std::string("Cannot find metric '") + labels + "'").c_str());
+  }
+  return metric_map;
+}
+
+void
+ModelState::HandleMetricOperation(
+    std::unique_ptr<CustomMetric>& metric,
+    CustomMetricsMessage** metrics_message_ptr)
+{
+  auto metric_map = FetchMetricMap(metric->FamilyName(), metric->Labels());
+  if (metric->RequestKind() == MetricValue) {
+    (*metrics_message_ptr)->value = (*metric_map)[metric->Labels()]->Value();
+  } else if (metric->RequestKind() == MetricIncrement) {
+    (*metric_map)[metric->Labels()]->Increment(metric->Value());
+  } else if (metric->RequestKind() == MetricSet) {
+    (*metric_map)[metric->Labels()]->SetValue(metric->Value());
+  } else {
+    throw PythonBackendException("Unknown metric operation");
+  }
+}
+
+void
+ModelState::RegisterMetric(std::unique_ptr<CustomMetric> metric)
+{
+  std::lock_guard<std::mutex> lock(StateForBackend()->metric_family_map_mu);
+  if (StateForBackend()->metric_family_map.find(metric->FamilyName()) !=
+      StateForBackend()->metric_family_map.end()) {
+    StateForBackend()->metric_family_map[metric->FamilyName()]->AddMetric(
+        std::move(metric));
+  } else {
+    throw PythonBackendException((std::string("Cannot find metric family '") +
+                                  metric->FamilyName() + "'")
+                                     .c_str());
+  }
+}
+
+void
+ModelState::ClearMetric(
+    const std::string& family_name, const std::string& labels)
+{
+  auto metric_map = FetchMetricMap(family_name, labels);
+  metric_map->erase(labels);
 }
 
 extern "C" {

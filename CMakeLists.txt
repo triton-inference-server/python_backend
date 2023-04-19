@@ -159,6 +159,8 @@ set(
   src/shm_manager.h
   src/pb_exception.h
   src/pb_preferred_memory.h
+  src/pb_custom_metrics.h
+  src/pb_custom_metrics.cc
 )
 
 set(
@@ -177,6 +179,8 @@ set(
   src/stub_launcher.cc
   src/infer_payload.h
   src/infer_payload.cc
+  src/custom_metrics_registry.h
+  src/custom_metrics_registry.cc
 )
 
 list(APPEND

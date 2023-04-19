@@ -40,10 +40,12 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <unordered_map>
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
+#include "pb_custom_metrics.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
@@ -152,20 +154,21 @@ class LogMessage {
 
 #define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
+// The payload for the stub_to_parent message queue
+struct UtilsMessagePayload {
+  UtilsMessagePayload(
+      const PYTHONSTUB_CommandType& command_type, void* utils_message_ptr)
+      : command_type(command_type), utils_message_ptr(utils_message_ptr)
+  {
+  }
+  PYTHONSTUB_CommandType command_type;
+  void* utils_message_ptr;
+};
+
 class Stub {
  public:
   Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
   static std::unique_ptr<Stub>& GetOrCreateInstance();
-
-  struct UtilsMessagePayload {
-    UtilsMessagePayload(
-        const PYTHONSTUB_CommandType& command_type, void* utils_message_ptr)
-        : command_type(command_type), utils_message_ptr(utils_message_ptr)
-    {
-    }
-    PYTHONSTUB_CommandType command_type;
-    void* utils_message_ptr;
-  };
 
   /// Instantiate a new Python backend Stub.
   void Instantiate(
@@ -221,6 +224,9 @@ class Stub {
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
+  /// Get the shared memory pool
+  std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
+
   void ProcessResponse(InferResponse* response);
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
   bool IsDecoupled();
@@ -272,6 +278,32 @@ class Stub {
   /// Is the stub in the finalize stage
   bool IsFinalizing();
 
+  /// Helper function to enqueue a utils message to the stub to parent message
+  /// buffer
+  void EnqueueUtilsMessage(
+      std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
+
+  /// Create a new metric family object
+  std::shared_ptr<CustomMetricFamily> CreateMetricFamily(
+      std::shared_ptr<CustomMetricFamily> new_metric_family);
+
+  /// Clean up the metric family object
+  void ClearMetricFamily(std::string& name);
+
+  /// Clean up the metric object
+  void ClearMetric(const std::string& family_name, const std::string& labels);
+
+  /// Send the custom metrics message to the python backend
+  void SendCustomMetricsMessage(
+      CustomMetricsMessage** custom_metrics_msg,
+      PYTHONSTUB_CommandType command_type,
+      bi::managed_external_buffer::handle_t handle);
+
+  /// Helper function to prepare the custom metrics message
+  void PrepareCustomMetricsMessage(
+      AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
+      CustomMetricsMessage** custom_metrics_msg);
+
  private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
@@ -310,5 +342,8 @@ class Stub {
   std::mutex response_iterator_map_mu_;
   std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
       response_iterator_map_;
+  std::mutex metric_family_map_mu_;
+  std::unordered_map<std::string, std::shared_ptr<CustomMetricFamily>>
+      metric_family_map_;
 };
 }}}  // namespace triton::backend::python

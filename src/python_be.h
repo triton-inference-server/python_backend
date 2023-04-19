@@ -57,11 +57,13 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include "custom_metrics_registry.h"
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "memory_manager.h"
 #include "message_queue.h"
+#include "pb_custom_metrics.h"
 #include "pb_env.h"
 #include "pb_map.h"
 #include "pb_metric_reporter.h"
@@ -214,6 +216,9 @@ struct BackendState {
   std::string shared_memory_region_prefix;
   int64_t thread_pool_size;
   std::unique_ptr<EnvironmentManager> env_manager;
+  std::mutex metric_family_map_mu;
+  std::unordered_map<std::string, std::unique_ptr<PbMetricFamily>>
+      metric_family_map;
 };
 
 class ModelState : public BackendModel {
@@ -241,6 +246,27 @@ class ModelState : public BackendModel {
 
   // Auto-complete stub
   std::unique_ptr<StubLauncher>& Stub() { return auto_complete_stub_; }
+
+  // Register a metric family
+  void RegisterMetricFamily(std::unique_ptr<CustomMetricFamily> metric_family);
+
+  // Clean up metric family
+  void ClearMetricFamily(const std::string& name);
+
+  // Get the metric map corresponding to the metric family name and labels
+  std::unordered_map<std::string, std::unique_ptr<PbMetric>>* FetchMetricMap(
+      const std::string& family_name, const std::string& labels);
+
+  // Handle metric operations
+  void HandleMetricOperation(
+      std::unique_ptr<CustomMetric>& metric,
+      CustomMetricsMessage** metrics_message_ptr);
+
+  // Register a metric
+  void RegisterMetric(std::unique_ptr<CustomMetric> metric);
+
+  // Clean up metric
+  void ClearMetric(const std::string& family_name, const std::string& labels);
 
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
@@ -385,5 +411,11 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process the bls decoupled cleanup request
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process the custom metric family request
+  void ProcessMetricFamilyRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process the custom metric request
+  void ProcessMetricRequest(const std::unique_ptr<IPCMessage>& message);
 };
 }}}  // namespace triton::backend::python

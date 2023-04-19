@@ -41,7 +41,6 @@
 #include <regex>
 #include <thread>
 #include <unordered_map>
-#include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_preferred_memory.h"
@@ -425,6 +424,13 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "TRITONSERVER_MEMORY_CPU",
       c_python_backend_utils.attr("TRITONSERVER_MEMORY_CPU"));
+  py::setattr(
+      python_backend_utils, "MetricFamily",
+      c_python_backend_utils.attr("MetricFamily"));
+  py::setattr(
+      python_backend_utils, "COUNTER", c_python_backend_utils.attr("COUNTER"));
+  py::setattr(
+      python_backend_utils, "GAUGE", c_python_backend_utils.attr("GAUGE"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -890,13 +896,8 @@ Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
   std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
       std::make_unique<UtilsMessagePayload>(
-          PYTHONSTUB_LogRequest, log_ptr.release());
-
-  {
-    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-    stub_to_parent_buffer_.push(std::move(utils_msg_payload));
-  }
-  stub_to_parent_message_cv_.notify_one();
+          PYTHONSTUB_LogRequest, reinterpret_cast<void*>(log_ptr.release()));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
 }
 
 void
@@ -921,7 +922,8 @@ Stub::ServiceStubToParentRequests()
       } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
         SendCleanupId(utils_msg_payload);
       } else {
-        std::cout << "=== unknown command ===\n";
+        std::cerr << "Error when sending message via stub_to_parent message "
+                     "buffer - unknown command\n";
       }
     }
   }
@@ -998,11 +1000,7 @@ Stub::EnqueueCleanupId(void* id)
   if (id != nullptr) {
     std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
         std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
-    {
-      std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-      stub_to_parent_buffer_.push(std::move(utils_msg_payload));
-    }
-    stub_to_parent_message_cv_.notify_one();
+    EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
 }
 
@@ -1166,6 +1164,132 @@ bool
 Stub::IsFinalizing()
 {
   return finalizing_;
+}
+
+void
+Stub::EnqueueUtilsMessage(
+    std::unique_ptr<UtilsMessagePayload> utils_msg_payload)
+{
+  {
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
+    stub_to_parent_buffer_.push(std::move(utils_msg_payload));
+  }
+  stub_to_parent_message_cv_.notify_one();
+}
+
+std::shared_ptr<CustomMetricFamily>
+Stub::CreateMetricFamily(std::shared_ptr<CustomMetricFamily> metric_family)
+{
+  std::lock_guard<std::mutex> lock(metric_family_map_mu_);
+  std::string unique_name =
+      metric_family->Name() + metric_family->Description();
+  if (metric_family_map_.find(unique_name) != metric_family_map_.end()) {
+    if (metric_family_map_[unique_name]->Kind() != metric_family->Kind()) {
+      throw PythonBackendException(
+          "Metric family '" + metric_family->Name() +
+          "' already exists with a different type.");
+    }
+  } else {
+    metric_family_map_[unique_name] = metric_family;
+    metric_family->SaveToSharedMemory(shm_pool_);
+    CustomMetricsMessage* custom_metrics_msg = nullptr;
+    try {
+      SendCustomMetricsMessage(
+          &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequest,
+          metric_family->ShmHandle());
+    }
+    catch (const PythonBackendException& pb_exception) {
+      throw PythonBackendException(
+          "Failed to send metric family message: " +
+          std::string(pb_exception.what()));
+    }
+  }
+
+  return metric_family_map_[unique_name];
+}
+
+void
+Stub::ClearMetricFamily(std::string& name)
+{
+  {
+    std::lock_guard<std::mutex> lock(metric_family_map_mu_);
+    metric_family_map_.erase(name);
+  }
+}
+
+void
+Stub::ClearMetric(const std::string& family_name, const std::string& labels)
+{
+  std::lock_guard<std::mutex> lock(metric_family_map_mu_);
+  metric_family_map_[family_name]->ClearMetric(labels);
+}
+
+void
+Stub::PrepareCustomMetricsMessage(
+    AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
+    CustomMetricsMessage** custom_metrics_msg)
+{
+  custom_metrics_msg_shm = shm_pool_->Construct<CustomMetricsMessage>();
+  *custom_metrics_msg = custom_metrics_msg_shm.data_.get();
+  new (&((*custom_metrics_msg)->mu)) bi::interprocess_mutex;
+  new (&((*custom_metrics_msg)->cv)) bi::interprocess_condition;
+  (*custom_metrics_msg)->waiting_on_stub = false;
+  (*custom_metrics_msg)->is_error_set = false;
+  (*custom_metrics_msg)->has_error = false;
+}
+
+void
+Stub::SendCustomMetricsMessage(
+    CustomMetricsMessage** custom_metrics_msg,
+    PYTHONSTUB_CommandType command_type,
+    bi::managed_external_buffer::handle_t handle)
+{
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_msg_shm;
+  PrepareCustomMetricsMessage(custom_metrics_msg_shm, custom_metrics_msg);
+
+  (*custom_metrics_msg)->message = handle;
+
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = command_type;
+  ipc_message->Args() = custom_metrics_msg_shm.handle_;
+
+  std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
+  {
+    ScopedDefer _([&ipc_message, custom_metrics_msg] {
+      {
+        bi::scoped_lock<bi::interprocess_mutex> guard{
+            (*custom_metrics_msg)->mu};
+        (*custom_metrics_msg)->waiting_on_stub = false;
+        (*custom_metrics_msg)->cv.notify_all();
+      }
+    });
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{(*custom_metrics_msg)->mu};
+      SendIPCUtilsMessage(ipc_message);
+      while (!(*custom_metrics_msg)->waiting_on_stub) {
+        (*custom_metrics_msg)->cv.wait(guard);
+      }
+    }
+  }
+  if ((*custom_metrics_msg)->has_error) {
+    if ((*custom_metrics_msg)->is_error_set) {
+      std::unique_ptr<PbString> pb_string = PbString::LoadFromSharedMemory(
+          shm_pool_, (*custom_metrics_msg)->error);
+      std::string err_message =
+          std::string(
+              "Failed to process the custom metrics request for model '" +
+              name_ + "', message: ") +
+          pb_string->String();
+      throw PythonBackendException(err_message);
+    } else {
+      std::string err_message = std::string(
+          "Failed to process the custom metrics request for model '" + name_ +
+          "'.");
+      throw PythonBackendException(err_message);
+    }
+  }
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
@@ -1453,6 +1577,39 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def_static("log_warn", &Logger::LogWarn, py::arg("message"));
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));
   logger.def_static("log_verbose", &Logger::LogVerbose, py::arg("message"));
+
+  py::class_<CustomMetric, std::shared_ptr<CustomMetric>>(module, "Metric")
+      .def("increment", &CustomMetric::Increment)
+      .def("set", &CustomMetric::SetValue)
+      .def("value", &CustomMetric::GetValue);
+
+  py::enum_<MetricKind>(module, "MetricKind")
+      .value("COUNTER", MetricKind::COUNTER)
+      .value("GAUGE", MetricKind::GAUGE)
+      .export_values();
+
+  py::class_<CustomMetricFamily, std::shared_ptr<CustomMetricFamily>>(
+      module, "MetricFamily")
+      .def(
+          py::init([](const std::string& name, const std::string& description,
+                      const MetricKind& kind) {
+            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+            auto metric_family =
+                std::make_shared<CustomMetricFamily>(name, description, kind);
+            return stub->CreateMetricFamily(metric_family);
+          }),
+          py::arg("name").none(false), py::arg("description").none(false),
+          py::arg("kind").none(false))
+      .def(
+          "Metric",
+          [](std::shared_ptr<CustomMetricFamily>& metric_family,
+             py::dict labels) {
+            py::module json = py::module_::import("json");
+            std::string labels_str =
+                std::string(py::str(json.attr("dumps")(labels)));
+            return metric_family->CreateMetric(labels_str);
+          },
+          py::arg("labels").none(false) = py::dict());
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
