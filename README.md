@@ -70,6 +70,7 @@ any C++ code.
 - [Frameworks](#frameworks)
   - [PyTorch](#pytorch)
   - [TensorFlow](#tensorflow)
+- [Custom Metrics](#custom-metrics)
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
   - [AddSubNet in PyTorch](#addsubnet-in-pytorch)
@@ -77,6 +78,8 @@ any C++ code.
   - [Business Logic Scripting](#business-logic-scripting-1)
   - [Preprocessing](#preprocessing)
   - [Decoupled Models](#decoupled-models)
+  - [Auto-complete Config](#auto-complete-config)
+  - [Custom Metrics](#custom-metrics-1)
 - [Running with Inferentia](#running-with-inferentia)
 - [Logging](#logging)
 - [Reporting problems, asking questions](#reporting-problems-asking-questions)
@@ -1302,6 +1305,60 @@ selection process. For more information on improving the determinism of outputs
 in TensorFlow, see
 [here](https://www.tensorflow.org/api_docs/python/tf/config/experimental/enable_op_determinism).
 
+# Custom Metrics
+
+Starting from 23.05, you can utlize Custom Metrics API to register and collect
+custom metrics in the `initialize`, `execute`, and `finalize` functions of your
+Python model. The Custom Metrics API is the Python equivalent of the
+[TRITON C API custom metrics](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md#custom-metrics)
+support.
+
+Example below shows how to use this feature:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+    def initialize(self, args):
+      # Create a MetricFamily object to report the latency of the model
+      # execution. The 'kind' parameter must be either 'COUNTER' or
+      # 'GAUGE'.
+      self.metric_family = pb_utils.MetricFamily(
+          name="preprocess_latency_ns",
+          description="Cumulative time spent pre-processing requests",
+          kind=pb_utils.Metric.COUNTER # or pb_utils.Metric.GAUGE
+      )
+
+      # Create a Metric object under the MetricFamily object. The 'labels'
+      # is a dictionary of key-value pairs.
+      self.metric = self.metric_family.Metric(
+        labels={"model" : "model_name", "version" : "1"}
+      )
+
+    def execute(self, requests):
+      responses = []
+
+      for request in requests:
+        # Pre-processing - time it to capture latency
+        start_ns = time.time_ns()
+        self.preprocess(request)
+        end_ns = time.time_ns()
+
+        # Update metric to track cumulative pre-processing latency
+        self.metric.increment(end_ns - start_ns)
+
+      ...
+
+      print("Cumulative pre-processing latency:", self.metric.value())
+
+      return responses
+```
+
+You can look at the [custom_metrics example](examples/custom_metrics/model.py)
+which contains a complete example of demonstrating the Custom Metrics API for a
+Python model.
+
 # Examples
 
 For using the Triton Python client in these examples you need to install
@@ -1361,6 +1418,20 @@ the execution of a model instance either on CPU or GPU.
 
 In the [model instance kind example](examples/instance_kind/README.md) 
 we demonstrate how this can be achieved for your python model.
+
+## Auto-complete config
+
+The auto-complete config example demonstrates how to use the
+`auto_complete_config` function to define 
+[minimal model configuration](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#minimal-model-configuration)
+when a configuration file is not available. You can find the complete example
+instructions in [examples/auto_complete](examples/auto_complete/README.md).
+
+## Custom Metrics
+
+The example shows how to use custom metrics API in Python Backend. You can find
+the complete example instructions in
+[examples/custom_metrics](examples/custom_metrics/README.md).
 
 # Running with Inferentia
 
