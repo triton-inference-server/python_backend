@@ -36,11 +36,12 @@
 
 namespace triton { namespace backend { namespace python {
 
-class PbMetric {
+class MetricRegistry {
  public:
-  PbMetric(const std::string& label, TRITONSERVER_MetricFamily* metric_family);
+  MetricRegistry(
+      const std::string& label, TRITONSERVER_MetricFamily* metric_family);
 
-  ~PbMetric();
+  ~MetricRegistry();
 
   // Parse the labels string into a vector of TRITONSERVER_Parameter
   void ParseLabels(
@@ -69,13 +70,13 @@ class PbMetric {
   TRITONSERVER_Metric* metric_;
 };
 
-class PbMetricFamily {
+class MetricFamilyRegistry {
  public:
-  PbMetricFamily(
+  MetricFamilyRegistry(
       const std::string& name, const std::string& description,
       const MetricKind& kind);
 
-  ~PbMetricFamily();
+  ~MetricFamilyRegistry();
 
   // Helper function to convert the MetricKind enum to TRITONSERVER_MetricKind
   TRITONSERVER_MetricKind ToTritonServerMetricKind(const MetricKind& kind);
@@ -84,10 +85,10 @@ class PbMetricFamily {
   TRITONSERVER_MetricFamily* MetricFamily() { return metric_family_; }
 
   // Add a metric to the metric family and store it in the metric map
-  void AddMetric(std::unique_ptr<CustomMetric> metric);
+  void AddMetric(std::unique_ptr<PbCustomMetric> metric);
 
   // Get the metric map
-  std::unordered_map<std::string, std::unique_ptr<PbMetric>>* MetricMap();
+  std::unordered_map<std::string, std::unique_ptr<MetricRegistry>>* MetricMap();
 
   // Get the metric kind
   MetricKind Kind();
@@ -98,7 +99,7 @@ class PbMetricFamily {
   MetricKind kind_;
   TRITONSERVER_MetricFamily* metric_family_;
   std::mutex metric_map_mu_;
-  std::unordered_map<std::string, std::unique_ptr<PbMetric>> metric_map_;
+  std::unordered_map<std::string, std::unique_ptr<MetricRegistry>> metric_map_;
 };
 
 }}};  // namespace triton::backend::python

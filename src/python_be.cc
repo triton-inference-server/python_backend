@@ -899,8 +899,8 @@ ModelInstanceState::ProcessMetricFamilyRequest(
       reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
   std::unique_ptr<PbString> pb_error_message;
   PythonBackendException pb_exception(std::string{});
-  std::unique_ptr<CustomMetricFamily> metric_family =
-      CustomMetricFamily::LoadFromSharedMemory(
+  std::unique_ptr<PbCustomMetricFamily> metric_family =
+      PbCustomMetricFamily::LoadFromSharedMemory(
           Stub()->ShmPool(), metrics_message_ptr->message);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
@@ -950,7 +950,7 @@ ModelInstanceState::ProcessMetricRequest(
       reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
   std::unique_ptr<PbString> pb_error_message;
   PythonBackendException pb_exception(std::string{});
-  std::unique_ptr<CustomMetric> metric = CustomMetric::LoadFromSharedMemory(
+  std::unique_ptr<PbCustomMetric> metric = PbCustomMetric::LoadFromSharedMemory(
       Stub()->ShmPool(), metrics_message_ptr->message);
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
@@ -1816,7 +1816,7 @@ ModelState::ValidateModelConfig()
 
 void
 ModelState::RegisterMetricFamily(
-    std::unique_ptr<CustomMetricFamily> metric_family)
+    std::unique_ptr<PbCustomMetricFamily> metric_family)
 {
   std::lock_guard<std::mutex> lock(StateForBackend()->metric_family_map_mu);
   std::string unique_name =
@@ -1824,7 +1824,7 @@ ModelState::RegisterMetricFamily(
   if (StateForBackend()->metric_family_map.find(unique_name) ==
       StateForBackend()->metric_family_map.end()) {
     StateForBackend()->metric_family_map[unique_name] =
-        std::make_unique<PbMetricFamily>(
+        std::make_unique<MetricFamilyRegistry>(
             metric_family->Name(), metric_family->Description(),
             metric_family->Kind());
   } else {
@@ -1848,7 +1848,7 @@ ModelState::ClearMetricFamily(const std::string& name)
   }
 }
 
-std::unordered_map<std::string, std::unique_ptr<PbMetric>>*
+std::unordered_map<std::string, std::unique_ptr<MetricRegistry>>*
 ModelState::FetchMetricMap(
     const std::string& family_name, const std::string& labels)
 {
@@ -1870,7 +1870,7 @@ ModelState::FetchMetricMap(
 
 void
 ModelState::HandleMetricOperation(
-    std::unique_ptr<CustomMetric>& metric,
+    std::unique_ptr<PbCustomMetric>& metric,
     CustomMetricsMessage** metrics_message_ptr)
 {
   auto metric_map = FetchMetricMap(metric->FamilyName(), metric->Labels());
@@ -1886,7 +1886,7 @@ ModelState::HandleMetricOperation(
 }
 
 void
-ModelState::RegisterMetric(std::unique_ptr<CustomMetric> metric)
+ModelState::RegisterMetric(std::unique_ptr<PbCustomMetric> metric)
 {
   std::lock_guard<std::mutex> lock(StateForBackend()->metric_family_map_mu);
   if (StateForBackend()->metric_family_map.find(metric->FamilyName()) !=

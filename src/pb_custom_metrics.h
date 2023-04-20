@@ -38,18 +38,18 @@ namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
-struct CustomMetricShm {
+struct PbCustomMetricShm {
   bi::managed_external_buffer::handle_t family_name_shm_handle;
   bi::managed_external_buffer::handle_t labels_shm_handle;
   double value;
   MetricRequestKind metric_request_kind;
 };
 
-class CustomMetric {
+class PbCustomMetric {
  public:
-  CustomMetric(const std::string& family_name, const std::string& labels);
+  PbCustomMetric(const std::string& family_name, const std::string& labels);
 
-  ~CustomMetric();
+  ~PbCustomMetric();
 
   const std::string& FamilyName();
   const std::string& Labels();
@@ -66,7 +66,7 @@ class CustomMetric {
   /// \param handle Shared memory handle of the custom metric.
   /// \return Returns the custom metrics in the specified request_handle
   /// location.
-  static std::unique_ptr<CustomMetric> LoadFromSharedMemory(
+  static std::unique_ptr<PbCustomMetric> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
 
@@ -85,10 +85,10 @@ class CustomMetric {
 #endif
 
   /// Disallow copying the custom metric object.
-  DISALLOW_COPY_AND_ASSIGN(CustomMetric);
+  DISALLOW_COPY_AND_ASSIGN(PbCustomMetric);
 
  private:
-  CustomMetric(
+  PbCustomMetric(
       AllocatedSharedMemory<char>& custom_metric_shm,
       std::unique_ptr<PbString>& family_name_shm,
       std::unique_ptr<PbString>& labels_shm);
@@ -99,13 +99,13 @@ class CustomMetric {
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> custom_metric_shm_;
-  CustomMetricShm* custom_metric_shm_ptr_;
+  PbCustomMetricShm* custom_metric_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
   std::unique_ptr<PbString> family_name_shm_;
   std::unique_ptr<PbString> labels_shm_;
 };
 
-struct CustomMetricFamilyShm {
+struct PbCustomMetricFamilyShm {
   bi::managed_external_buffer::handle_t name_shm_handle;
   bi::managed_external_buffer::handle_t description_shm_handle;
   bi::managed_external_buffer::handle_t key_name_shm_handle;
@@ -113,13 +113,13 @@ struct CustomMetricFamilyShm {
   MetricFamilyRequestKind metric_family_request_kind;
 };
 
-class CustomMetricFamily {
+class PbCustomMetricFamily {
  public:
-  CustomMetricFamily(
+  PbCustomMetricFamily(
       const std::string& name, const std::string& description,
       const MetricKind& kind);
 
-  ~CustomMetricFamily();
+  ~PbCustomMetricFamily();
 
   /// Get the name of the custom metric family.
   /// \return Returns the name of the metric family.
@@ -150,7 +150,7 @@ class CustomMetricFamily {
   /// \param handle Shared memory handle of the custom metric family.
   /// \return Returns the custom metric family in the specified request_handle
   /// location.
-  static std::unique_ptr<CustomMetricFamily> LoadFromSharedMemory(
+  static std::unique_ptr<PbCustomMetricFamily> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
 
@@ -161,14 +161,14 @@ class CustomMetricFamily {
   /// the metric_map_.
   /// \param labels The labels for the custom metric.
   /// \return Returns a custom metric object for the specified labels.
-  std::shared_ptr<CustomMetric> CreateMetric(const std::string& labels);
+  std::shared_ptr<PbCustomMetric> CreateMetric(const std::string& labels);
 #endif
 
   /// Disallow copying the custom metric family object.
-  DISALLOW_COPY_AND_ASSIGN(CustomMetricFamily);
+  DISALLOW_COPY_AND_ASSIGN(PbCustomMetricFamily);
 
  private:
-  CustomMetricFamily(
+  PbCustomMetricFamily(
       AllocatedSharedMemory<char>& custom_metric_family_shm,
       std::unique_ptr<PbString>& name_shm,
       std::unique_ptr<PbString>& description_shm);
@@ -180,13 +180,13 @@ class CustomMetricFamily {
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> custom_metric_family_shm_;
-  CustomMetricFamilyShm* custom_metric_family_shm_ptr_;
+  PbCustomMetricFamilyShm* custom_metric_family_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
   std::unique_ptr<PbString> name_shm_;
   std::unique_ptr<PbString> description_shm_;
 
   std::mutex metric_map_mu_;
-  std::unordered_map<std::string, std::shared_ptr<CustomMetric>> metric_map_;
+  std::unordered_map<std::string, std::shared_ptr<PbCustomMetric>> metric_map_;
 };
 
 }}};  // namespace triton::backend::python

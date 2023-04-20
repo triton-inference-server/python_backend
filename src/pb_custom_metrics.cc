@@ -32,14 +32,14 @@
 
 namespace triton { namespace backend { namespace python {
 
-CustomMetric::CustomMetric(
+PbCustomMetric::PbCustomMetric(
     const std::string& family_name, const std::string& labels)
     : family_name_(family_name), labels_(labels), value_(0),
       metric_request_kind_(MetricNew)
 {
 }
 
-CustomMetric::~CustomMetric()
+PbCustomMetric::~PbCustomMetric()
 {
 #ifdef TRITON_PB_STUB
   if (metric_request_kind_ != MetricDelete) {
@@ -52,7 +52,7 @@ CustomMetric::~CustomMetric()
           &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
     }
     catch (const PythonBackendException& pb_exception) {
-      std::cerr << "Error when deleting CustomMetric: " << pb_exception.what()
+      std::cerr << "Error when deleting PbCustomMetric: " << pb_exception.what()
                 << "\n";
     }
     stub->ClearMetric(family_name_, labels_);
@@ -61,42 +61,43 @@ CustomMetric::~CustomMetric()
 }
 
 const std::string&
-CustomMetric::FamilyName()
+PbCustomMetric::FamilyName()
 {
   return family_name_;
 }
 
 const std::string&
-CustomMetric::Labels()
+PbCustomMetric::Labels()
 {
   return labels_;
 }
 
 bi::managed_external_buffer::handle_t
-CustomMetric::ShmHandle()
+PbCustomMetric::ShmHandle()
 {
   return shm_handle_;
 }
 
 const MetricRequestKind&
-CustomMetric::RequestKind()
+PbCustomMetric::RequestKind()
 {
   return metric_request_kind_;
 }
 
 double
-CustomMetric::Value()
+PbCustomMetric::Value()
 {
   return value_;
 }
 
 void
-CustomMetric::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+PbCustomMetric::SaveToSharedMemory(
+    std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<char> custom_metric_shm =
-      shm_pool->Construct<char>(sizeof(CustomMetricShm), true);
+      shm_pool->Construct<char>(sizeof(PbCustomMetricShm), true);
   custom_metric_shm_ptr_ =
-      reinterpret_cast<CustomMetricShm*>(custom_metric_shm.data_.get());
+      reinterpret_cast<PbCustomMetricShm*>(custom_metric_shm.data_.get());
 
   std::unique_ptr<PbString> family_name_shm =
       PbString::Create(shm_pool, FamilyName());
@@ -114,25 +115,25 @@ CustomMetric::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   shm_handle_ = custom_metric_shm.handle_;
 }
 
-std::unique_ptr<CustomMetric>
-CustomMetric::LoadFromSharedMemory(
+std::unique_ptr<PbCustomMetric>
+PbCustomMetric::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<char> custom_metric_shm = shm_pool->Load<char>(handle);
-  CustomMetricShm* custom_metric_shm_ptr =
-      reinterpret_cast<CustomMetricShm*>(custom_metric_shm.data_.get());
+  PbCustomMetricShm* custom_metric_shm_ptr =
+      reinterpret_cast<PbCustomMetricShm*>(custom_metric_shm.data_.get());
 
   std::unique_ptr<PbString> family_name_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_shm_ptr->family_name_shm_handle);
   std::unique_ptr<PbString> labels_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_shm_ptr->labels_shm_handle);
 
-  return std::unique_ptr<CustomMetric>(
-      new CustomMetric(custom_metric_shm, family_name_shm, labels_shm));
+  return std::unique_ptr<PbCustomMetric>(
+      new PbCustomMetric(custom_metric_shm, family_name_shm, labels_shm));
 }
 
-CustomMetric::CustomMetric(
+PbCustomMetric::PbCustomMetric(
     AllocatedSharedMemory<char>& custom_metric_shm,
     std::unique_ptr<PbString>& family_name_shm,
     std::unique_ptr<PbString>& labels_shm)
@@ -141,14 +142,14 @@ CustomMetric::CustomMetric(
       labels_shm_(std::move(labels_shm))
 {
   custom_metric_shm_ptr_ =
-      reinterpret_cast<CustomMetricShm*>(custom_metric_shm_.data_.get());
+      reinterpret_cast<PbCustomMetricShm*>(custom_metric_shm_.data_.get());
   family_name_ = family_name_shm_->String();
   labels_ = labels_shm_->String();
   value_ = custom_metric_shm_ptr_->value;
   metric_request_kind_ = custom_metric_shm_ptr_->metric_request_kind;
 }
 
-CustomMetricFamily::CustomMetricFamily(
+PbCustomMetricFamily::PbCustomMetricFamily(
     const std::string& name, const std::string& description,
     const MetricKind& kind)
     : name_(name), description_(description), kind_(kind),
@@ -156,7 +157,7 @@ CustomMetricFamily::CustomMetricFamily(
 {
 }
 
-CustomMetricFamily::~CustomMetricFamily()
+PbCustomMetricFamily::~PbCustomMetricFamily()
 {
 #ifdef TRITON_PB_STUB
   if (metric_family_request_kind_ != MetricFamilyDelete) {
@@ -169,7 +170,7 @@ CustomMetricFamily::~CustomMetricFamily()
           &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
     }
     catch (const PythonBackendException& pb_exception) {
-      std::cerr << "Error when deleting CustomMetricFamily: "
+      std::cerr << "Error when deleting PbCustomMetricFamily: "
                 << pb_exception.what() << "\n";
     }
     stub->ClearMetricFamily(name_);
@@ -178,43 +179,43 @@ CustomMetricFamily::~CustomMetricFamily()
 };
 
 const std::string&
-CustomMetricFamily::Name()
+PbCustomMetricFamily::Name()
 {
   return name_;
 }
 
 const std::string&
-CustomMetricFamily::Description()
+PbCustomMetricFamily::Description()
 {
   return description_;
 }
 
 const MetricKind&
-CustomMetricFamily::Kind()
+PbCustomMetricFamily::Kind()
 {
   return kind_;
 }
 
 bi::managed_external_buffer::handle_t
-CustomMetricFamily::ShmHandle()
+PbCustomMetricFamily::ShmHandle()
 {
   return shm_handle_;
 }
 
 const MetricFamilyRequestKind&
-CustomMetricFamily::RequestKind()
+PbCustomMetricFamily::RequestKind()
 {
   return metric_family_request_kind_;
 }
 
 void
-CustomMetricFamily::SaveToSharedMemory(
+PbCustomMetricFamily::SaveToSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<char> custom_metric_family_shm =
-      shm_pool->Construct<char>(sizeof(CustomMetricFamilyShm));
+      shm_pool->Construct<char>(sizeof(PbCustomMetricFamilyShm));
 
-  custom_metric_family_shm_ptr_ = reinterpret_cast<CustomMetricFamilyShm*>(
+  custom_metric_family_shm_ptr_ = reinterpret_cast<PbCustomMetricFamilyShm*>(
       custom_metric_family_shm.data_.get());
   std::unique_ptr<PbString> name_shm = PbString::Create(shm_pool, Name());
   std::unique_ptr<PbString> description_shm =
@@ -234,26 +235,26 @@ CustomMetricFamily::SaveToSharedMemory(
   shm_handle_ = custom_metric_family_shm.handle_;
 }
 
-std::unique_ptr<CustomMetricFamily>
-CustomMetricFamily::LoadFromSharedMemory(
+std::unique_ptr<PbCustomMetricFamily>
+PbCustomMetricFamily::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<char> custom_metric_family_shm =
       shm_pool->Load<char>(handle);
-  CustomMetricFamilyShm* custom_metric_family_shm_ptr =
-      reinterpret_cast<CustomMetricFamilyShm*>(
+  PbCustomMetricFamilyShm* custom_metric_family_shm_ptr =
+      reinterpret_cast<PbCustomMetricFamilyShm*>(
           custom_metric_family_shm.data_.get());
   std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_family_shm_ptr->name_shm_handle);
   std::unique_ptr<PbString> description_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_family_shm_ptr->description_shm_handle);
 
-  return std::unique_ptr<CustomMetricFamily>(new CustomMetricFamily(
+  return std::unique_ptr<PbCustomMetricFamily>(new PbCustomMetricFamily(
       custom_metric_family_shm, name_shm, description_shm));
 }
 
-CustomMetricFamily::CustomMetricFamily(
+PbCustomMetricFamily::PbCustomMetricFamily(
     AllocatedSharedMemory<char>& custom_metric_family_shm,
     std::unique_ptr<PbString>& name_shm,
     std::unique_ptr<PbString>& description_shm)
@@ -261,7 +262,7 @@ CustomMetricFamily::CustomMetricFamily(
       name_shm_(std::move(name_shm)),
       description_shm_(std::move(description_shm))
 {
-  custom_metric_family_shm_ptr_ = reinterpret_cast<CustomMetricFamilyShm*>(
+  custom_metric_family_shm_ptr_ = reinterpret_cast<PbCustomMetricFamilyShm*>(
       custom_metric_family_shm_.data_.get());
   name_ = name_shm_->String();
   description_ = description_shm_->String();
@@ -271,7 +272,7 @@ CustomMetricFamily::CustomMetricFamily(
 }
 
 void
-CustomMetricFamily::ClearMetric(const std::string& labels)
+PbCustomMetricFamily::ClearMetric(const std::string& labels)
 {
   std::lock_guard<std::mutex> lock(metric_map_mu_);
   metric_map_.erase(labels);
@@ -279,7 +280,7 @@ CustomMetricFamily::ClearMetric(const std::string& labels)
 
 #ifdef TRITON_PB_STUB
 void
-CustomMetric::Increment(const double& value)
+PbCustomMetric::Increment(const double& value)
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   metric_request_kind_ = MetricIncrement;
@@ -297,7 +298,7 @@ CustomMetric::Increment(const double& value)
 }
 
 void
-CustomMetric::SetValue(const double& value)
+PbCustomMetric::SetValue(const double& value)
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   metric_request_kind_ = MetricSet;
@@ -315,7 +316,7 @@ CustomMetric::SetValue(const double& value)
 }
 
 double
-CustomMetric::GetValue()
+PbCustomMetric::GetValue()
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   metric_request_kind_ = MetricValue;
@@ -333,8 +334,8 @@ CustomMetric::GetValue()
   return custom_metrics_msg->value;
 }
 
-std::shared_ptr<CustomMetric>
-CustomMetricFamily::CreateMetric(const std::string& labels_str)
+std::shared_ptr<PbCustomMetric>
+PbCustomMetricFamily::CreateMetric(const std::string& labels_str)
 {
   std::lock_guard<std::mutex> lock(metric_map_mu_);
   if (metric_map_.find(labels_str) != metric_map_.end()) {
@@ -343,7 +344,7 @@ CustomMetricFamily::CreateMetric(const std::string& labels_str)
               << "' already exists in Metric family '" << name_ << "' .\n";
   } else {
     auto metric =
-        std::make_shared<CustomMetric>(name_ + description_, labels_str);
+        std::make_shared<PbCustomMetric>(name_ + description_, labels_str);
     metric_map_[labels_str] = metric;
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     metric->SaveToSharedMemory(stub->ShmPool());

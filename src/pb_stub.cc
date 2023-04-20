@@ -1177,8 +1177,8 @@ Stub::EnqueueUtilsMessage(
   stub_to_parent_message_cv_.notify_one();
 }
 
-std::shared_ptr<CustomMetricFamily>
-Stub::CreateMetricFamily(std::shared_ptr<CustomMetricFamily> metric_family)
+std::shared_ptr<PbCustomMetricFamily>
+Stub::CreateMetricFamily(std::shared_ptr<PbCustomMetricFamily> metric_family)
 {
   std::lock_guard<std::mutex> lock(metric_family_map_mu_);
   std::string unique_name =
@@ -1578,31 +1578,31 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));
   logger.def_static("log_verbose", &Logger::LogVerbose, py::arg("message"));
 
-  py::class_<CustomMetric, std::shared_ptr<CustomMetric>>(module, "Metric")
-      .def("increment", &CustomMetric::Increment)
-      .def("set", &CustomMetric::SetValue)
-      .def("value", &CustomMetric::GetValue);
+  py::class_<PbCustomMetric, std::shared_ptr<PbCustomMetric>>(module, "Metric")
+      .def("increment", &PbCustomMetric::Increment)
+      .def("set", &PbCustomMetric::SetValue)
+      .def("value", &PbCustomMetric::GetValue);
 
   py::enum_<MetricKind>(module, "MetricKind")
       .value("COUNTER", MetricKind::COUNTER)
       .value("GAUGE", MetricKind::GAUGE)
       .export_values();
 
-  py::class_<CustomMetricFamily, std::shared_ptr<CustomMetricFamily>>(
+  py::class_<PbCustomMetricFamily, std::shared_ptr<PbCustomMetricFamily>>(
       module, "MetricFamily")
       .def(
           py::init([](const std::string& name, const std::string& description,
                       const MetricKind& kind) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             auto metric_family =
-                std::make_shared<CustomMetricFamily>(name, description, kind);
+                std::make_shared<PbCustomMetricFamily>(name, description, kind);
             return stub->CreateMetricFamily(metric_family);
           }),
           py::arg("name").none(false), py::arg("description").none(false),
           py::arg("kind").none(false))
       .def(
           "Metric",
-          [](std::shared_ptr<CustomMetricFamily>& metric_family,
+          [](std::shared_ptr<PbCustomMetricFamily>& metric_family,
              py::dict labels) {
             py::module json = py::module_::import("json");
             std::string labels_str =

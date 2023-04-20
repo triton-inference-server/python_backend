@@ -284,8 +284,8 @@ class Stub {
       std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
 
   /// Create a new metric family object
-  std::shared_ptr<CustomMetricFamily> CreateMetricFamily(
-      std::shared_ptr<CustomMetricFamily> new_metric_family);
+  std::shared_ptr<PbCustomMetricFamily> CreateMetricFamily(
+      std::shared_ptr<PbCustomMetricFamily> new_metric_family);
 
   /// Clean up the metric family object
   void ClearMetricFamily(std::string& name);
@@ -343,7 +343,7 @@ class Stub {
   std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
       response_iterator_map_;
   std::mutex metric_family_map_mu_;
-  std::unordered_map<std::string, std::shared_ptr<CustomMetricFamily>>
+  std::unordered_map<std::string, std::shared_ptr<PbCustomMetricFamily>>
       metric_family_map_;
 };
 }}}  // namespace triton::backend::python

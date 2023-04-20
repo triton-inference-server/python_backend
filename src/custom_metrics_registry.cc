@@ -29,7 +29,7 @@
 
 namespace triton { namespace backend { namespace python {
 
-PbMetric::PbMetric(
+MetricRegistry::MetricRegistry(
     const std::string& labels, TRITONSERVER_MetricFamily* metric_family)
     : labels_(labels), value_(0.0), metric_(nullptr)
 {
@@ -42,7 +42,7 @@ PbMetric::PbMetric(
   }
 }
 
-PbMetric::~PbMetric()
+MetricRegistry::~MetricRegistry()
 {
   if (metric_ != nullptr) {
     TRITONSERVER_MetricDelete(metric_);
@@ -50,13 +50,13 @@ PbMetric::~PbMetric()
 }
 
 const std::string&
-PbMetric::Labels()
+MetricRegistry::Labels()
 {
   return labels_;
 }
 
 void
-PbMetric::ParseLabels(
+MetricRegistry::ParseLabels(
     std::vector<const TRITONSERVER_Parameter*>& labels_params,
     const std::string& labels)
 {
@@ -74,33 +74,33 @@ PbMetric::ParseLabels(
 }
 
 void
-PbMetric::Increment(const double& value)
+MetricRegistry::Increment(const double& value)
 {
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricIncrement(metric_, value));
   UpdateValue();
 }
 
 void
-PbMetric::SetValue(const double& value)
+MetricRegistry::SetValue(const double& value)
 {
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricSet(metric_, value));
   UpdateValue();
 }
 
 double
-PbMetric::Value()
+MetricRegistry::Value()
 {
   UpdateValue();
   return value_;
 }
 
 void
-PbMetric::UpdateValue()
+MetricRegistry::UpdateValue()
 {
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricValue(metric_, &value_));
 }
 
-PbMetricFamily::PbMetricFamily(
+MetricFamilyRegistry::MetricFamilyRegistry(
     const std::string& name, const std::string& description,
     const MetricKind& kind)
     : name_(name), description_(description), kind_(kind),
@@ -111,7 +111,7 @@ PbMetricFamily::PbMetricFamily(
       &metric_family_, triton_kind, name_.c_str(), description_.c_str()));
 }
 
-PbMetricFamily::~PbMetricFamily()
+MetricFamilyRegistry::~MetricFamilyRegistry()
 {
   std::lock_guard<std::mutex> lock(metric_map_mu_);
   metric_map_.clear();
@@ -123,7 +123,7 @@ PbMetricFamily::~PbMetricFamily()
 }
 
 TRITONSERVER_MetricKind
-PbMetricFamily::ToTritonServerMetricKind(const MetricKind& kind)
+MetricFamilyRegistry::ToTritonServerMetricKind(const MetricKind& kind)
 {
   switch (kind) {
     case COUNTER:
@@ -136,26 +136,26 @@ PbMetricFamily::ToTritonServerMetricKind(const MetricKind& kind)
 }
 
 void
-PbMetricFamily::AddMetric(std::unique_ptr<CustomMetric> metric)
+MetricFamilyRegistry::AddMetric(std::unique_ptr<PbCustomMetric> metric)
 {
   std::lock_guard<std::mutex> lock(metric_map_mu_);
   if (metric_map_.find(metric->Labels()) != metric_map_.end()) {
     throw PythonBackendException("Metric with the same labels already exists.");
   } else {
-    std::unique_ptr<PbMetric> pb_metric =
-        std::make_unique<PbMetric>(metric->Labels(), metric_family_);
+    std::unique_ptr<MetricRegistry> pb_metric =
+        std::make_unique<MetricRegistry>(metric->Labels(), metric_family_);
     metric_map_.insert({metric->Labels(), std::move(pb_metric)});
   }
 }
 
-std::unordered_map<std::string, std::unique_ptr<PbMetric>>*
-PbMetricFamily::MetricMap()
+std::unordered_map<std::string, std::unique_ptr<MetricRegistry>>*
+MetricFamilyRegistry::MetricMap()
 {
   return &metric_map_;
 }
 
 MetricKind
-PbMetricFamily::Kind()
+MetricFamilyRegistry::Kind()
 {
   return kind_;
 }
