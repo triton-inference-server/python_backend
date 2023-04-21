@@ -1223,7 +1223,7 @@ class TritonPythonModel:
     # tensor.
     input0 = pb_utils.Tensor.from_dlpack("INPUT0", to_dlpack(pytorch_tensor))
 ```
-Starting from 23.04 release, Python backend allows tensors implementing
+Python backend allows tensors implementing
 [`__dlpack__`](https://data-apis.org/array-api/2022.12/API_specification/generated/array_api.array.__dlpack__.html) 
 and [`__dlpack_device__`](https://data-apis.org/array-api/2022.12/API_specification/generated/array_api.array.__dlpack_device__.html) 
 [interface](https://dmlc.github.io/dlpack/latest/python_spec.html) 

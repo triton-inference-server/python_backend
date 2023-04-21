@@ -257,7 +257,7 @@ PbTensor::DLPack(const py::object& stream)
   // Here external tensor requests PbTensor's `__dlpack__` method to provide
   // a PyCapsule. By the design of PbTensor, in a GPU case no pending work 
   // is scheduled to work with PbTensor's data and we can simply pass 
-  // the capsule.
+  // the capsule without a synchronization.
   return this->ToDLPack();
 }
 
@@ -339,14 +339,6 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
   if (py::isinstance<py::capsule>(tensor)) {
     return FromDLPackCapsule(name, tensor);
   } else if (py::hasattr(tensor, "__dlpack__")) {
-#ifdef TRITON_ENABLE_GPU
-  cudaError_t err = cudaStreamSynchronize(0);
-  if (err != cudaSuccess) {
-    throw PythonBackendException(
-        "Failed to syncronize on the default stream before\
-             dlpack capsule consumption.");
-  }
-#endif
     // Array API requirements for the stream argument:
     // stream = None, producer must assume the legacy default stream,
     // stream = -1 is a signal for the producer not to perform any 
@@ -373,20 +365,6 @@ std::shared_ptr<PbTensor>
 PbTensor::FromDLPackCapsule(
     const std::string& name, const py::capsule& dlpack_tensor)
 {
-
-// TO-DO ADD sync on the default stream either here for all apis 
-// or in __dlpack__ case for only new apis. Write tests and think about 
-// different contexts.
-
-#ifdef TRITON_ENABLE_GPU
-  cudaError_t err = cudaStreamSynchronize(0);
-  if (err != cudaSuccess) {
-    throw PythonBackendException(
-        "Failed to syncronize on the default stream before\
-             dlpack capsule consumption.");
-  }
-#endif
-
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 
