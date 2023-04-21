@@ -107,18 +107,6 @@ if [ $USE_TENSORFLOW -eq 1 ]; then
     fi
 fi
 
-# Get latest conda required https://repo.anaconda.com/miniconda/
-cd ${INFRENTIA_PATH}
-export CONDA_PATH=${INFRENTIA_PATH}/miniconda
-rm -rf $CONDA_PATH
-wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-py37_4.10.3-Linux-x86_64.sh \
-         -O ${PWD}/miniconda.sh --no-check-certificate && \
-    /bin/bash ${PWD}/miniconda.sh -b -p ${CONDA_PATH} && \
-    rm ${PWD}/miniconda.sh && \
-    $(eval echo "${CONDA_PATH}/bin/conda clean -ya")
-export PATH=${CONDA_PATH}/bin:${PATH}
-conda info
-
 # Install python_backend_stub installing dependencies
 apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -137,10 +125,6 @@ apt-get install -y --no-install-recommends \
 cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1 && \
 cmake --version
 
-# Create Conda Enviroment
-conda create -q -y -n test_conda_env python=${PYTHON_VERSION}
-source ${CONDA_PATH}/bin/activate test_conda_env
-
 # First compile correct python stub
 cd ${PYTHON_BACKEND_PATH}
 rm -rf build && mkdir build && cd build
@@ -151,25 +135,25 @@ make triton-python-backend-stub -j16
 # since we need to use pip to update: 
 #  https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
-conda config --env --add channels https://conda.repos.neuron.amazonaws.com
 
+python -m pip install -U pip
+# Set pip repository pointing to the Neuron repository 
+python -m pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 if [ $USE_TENSORFLOW -eq 1 ]; then
-    conda install tensorflow-neuron pillow -y
-    # Update Neuron TensorBoard
-    pip install --upgrade tensorboard-plugin-neuron
     # Update Neuron TensorFlow
     if [ $TENSORFLOW_VERSION -eq 1 ]; then
-        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4"
+        # Install TensorFlow Neuron
+        python -m pip install tensorflow-neuron[cc]==1.15.5.* "protobuf"
     else
-        pip install --upgrade tensorflow-neuron[cc] "protobuf<4"
+        # Install TensorFlow Neuron
+        python -m pip install tensorflow-neuron[cc] "protobuf"
     fi
 fi
 
 if [ $USE_PYTORCH -eq 1 ]
 then
-    conda install torch-neuron torchvision -y
-    # Upgrade torch-neuron and install transformers
-    pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf<4" torchvision "transformers==4.6.0"
+    # Install PyTorch Neuron
+    python -m pip install torch-neuron neuron-cc[tensorflow] "protobuf" torchvision
 fi
 
 # Upgrade the python backend stub, rules and sockets
