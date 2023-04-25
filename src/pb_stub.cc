@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "pb_stub.h"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -748,22 +749,14 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
             str + "'.");
       }
     }
-
-
     response_batch_shm_ptr->batch_size = response_size;
 
-    std::vector<std::shared_ptr<PbTensor>> gpu_tensors;
     for (size_t i = 0; i < batch_size; i++) {
       InferResponse* infer_response = responses[i].cast<InferResponse*>();
       InferRequest* infer_request = py_request_list[i].cast<InferRequest*>();
       infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
 
       ProcessResponse(infer_response);
-      for (auto output_tensor : infer_response->OutputTensors()) {
-        if (!output_tensor->IsCPU()) {
-          gpu_tensors.push_back(output_tensor);
-        }
-      }
       responses_shm_handle[i] = infer_response->ShmHandle();
     }
   }

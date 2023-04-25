@@ -24,6 +24,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "python_be.h"
+
 #include "pb_log.h"
 
 namespace triton { namespace backend { namespace python {
@@ -400,7 +401,7 @@ ModelInstanceState::LaunchStubProcess()
   RETURN_IF_ERROR(Stub()->Setup());
   StartLogMonitor();
   RETURN_IF_ERROR(Stub()->Launch());
-  
+
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
@@ -885,9 +886,10 @@ ModelInstanceState::StartLogMonitor()
   log_monitor_ = std::thread(&ModelInstanceState::LogMessageQueueMonitor, this);
 }
 
-void ModelInstanceState::TerminateLogMonitor()
+void
+ModelInstanceState::TerminateLogMonitor()
 {
-  if(log_thread_) {
+  if (log_thread_) {
     log_thread_ = false;
     Stub()->LogMessageQueue()->Push(DUMMY_MESSAGE);
     log_monitor_.join();
@@ -1256,9 +1258,8 @@ ModelInstanceState::ProcessRequests(
   std::vector<bool> requires_deferred_callback;
 
   std::vector<std::unique_ptr<InferResponse>> shm_responses;
-  std::unordered_map<
-      uint32_t, std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>>
-      gpu_output_buffers;
+  std::vector<std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>>
+      gpu_output_buffers(request_count);
 
   for (uint32_t r = 0; r < request_count; ++r) {
     NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
@@ -1342,7 +1343,7 @@ ModelInstanceState::ProcessRequests(
   if (has_gpu_output) {
     size_t total_gpu_buffers_count = 0;
     for (auto& gpu_output_buffer : gpu_output_buffers) {
-      total_gpu_buffers_count += gpu_output_buffer.second.size();
+      total_gpu_buffers_count += gpu_output_buffer.size();
     }
     AllocatedSharedMemory<char> gpu_buffers_handle =
         Stub()->ShmPool()->Construct<char>(
@@ -1358,7 +1359,7 @@ ModelInstanceState::ProcessRequests(
 
     size_t index = 0;
     for (auto& gpu_output_buffer : gpu_output_buffers) {
-      for (auto& buffer_memory_pair : gpu_output_buffer.second) {
+      for (auto& buffer_memory_pair : gpu_output_buffer) {
         gpu_buffers_handle_shm[index] = buffer_memory_pair.first->ShmHandle();
         ++index;
       }
@@ -1373,12 +1374,12 @@ ModelInstanceState::ProcessRequests(
     bool cuda_copy = false;
 
     index = 0;
+    uint32_t response_index = 0;
     for (auto& gpu_output_buffer : gpu_output_buffers) {
-      for (auto& buffer_memory_pair : gpu_output_buffer.second) {
+      for (auto& buffer_memory_pair : gpu_output_buffer) {
         auto& pb_memory = buffer_memory_pair.first;
         if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-          bool cuda_used;
-          uint32_t response_index = gpu_output_buffer.first;
+          bool cuda_used = false;
           void* pointer = buffer_memory_pair.second;
 
           GUARDED_RESPOND_IF_ERROR(
@@ -1393,6 +1394,7 @@ ModelInstanceState::ProcessRequests(
         gpu_buffers_handle_shm[index] = pb_memory->ShmHandle();
         ++index;
       }
+      response_index++;
 #ifdef TRITON_ENABLE_GPU
       if (cuda_copy) {
         cudaStreamSynchronize(stream_);
@@ -1948,7 +1950,7 @@ TRITONBACKEND_ModelInstanceExecute(
       instance_state->TerminateLogMonitor();
       instance_state->Stub()->KillStubProcess();
       TRITONSERVER_Error* err = instance_state->Stub()->Setup();
-      if(err == nullptr) {
+      if (err == nullptr) {
         instance_state->StartLogMonitor();
       }
       LOG_IF_ERROR(err, "Failed to restart the stub process.");
@@ -2053,11 +2055,11 @@ TRITONBACKEND_GetBackendAttribute(
   // Other instance groups setting are set to "no value" so that Triton core
   // will auto-complete them with default policy.
 #ifdef TRITON_ENABLE_GPU
-  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(backend_attributes,
-      TRITONSERVER_INSTANCEGROUPKIND_GPU, 0, nullptr, 0));
+  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(
+      backend_attributes, TRITONSERVER_INSTANCEGROUPKIND_GPU, 0, nullptr, 0));
 #else
-  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(backend_attributes,
-      TRITONSERVER_INSTANCEGROUPKIND_CPU, 0, nullptr, 0));
+  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(
+      backend_attributes, TRITONSERVER_INSTANCEGROUPKIND_CPU, 0, nullptr, 0));
 #endif
 
   return nullptr;
