@@ -1,5 +1,5 @@
 <!--
-# Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -86,12 +86,10 @@ After starting the Triton container, go into the `python_backend` folder and run
  $source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
 ```
 This script will:
-1. Setup miniconda enviroment
-2. Install necessary dependencies
-3. Create a [Custom Python Execution Environment](https://github.com/triton-inference-server/python_backend#using-custom-python-execution-environments),
+1. Install necessary dependencies
+2. Create a [Custom Python Execution Environment](https://github.com/triton-inference-server/python_backend#creating-custom-execution-environments),
    `python_backend_stub` to use for Inferentia
-4. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html),
-    the Neuron compiler and [neuron-rtd](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-runtime/overview.html) the Neuron Runtime
+3. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html), the Neuron compiler.
 
 There are user configurable options available for the script as well. 
 For example, to control the python version for the python environment to 3.6, 
