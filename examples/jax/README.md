@@ -60,11 +60,11 @@ $ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
 ```
 See the installation steps above for the `<yy.mm>` version.
 
-At the time of writing, the latest version is `23.03`, which translates to the
+At the time of writing, the latest version is `23.04`, which translates to the
 following commands:
 ```
-$ docker pull nvcr.io/nvidia/tritonserver:23.03-py3
-$ docker pull nvcr.io/nvidia/tritonserver:23.03-py3-sdk
+$ docker pull nvcr.io/nvidia/tritonserver:23.04-py3
+$ docker pull nvcr.io/nvidia/tritonserver:23.04-py3-sdk
 ```
 
 Be sure to replace the `<yy.mm>` with the version pulled for all the remaining
