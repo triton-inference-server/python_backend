@@ -180,22 +180,13 @@ struct CleanupMessage : SendMessageBase {
   void* id;
 };
 
-enum MetricFamilyRequestKind { MetricFamilyNew, MetricFamilyDelete };
-
-enum MetricRequestKind {
-  MetricNew,
-  MetricDelete,
-  MetricValue,
-  MetricIncrement,
-  MetricSet
-};
-
 struct CustomMetricsMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t message;
   bool has_error;
   bool is_error_set;
   bi::managed_external_buffer::handle_t error;
   double value;
+  void* address;
 };
 
 struct ResponseSenderBase {

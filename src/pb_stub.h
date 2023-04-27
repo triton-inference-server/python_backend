@@ -45,7 +45,8 @@
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
-#include "pb_custom_metrics.h"
+#include "metric.h"
+#include "metric_family.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
@@ -283,16 +284,6 @@ class Stub {
   void EnqueueUtilsMessage(
       std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
 
-  /// Create a new metric family object
-  std::shared_ptr<PbCustomMetricFamily> CreateMetricFamily(
-      std::shared_ptr<PbCustomMetricFamily> new_metric_family);
-
-  /// Clean up the metric family object
-  void ClearMetricFamily(std::string& name);
-
-  /// Clean up the metric object
-  void ClearMetric(const std::string& family_name, const std::string& labels);
-
   /// Send the custom metrics message to the python backend
   void SendCustomMetricsMessage(
       CustomMetricsMessage** custom_metrics_msg,
@@ -342,8 +333,5 @@ class Stub {
   std::mutex response_iterator_map_mu_;
   std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
       response_iterator_map_;
-  std::mutex metric_family_map_mu_;
-  std::unordered_map<std::string, std::shared_ptr<PbCustomMetricFamily>>
-      metric_family_map_;
 };
 }}}  // namespace triton::backend::python

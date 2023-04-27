@@ -1177,53 +1177,6 @@ Stub::EnqueueUtilsMessage(
   stub_to_parent_message_cv_.notify_one();
 }
 
-std::shared_ptr<PbCustomMetricFamily>
-Stub::CreateMetricFamily(std::shared_ptr<PbCustomMetricFamily> metric_family)
-{
-  std::lock_guard<std::mutex> lock(metric_family_map_mu_);
-  std::string unique_name =
-      metric_family->Name() + metric_family->Description();
-  if (metric_family_map_.find(unique_name) != metric_family_map_.end()) {
-    if (metric_family_map_[unique_name]->Kind() != metric_family->Kind()) {
-      throw PythonBackendException(
-          "Metric family '" + metric_family->Name() +
-          "' already exists with a different type.");
-    }
-  } else {
-    metric_family_map_[unique_name] = metric_family;
-    metric_family->SaveToSharedMemory(shm_pool_);
-    CustomMetricsMessage* custom_metrics_msg = nullptr;
-    try {
-      SendCustomMetricsMessage(
-          &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequest,
-          metric_family->ShmHandle());
-    }
-    catch (const PythonBackendException& pb_exception) {
-      throw PythonBackendException(
-          "Failed to send metric family message: " +
-          std::string(pb_exception.what()));
-    }
-  }
-
-  return metric_family_map_[unique_name];
-}
-
-void
-Stub::ClearMetricFamily(std::string& name)
-{
-  {
-    std::lock_guard<std::mutex> lock(metric_family_map_mu_);
-    metric_family_map_.erase(name);
-  }
-}
-
-void
-Stub::ClearMetric(const std::string& family_name, const std::string& labels)
-{
-  std::lock_guard<std::mutex> lock(metric_family_map_mu_);
-  metric_family_map_[family_name]->ClearMetric(labels);
-}
-
 void
 Stub::PrepareCustomMetricsMessage(
     AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
@@ -1578,36 +1531,38 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));
   logger.def_static("log_verbose", &Logger::LogVerbose, py::arg("message"));
 
-  py::class_<PbCustomMetric, std::shared_ptr<PbCustomMetric>>(module, "Metric")
-      .def("increment", &PbCustomMetric::Increment)
-      .def("set", &PbCustomMetric::SetValue)
-      .def("value", &PbCustomMetric::GetValue);
+  py::class_<Metric, std::shared_ptr<Metric>>(module, "Metric")
+      .def("increment", &Metric::SendIncrementRequest)
+      .def("set", &Metric::SendSetValueRequest)
+      .def("value", &Metric::SendGetValueRequest);
 
   py::enum_<MetricKind>(module, "MetricKind")
       .value("COUNTER", MetricKind::COUNTER)
       .value("GAUGE", MetricKind::GAUGE)
       .export_values();
 
-  py::class_<PbCustomMetricFamily, std::shared_ptr<PbCustomMetricFamily>>(
+  py::class_<MetricFamily, std::shared_ptr<MetricFamily>>(
       module, "MetricFamily")
       .def(
           py::init([](const std::string& name, const std::string& description,
                       const MetricKind& kind) {
-            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
             auto metric_family =
-                std::make_shared<PbCustomMetricFamily>(name, description, kind);
-            return stub->CreateMetricFamily(metric_family);
+                std::make_shared<MetricFamily>(name, description, kind);
+            return metric_family;
           }),
           py::arg("name").none(false), py::arg("description").none(false),
           py::arg("kind").none(false))
       .def(
           "Metric",
-          [](std::shared_ptr<PbCustomMetricFamily>& metric_family,
-             py::dict labels) {
+          [](std::shared_ptr<MetricFamily>& metric_family, py::dict labels) {
             py::module json = py::module_::import("json");
             std::string labels_str =
                 std::string(py::str(json.attr("dumps")(labels)));
-            return metric_family->CreateMetric(labels_str);
+            auto metric = std::make_shared<Metric>(
+                metric_family->Name() + metric_family->Description(),
+                labels_str, metric_family->MetricFamilyAddress());
+            metric_family->AddMetric(metric);
+            return metric;
           },
           py::arg("labels").none(false) = py::dict());
 

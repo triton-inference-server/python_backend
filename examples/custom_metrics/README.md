@@ -69,8 +69,8 @@ custom_metrics example: found pattern 'requests_process_latency_ns{model="custom
 PASS: custom_metrics
 ```
 
-In the terminal that runs Triton server, you should an output similar to the
-output below:
+In the terminal that runs Triton Server, you should see an output similar to
+the output below:
 ```
 Cumulative requests processing latency: 223406.0
 ```
@@ -82,5 +82,5 @@ explanations about each of the function calls.
 
 The [client.py](./client.py) sends a HTTP request with url
 `http://localhost:8002/metrics` to fetch the metrics from Triton server. The
-client then verify if the custom metrics added in the model file are correctly
-reported.
+client then verifies if the custom metrics added in the model file are
+correctly reported.

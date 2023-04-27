@@ -1350,7 +1350,7 @@ class TritonPythonModel:
 
       ...
 
-      print("Cumulative pre-processing latency:", self.metric.value())
+        print("Cumulative pre-processing latency:", self.metric.value())
 
       return responses
 ```
