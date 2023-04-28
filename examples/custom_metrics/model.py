@@ -64,9 +64,9 @@ class TritonPythonModel:
             model_config, "OUTPUT1")
 
         # Convert Triton types to numpy types
-        self.output0_dtype = pb_utils.triton_string_to_numpy(
+        self.out0_dtype = pb_utils.triton_string_to_numpy(
             output0_config['data_type'])
-        self.output1_dtype = pb_utils.triton_string_to_numpy(
+        self.out1_dtype = pb_utils.triton_string_to_numpy(
             output1_config['data_type'])
 
         # Create a MetricFamily object to report the latency of the model
@@ -114,9 +114,6 @@ class TritonPythonModel:
           be the same as `requests`
         """
 
-        output0_dtype = self.output0_dtype
-        output1_dtype = self.output1_dtype
-
         responses = []
 
         # Record the start time of processing the requests
@@ -135,9 +132,9 @@ class TritonPythonModel:
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
             out_tensor_0 = pb_utils.Tensor("OUTPUT0",
-                                           out_0.astype(output0_dtype))
+                                           out_0.astype(self.out0_dtype))
             out_tensor_1 = pb_utils.Tensor("OUTPUT1",
-                                           out_1.astype(output1_dtype))
+                                           out_1.astype(self.out1_dtype))
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
