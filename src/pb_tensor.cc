@@ -255,8 +255,8 @@ py::capsule
 PbTensor::DLPack(const py::object& stream)
 {
   // Here external tensor requests PbTensor's `__dlpack__` method to provide
-  // a PyCapsule. By the design of PbTensor, in a GPU case no pending work 
-  // is scheduled to work with PbTensor's data and we can simply pass 
+  // a PyCapsule. By the design of PbTensor, in a GPU case no pending work
+  // is scheduled to work with PbTensor's data and we can simply pass
   // the capsule without a synchronization.
   return this->ToDLPack();
 }
@@ -341,7 +341,7 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
   } else if (py::hasattr(tensor, "__dlpack__")) {
     // Array API requirements for the stream argument:
     // stream = None, producer must assume the legacy default stream,
-    // stream = -1 is a signal for the producer not to perform any 
+    // stream = -1 is a signal for the producer not to perform any
     //          synchronization
     // stream = 1 the legacy default stream (in this case should synchronize
     //          on CUDA stream 0)
@@ -352,8 +352,51 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     // assume the legacy default stream.
     // Reference:
     // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
-    return FromDLPackCapsule(
-        name, tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
+    if (py::hasattr(tensor, "__dlpack_device__")) {
+      std::pair<DLDeviceType, int> capsule_device_info =
+          tensor.attr("__dlpack_device__")()
+              .cast<std::pair<DLDeviceType, int>>();
+      auto current_device = 0;
+      if (capsule_device_info.first == DLDeviceType::kDLCUDA) {
+#ifdef TRITON_ENABLE_GPU
+        cudaError_t err = cudaGetDevice(&current_device);
+        if (err == cudaSuccess) {
+          err = cudaSetDevice(capsule_device_info.second);
+          if (err == cudaSuccess) {
+            auto ptr_to_pbtensor = FromDLPackCapsule(
+                name,
+                tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
+            err = cudaSetDevice(current_device);
+            if (err == cudaSuccess) {
+              return ptr_to_pbtensor;
+            } else {
+              throw PythonBackendException(
+                  "Failed to set CUDA device id back to initial compute device "
+                  "with id " +
+                  std::to_string(current_device));
+            }
+          } else {
+            throw PythonBackendException(
+                "Failed to set CUDA device to device with id " +
+                std::to_string(capsule_device_info.second));
+          }
+        } else {
+          throw PythonBackendException("Failed to get current CUDA device id.");
+        }
+#else
+        throw PythonBackendException(
+            "DLPack capsule passed pointer to memory allocated on GPU device, \
+          when GPU is not available");
+#endif
+      } else {
+        return FromDLPackCapsule(
+            name, tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
+      }
+    } else {
+      throw PythonBackendException(
+          "Provided tensor is not supported.\
+      Tensor must be a DLPack capsule or have a `__dlpack_device__` attribute");
+    }
   } else {
     throw PythonBackendException(
         "Provided tensor is not supported.\
