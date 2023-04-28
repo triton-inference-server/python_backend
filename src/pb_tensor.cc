@@ -353,25 +353,34 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     // Reference:
     // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
     if (py::hasattr(tensor, "__dlpack_device__")) {
-      std::pair<DLDeviceType, int> capsule_device_info =
+      std::pair<int32_t, int64_t> capsule_device_info =
           tensor.attr("__dlpack_device__")()
-              .cast<std::pair<DLDeviceType, int>>();
-      auto current_device = 0;
+              .cast<std::pair<int32_t, int64_t>>();
       if (capsule_device_info.first == DLDeviceType::kDLCUDA) {
 #ifdef TRITON_ENABLE_GPU
+        auto current_device = 0;
         cudaError_t err = cudaGetDevice(&current_device);
         if (err == cudaSuccess) {
-          err = cudaSetDevice(capsule_device_info.second);
+          err = (current_device == capsule_device_info.second)
+                    ? cudaSetDevice(capsule_device_info.second)
+                    : cudaSuccess;
           if (err == cudaSuccess) {
+            // In case there is a pending job on the data, where this capsule
+            // is pointing to, we need to wait ffor it before consuming.
+            // This is important for when data is located in different
+            // context (GPU) or work is done on a non-blocking stream
+            err = cudaDeviceSynchronize();
             auto ptr_to_pbtensor = FromDLPackCapsule(
                 name,
-                tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
-            err = cudaSetDevice(current_device);
+                tensor.attr("__dlpack__")(py::arg("stream") = py::int_(1)));
+            err = (current_device == capsule_device_info.second)
+                      ? cudaSetDevice(current_device)
+                      : cudaSuccess;
             if (err == cudaSuccess) {
               return ptr_to_pbtensor;
             } else {
               throw PythonBackendException(
-                  "Failed to set CUDA device id back to initial compute device "
+                  "Failed to set CUDA device back to initial compute device "
                   "with id " +
                   std::to_string(current_device));
             }
