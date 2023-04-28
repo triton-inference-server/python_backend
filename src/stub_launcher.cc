@@ -321,6 +321,18 @@ StubLauncher::Launch()
 
     stub_pid_ = pid;
 
+    // The stub process would send two messages to the parent process during the
+    // initialization.
+    // 1. When the stub process's health monitoring thread has started.
+    // 2. When the initialization is fully completed and the Python model is
+    // loaded.
+    //
+    // The reason it is broken into two steps is that creation of the health
+    // monitoring thread may take longer which can make the server process think
+    // that the stub process is unhealthy and return early. Waiting until the
+    // health thread is spawn would make sure would prevent this issue.
+    parent_message_queue_->Pop();
+
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
       try {
         AutocompleteStubProcess();

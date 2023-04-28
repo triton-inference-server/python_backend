@@ -29,7 +29,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-
 #include <atomic>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
@@ -42,7 +41,6 @@
 #include <regex>
 #include <thread>
 #include <unordered_map>
-
 #include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
@@ -54,7 +52,6 @@
 #include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/common/nvtx.h"
-
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
@@ -1529,6 +1526,12 @@ main(int argc, char** argv)
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread =
       std::thread([&parent_pid, &background_thread_running, &stub, &logger] {
+        // Send a dummy message after the stub process is launched to notify the
+        // parent process that the health thread has started.
+        std::unique_ptr<IPCMessage> ipc_message = IPCMessage::Create(
+            stub->SharedMemory(), false /* inline_response */);
+        stub->SendIPCMessage(ipc_message);
+
         while (background_thread_running) {
           // Every 300ms set the health variable to true. This variable is in
           // shared memory and will be set to false by the parent process.
