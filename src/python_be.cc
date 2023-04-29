@@ -1515,15 +1515,6 @@ ModelInstanceState::SendBLSDecoupledResponse(
     }
   }
 
-  ScopedDefer _([&ipc_message, response_batch] {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock{
-          *(ipc_message->ResponseMutex())};
-      response_batch->waiting_on_stub = false;
-      ipc_message->ResponseCondition()->notify_all();
-    }
-  });
-
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
