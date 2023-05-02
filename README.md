@@ -1327,7 +1327,7 @@ class TritonPythonModel:
       self.metric_family = pb_utils.MetricFamily(
           name="preprocess_latency_ns",
           description="Cumulative time spent pre-processing requests",
-          kind=pb_utils.Metric.COUNTER # or pb_utils.Metric.GAUGE
+          kind=pb_utils.MetricFamily.COUNTER # or pb_utils.MetricFamily.GAUGE
       )
 
       # Create a Metric object under the MetricFamily object. The 'labels'

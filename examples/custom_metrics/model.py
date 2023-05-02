@@ -80,7 +80,7 @@ class TritonPythonModel:
         self.metric_family = pb_utils.MetricFamily(
             name="requests_process_latency_ns",
             description="Cumulative time spent processing requests",
-            kind=pb_utils.COUNTER # or pb_utils.GAUGE
+            kind=pb_utils.MetricFamily.COUNTER # or pb_utils.MetricFamily.GAUGE
         )
 
         # Create a Metric object under the MetricFamily object. The 'labels'
@@ -88,9 +88,10 @@ class TritonPythonModel:
         # objects under the same MetricFamily object with unique labels. Empty
         # labels is allowed. The 'labels' parameter is optional. If you don't
         # specify the 'labels' parameter, empty labels will be used.
-        self.metric = self.metric_family.Metric(
-            labels={"model" : "custom_metrics", "version" : "1"}
-        )
+        self.metric = self.metric_family.Metric(labels={
+            "model": "custom_metrics",
+            "version": "1"
+        })
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -160,7 +161,9 @@ class TritonPythonModel:
         #       type of the value is double.
         #   - Metric.value(): Get the current value of the metric.
         self.metric.increment(end_ns - start_ns)
-        print("Cumulative requests processing latency:", self.metric.value())
+        logger = pb_utils.Logger
+        logger.log_info("Cumulative requests processing latency: {}".format(
+            self.metric.value()))
 
         # You should return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
