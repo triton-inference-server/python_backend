@@ -1116,9 +1116,6 @@ Stub::ParentToStubMQMonitor()
           *(ipc_message->ResponseMutex())};
       response_batch->waiting_on_stub = true;
       ipc_message->ResponseCondition()->notify_all();
-      while (response_batch->waiting_on_stub) {
-        ipc_message->ResponseCondition()->wait(lock);
-      }
     }
   }
 }
