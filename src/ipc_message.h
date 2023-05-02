@@ -52,8 +52,13 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_AutoCompleteResponse,
   PYTHONSTUB_LogRequest,
   PYTHONSTUB_CleanupRequest,
-  PYTHONSTUB_MetricFamilyRequest,
-  PYTHONSTUB_MetricRequest
+  PYTHONSTUB_MetricFamilyRequestNew,
+  PYTHONSTUB_MetricFamilyRequestDelete,
+  PYTHONSTUB_MetricRequestNew,
+  PYTHONSTUB_MetricRequestDelete,
+  PYTHONSTUB_MetricRequestValue,
+  PYTHONSTUB_MetricRequestIncrement,
+  PYTHONSTUB_MetricRequestSet
 } PYTHONSTUB_CommandType;
 
 ///

@@ -185,7 +185,16 @@ struct CustomMetricsMessage : SendMessageBase {
   bool has_error;
   bool is_error_set;
   bi::managed_external_buffer::handle_t error;
+  // This field is specifically utilized when making the
+  // 'PYTHONSTUB_MetricRequestValue' request. It is used to hold the metric
+  // value after the Python backend calls the Triton C API to retrieve the
+  // metric value and pass it back to the stub process.
   double value;
+  // This field is specifically utilized when making the
+  // 'PYTHONSTUB_MetricFamilyRequestNew' or 'PYTHONSTUB_MetricRequestNew'
+  // requests. It is used to hold the memory address of
+  // TRITONSERVER_MetricFamily' or 'TRITONSERVER_Metric' objects created in the
+  // Python backend and pass back to the stub process.
   void* address;
 };
 

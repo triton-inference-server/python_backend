@@ -40,50 +40,26 @@ namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
-enum MetricRequestKind {
-  MetricNew,
-  MetricDelete,
-  MetricValue,
-  MetricIncrement,
-  MetricSet
-};
-
+// The 'MetricShm' struct is utilized by the 'Metric' class for saving the
+// essential data to shared memory and for loading the data from shared memory
+// in order to reconstruct the 'Metric' object.
 struct MetricShm {
-  bi::managed_external_buffer::handle_t family_name_shm_handle;
+  // The shared memory handle of the labels in PbString format.
   bi::managed_external_buffer::handle_t labels_shm_handle;
-  double value;
-  MetricRequestKind metric_request_kind;
+  // The value used for incrementing or setting the metric.
+  double operation_value;
+  // The address of the TRITONSERVER_Metric object.
   void* metric_address;
+  // The address corresponds to the TRITONSERVER_MetricFamily object that this
+  // metric belongs to.
   void* metric_family_address;
 };
 
 class Metric {
  public:
-  Metric(
-      const std::string& family_name, const std::string& labels,
-      void* metric_family_address);
+  Metric(const std::string& labels, void* metric_family_address);
 
   ~Metric();
-
-  /// Get the family name of the metric.
-  /// \return Returns the family name of the metric.
-  const std::string& FamilyName();
-
-  /// Get the labels of the metric.
-  /// \return Returns the labels of the metric.
-  const std::string& Labels();
-
-  /// Get the shared memory handle of the metric.
-  /// \return Returns the shared memory handle of the metric.
-  bi::managed_external_buffer::handle_t ShmHandle();
-
-  /// Get the request kind of the metric.
-  /// \return Returns the request kind of the metric.
-  const MetricRequestKind& RequestKind();
-
-  /// Get the value of the metric.
-  /// \return Returns the value of the metric.
-  double Value();
 
   /// Save Custom Metric object to shared memory.
   /// \param shm_pool Shared memory pool to save the custom metric object.
@@ -102,7 +78,7 @@ class Metric {
   /// \return Returns the address of the TRITONSERVER_Metric object.
   void* MetricAddress();
 
-  /// Send the request to the parent processto delete the Metric object.
+  /// Send the request to the parent process to delete the Metric object.
   void Clear();
 
 #ifdef TRITON_PB_STUB
@@ -134,7 +110,9 @@ class Metric {
 
   /// Handle the metric operation.
   /// \param metrics_message_ptr The pointer to the CustomMetricsMessage object.
-  void HandleMetricOperation(CustomMetricsMessage** metrics_message_ptr);
+  void HandleMetricOperation(
+      CustomMetricsMessage* metrics_message_ptr,
+      const PYTHONSTUB_CommandType& command_type);
 
   /// Use Triton C API to increment the value of the metric by the given value.
   /// \param value The value to increment the metric by.
@@ -145,7 +123,7 @@ class Metric {
   void SetValue(const double& value);
 
   /// Use Triton C API to get the value of the metric.
-  void UpdateValue();
+  double GetValue();
 
   /// Clear the TRITONSERVER_Metric object.
   void ClearTritonMetric();
@@ -155,22 +133,30 @@ class Metric {
   DISALLOW_COPY_AND_ASSIGN(Metric);
 
  private:
+  // The private constructor for creating a Metric object from shared memory.
   Metric(
-      AllocatedSharedMemory<char>& custom_metric_shm,
-      std::unique_ptr<PbString>& family_name_shm,
+      AllocatedSharedMemory<MetricShm>& custom_metric_shm,
       std::unique_ptr<PbString>& labels_shm);
-  std::string family_name_;
+
+  // The labels of the metric, which is the identifier of the metric.
   std::string labels_;
-  double value_;
-  MetricRequestKind metric_request_kind_;
+  // The value used for incrementing or setting the metric.
+  double operation_value_;
+  // The address of the TRITONSERVER_Metric object.
   void* metric_address_;
+  // The address corresponds to the TRITONSERVER_MetricFamily object that this
+  // metric belongs to.
   void* metric_family_address_;
+  // Indicates whether the metric has been cleared. It is needed as the Clear()'
+  // function can be called from two different locations: when the metric family
+  // clears the 'metric_map_' and when the 'Metric' object goes out of
+  // scope/being deleted.
+  bool is_cleared_;
 
   // Shared Memory Data Structures
-  AllocatedSharedMemory<char> custom_metric_shm_;
+  AllocatedSharedMemory<MetricShm> custom_metric_shm_;
   MetricShm* custom_metric_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
-  std::unique_ptr<PbString> family_name_shm_;
   std::unique_ptr<PbString> labels_shm_;
 };
 

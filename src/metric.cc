@@ -32,12 +32,9 @@
 
 namespace triton { namespace backend { namespace python {
 
-Metric::Metric(
-    const std::string& family_name, const std::string& labels,
-    void* metric_address)
-    : family_name_(family_name), labels_(labels), value_(0),
-      metric_request_kind_(MetricNew), metric_address_(nullptr),
-      metric_family_address_(metric_address)
+Metric::Metric(const std::string& labels, void* metric_family_address)
+    : labels_(labels), operation_value_(0), metric_address_(nullptr),
+      metric_family_address_(metric_family_address), is_cleared_(false)
 {
 #ifdef TRITON_PB_STUB
   // Send the request to create the Metric to the parent process
@@ -46,7 +43,7 @@ Metric::Metric(
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
     stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
+        &custom_metrics_msg, PYTHONSTUB_MetricRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -63,58 +60,22 @@ Metric::~Metric()
 #endif
 }
 
-const std::string&
-Metric::FamilyName()
-{
-  return family_name_;
-}
-
-const std::string&
-Metric::Labels()
-{
-  return labels_;
-}
-
-bi::managed_external_buffer::handle_t
-Metric::ShmHandle()
-{
-  return shm_handle_;
-}
-
-const MetricRequestKind&
-Metric::RequestKind()
-{
-  return metric_request_kind_;
-}
-
-double
-Metric::Value()
-{
-  return value_;
-}
-
 void
 Metric::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  AllocatedSharedMemory<char> custom_metric_shm =
-      shm_pool->Construct<char>(sizeof(MetricShm), true);
-  custom_metric_shm_ptr_ =
-      reinterpret_cast<MetricShm*>(custom_metric_shm.data_.get());
+  AllocatedSharedMemory<MetricShm> custom_metric_shm =
+      shm_pool->Construct<MetricShm>();
+  custom_metric_shm_ptr_ = custom_metric_shm.data_.get();
 
-  std::unique_ptr<PbString> family_name_shm =
-      PbString::Create(shm_pool, FamilyName());
-  std::unique_ptr<PbString> labels_shm = PbString::Create(shm_pool, Labels());
+  std::unique_ptr<PbString> labels_shm = PbString::Create(shm_pool, labels_);
 
-  custom_metric_shm_ptr_->value = value_;
-  custom_metric_shm_ptr_->metric_request_kind = metric_request_kind_;
-  custom_metric_shm_ptr_->family_name_shm_handle = family_name_shm->ShmHandle();
+  custom_metric_shm_ptr_->operation_value = operation_value_;
   custom_metric_shm_ptr_->labels_shm_handle = labels_shm->ShmHandle();
   custom_metric_shm_ptr_->metric_family_address = metric_family_address_;
   custom_metric_shm_ptr_->metric_address = metric_address_;
 
   // Save the references to shared memory.
   custom_metric_shm_ = std::move(custom_metric_shm);
-  family_name_shm_ = std::move(family_name_shm);
   labels_shm_ = std::move(labels_shm);
   shm_handle_ = custom_metric_shm.handle_;
 }
@@ -124,33 +85,25 @@ Metric::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
 {
-  AllocatedSharedMemory<char> custom_metric_shm = shm_pool->Load<char>(handle);
-  MetricShm* custom_metric_shm_ptr =
-      reinterpret_cast<MetricShm*>(custom_metric_shm.data_.get());
+  AllocatedSharedMemory<MetricShm> custom_metric_shm =
+      shm_pool->Load<MetricShm>(handle);
+  MetricShm* custom_metric_shm_ptr = custom_metric_shm.data_.get();
 
-  std::unique_ptr<PbString> family_name_shm = PbString::LoadFromSharedMemory(
-      shm_pool, custom_metric_shm_ptr->family_name_shm_handle);
   std::unique_ptr<PbString> labels_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_shm_ptr->labels_shm_handle);
 
-  return std::unique_ptr<Metric>(
-      new Metric(custom_metric_shm, family_name_shm, labels_shm));
+  return std::unique_ptr<Metric>(new Metric(custom_metric_shm, labels_shm));
 }
 
 Metric::Metric(
-    AllocatedSharedMemory<char>& custom_metric_shm,
-    std::unique_ptr<PbString>& family_name_shm,
+    AllocatedSharedMemory<MetricShm>& custom_metric_shm,
     std::unique_ptr<PbString>& labels_shm)
     : custom_metric_shm_(std::move(custom_metric_shm)),
-      family_name_shm_(std::move(family_name_shm)),
       labels_shm_(std::move(labels_shm))
 {
-  custom_metric_shm_ptr_ =
-      reinterpret_cast<MetricShm*>(custom_metric_shm_.data_.get());
-  family_name_ = family_name_shm_->String();
+  custom_metric_shm_ptr_ = custom_metric_shm_.data_.get();
   labels_ = labels_shm_->String();
-  value_ = custom_metric_shm_ptr_->value;
-  metric_request_kind_ = custom_metric_shm_ptr_->metric_request_kind;
+  operation_value_ = custom_metric_shm_ptr_->operation_value;
   metric_family_address_ = custom_metric_shm_ptr_->metric_family_address;
   metric_address_ = custom_metric_shm_ptr_->metric_address;
 }
@@ -166,13 +119,12 @@ void
 Metric::SendIncrementRequest(const double& value)
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  metric_request_kind_ = MetricIncrement;
-  value_ = value;
+  operation_value_ = value;
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
     stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
+        &custom_metrics_msg, PYTHONSTUB_MetricRequestIncrement, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -185,13 +137,12 @@ void
 Metric::SendSetValueRequest(const double& value)
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  metric_request_kind_ = MetricSet;
-  value_ = value;
+  operation_value_ = value;
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
     stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
+        &custom_metrics_msg, PYTHONSTUB_MetricRequestSet, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -203,12 +154,11 @@ double
 Metric::SendGetValueRequest()
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  metric_request_kind_ = MetricValue;
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
     stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
+        &custom_metrics_msg, PYTHONSTUB_MetricRequestValue, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -221,14 +171,18 @@ Metric::SendGetValueRequest()
 void
 Metric::Clear()
 {
-  if (metric_request_kind_ != MetricDelete) {
-    metric_request_kind_ = MetricDelete;
+  // Need to check if the metric has been cleared before as the Clear()'
+  // function can be called from two different locations: when the metric family
+  // clears the 'metric_map_' and when the 'Metric' object goes out of
+  // scope/being deleted.
+  if (!is_cleared_) {
+    is_cleared_ = true;
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
     try {
       stub->SendCustomMetricsMessage(
-          &custom_metrics_msg, PYTHONSTUB_MetricRequest, shm_handle_);
+          &custom_metrics_msg, PYTHONSTUB_MetricRequestDelete, shm_handle_);
     }
     catch (const PythonBackendException& pb_exception) {
       std::cerr << "Error when deleting Metric: " << pb_exception.what()
@@ -273,15 +227,16 @@ Metric::ParseLabels(
 }
 
 void
-Metric::HandleMetricOperation(CustomMetricsMessage** metrics_message_ptr)
+Metric::HandleMetricOperation(
+    CustomMetricsMessage* metrics_message_ptr,
+    const PYTHONSTUB_CommandType& command_type)
 {
-  if (metric_request_kind_ == MetricValue) {
-    UpdateValue();
-    (*metrics_message_ptr)->value = value_;
-  } else if (metric_request_kind_ == MetricIncrement) {
-    Increment(value_);
-  } else if (metric_request_kind_ == MetricSet) {
-    SetValue(value_);
+  if (command_type == PYTHONSTUB_MetricRequestValue) {
+    metrics_message_ptr->value = GetValue();
+  } else if (command_type == PYTHONSTUB_MetricRequestIncrement) {
+    Increment(operation_value_);
+  } else if (command_type == PYTHONSTUB_MetricRequestSet) {
+    SetValue(operation_value_);
   } else {
     throw PythonBackendException("Unknown metric operation");
   }
@@ -292,7 +247,6 @@ Metric::Increment(const double& value)
 {
   auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricIncrement(triton_metric, value));
-  UpdateValue();
 }
 
 void
@@ -300,14 +254,15 @@ Metric::SetValue(const double& value)
 {
   auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricSet(triton_metric, value));
-  UpdateValue();
 }
 
-void
-Metric::UpdateValue()
+double
+Metric::GetValue()
 {
+  double value;
   auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
-  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricValue(triton_metric, &value_));
+  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricValue(triton_metric, &value));
+  return value;
 }
 
 void

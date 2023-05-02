@@ -804,14 +804,33 @@ ModelInstanceState::StubToParentMQMonitor()
     std::unique_ptr<IPCMessage> message =
         IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), handle);
 
-    if (message->Command() == PYTHONSTUB_LogRequest) {
-      ProcessLogRequest(message);
-    } else if (message->Command() == PYTHONSTUB_CleanupRequest) {
-      ProcessBLSCleanupRequest(message);
-    } else if (message->Command() == PYTHONSTUB_MetricFamilyRequest) {
-      ProcessMetricFamilyRequest(message);
-    } else if (message->Command() == PYTHONSTUB_MetricRequest) {
-      ProcessMetricRequest(message);
+    switch (message->Command()) {
+      case PYTHONSTUB_LogRequest: {
+        ProcessLogRequest(message);
+        break;
+      }
+      case PYTHONSTUB_CleanupRequest: {
+        ProcessBLSCleanupRequest(message);
+        break;
+      }
+      case PYTHONSTUB_MetricFamilyRequestNew:
+      case PYTHONSTUB_MetricFamilyRequestDelete: {
+        ProcessMetricFamilyRequest(message);
+        break;
+      }
+      case PYTHONSTUB_MetricRequestNew:
+      case PYTHONSTUB_MetricRequestDelete:
+      case PYTHONSTUB_MetricRequestValue:
+      case PYTHONSTUB_MetricRequestIncrement:
+      case PYTHONSTUB_MetricRequestSet: {
+        ProcessMetricRequest(message);
+        break;
+      }
+      default: {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_ERROR, "Unexpected message type received.");
+        break;
+      }
     }
   }
 }
@@ -889,9 +908,12 @@ ModelInstanceState::ProcessBLSCleanupRequest(
   }
 }
 
+template <typename T>
 void
-ModelInstanceState::ProcessMetricFamilyRequest(
-    const std::unique_ptr<IPCMessage>& message)
+ModelInstanceState::ProcessCustomMetricsRequest(
+    const std::unique_ptr<IPCMessage>& message,
+    std::function<void(std::unique_ptr<T>&, CustomMetricsMessage*)>
+        request_handler)
 {
   AllocatedSharedMemory<CustomMetricsMessage> metrics_message =
       Stub()->ShmPool()->Load<CustomMetricsMessage>(message->Args());
@@ -899,9 +921,8 @@ ModelInstanceState::ProcessMetricFamilyRequest(
       reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
   std::unique_ptr<PbString> pb_error_message;
   PythonBackendException pb_exception(std::string{});
-  std::unique_ptr<MetricFamily> metric_family =
-      MetricFamily::LoadFromSharedMemory(
-          Stub()->ShmPool(), metrics_message_ptr->message);
+  std::unique_ptr<T> metrics_object =
+      T::LoadFromSharedMemory(Stub()->ShmPool(), metrics_message_ptr->message);
 
   ScopedDefer _([metrics_message_ptr] {
     {
@@ -915,15 +936,7 @@ ModelInstanceState::ProcessMetricFamilyRequest(
   });
 
   try {
-    if (metric_family->RequestKind() == MetricFamilyNew) {
-      metrics_message_ptr->address =
-          metric_family->InitializeTritonMetricFamily();
-    } else if (metric_family->RequestKind() == MetricFamilyDelete) {
-      metric_family->ClearTritonMetricFamily();
-    } else {
-      pb_exception =
-          PythonBackendException("Unknown metric family request kind");
-    }
+    request_handler(metrics_object, metrics_message_ptr);
   }
   catch (const PythonBackendException& exception) {
     pb_exception = exception;
@@ -940,54 +953,65 @@ ModelInstanceState::ProcessMetricFamilyRequest(
 }
 
 void
+ModelInstanceState::ProcessMetricFamilyRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  auto command = message->Command();
+  ProcessCustomMetricsRequest<MetricFamily>(
+      message, [this, command](
+                   std::unique_ptr<MetricFamily>& metric_family,
+                   CustomMetricsMessage* metrics_message_ptr) {
+        switch (command) {
+          case PYTHONSTUB_MetricFamilyRequestNew: {
+            metrics_message_ptr->address =
+                metric_family->InitializeTritonMetricFamily();
+            break;
+          }
+          case PYTHONSTUB_MetricFamilyRequestDelete: {
+            metric_family->ClearTritonMetricFamily();
+            break;
+          }
+          default: {
+            throw PythonBackendException("Unknown metric family request kind");
+          }
+        }
+      });
+}
+
+void
 ModelInstanceState::ProcessMetricRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
-  AllocatedSharedMemory<CustomMetricsMessage> metrics_message =
-      Stub()->ShmPool()->Load<CustomMetricsMessage>(message->Args());
-  CustomMetricsMessage* metrics_message_ptr =
-      reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
-  std::unique_ptr<PbString> pb_error_message;
-  PythonBackendException pb_exception(std::string{});
-  std::unique_ptr<Metric> metric = Metric::LoadFromSharedMemory(
-      Stub()->ShmPool(), metrics_message_ptr->message);
-
-  ScopedDefer _([metrics_message_ptr] {
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{metrics_message_ptr->mu};
-      metrics_message_ptr->waiting_on_stub = true;
-      metrics_message_ptr->cv.notify_all();
-      while (metrics_message_ptr->waiting_on_stub) {
-        metrics_message_ptr->cv.wait(guard);
-      }
-    }
-  });
-
-  try {
-    if (metric->RequestKind() == MetricNew) {
-      metrics_message_ptr->address = metric->InitializeTritonMetric();
-    } else if (
-        (metric->RequestKind() == MetricIncrement) ||
-        (metric->RequestKind() == MetricSet) ||
-        (metric->RequestKind() == MetricValue)) {
-      metric->HandleMetricOperation(&metrics_message_ptr);
-    } else if (metric->RequestKind() == MetricDelete) {
-      metric->ClearTritonMetric();
-    } else {
-      throw PythonBackendException("Unknown metric request kind");
-    }
-  }
-  catch (const PythonBackendException& exception) {
-    pb_exception = exception;
-  }
-  if (pb_exception.what() != std::string{}) {
-    metrics_message_ptr->has_error = true;
-    LOG_IF_EXCEPTION(
-        pb_error_message =
-            PbString::Create(Stub()->ShmPool(), pb_exception.what()));
-    metrics_message_ptr->error = pb_error_message->ShmHandle();
-    metrics_message_ptr->is_error_set = true;
-  }
+  auto command = message->Command();
+  ProcessCustomMetricsRequest<Metric>(
+      message, [this, command](
+                   std::unique_ptr<Metric>& metric,
+                   CustomMetricsMessage* metrics_message_ptr) {
+        try {
+          switch (command) {
+            case PYTHONSTUB_MetricRequestNew: {
+              metrics_message_ptr->address = metric->InitializeTritonMetric();
+              break;
+            }
+            case PYTHONSTUB_MetricRequestIncrement:
+            case PYTHONSTUB_MetricRequestSet:
+            case PYTHONSTUB_MetricRequestValue: {
+              metric->HandleMetricOperation(metrics_message_ptr, command);
+              break;
+            }
+            case PYTHONSTUB_MetricRequestDelete: {
+              metric->ClearTritonMetric();
+              break;
+            }
+            default: {
+              throw PythonBackendException("Unknown metric request kind");
+            }
+          }
+        }
+        catch (const PythonBackendException& exception) {
+          throw exception;
+        }
+      });
 }
 
 void

@@ -427,10 +427,6 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "MetricFamily",
       c_python_backend_utils.attr("MetricFamily"));
-  py::setattr(
-      python_backend_utils, "COUNTER", c_python_backend_utils.attr("COUNTER"));
-  py::setattr(
-      python_backend_utils, "GAUGE", c_python_backend_utils.attr("GAUGE"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -1553,18 +1549,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("name").none(false), py::arg("description").none(false),
           py::arg("kind").none(false))
       .def(
-          "Metric",
-          [](std::shared_ptr<MetricFamily>& metric_family, py::dict labels) {
-            py::module json = py::module_::import("json");
-            std::string labels_str =
-                std::string(py::str(json.attr("dumps")(labels)));
-            auto metric = std::make_shared<Metric>(
-                metric_family->Name() + metric_family->Description(),
-                labels_str, metric_family->MetricFamilyAddress());
-            metric_family->AddMetric(metric);
-            return metric;
-          },
+          "Metric", &MetricFamily::CreateMetric,
           py::arg("labels").none(false) = py::dict());
+  module.attr("MetricFamily").attr("COUNTER") = MetricKind::COUNTER;
+  module.attr("MetricFamily").attr("GAUGE") = MetricKind::GAUGE;
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

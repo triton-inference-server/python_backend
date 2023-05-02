@@ -41,14 +41,17 @@ namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {
 
-enum MetricFamilyRequestKind { MetricFamilyNew, MetricFamilyDelete };
-
+// The 'MetricFamilyShm' struct is utilized by the 'MetricFamily' class for
+// saving the essential data to shared memory and for loading the data from
+// shared memory in order to reconstruct the 'MetricFamily' object.
 struct MetricFamilyShm {
+  // The shared memory handle of the name in PbString format.
   bi::managed_external_buffer::handle_t name_shm_handle;
+  // The shared memory handle of the description in PbString format.
   bi::managed_external_buffer::handle_t description_shm_handle;
-  bi::managed_external_buffer::handle_t key_name_shm_handle;
+  // The metric kind of the 'MetricFamily'.
   MetricKind kind;
-  MetricFamilyRequestKind metric_family_request_kind;
+  // The address of the 'TRITONSERVER_MetricFamily' object.
   void* metric_family_address;
 };
 
@@ -59,26 +62,6 @@ class MetricFamily {
       const MetricKind& kind);
 
   ~MetricFamily();
-
-  /// Get the name of the custom metric family.
-  /// \return Returns the name of the metric family.
-  const std::string& Name();
-
-  /// Get the description of the custom metric family.
-  /// \return Returns the description of the custom metric family.
-  const std::string& Description();
-
-  /// Get the metric kind of the custom metric family.
-  /// \return Returns the metric kind of the custom metric family.
-  const MetricKind& Kind();
-
-  /// Get the shm handle of the custom metric family.
-  /// \return Returns the shm handle of the custom metric family.
-  bi::managed_external_buffer::handle_t ShmHandle();
-
-  /// Get the custom metric family request kind.
-  /// \return Returns the custom metric family request kind.
-  const MetricFamilyRequestKind& RequestKind();
 
   /// Save a custom metric family to shared memory.
   /// \param shm_pool Shared memory pool to save the custom metric family.
@@ -98,9 +81,10 @@ class MetricFamily {
   void* MetricFamilyAddress();
 
 #ifdef TRITON_PB_STUB
-  /// Store the metric in the metric map.
-  /// \param metric The Metric to be added.
-  void AddMetric(std::shared_ptr<Metric> metric);
+  /// Create a metric from the metric family and store it in the metric map.
+  /// \param labels The labels of the metric.
+  /// \return Returns the shared pointer to the created metric.
+  std::shared_ptr<Metric> CreateMetric(py::dict labels);
 #else
   /// Initialize the TRITONSERVER_MetricFamily object.
   /// \return Returns the address of the TRITONSERVER_MetricFamily object.
@@ -119,23 +103,31 @@ class MetricFamily {
   DISALLOW_COPY_AND_ASSIGN(MetricFamily);
 
  private:
+  // The private constructor for creating a MetricFamily object from shared
+  // memory.
   MetricFamily(
-      AllocatedSharedMemory<char>& custom_metric_family_shm,
+      AllocatedSharedMemory<MetricFamilyShm>& custom_metric_family_shm,
       std::unique_ptr<PbString>& name_shm,
       std::unique_ptr<PbString>& description_shm);
+
+  // The name of the metric family.
   std::string name_;
+  // The description of the metric family.
   std::string description_;
-  std::string unique_name_;
+  // The metric kind of the metric family. Currently only supports GAUGE and
+  // COUNTER.
   MetricKind kind_;
-  MetricFamilyRequestKind metric_family_request_kind_;
+  // The address of the TRITONSERVER_MetricFamily object.
   void* metric_family_address_;
+
+  // The mutex to protect the 'metric_map_'.
   std::mutex metric_map_mu_;
   // Need to keep track of the metrics associated with the metric family to make
   // sure the metrics are cleaned up before the metric family is deleted.
   std::unordered_map<void*, std::shared_ptr<Metric>> metric_map_;
 
   // Shared Memory Data Structures
-  AllocatedSharedMemory<char> custom_metric_family_shm_;
+  AllocatedSharedMemory<MetricFamilyShm> custom_metric_family_shm_;
   MetricFamilyShm* custom_metric_family_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
   std::unique_ptr<PbString> name_shm_;

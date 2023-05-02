@@ -36,7 +36,6 @@ MetricFamily::MetricFamily(
     const std::string& name, const std::string& description,
     const MetricKind& kind)
     : name_(name), description_(description), kind_(kind),
-      metric_family_request_kind_(MetricFamilyNew),
       metric_family_address_(nullptr)
 {
 #ifdef TRITON_PB_STUB
@@ -46,7 +45,7 @@ MetricFamily::MetricFamily(
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
     stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequest, shm_handle_);
+        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -60,74 +59,41 @@ MetricFamily::MetricFamily(
 MetricFamily::~MetricFamily()
 {
 #ifdef TRITON_PB_STUB
-  // Send the request to delete the MetricFamily to the parent process
-  if (metric_family_request_kind_ != MetricFamilyDelete) {
-    // Clear all the metrics first
+  // Clear all the metrics first
+  std::lock_guard<std::mutex> lock(metric_map_mu_);
+  {
     for (auto& m : metric_map_) {
       m.second->Clear();
     }
+  }
 
-    metric_family_request_kind_ = MetricFamilyDelete;
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-    SaveToSharedMemory(stub->ShmPool());
-    CustomMetricsMessage* custom_metrics_msg = nullptr;
-    try {
-      stub->SendCustomMetricsMessage(
-          &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequest, shm_handle_);
-    }
-    catch (const PythonBackendException& pb_exception) {
-      std::cerr << "Error when deleting MetricFamily: " << pb_exception.what()
-                << "\n";
-    }
+  // Send the request to delete the MetricFamily to the parent process
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  SaveToSharedMemory(stub->ShmPool());
+  CustomMetricsMessage* custom_metrics_msg = nullptr;
+  try {
+    stub->SendCustomMetricsMessage(
+        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestDelete, shm_handle_);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    std::cerr << "Error when deleting MetricFamily: " << pb_exception.what()
+              << "\n";
   }
 #endif
 };
 
-const std::string&
-MetricFamily::Name()
-{
-  return name_;
-}
-
-const std::string&
-MetricFamily::Description()
-{
-  return description_;
-}
-
-const MetricKind&
-MetricFamily::Kind()
-{
-  return kind_;
-}
-
-bi::managed_external_buffer::handle_t
-MetricFamily::ShmHandle()
-{
-  return shm_handle_;
-}
-
-const MetricFamilyRequestKind&
-MetricFamily::RequestKind()
-{
-  return metric_family_request_kind_;
-}
-
 void
 MetricFamily::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  AllocatedSharedMemory<char> custom_metric_family_shm =
-      shm_pool->Construct<char>(sizeof(MetricFamilyShm));
+  AllocatedSharedMemory<MetricFamilyShm> custom_metric_family_shm =
+      shm_pool->Construct<MetricFamilyShm>();
 
-  custom_metric_family_shm_ptr_ =
-      reinterpret_cast<MetricFamilyShm*>(custom_metric_family_shm.data_.get());
-  std::unique_ptr<PbString> name_shm = PbString::Create(shm_pool, Name());
+  custom_metric_family_shm_ptr_ = custom_metric_family_shm.data_.get();
+  std::unique_ptr<PbString> name_shm = PbString::Create(shm_pool, name_);
   std::unique_ptr<PbString> description_shm =
-      PbString::Create(shm_pool, Description());
+      PbString::Create(shm_pool, description_);
 
   custom_metric_family_shm_ptr_->kind = kind_;
-  custom_metric_family_shm_ptr_->metric_family_request_kind =
-      metric_family_request_kind_;
   custom_metric_family_shm_ptr_->name_shm_handle = name_shm->ShmHandle();
   custom_metric_family_shm_ptr_->description_shm_handle =
       description_shm->ShmHandle();
@@ -145,10 +111,10 @@ MetricFamily::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
 {
-  AllocatedSharedMemory<char> custom_metric_family_shm =
-      shm_pool->Load<char>(handle);
+  AllocatedSharedMemory<MetricFamilyShm> custom_metric_family_shm =
+      shm_pool->Load<MetricFamilyShm>(handle);
   MetricFamilyShm* custom_metric_family_shm_ptr =
-      reinterpret_cast<MetricFamilyShm*>(custom_metric_family_shm.data_.get());
+      custom_metric_family_shm.data_.get();
   std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_family_shm_ptr->name_shm_handle);
   std::unique_ptr<PbString> description_shm = PbString::LoadFromSharedMemory(
@@ -159,20 +125,17 @@ MetricFamily::LoadFromSharedMemory(
 }
 
 MetricFamily::MetricFamily(
-    AllocatedSharedMemory<char>& custom_metric_family_shm,
+    AllocatedSharedMemory<MetricFamilyShm>& custom_metric_family_shm,
     std::unique_ptr<PbString>& name_shm,
     std::unique_ptr<PbString>& description_shm)
     : custom_metric_family_shm_(std::move(custom_metric_family_shm)),
       name_shm_(std::move(name_shm)),
       description_shm_(std::move(description_shm))
 {
-  custom_metric_family_shm_ptr_ =
-      reinterpret_cast<MetricFamilyShm*>(custom_metric_family_shm_.data_.get());
+  custom_metric_family_shm_ptr_ = custom_metric_family_shm_.data_.get();
   name_ = name_shm_->String();
   description_ = description_shm_->String();
   kind_ = custom_metric_family_shm_ptr_->kind;
-  metric_family_request_kind_ =
-      custom_metric_family_shm_ptr_->metric_family_request_kind;
   metric_family_address_ = custom_metric_family_shm_ptr_->metric_family_address;
 }
 
@@ -183,11 +146,18 @@ MetricFamily::MetricFamilyAddress()
 }
 
 #ifdef TRITON_PB_STUB
-void
-MetricFamily::AddMetric(std::shared_ptr<Metric> metric)
+std::shared_ptr<Metric>
+MetricFamily::CreateMetric(py::dict labels)
 {
-  std::lock_guard<std::mutex> lock(metric_map_mu_);
-  metric_map_.insert({metric->MetricAddress(), metric});
+  py::module json = py::module_::import("json");
+  std::string labels_str = std::string(py::str(json.attr("dumps")(labels)));
+  auto metric = std::make_shared<Metric>(labels_str, metric_family_address_);
+  {
+    std::lock_guard<std::mutex> lock(metric_map_mu_);
+    metric_map_.insert({metric->MetricAddress(), metric});
+  }
+
+  return metric;
 }
 #else
 void*
@@ -216,7 +186,6 @@ MetricFamily::ToTritonServerMetricKind(const MetricKind& kind)
 void
 MetricFamily::ClearTritonMetricFamily()
 {
-  metric_map_.clear();
   auto metric_family =
       reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_);
   if (metric_family != nullptr) {
