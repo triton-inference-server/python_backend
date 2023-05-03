@@ -70,7 +70,7 @@ class MetricFamily {
   /// Create a Custom Metric Family object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param handle Shared memory handle of the custom metric family.
-  /// \return Returns the custom metric family in the specified request_handle
+  /// \return Returns the custom metric family in the specified handle
   /// location.
   static std::unique_ptr<MetricFamily> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,

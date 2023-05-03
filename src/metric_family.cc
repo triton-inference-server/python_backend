@@ -60,8 +60,8 @@ MetricFamily::~MetricFamily()
 {
 #ifdef TRITON_PB_STUB
   // Clear all the metrics first
-  std::lock_guard<std::mutex> lock(metric_map_mu_);
   {
+    std::lock_guard<std::mutex> lock(metric_map_mu_);
     for (auto& m : metric_map_) {
       m.second->Clear();
     }

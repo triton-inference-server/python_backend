@@ -268,9 +268,9 @@ Metric::GetValue()
 void
 Metric::ClearTritonMetric()
 {
-  auto metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
-  if (metric != nullptr) {
-    LOG_IF_ERROR(TRITONSERVER_MetricDelete(metric), "deleting metric");
+  auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
+  if (triton_metric != nullptr) {
+    LOG_IF_ERROR(TRITONSERVER_MetricDelete(triton_metric), "deleting metric");
   }
 }
 

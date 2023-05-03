@@ -561,8 +561,10 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
     dst_buffers.emplace_back(std::move(dst_buffer));
   }
 
-  ScopedDefer load_gpu_buffer_response(
-      [this] { parent_message_queue_->Push(DUMMY_MESSAGE); });
+  ScopedDefer load_gpu_buffer_response([this] {
+    // Push a dummy message to signal the thread to terminate.
+    parent_message_queue_->Push(DUMMY_MESSAGE);
+  });
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
@@ -881,6 +883,7 @@ Stub::TerminateStubToParentQueueMonitor()
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
     std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
+    // Push a dummy message to signal the thread to terminate.
     stub_to_parent_buffer_.push(DUMMY_MESSAGE);
   }
   stub_to_parent_message_cv_.notify_one();
@@ -1019,6 +1022,7 @@ Stub::TerminateParentToStubQueueMonitor()
 {
   if (parent_to_stub_thread_) {
     parent_to_stub_thread_ = false;
+    // Push a dummy message to signal the thread to terminate.
     parent_to_stub_mq_->Push(DUMMY_MESSAGE);
     parent_to_stub_queue_monitor_.join();
   }

@@ -1027,6 +1027,7 @@ ModelInstanceState::TerminateMonitor()
 {
   if (stub_to_parent_thread_) {
     stub_to_parent_thread_ = false;
+    // Push a dummy message to signal the thread to terminate.
     Stub()->StubToParentMessageQueue()->Push(DUMMY_MESSAGE);
     stub_to_parent_queue_monitor_.join();
   }
@@ -1191,7 +1192,10 @@ ModelInstanceState::ProcessRequestsDecoupled(
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
   received_message_ = nullptr;
-  ScopedDefer _([this] { Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE); });
+  ScopedDefer _([this] {
+    // Push a dummy message to signal the thread to terminate.
+    Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
+  });
 
   {
     std::unique_lock<std::mutex> guard{mu_};
@@ -1312,6 +1316,7 @@ ModelInstanceState::ProcessRequests(
     // the object stored in shared memory.
     NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
     if (!restart)
+      // Push a dummy message to signal the thread to terminate.
       Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
   });
   if (restart) {
@@ -1660,6 +1665,7 @@ ModelInstanceState::~ModelInstanceState()
   if (Stub()->IsHealthy()) {
     if (model_state->IsDecoupled()) {
       futures_.clear();
+      // Push a dummy message to signal the thread to terminate.
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
     }
