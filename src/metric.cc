@@ -37,19 +37,7 @@ Metric::Metric(const std::string& labels, void* metric_family_address)
       metric_family_address_(metric_family_address), is_cleared_(false)
 {
 #ifdef TRITON_PB_STUB
-  // Send the request to create the Metric to the parent process
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  SaveToSharedMemory(stub->ShmPool());
-  CustomMetricsMessage* custom_metrics_msg = nullptr;
-  try {
-    stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricRequestNew, shm_handle_);
-  }
-  catch (const PythonBackendException& pb_exception) {
-    throw PythonBackendException(
-        "Error when creating Metric: " + std::string(pb_exception.what()));
-  }
-  metric_address_ = custom_metrics_msg->address;
+  SendCreateMetricRequest();
 #endif
 }
 
@@ -115,6 +103,24 @@ Metric::MetricAddress()
 }
 
 #ifdef TRITON_PB_STUB
+void
+Metric::SendCreateMetricRequest()
+{
+  // Send the request to create the Metric to the parent process
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  SaveToSharedMemory(stub->ShmPool());
+  CustomMetricsMessage* custom_metrics_msg = nullptr;
+  try {
+    stub->SendCustomMetricsMessage(
+        &custom_metrics_msg, PYTHONSTUB_MetricRequestNew, shm_handle_);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    throw PythonBackendException(
+        "Error when creating Metric: " + std::string(pb_exception.what()));
+  }
+  metric_address_ = custom_metrics_msg->address;
+}
+
 void
 Metric::SendIncrementRequest(const double& value)
 {

@@ -1544,12 +1544,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<MetricFamily, std::shared_ptr<MetricFamily>>(
       module, "MetricFamily")
       .def(
-          py::init([](const std::string& name, const std::string& description,
-                      const MetricKind& kind) {
-            auto metric_family =
-                std::make_shared<MetricFamily>(name, description, kind);
-            return metric_family;
-          }),
+          py::init(&MetricFamily::CreateMetricFamily),
           py::arg("name").none(false), py::arg("description").none(false),
           py::arg("kind").none(false))
       .def(

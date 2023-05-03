@@ -82,6 +82,10 @@ class Metric {
   void Clear();
 
 #ifdef TRITON_PB_STUB
+  /// Send a request to register a new 'TRITONSERVER_Metric' object to the
+  /// parent process.
+  void SendCreateMetricRequest();
+
   /// Send the request to the parent process to increment the metric by the
   /// specified value.
   /// \param value The value to increment the metric by.

@@ -39,20 +39,7 @@ MetricFamily::MetricFamily(
       metric_family_address_(nullptr)
 {
 #ifdef TRITON_PB_STUB
-  // Send the request to create the MetricFamily to the parent process
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  SaveToSharedMemory(stub->ShmPool());
-  CustomMetricsMessage* custom_metrics_msg = nullptr;
-  try {
-    stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
-  }
-  catch (const PythonBackendException& pb_exception) {
-    throw PythonBackendException(
-        "Error when creating MetricFamily: " +
-        std::string(pb_exception.what()));
-  }
-  metric_family_address_ = custom_metrics_msg->address;
+  SendCreateMetricFamilyRequest();
 #endif
 }
 
@@ -146,6 +133,35 @@ MetricFamily::MetricFamilyAddress()
 }
 
 #ifdef TRITON_PB_STUB
+std::shared_ptr<MetricFamily>
+MetricFamily::CreateMetricFamily(
+    const std::string& name, const std::string& description,
+    const MetricKind& kind)
+{
+  std::shared_ptr<MetricFamily> metric_family =
+      std::make_shared<MetricFamily>(name, description, kind);
+  metric_family->SendCreateMetricFamilyRequest();
+  return metric_family;
+}
+
+void
+MetricFamily::SendCreateMetricFamilyRequest()
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  SaveToSharedMemory(stub->ShmPool());
+  CustomMetricsMessage* custom_metrics_msg = nullptr;
+  try {
+    stub->SendCustomMetricsMessage(
+        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    throw PythonBackendException(
+        "Error when creating MetricFamily: " +
+        std::string(pb_exception.what()));
+  }
+  metric_family_address_ = custom_metrics_msg->address;
+}
+
 std::shared_ptr<Metric>
 MetricFamily::CreateMetric(py::dict labels)
 {

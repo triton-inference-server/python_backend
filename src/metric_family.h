@@ -81,6 +81,19 @@ class MetricFamily {
   void* MetricFamilyAddress();
 
 #ifdef TRITON_PB_STUB
+  /// Create a metric family object and returned as a shared pointer.
+  /// \param name The name of the metric family.
+  /// \param description The description of the metric family.
+  /// \param kind The metric kind of the metric family.
+  /// \return Returns the shared pointer to the created metric family.
+  static std::shared_ptr<MetricFamily> CreateMetricFamily(
+      const std::string& name, const std::string& description,
+      const MetricKind& kind);
+
+  /// Send a request to register a new 'TRITONSERVER_MetricFamily' object to the
+  /// parent process.
+  void SendCreateMetricFamilyRequest();
+
   /// Create a metric from the metric family and store it in the metric map.
   /// \param labels The labels of the metric.
   /// \return Returns the shared pointer to the created metric.
