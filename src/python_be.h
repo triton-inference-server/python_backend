@@ -389,7 +389,7 @@ class ModelInstanceState : public BackendModelInstance {
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process a custom metrics request. The function 'request_handler' is invoked
-  // to handle the request.
+  // to handle the request. T should be either 'MetricFamily' or 'Metric'.
   template <typename T>
   void ProcessCustomMetricsRequest(
       const std::unique_ptr<IPCMessage>& message,
