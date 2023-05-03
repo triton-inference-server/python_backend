@@ -155,7 +155,9 @@ class LogMessage {
 
 #define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
-// The payload for the stub_to_parent message queue
+// The payload for the stub_to_parent message queue. This struct serves as a
+// wrapper for different types of messages so that they can be sent through the
+// same buffer.
 struct UtilsMessagePayload {
   UtilsMessagePayload(
       const PYTHONSTUB_CommandType& command_type, void* utils_message_ptr)
