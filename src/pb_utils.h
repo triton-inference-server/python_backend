@@ -71,12 +71,14 @@ namespace bi = boost::interprocess;
     }                                                              \
     while (false)
 
-#define THROW_IF_TRITON_ERROR(X)                                          \
-  do {                                                                    \
-    TRITONSERVER_Error* tie_err__ = (X);                                  \
-    if (tie_err__ != nullptr) {                                           \
-      throw PythonBackendException(TRITONSERVER_ErrorMessage(tie_err__)); \
-    }                                                                     \
+#define THROW_IF_TRITON_ERROR(X)                                              \
+  do {                                                                        \
+    TRITONSERVER_Error* tie_err__ = (X);                                      \
+    if (tie_err__ != nullptr) {                                               \
+      auto error_message = std::string(TRITONSERVER_ErrorMessage(tie_err__)); \
+      TRITONSERVER_ErrorDelete(tie_err__);                                    \
+      throw PythonBackendException(error_message);                            \
+    }                                                                         \
   } while (false)
 
 #define THROW_IF_CUDA_ERROR(X)                          \
@@ -165,6 +167,8 @@ struct ResponseBatch : SendMessageBase {
 
 enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
 
+enum MetricKind { COUNTER, GAUGE };
+
 struct LogSendMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t filename;
   int32_t line;
@@ -172,9 +176,26 @@ struct LogSendMessage : SendMessageBase {
   LogLevel level;
 };
 
-
 struct CleanupMessage : SendMessageBase {
   void* id;
+};
+
+struct CustomMetricsMessage : SendMessageBase {
+  bi::managed_external_buffer::handle_t message;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  // This field is specifically utilized when making the
+  // 'PYTHONSTUB_MetricRequestValue' request. It is used to hold the metric
+  // value after the Python backend calls the Triton C API to retrieve the
+  // metric value and pass it back to the stub process.
+  double value;
+  // This field is specifically utilized when making the
+  // 'PYTHONSTUB_MetricFamilyRequestNew' or 'PYTHONSTUB_MetricRequestNew'
+  // requests. It is used to hold the memory address of
+  // TRITONSERVER_MetricFamily' or 'TRITONSERVER_Metric' objects created in the
+  // Python backend and pass back to the stub process.
+  void* address;
 };
 
 struct ResponseSenderBase {

@@ -41,7 +41,6 @@
 #include <regex>
 #include <thread>
 #include <unordered_map>
-#include "infer_response.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_preferred_memory.h"
@@ -425,6 +424,9 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "TRITONSERVER_MEMORY_CPU",
       c_python_backend_utils.attr("TRITONSERVER_MEMORY_CPU"));
+  py::setattr(
+      python_backend_utils, "MetricFamily",
+      c_python_backend_utils.attr("MetricFamily"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -559,8 +561,10 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
     dst_buffers.emplace_back(std::move(dst_buffer));
   }
 
-  ScopedDefer load_gpu_buffer_response(
-      [this] { parent_message_queue_->Push(DUMMY_MESSAGE); });
+  ScopedDefer load_gpu_buffer_response([this] {
+    // Push a dummy message to signal the thread to terminate.
+    parent_message_queue_->Push(DUMMY_MESSAGE);
+  });
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
@@ -879,8 +883,8 @@ Stub::TerminateStubToParentQueueMonitor()
   Logger::GetOrCreateInstance()->SetBackendLoggingActive(false);
   {
     std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-    log_request_buffer_.push(DUMMY_MESSAGE);
-    bls_response_cleanup_buffer_.push(DUMMY_MESSAGE);
+    // Push a dummy message to signal the thread to terminate.
+    stub_to_parent_buffer_.push(DUMMY_MESSAGE);
   }
   stub_to_parent_message_cv_.notify_one();
   stub_to_parent_queue_monitor_.join();
@@ -889,11 +893,10 @@ Stub::TerminateStubToParentQueueMonitor()
 void
 Stub::EnqueueLogRequest(std::unique_ptr<PbLog>& log_ptr)
 {
-  {
-    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-    log_request_buffer_.push(std::move(log_ptr));
-  }
-  stub_to_parent_message_cv_.notify_one();
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+      std::make_unique<UtilsMessagePayload>(
+          PYTHONSTUB_LogRequest, reinterpret_cast<void*>(log_ptr.release()));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
 }
 
 void
@@ -901,43 +904,36 @@ Stub::ServiceStubToParentRequests()
 {
   while (stub_to_parent_thread_) {
     std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
-    while (log_request_buffer_.empty() &&
-           bls_response_cleanup_buffer_.empty()) {
+    while (stub_to_parent_buffer_.empty()) {
       stub_to_parent_message_cv_.wait(guard);
     }
-    if (!log_request_buffer_.empty()) {
-      // On exit, will send messages until
-      // DUMMY_MESSAGE is reached
-      std::unique_ptr<PbLog> log_request =
-          std::move(log_request_buffer_.front());
-      if (log_request == DUMMY_MESSAGE) {
-        log_request_buffer_.pop();
-        break;
+    // On exit, will send messages to the parent process until
+    // DUMMY_MESSAGE is reached
+    std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+        std::move(stub_to_parent_buffer_.front());
+    if (utils_msg_payload == DUMMY_MESSAGE) {
+      stub_to_parent_buffer_.pop();
+      break;
+    } else {
+      stub_to_parent_buffer_.pop();
+      if (utils_msg_payload->command_type == PYTHONSTUB_LogRequest) {
+        SendLogMessage(utils_msg_payload);
+      } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
+        SendCleanupId(utils_msg_payload);
       } else {
-        log_request_buffer_.pop();
-        SendLogMessage(log_request);
-      }
-    }
-    if (!bls_response_cleanup_buffer_.empty()) {
-      void* id = std::move(bls_response_cleanup_buffer_.front());
-      if (id == DUMMY_MESSAGE) {
-        bls_response_cleanup_buffer_.pop();
-        break;
-      } else {
-        bls_response_cleanup_buffer_.pop();
-        {
-          std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-          response_iterator_map_.erase(id);
-        }
-        SendCleanupId(id);
+        std::cerr << "Error when sending message via stub_to_parent message "
+                     "buffer - unknown command\n";
       }
     }
   }
 }
 
 void
-Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
+Stub::SendLogMessage(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 {
+  std::unique_ptr<PbLog> log_send_message = std::unique_ptr<PbLog>(
+      reinterpret_cast<PbLog*>(utils_msg_payload->utils_message_ptr));
+
   std::unique_ptr<PbLogShm> log_request_shm = PbLogShm::Create(
       shm_pool_, log_send_message->Filename(), log_send_message->Line(),
       log_send_message->Message(), log_send_message->Level());
@@ -966,8 +962,14 @@ Stub::SendLogMessage(std::unique_ptr<PbLog>& log_send_message)
 }
 
 void
-Stub::SendCleanupId(void* id)
+Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 {
+  void* id = utils_msg_payload->utils_message_ptr;
+  {
+    std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+    response_iterator_map_.erase(id);
+  }
+
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, true /* inline_response */);
   ipc_message->Command() = PYTHONSTUB_CleanupRequest;
@@ -995,11 +997,9 @@ void
 Stub::EnqueueCleanupId(void* id)
 {
   if (id != nullptr) {
-    {
-      std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
-      bls_response_cleanup_buffer_.push(id);
-    }
-    stub_to_parent_message_cv_.notify_one();
+    std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+        std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
+    EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
 }
 
@@ -1022,6 +1022,7 @@ Stub::TerminateParentToStubQueueMonitor()
 {
   if (parent_to_stub_thread_) {
     parent_to_stub_thread_ = false;
+    // Push a dummy message to signal the thread to terminate.
     parent_to_stub_mq_->Push(DUMMY_MESSAGE);
     parent_to_stub_queue_monitor_.join();
   }
@@ -1163,6 +1164,85 @@ bool
 Stub::IsFinalizing()
 {
   return finalizing_;
+}
+
+void
+Stub::EnqueueUtilsMessage(
+    std::unique_ptr<UtilsMessagePayload> utils_msg_payload)
+{
+  {
+    std::lock_guard<std::mutex> guard{stub_to_parent_message_mu_};
+    stub_to_parent_buffer_.push(std::move(utils_msg_payload));
+  }
+  stub_to_parent_message_cv_.notify_one();
+}
+
+void
+Stub::PrepareCustomMetricsMessage(
+    AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
+    CustomMetricsMessage** custom_metrics_msg)
+{
+  custom_metrics_msg_shm = shm_pool_->Construct<CustomMetricsMessage>();
+  *custom_metrics_msg = custom_metrics_msg_shm.data_.get();
+  new (&((*custom_metrics_msg)->mu)) bi::interprocess_mutex;
+  new (&((*custom_metrics_msg)->cv)) bi::interprocess_condition;
+  (*custom_metrics_msg)->waiting_on_stub = false;
+  (*custom_metrics_msg)->is_error_set = false;
+  (*custom_metrics_msg)->has_error = false;
+}
+
+void
+Stub::SendCustomMetricsMessage(
+    CustomMetricsMessage** custom_metrics_msg,
+    PYTHONSTUB_CommandType command_type,
+    bi::managed_external_buffer::handle_t handle)
+{
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_msg_shm;
+  PrepareCustomMetricsMessage(custom_metrics_msg_shm, custom_metrics_msg);
+
+  (*custom_metrics_msg)->message = handle;
+
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = command_type;
+  ipc_message->Args() = custom_metrics_msg_shm.handle_;
+
+  std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
+  {
+    ScopedDefer _([&ipc_message, custom_metrics_msg] {
+      {
+        bi::scoped_lock<bi::interprocess_mutex> guard{
+            (*custom_metrics_msg)->mu};
+        (*custom_metrics_msg)->waiting_on_stub = false;
+        (*custom_metrics_msg)->cv.notify_all();
+      }
+    });
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{(*custom_metrics_msg)->mu};
+      SendIPCUtilsMessage(ipc_message);
+      while (!(*custom_metrics_msg)->waiting_on_stub) {
+        (*custom_metrics_msg)->cv.wait(guard);
+      }
+    }
+  }
+  if ((*custom_metrics_msg)->has_error) {
+    if ((*custom_metrics_msg)->is_error_set) {
+      std::unique_ptr<PbString> pb_string = PbString::LoadFromSharedMemory(
+          shm_pool_, (*custom_metrics_msg)->error);
+      std::string err_message =
+          std::string(
+              "Failed to process the custom metrics request for model '" +
+              name_ + "', message: ") +
+          pb_string->String();
+      throw PythonBackendException(err_message);
+    } else {
+      std::string err_message = std::string(
+          "Failed to process the custom metrics request for model '" + name_ +
+          "'.");
+      throw PythonBackendException(err_message);
+    }
+  }
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
@@ -1450,6 +1530,28 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   logger.def_static("log_warn", &Logger::LogWarn, py::arg("message"));
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));
   logger.def_static("log_verbose", &Logger::LogVerbose, py::arg("message"));
+
+  py::class_<Metric, std::shared_ptr<Metric>>(module, "Metric")
+      .def("increment", &Metric::SendIncrementRequest)
+      .def("set", &Metric::SendSetValueRequest)
+      .def("value", &Metric::SendGetValueRequest);
+
+  py::enum_<MetricKind>(module, "MetricKind")
+      .value("COUNTER", MetricKind::COUNTER)
+      .value("GAUGE", MetricKind::GAUGE)
+      .export_values();
+
+  py::class_<MetricFamily, std::shared_ptr<MetricFamily>>(
+      module, "MetricFamily")
+      .def(
+          py::init(&MetricFamily::CreateMetricFamily),
+          py::arg("name").none(false), py::arg("description").none(false),
+          py::arg("kind").none(false))
+      .def(
+          "Metric", &MetricFamily::CreateMetric,
+          py::arg("labels").none(false) = py::dict());
+  module.attr("MetricFamily").attr("COUNTER") = MetricKind::COUNTER;
+  module.attr("MetricFamily").attr("GAUGE") = MetricKind::GAUGE;
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

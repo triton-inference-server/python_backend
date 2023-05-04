@@ -62,6 +62,8 @@
 #include "ipc_message.h"
 #include "memory_manager.h"
 #include "message_queue.h"
+#include "metric.h"
+#include "metric_family.h"
 #include "pb_env.h"
 #include "pb_map.h"
 #include "pb_metric_reporter.h"
@@ -385,5 +387,19 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process the bls decoupled cleanup request
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process a custom metrics request. The function 'request_handler' is invoked
+  // to handle the request. T should be either 'MetricFamily' or 'Metric'.
+  template <typename T>
+  void ProcessCustomMetricsRequest(
+      const std::unique_ptr<IPCMessage>& message,
+      std::function<void(std::unique_ptr<T>&, CustomMetricsMessage*)>
+          request_handler);
+
+  // Process a metric family request
+  void ProcessMetricFamilyRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process a metric request
+  void ProcessMetricRequest(const std::unique_ptr<IPCMessage>& message);
 };
 }}}  // namespace triton::backend::python
