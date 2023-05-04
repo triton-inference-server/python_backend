@@ -159,6 +159,10 @@ set(
   src/shm_manager.h
   src/pb_exception.h
   src/pb_preferred_memory.h
+  src/metric.h
+  src/metric.cc
+  src/metric_family.h
+  src/metric_family.cc
 )
 
 set(

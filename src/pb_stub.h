@@ -40,10 +40,13 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <unordered_map>
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "message_queue.h"
+#include "metric.h"
+#include "metric_family.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
@@ -152,6 +155,19 @@ class LogMessage {
 
 #define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
+// The payload for the stub_to_parent message queue. This struct serves as a
+// wrapper for different types of messages so that they can be sent through the
+// same buffer.
+struct UtilsMessagePayload {
+  UtilsMessagePayload(
+      const PYTHONSTUB_CommandType& command_type, void* utils_message_ptr)
+      : command_type(command_type), utils_message_ptr(utils_message_ptr)
+  {
+  }
+  PYTHONSTUB_CommandType command_type;
+  void* utils_message_ptr;
+};
+
 class Stub {
  public:
   Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
@@ -211,6 +227,9 @@ class Stub {
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
+  /// Get the shared memory pool
+  std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
+
   void ProcessResponse(InferResponse* response);
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
   bool IsDecoupled();
@@ -229,7 +248,7 @@ class Stub {
   void ServiceStubToParentRequests();
 
   /// Send client log to the python backend
-  void SendLogMessage(std::unique_ptr<PbLog>& log_send_message);
+  void SendLogMessage(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Check if stub to parent message handler is running
   bool StubToParentServiceActive();
@@ -251,7 +270,7 @@ class Stub {
       std::shared_ptr<InferResponse> infer_response);
 
   /// Send the id to the python backend for object cleanup
-  void SendCleanupId(void* id);
+  void SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Add cleanup id to queue
   void EnqueueCleanupId(void* id);
@@ -262,6 +281,21 @@ class Stub {
   /// Is the stub in the finalize stage
   bool IsFinalizing();
 
+  /// Helper function to enqueue a utils message to the stub to parent message
+  /// buffer
+  void EnqueueUtilsMessage(
+      std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
+
+  /// Send the custom metrics message to the python backend
+  void SendCustomMetricsMessage(
+      CustomMetricsMessage** custom_metrics_msg,
+      PYTHONSTUB_CommandType command_type,
+      bi::managed_external_buffer::handle_t handle);
+
+  /// Helper function to prepare the custom metrics message
+  void PrepareCustomMetricsMessage(
+      AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
+      CustomMetricsMessage** custom_metrics_msg);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
@@ -291,8 +325,7 @@ class Stub {
   bool finalizing_;
   static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
-  std::queue<std::unique_ptr<PbLog>> log_request_buffer_;
-  std::queue<void*> bls_response_cleanup_buffer_;
+  std::queue<std::unique_ptr<UtilsMessagePayload>> stub_to_parent_buffer_;
   std::thread stub_to_parent_queue_monitor_;
   bool stub_to_parent_thread_;
   std::mutex stub_to_parent_message_mu_;

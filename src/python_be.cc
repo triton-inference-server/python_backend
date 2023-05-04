@@ -804,14 +804,36 @@ ModelInstanceState::StubToParentMQMonitor()
     std::unique_ptr<IPCMessage> message =
         IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), handle);
 
-    if (message->Command() == PYTHONSTUB_LogRequest) {
-      ProcessLogRequest(message);
-    } else if (message->Command() == PYTHONSTUB_CleanupRequest) {
-      ProcessBLSCleanupRequest(message);
+    switch (message->Command()) {
+      case PYTHONSTUB_LogRequest: {
+        ProcessLogRequest(message);
+        break;
+      }
+      case PYTHONSTUB_CleanupRequest: {
+        ProcessBLSCleanupRequest(message);
+        break;
+      }
+      case PYTHONSTUB_MetricFamilyRequestNew:
+      case PYTHONSTUB_MetricFamilyRequestDelete: {
+        ProcessMetricFamilyRequest(message);
+        break;
+      }
+      case PYTHONSTUB_MetricRequestNew:
+      case PYTHONSTUB_MetricRequestDelete:
+      case PYTHONSTUB_MetricRequestValue:
+      case PYTHONSTUB_MetricRequestIncrement:
+      case PYTHONSTUB_MetricRequestSet: {
+        ProcessMetricRequest(message);
+        break;
+      }
+      default: {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_ERROR, "Unexpected message type received.");
+        break;
+      }
     }
   }
 }
-
 
 void
 ModelInstanceState::ProcessLogRequest(
@@ -886,6 +908,112 @@ ModelInstanceState::ProcessBLSCleanupRequest(
   }
 }
 
+template <typename T>
+void
+ModelInstanceState::ProcessCustomMetricsRequest(
+    const std::unique_ptr<IPCMessage>& message,
+    std::function<void(std::unique_ptr<T>&, CustomMetricsMessage*)>
+        request_handler)
+{
+  AllocatedSharedMemory<CustomMetricsMessage> metrics_message =
+      Stub()->ShmPool()->Load<CustomMetricsMessage>(message->Args());
+  CustomMetricsMessage* metrics_message_ptr =
+      reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
+  std::unique_ptr<PbString> pb_error_message;
+  PythonBackendException pb_exception(std::string{});
+  std::unique_ptr<T> metrics_object =
+      T::LoadFromSharedMemory(Stub()->ShmPool(), metrics_message_ptr->message);
+
+  ScopedDefer _([metrics_message_ptr] {
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{metrics_message_ptr->mu};
+      metrics_message_ptr->waiting_on_stub = true;
+      metrics_message_ptr->cv.notify_all();
+      while (metrics_message_ptr->waiting_on_stub) {
+        metrics_message_ptr->cv.wait(guard);
+      }
+    }
+  });
+
+  try {
+    request_handler(metrics_object, metrics_message_ptr);
+  }
+  catch (const PythonBackendException& exception) {
+    pb_exception = exception;
+  }
+
+  if (pb_exception.what() != std::string{}) {
+    metrics_message_ptr->has_error = true;
+    LOG_IF_EXCEPTION(
+        pb_error_message =
+            PbString::Create(Stub()->ShmPool(), pb_exception.what()));
+    metrics_message_ptr->error = pb_error_message->ShmHandle();
+    metrics_message_ptr->is_error_set = true;
+  }
+}
+
+void
+ModelInstanceState::ProcessMetricFamilyRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  auto command = message->Command();
+  ProcessCustomMetricsRequest<MetricFamily>(
+      message, [this, command](
+                   std::unique_ptr<MetricFamily>& metric_family,
+                   CustomMetricsMessage* metrics_message_ptr) {
+        switch (command) {
+          case PYTHONSTUB_MetricFamilyRequestNew: {
+            metrics_message_ptr->address =
+                metric_family->InitializeTritonMetricFamily();
+            break;
+          }
+          case PYTHONSTUB_MetricFamilyRequestDelete: {
+            metric_family->ClearTritonMetricFamily();
+            break;
+          }
+          default: {
+            throw PythonBackendException("Unknown metric family request kind");
+          }
+        }
+      });
+}
+
+void
+ModelInstanceState::ProcessMetricRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  auto command = message->Command();
+  ProcessCustomMetricsRequest<Metric>(
+      message, [this, command](
+                   std::unique_ptr<Metric>& metric,
+                   CustomMetricsMessage* metrics_message_ptr) {
+        try {
+          switch (command) {
+            case PYTHONSTUB_MetricRequestNew: {
+              metrics_message_ptr->address = metric->InitializeTritonMetric();
+              break;
+            }
+            case PYTHONSTUB_MetricRequestIncrement:
+            case PYTHONSTUB_MetricRequestSet:
+            case PYTHONSTUB_MetricRequestValue: {
+              metric->HandleMetricOperation(metrics_message_ptr, command);
+              break;
+            }
+            case PYTHONSTUB_MetricRequestDelete: {
+              metric->ClearTritonMetric();
+              break;
+            }
+            default: {
+              throw PythonBackendException("Unknown metric request kind");
+            }
+          }
+        }
+        catch (const PythonBackendException& exception) {
+          throw exception;
+        }
+      });
+}
+
 void
 ModelInstanceState::StartMonitor()
 {
@@ -899,6 +1027,7 @@ ModelInstanceState::TerminateMonitor()
 {
   if (stub_to_parent_thread_) {
     stub_to_parent_thread_ = false;
+    // Push a dummy message to signal the thread to terminate.
     Stub()->StubToParentMessageQueue()->Push(DUMMY_MESSAGE);
     stub_to_parent_queue_monitor_.join();
   }
@@ -1063,7 +1192,10 @@ ModelInstanceState::ProcessRequestsDecoupled(
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
   received_message_ = nullptr;
-  ScopedDefer _([this] { Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE); });
+  ScopedDefer _([this] {
+    // Push a dummy message to signal the thread to terminate.
+    Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
+  });
 
   {
     std::unique_lock<std::mutex> guard{mu_};
@@ -1184,6 +1316,7 @@ ModelInstanceState::ProcessRequests(
     // the object stored in shared memory.
     NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
     if (!restart)
+      // Push a dummy message to signal the thread to terminate.
       Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
   });
   if (restart) {
@@ -1532,6 +1665,7 @@ ModelInstanceState::~ModelInstanceState()
   if (Stub()->IsHealthy()) {
     if (model_state->IsDecoupled()) {
       futures_.clear();
+      // Push a dummy message to signal the thread to terminate.
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
     }
