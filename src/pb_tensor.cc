@@ -366,9 +366,14 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     }
     // In case there is a pending job on the data, where this capsule
     // is pointing to, we need to wait for it before consuming.
-    // This is important for when data is located in different
-    // context (GPU) or work is done on non-blocking streams.
-    err = cudaDeviceSynchronize();
+    // This is important for when data is located on different
+    // context (GPU) and work is done on the default stream.
+    // For this scenario, __dlpack__ implementation may skip 
+    // syncronization (since the work is on the default stream)
+    // and we will return pointer to the data on different GPU too early 
+    // (i.e. before pending work is done). Thus we sync on the default stream
+    // only in the case we switched to a different context.
+    err = overridden ? cudaStreamSynchronize(0) : cudaSuccess;
     if (err != cudaSuccess) {
       throw PythonBackendException(
           "Failed to synchronize CUDA device with id " +
@@ -399,6 +404,12 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
         "DLPack capsule passed pointer to memory allocated on GPU device, \
           when GPU is not available");
 #endif
+  } else if (
+      capsule_device_info.first != DLDeviceType::kDLCPU &&
+      capsule_device_info.first != DLDeviceType::kDLCUDAHost) {
+    throw PythonBackendException(
+        "DLDevice type " + std::to_string(capsule_device_info.first) +
+        " is not support by Python backend.");
   }
 
   // If data is located on CPU, `stream=None` is the only accepted argument
