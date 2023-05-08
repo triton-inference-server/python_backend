@@ -1488,7 +1488,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("is_cpu", &PbTensor::IsCPU)
       .def("shape", &PbTensor::Dims)
-      .def("from_dlpack", &PbTensor::FromDLPack);
+      .def("from_dlpack", &PbTensor::FromDLPack)
+      .def("__dlpack__", &PbTensor::DLPack, py::arg("stream") = py::none())
+      .def("__dlpack_device__", &PbTensor::DLPackDevice);
 
   py::class_<InferResponse, std::shared_ptr<InferResponse>>(
       module, "InferenceResponse")

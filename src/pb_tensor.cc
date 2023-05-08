@@ -231,6 +231,36 @@ PbTensor::FromNumpy(const std::string& name, py::array& numpy_array)
   return std::make_shared<PbTensor>(name, numpy_array);
 }
 
+DLDeviceType
+PbTensor::DeviceType()
+{
+  DLDeviceType device_type{};
+
+  switch (memory_type_) {
+    case TRITONSERVER_MEMORY_GPU:
+      device_type = DLDeviceType::kDLCUDA;
+      break;
+    case TRITONSERVER_MEMORY_CPU:
+      device_type = DLDeviceType::kDLCPU;
+      break;
+    case TRITONSERVER_MEMORY_CPU_PINNED:
+      device_type = DLDeviceType::kDLCUDAHost;
+      break;
+  }
+
+  return device_type;
+}
+
+py::capsule
+PbTensor::DLPack(const py::object& stream)
+{
+  // Here external tensor requests PbTensor's `__dlpack__` method to provide
+  // a PyCapsule. By the design of PbTensor, in a GPU case no pending work
+  // is scheduled to work with PbTensor's data and we can simply pass
+  // the capsule without a synchronization.
+  return this->ToDLPack();
+}
+
 py::capsule
 PbTensor::ToDLPack()
 {
@@ -269,23 +299,19 @@ PbTensor::ToDLPack()
   tensor_handle.inc_ref();
 
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
+  dlpack_tensor->dl_tensor.device.device_type = this->DeviceType();
   dlpack_tensor->dl_tensor.dtype = triton_to_dlpack_type(dtype_);
-
-  switch (memory_type_) {
-    case TRITONSERVER_MEMORY_GPU:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
-      break;
-    case TRITONSERVER_MEMORY_CPU:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCPU;
-      break;
-    case TRITONSERVER_MEMORY_CPU_PINNED:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDAHost;
-      break;
-  }
 
   return py::capsule(
       static_cast<void*>(dlpack_tensor), "dltensor", &delete_unused_dltensor);
 }
+
+std::pair<int32_t, int64_t>
+PbTensor::DLPackDevice()
+{
+  return std::pair<int32_t, int64_t>(this->DeviceType(), memory_type_id_);
+}
+
 #endif  // TRITON_PB_STUB
 
 void
@@ -305,12 +331,100 @@ PbTensor::Memory()
 
 #ifdef TRITON_PB_STUB
 std::shared_ptr<PbTensor>
-PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
+PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
 {
   if (name == "") {
     throw PythonBackendException("Tensor name cannot be an empty string.");
   }
+  if (py::isinstance<py::capsule>(tensor)) {
+    return FromDLPackCapsule(name, tensor);
+  }
 
+  if (!py::hasattr(tensor, "__dlpack__") ||
+      !py::hasattr(tensor, "__dlpack_device__")) {
+    throw PythonBackendException(
+        "Provided tensor is not supported. Tensor must be a DLPack capsule \
+        or have `__dlpack__` and `__dlpack_device__` attributes");
+  }
+
+  auto capsule_device_info =
+      tensor.attr("__dlpack_device__")().cast<std::pair<int32_t, int64_t>>();
+  if (capsule_device_info.first == DLDeviceType::kDLCUDA) {
+#ifdef TRITON_ENABLE_GPU
+    int current_device;
+    cudaError_t err = cudaGetDevice(&current_device);
+    if (err != cudaSuccess) {
+      throw PythonBackendException("Failed to get current CUDA device id.");
+    }
+
+    bool overridden = (current_device != capsule_device_info.second);
+    err = overridden ? cudaSetDevice(capsule_device_info.second) : cudaSuccess;
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          "Failed to set CUDA device to device with id " +
+          std::to_string(capsule_device_info.second));
+    }
+    // In case there is a pending job on the data, where this capsule
+    // is pointing to, we need to wait for it before consuming.
+    // This is important for when data is located on different
+    // context (GPU) and work is done on the default stream.
+    // For this scenario, __dlpack__ implementation may skip 
+    // syncronization (since the work is on the default stream)
+    // and we will return pointer to the data on different GPU too early 
+    // (i.e. before pending work is done). Thus we sync on the default stream
+    // only in the case we switched to a different context.
+    err = overridden ? cudaStreamSynchronize(0) : cudaSuccess;
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          "Failed to synchronize CUDA device with id " +
+          std::to_string(
+              overridden ? capsule_device_info.second : current_device));
+    }
+
+    // Array API requirements for the stream argument:
+    // stream = 1 the legacy default stream (in this case should
+    // synchronize on CUDA stream 0)
+    // For CPU, `stream=None` is the only accepted argument
+    // according to array API. For GPU, when `stream=None`  producer
+    // must assume the legacy default stream. Reference:
+    // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
+    auto ptr_to_tensor = FromDLPackCapsule(
+        name, tensor.attr("__dlpack__")(py::arg("stream") = py::int_(1)));
+
+    err = overridden ? cudaSetDevice(current_device) : cudaSuccess;
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          "Failed to set CUDA device back to initial compute device "
+          "with id " +
+          std::to_string(current_device));
+    }
+    return ptr_to_tensor;
+#else
+    throw PythonBackendException(
+        "DLPack capsule passed pointer to memory allocated on GPU device, \
+          when GPU is not available");
+#endif
+  } else if (
+      capsule_device_info.first != DLDeviceType::kDLCPU &&
+      capsule_device_info.first != DLDeviceType::kDLCUDAHost) {
+    throw PythonBackendException(
+        "DLDevice type " + std::to_string(capsule_device_info.first) +
+        " is not support by Python backend.");
+  }
+
+  // If data is located on CPU, `stream=None` is the only accepted argument
+  // according to array API. For GPU, when `stream=None`  producer must
+  // assume the legacy default stream.
+  // Reference:
+  // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
+  return FromDLPackCapsule(
+      name, tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
+}
+
+std::shared_ptr<PbTensor>
+PbTensor::FromDLPackCapsule(
+    const std::string& name, const py::capsule& dlpack_tensor)
+{
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 
