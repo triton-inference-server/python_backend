@@ -89,7 +89,7 @@ FetchContent_MakeAvailable(pybind11)
 FetchContent_Declare(
   dlpack
   GIT_REPOSITORY "https://github.com/dmlc/dlpack"
-  GIT_TAG "v0.7"
+  GIT_TAG "v0.8"
   GIT_SHALLOW ON
 )
 FetchContent_MakeAvailable(dlpack)

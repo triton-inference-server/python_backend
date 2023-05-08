@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -189,8 +189,8 @@ triton_to_dlpack_type(TRITONSERVER_DataType triton_dtype)
   dl_dtype.lanes = 1;
   switch (triton_dtype) {
     case TRITONSERVER_TYPE_BOOL:
-      dl_code = DLDataTypeCode::kDLInt;
-      dt_size = 1;
+      dl_code = DLDataTypeCode::kDLBool;
+      dt_size = 8;
       break;
     case TRITONSERVER_TYPE_UINT8:
       dl_code = DLDataTypeCode::kDLUInt;
@@ -279,8 +279,6 @@ dlpack_to_triton_type(const DLDataType& data_type)
       return TRITONSERVER_TYPE_INT32;
     } else if (data_type.bits == 64) {
       return TRITONSERVER_TYPE_INT64;
-    } else if (data_type.bits == 1) {
-      return TRITONSERVER_TYPE_BOOL;
     }
   }
 
@@ -293,6 +291,12 @@ dlpack_to_triton_type(const DLDataType& data_type)
       return TRITONSERVER_TYPE_UINT32;
     } else if (data_type.bits == 64) {
       return TRITONSERVER_TYPE_UINT64;
+    }
+  }
+
+  if (data_type.code == DLDataTypeCode::kDLBool) {
+    if (data_type.bits == 8) {
+      return TRITONSERVER_TYPE_BOOL;
     }
   }
 
