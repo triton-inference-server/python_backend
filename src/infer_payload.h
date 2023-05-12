@@ -61,9 +61,9 @@ class InferPayload {
 
  private:
   // Need to use mutex to make sure InferPayload is thread-safe in
-  // `InferResponseComplete` callback function.
+  // `InferResponseComplete` callback function for decoupled case.
   std::mutex mutex_;
-  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
+  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> promise_;
   bool is_decoupled_;
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;

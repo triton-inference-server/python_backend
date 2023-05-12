@@ -33,22 +33,17 @@ InferPayload::InferPayload(
     std::function<void(std::unique_ptr<InferResponse>)> callback)
     : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
 {
-  prev_promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
+  promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
 
-InferPayload::~InferPayload()
-{
-  std::lock_guard<std::mutex> lock(mutex_);
-  prev_promise_.reset();
-}
+InferPayload::~InferPayload() {}
 
 void
 InferPayload::SetValueForPrevPromise(
     std::unique_ptr<InferResponse> infer_response)
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  prev_promise_->set_value(std::move(infer_response));
-  prev_promise_.reset();
+  promise_->set_value(std::move(infer_response));
   is_promise_set_ = true;
 }
 
@@ -56,8 +51,7 @@ void
 InferPayload::SetFuture(
     std::future<std::unique_ptr<InferResponse>>& response_future)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
-  response_future = prev_promise_->get_future();
+  response_future = promise_->get_future();
 }
 
 bool
@@ -82,7 +76,6 @@ void
 InferPayload::SetResponseAllocUserp(
     const ResponseAllocatorUserp& response_alloc_userp)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
   response_alloc_userp_ =
       std::make_shared<ResponseAllocatorUserp>(response_alloc_userp);
 }
