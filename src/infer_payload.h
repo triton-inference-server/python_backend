@@ -48,7 +48,6 @@ class InferPayload {
   InferPayload(
       const bool is_decouple,
       std::function<void(std::unique_ptr<InferResponse>)> callback);
-  ~InferPayload();
 
   void SetValue(std::unique_ptr<InferResponse> infer_response);
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);

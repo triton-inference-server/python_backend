@@ -36,8 +36,6 @@ InferPayload::InferPayload(
   promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
 
-InferPayload::~InferPayload() {}
-
 void
 InferPayload::SetValue(std::unique_ptr<InferResponse> infer_response)
 {
