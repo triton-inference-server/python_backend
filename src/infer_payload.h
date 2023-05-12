@@ -60,6 +60,9 @@ class InferPayload {
   std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
 
  private:
+  // Need to use mutex to make sure InferPayload is thread-safe in
+  // `InferResponseComplete` callback function.
+  std::mutex mutex_;
   std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
   bool is_decoupled_;
   bool is_promise_set_;

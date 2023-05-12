@@ -38,6 +38,7 @@ InferPayload::InferPayload(
 
 InferPayload::~InferPayload()
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   prev_promise_.reset();
 }
 
@@ -45,6 +46,7 @@ void
 InferPayload::SetValueForPrevPromise(
     std::unique_ptr<InferResponse> infer_response)
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   prev_promise_->set_value(std::move(infer_response));
   prev_promise_.reset();
   is_promise_set_ = true;
@@ -54,6 +56,7 @@ void
 InferPayload::SetFuture(
     std::future<std::unique_ptr<InferResponse>>& response_future)
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   response_future = prev_promise_->get_future();
 }
 
@@ -79,6 +82,7 @@ void
 InferPayload::SetResponseAllocUserp(
     const ResponseAllocatorUserp& response_alloc_userp)
 {
+  std::lock_guard<std::mutex> lock(mutex_);
   response_alloc_userp_ =
       std::make_shared<ResponseAllocatorUserp>(response_alloc_userp);
 }
