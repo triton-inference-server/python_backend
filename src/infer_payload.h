@@ -50,7 +50,7 @@ class InferPayload {
       std::function<void(std::unique_ptr<InferResponse>)> callback);
   ~InferPayload();
 
-  void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
+  void SetValue(std::unique_ptr<InferResponse> infer_response);
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
   bool IsDecoupled();
   bool IsPromiseSet();
@@ -60,11 +60,9 @@ class InferPayload {
   std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
 
  private:
-  // Need to use mutex to make sure InferPayload is thread-safe in
-  // `InferResponseComplete` callback function for decoupled case.
-  std::mutex mutex_;
   std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> promise_;
   bool is_decoupled_;
+  std::mutex mutex_;
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;
   std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
