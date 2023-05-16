@@ -59,6 +59,10 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 namespace bi = boost::interprocess;
+#ifndef TRITON_ENABLE_GPU
+using cudaStream_t = void*;
+#endif
+
 namespace triton { namespace backend { namespace python {
 
 std::atomic<bool> non_graceful_exit = {false};
@@ -854,6 +858,34 @@ Stub::~Stub()
   parent_message_queue_.reset();
   stub_to_parent_mq_.reset();
   memory_manager_message_queue_.reset();
+
+#ifdef TRITON_ENABLE_GPU
+  int original_device;
+  cudaError_t err = cudaGetDevice(&original_device);
+  if (err != cudaSuccess) {
+    LOG_INFO << "Failed to get current CUDA device id.";
+  }
+  if (!dlpack_proxy_stream_pool_.empty()) {
+    for (auto& entry : dlpack_proxy_stream_pool_) {
+      err = cudaSetDevice(entry.first);
+      if (err != cudaSuccess) {
+        LOG_INFO << "Failed to set CUDA device to device with id " +
+                        std::to_string(entry.first);
+      }
+      err = cudaStreamDestroy(entry.second);
+      if (err != cudaSuccess) {
+        LOG_INFO
+            << "Failed to destroy dlpack CUDA proxy stream on device with id " +
+                   std::to_string(entry.first);
+      }
+    }
+  }
+  err = cudaSetDevice(original_device);
+  if (err != cudaSuccess) {
+    LOG_INFO << "Failed to set CUDA device to device with id " +
+                    std::to_string(original_device);
+  }
+#endif
 }
 
 std::unique_ptr<Stub> Stub::stub_instance_;
@@ -1243,6 +1275,28 @@ Stub::SendCustomMetricsMessage(
       throw PythonBackendException(err_message);
     }
   }
+}
+
+cudaStream_t
+Stub::GetProxyStream(const int& device_id)
+{
+#ifdef TRITON_ENABLE_GPU
+  if (dlpack_proxy_stream_pool_.find(device_id) ==
+      dlpack_proxy_stream_pool_.end()) {
+    cudaStream_t new_proxy_stream;
+    cudaError_t err = cudaStreamCreate(&new_proxy_stream);
+    if (err == cudaSuccess) {
+      dlpack_proxy_stream_pool_.emplace(device_id, new_proxy_stream);
+      return new_proxy_stream;
+    } else {
+      throw PythonBackendException(
+          "Failed to create a CUDA stream for a DLPack call.");
+    }
+  }
+  return dlpack_proxy_stream_pool_[device_id];
+#else
+  return nullptr;
+#endif
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;

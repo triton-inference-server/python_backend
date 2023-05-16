@@ -29,6 +29,7 @@
 #endif  // TRITON_ENABLE_GPU
 
 #ifdef TRITON_PB_STUB
+#include "pb_stub.h"
 #include "pb_stub_utils.h"
 namespace py = pybind11;
 #endif
@@ -353,6 +354,7 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
 #ifdef TRITON_ENABLE_GPU
     int current_device;
     cudaError_t err = cudaGetDevice(&current_device);
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     if (err != cudaSuccess) {
       throw PythonBackendException("Failed to get current CUDA device id.");
     }
@@ -365,6 +367,8 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
           std::to_string(capsule_device_info.second));
     }
 
+    cudaStream_t proxy_stream = stub->GetProxyStream(current_device);
+
     // Array API requirements for the stream argument:
     // stream = 1 the legacy default stream (in this case should
     // synchronize on CUDA stream 0)
@@ -373,17 +377,19 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     // must assume the legacy default stream. Reference:
     // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
     auto ptr_to_tensor = FromDLPackCapsule(
-        name, tensor.attr("__dlpack__")(py::arg("stream") = py::int_(1)));
+        name, tensor.attr("__dlpack__")(
+                  py::arg("stream") =
+                      py::int_(reinterpret_cast<int64_t>(proxy_stream))));
 
     // In case there is a pending job on the data, where this capsule
     // is pointing to, we need to wait for it to finish before returning
     // capsule.
-    // We synchronize on the default stream explicitly since that what we 
+    // We synchronize on the default stream explicitly since that what we
     // pass to external tensor's `__dlpack__` method and in case when memory
     // is allocated on GPU, PbTensor should be on the default stream.
     // If external tensor's `__dlpack__` method for some reason does not make
-    // default stream wait for when the capsule is ready, this sync will help. 
-    err = cudaStreamSynchronize(0);
+    // default stream wait for when the capsule is ready, this sync will help.
+    err = cudaStreamSynchronize(proxy_stream);
     if (err != cudaSuccess) {
       throw PythonBackendException(
           "Failed to synchronize CUDA device with id " +
@@ -413,7 +419,7 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
   }
 
   // If data is located on a CPU, `stream=None` is the only accepted argument
-  // according to array API. 
+  // according to array API.
   // Reference:
   // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
   return FromDLPackCapsule(
