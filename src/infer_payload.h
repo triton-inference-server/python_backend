@@ -43,12 +43,13 @@ struct ResponseAllocatorUserp {
   PreferredMemory preferred_memory;
 };
 
-class InferPayload {
+class InferPayload : public std::enable_shared_from_this<InferPayload> {
  public:
   InferPayload(
       const bool is_decouple,
       std::function<void(std::unique_ptr<InferResponse>)> callback);
 
+  std::shared_ptr<InferPayload> GetPtr() { return shared_from_this(); }
   void SetValue(std::unique_ptr<InferResponse> infer_response);
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
   bool IsDecoupled();

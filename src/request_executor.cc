@@ -77,8 +77,8 @@ void
 InferResponseComplete(
     TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
 {
-  auto linfer_payload = reinterpret_cast<std::shared_ptr<InferPayload>*>(userp);
-  std::unique_ptr<std::shared_ptr<InferPayload>> infer_payload(linfer_payload);
+  auto linfer_payload = reinterpret_cast<InferPayload*>(userp);
+  std::shared_ptr<InferPayload> infer_payload = linfer_payload->GetPtr();
   std::unique_ptr<InferResponse> infer_response;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   std::shared_ptr<PbError> pb_error;
@@ -147,7 +147,7 @@ InferResponseComplete(
       output_tensors.clear();
     }
 
-    if (!(*infer_payload)->IsDecoupled()) {
+    if (!infer_payload->IsDecoupled()) {
       infer_response = std::make_unique<InferResponse>(
           output_tensors, pb_error, true /* is_last_response */);
     } else {
@@ -168,7 +168,7 @@ InferResponseComplete(
         TRITONSERVER_InferenceResponseDelete(response),
         "Failed to release BLS inference response.");
   } else if (
-      (*infer_payload)->IsDecoupled() &&
+      (infer_payload)->IsDecoupled() &&
       (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
     // An empty response may be the last reponse for decoupled models.
     infer_response = std::make_unique<InferResponse>(
@@ -179,7 +179,7 @@ InferResponseComplete(
         output_tensors, pb_error, true /* is_last_response */, userp /* id */);
   }
 
-  (*infer_payload)->SetValue(std::move(infer_response));
+  infer_payload->SetValue(std::move(infer_response));
 }
 
 TRITONSERVER_Error*
@@ -381,13 +381,11 @@ RequestExecutor::Infer(
       ResponseAllocatorUserp response_allocator_userp(
           shm_pool_.get(), infer_request->GetPreferredMemory());
       infer_payload->SetResponseAllocUserp(response_allocator_userp);
-      std::shared_ptr<InferPayload>* infer_payload_p =
-          new std::shared_ptr<InferPayload>(infer_payload);
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetResponseCallback(
           irequest, response_allocator_,
           reinterpret_cast<void*>(infer_payload->ResponseAllocUserp().get()),
-          InferResponseComplete, reinterpret_cast<void*>(infer_payload_p)));
+          InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
       THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
           server_, irequest, nullptr /* trace */));
