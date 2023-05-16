@@ -384,11 +384,8 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     // In case there is a pending job on the data, where this capsule
     // is pointing to, we need to wait for it to finish before returning
     // capsule.
-    // We synchronize on the default stream explicitly since that what we
-    // pass to external tensor's `__dlpack__` method and in case when memory
-    // is allocated on GPU, PbTensor should be on the default stream.
-    // If external tensor's `__dlpack__` method for some reason does not make
-    // default stream wait for when the capsule is ready, this sync will help.
+    // We synchronize on the proxy stream explicitly since that what we
+    // pass to external tensor's `__dlpack__` method.
     err = cudaStreamSynchronize(proxy_stream);
     if (err != cudaSuccess) {
       throw PythonBackendException(

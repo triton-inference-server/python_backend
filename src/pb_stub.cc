@@ -827,6 +827,22 @@ Stub::Finalize()
       LOG_INFO << e.what();
     }
   }
+#ifdef TRITON_ENABLE_GPU
+  // We also need to destroy created proxy CUDA streams for dlpack, if any
+  std::lock_guard<std::mutex> lock(dlpack_proxy_stream_pool_mu_);
+  if (!dlpack_proxy_stream_pool_.empty()) {
+    for (auto& entry : dlpack_proxy_stream_pool_) {
+      // We don't need to switch device to destroy a stream
+      // https://stackoverflow.com/questions/64663943/how-to-destroy-a-stream-that-was-created-on-a-specific-device
+      cudaError_t err = cudaStreamDestroy(entry.second);
+      if (err != cudaSuccess) {
+        LOG_INFO
+            << "Failed to destroy dlpack CUDA proxy stream on device with id " +
+                   std::to_string(entry.first);
+      }
+    }
+  }
+#endif
 }
 
 void
@@ -858,34 +874,6 @@ Stub::~Stub()
   parent_message_queue_.reset();
   stub_to_parent_mq_.reset();
   memory_manager_message_queue_.reset();
-
-#ifdef TRITON_ENABLE_GPU
-  int original_device;
-  cudaError_t err = cudaGetDevice(&original_device);
-  if (err != cudaSuccess) {
-    LOG_INFO << "Failed to get current CUDA device id.";
-  }
-  if (!dlpack_proxy_stream_pool_.empty()) {
-    for (auto& entry : dlpack_proxy_stream_pool_) {
-      err = cudaSetDevice(entry.first);
-      if (err != cudaSuccess) {
-        LOG_INFO << "Failed to set CUDA device to device with id " +
-                        std::to_string(entry.first);
-      }
-      err = cudaStreamDestroy(entry.second);
-      if (err != cudaSuccess) {
-        LOG_INFO
-            << "Failed to destroy dlpack CUDA proxy stream on device with id " +
-                   std::to_string(entry.first);
-      }
-    }
-  }
-  err = cudaSetDevice(original_device);
-  if (err != cudaSuccess) {
-    LOG_INFO << "Failed to set CUDA device to device with id " +
-                    std::to_string(original_device);
-  }
-#endif
 }
 
 std::unique_ptr<Stub> Stub::stub_instance_;
@@ -1281,6 +1269,7 @@ cudaStream_t
 Stub::GetProxyStream(const int& device_id)
 {
 #ifdef TRITON_ENABLE_GPU
+  std::lock_guard<std::mutex> lock(dlpack_proxy_stream_pool_mu_);
   if (dlpack_proxy_stream_pool_.find(device_id) ==
       dlpack_proxy_stream_pool_.end()) {
     cudaStream_t new_proxy_stream;

@@ -343,6 +343,7 @@ class Stub {
   std::mutex response_iterator_map_mu_;
   std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
       response_iterator_map_;
+  std::mutex dlpack_proxy_stream_pool_mu_;
   std::unordered_map<int, cudaStream_t> dlpack_proxy_stream_pool_;
 };
 }}}  // namespace triton::backend::python
