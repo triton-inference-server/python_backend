@@ -830,16 +830,14 @@ Stub::Finalize()
 #ifdef TRITON_ENABLE_GPU
   // We also need to destroy created proxy CUDA streams for dlpack, if any
   std::lock_guard<std::mutex> lock(dlpack_proxy_stream_pool_mu_);
-  if (!dlpack_proxy_stream_pool_.empty()) {
-    for (auto& entry : dlpack_proxy_stream_pool_) {
-      // We don't need to switch device to destroy a stream
-      // https://stackoverflow.com/questions/64663943/how-to-destroy-a-stream-that-was-created-on-a-specific-device
-      cudaError_t err = cudaStreamDestroy(entry.second);
-      if (err != cudaSuccess) {
-        LOG_INFO
-            << "Failed to destroy dlpack CUDA proxy stream on device with id " +
-                   std::to_string(entry.first);
-      }
+  for (auto& entry : dlpack_proxy_stream_pool_) {
+    // We don't need to switch device to destroy a stream
+    // https://stackoverflow.com/questions/64663943/how-to-destroy-a-stream-that-was-created-on-a-specific-device
+    cudaError_t err = cudaStreamDestroy(entry.second);
+    if (err != cudaSuccess) {
+      LOG_ERROR
+          << "Failed to destroy dlpack CUDA proxy stream on device with id " +
+                 std::to_string(entry.first);
     }
   }
 #endif
