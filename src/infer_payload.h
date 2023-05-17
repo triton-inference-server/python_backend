@@ -49,6 +49,9 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
       const bool is_decouple,
       std::function<void(std::unique_ptr<InferResponse>)> callback);
 
+  /// GetPtr should be only called when the InferPayload object is constructed
+  /// using a shared pointer. Calling this function in any other circumstance
+  /// is undefined behaviour until C++17.
   std::shared_ptr<InferPayload> GetPtr() { return shared_from_this(); }
   void SetValue(std::unique_ptr<InferResponse> infer_response);
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
