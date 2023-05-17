@@ -33,28 +33,30 @@ InferPayload::InferPayload(
     std::function<void(std::unique_ptr<InferResponse>)> callback)
     : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
 {
-  prev_promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
-}
-
-InferPayload::~InferPayload()
-{
-  prev_promise_.reset();
+  promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
 
 void
-InferPayload::SetValueForPrevPromise(
-    std::unique_ptr<InferResponse> infer_response)
+InferPayload::SetValue(std::unique_ptr<InferResponse> infer_response)
 {
-  prev_promise_->set_value(std::move(infer_response));
-  prev_promise_.reset();
-  is_promise_set_ = true;
+  {
+    // Only set value to the promise with the first response. Call the callback
+    // function to send decoupled response to the stub.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!is_promise_set_) {
+      is_promise_set_ = true;
+      promise_->set_value(std::move(infer_response));
+      return;
+    }
+  }
+  Callback(std::move(infer_response));
 }
 
 void
 InferPayload::SetFuture(
     std::future<std::unique_ptr<InferResponse>>& response_future)
 {
-  response_future = prev_promise_->get_future();
+  response_future = promise_->get_future();
 }
 
 bool

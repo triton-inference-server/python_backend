@@ -43,14 +43,17 @@ struct ResponseAllocatorUserp {
   PreferredMemory preferred_memory;
 };
 
-class InferPayload {
+class InferPayload : public std::enable_shared_from_this<InferPayload> {
  public:
   InferPayload(
       const bool is_decouple,
       std::function<void(std::unique_ptr<InferResponse>)> callback);
-  ~InferPayload();
 
-  void SetValueForPrevPromise(std::unique_ptr<InferResponse> infer_response);
+  /// GetPtr should be only called when the InferPayload object is constructed
+  /// using a shared pointer. Calling this function in any other circumstance
+  /// is undefined behaviour until C++17.
+  std::shared_ptr<InferPayload> GetPtr() { return shared_from_this(); }
+  void SetValue(std::unique_ptr<InferResponse> infer_response);
   void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
   bool IsDecoupled();
   bool IsPromiseSet();
@@ -60,8 +63,9 @@ class InferPayload {
   std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
 
  private:
-  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> prev_promise_;
+  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> promise_;
   bool is_decoupled_;
+  std::mutex mutex_;
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;
   std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
