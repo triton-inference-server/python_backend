@@ -77,7 +77,8 @@ void
 InferResponseComplete(
     TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
 {
-  auto p = reinterpret_cast<InferPayload*>(userp);
+  auto linfer_payload = reinterpret_cast<InferPayload*>(userp);
+  std::shared_ptr<InferPayload> infer_payload = linfer_payload->GetPtr();
   std::unique_ptr<InferResponse> infer_response;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   std::shared_ptr<PbError> pb_error;
@@ -146,7 +147,7 @@ InferResponseComplete(
       output_tensors.clear();
     }
 
-    if (!p->IsDecoupled()) {
+    if (!infer_payload->IsDecoupled()) {
       infer_response = std::make_unique<InferResponse>(
           output_tensors, pb_error, true /* is_last_response */);
     } else {
@@ -167,7 +168,8 @@ InferResponseComplete(
         TRITONSERVER_InferenceResponseDelete(response),
         "Failed to release BLS inference response.");
   } else if (
-      p->IsDecoupled() && (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
+      (infer_payload)->IsDecoupled() &&
+      (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
     // An empty response may be the last reponse for decoupled models.
     infer_response = std::make_unique<InferResponse>(
         output_tensors, pb_error, true /* is_last_response */, userp /* id */);
@@ -177,13 +179,7 @@ InferResponseComplete(
         output_tensors, pb_error, true /* is_last_response */, userp /* id */);
   }
 
-  // Only set value to the promise with the first response. Call the callback
-  // function to send decoupled response to the stub.
-  if (p->IsPromiseSet()) {
-    p->Callback(std::move(infer_response));
-  } else {
-    p->SetValueForPrevPromise(std::move(infer_response));
-  }
+  infer_payload->SetValue(std::move(infer_response));
 }
 
 TRITONSERVER_Error*
@@ -339,8 +335,8 @@ RequestExecutor::Infer(
           std::string("Model ") + model_name +
           " is using the decoupled. The current BLS request call doesn't "
           "support models using the decoupled transaction policy. Please use "
-          "stream API 'stream_exec()' or 'async_stream_exec() for decoupled "
-          "models.'");
+          "'decoupled=True' argument to the 'exec' or 'async_exec' calls for "
+          "decoupled models.'");
     }
 
     // Inference
