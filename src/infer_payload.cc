@@ -39,15 +39,17 @@ InferPayload::InferPayload(
 void
 InferPayload::SetValue(std::unique_ptr<InferResponse> infer_response)
 {
-  // Only set value to the promise with the first response. Call the callback
-  // function to send decoupled response to the stub.
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!is_promise_set_) {
-    is_promise_set_ = true;
-    promise_->set_value(std::move(infer_response));
-  } else {
-    Callback(std::move(infer_response));
+  {
+    // Only set value to the promise with the first response. Call the callback
+    // function to send decoupled response to the stub.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!is_promise_set_) {
+      is_promise_set_ = true;
+      promise_->set_value(std::move(infer_response));
+      return;
+    }
   }
+  Callback(std::move(infer_response));
 }
 
 void
