@@ -59,6 +59,10 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 namespace bi = boost::interprocess;
+#ifndef TRITON_ENABLE_GPU
+using cudaStream_t = void*;
+#endif
+
 namespace triton { namespace backend { namespace python {
 
 std::atomic<bool> non_graceful_exit = {false};
@@ -823,6 +827,20 @@ Stub::Finalize()
       LOG_INFO << e.what();
     }
   }
+#ifdef TRITON_ENABLE_GPU
+  // We also need to destroy created proxy CUDA streams for dlpack, if any
+  std::lock_guard<std::mutex> lock(dlpack_proxy_stream_pool_mu_);
+  for (auto& entry : dlpack_proxy_stream_pool_) {
+    // We don't need to switch device to destroy a stream
+    // https://stackoverflow.com/questions/64663943/how-to-destroy-a-stream-that-was-created-on-a-specific-device
+    cudaError_t err = cudaStreamDestroy(entry.second);
+    if (err != cudaSuccess) {
+      LOG_ERROR
+          << "Failed to destroy dlpack CUDA proxy stream on device with id " +
+                 std::to_string(entry.first);
+    }
+  }
+#endif
 }
 
 void
@@ -1243,6 +1261,29 @@ Stub::SendCustomMetricsMessage(
       throw PythonBackendException(err_message);
     }
   }
+}
+
+cudaStream_t
+Stub::GetProxyStream(const int& device_id)
+{
+#ifdef TRITON_ENABLE_GPU
+  std::lock_guard<std::mutex> lock(dlpack_proxy_stream_pool_mu_);
+  if (dlpack_proxy_stream_pool_.find(device_id) ==
+      dlpack_proxy_stream_pool_.end()) {
+    cudaStream_t new_proxy_stream;
+    cudaError_t err = cudaStreamCreate(&new_proxy_stream);
+    if (err == cudaSuccess) {
+      dlpack_proxy_stream_pool_.emplace(device_id, new_proxy_stream);
+      return new_proxy_stream;
+    } else {
+      throw PythonBackendException(
+          "Failed to create a CUDA stream for a DLPack call.");
+    }
+  }
+  return dlpack_proxy_stream_pool_[device_id];
+#else
+  return nullptr;
+#endif
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
