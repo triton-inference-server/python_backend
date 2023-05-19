@@ -165,10 +165,12 @@ PbMemory::CopyBuffer(
     err = cudaStreamSynchronize(0);
     if (err != cudaSuccess) {
       throw PythonBackendException(
-          std::string("failed to synchronize the default CUDA stream").c_str());
+          std::string(
+              "failed to synchronize the default CUDA stream. error: " +
+              std::string(cudaGetErrorString(err)))
+              .c_str());
     }
   }
-
 #endif
 }
 
