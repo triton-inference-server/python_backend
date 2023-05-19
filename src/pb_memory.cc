@@ -142,8 +142,7 @@ PbMemory::CopyBuffer(
   }
 
   cudaError_t err;
-  if ((src->MemoryType() == TRITONSERVER_MEMORY_GPU &&
-       dst->MemoryType() == TRITONSERVER_MEMORY_GPU) &&
+  if ((kind == cudaMemcpyDeviceToDevice) &&
       (src->MemoryTypeId() != dst->MemoryTypeId())) {
     err = cudaMemcpyPeer(
         dst->DataPtr(), dst->MemoryTypeId(), src->DataPtr(),
@@ -160,8 +159,7 @@ PbMemory::CopyBuffer(
             .c_str());
   }
 
-  if ((src->MemoryType() == TRITONSERVER_MEMORY_GPU &&
-       dst->MemoryType() == TRITONSERVER_MEMORY_GPU)) {
+  if (kind == cudaMemcpyDeviceToDevice) {
     // Synchronize the default stream for d2d copies.
     // https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html#api-sync-behavior__memcpy-sync
     err = cudaStreamSynchronize(0);
