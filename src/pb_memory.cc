@@ -141,14 +141,35 @@ PbMemory::CopyBuffer(
     kind = cudaMemcpyDeviceToDevice;
   }
 
-  cudaError_t err =
-      cudaMemcpy(dst->DataPtr(), src->DataPtr(), src->ByteSize(), kind);
+  cudaError_t err;
+  if ((kind == cudaMemcpyDeviceToDevice) &&
+      (src->MemoryTypeId() != dst->MemoryTypeId())) {
+    err = cudaMemcpyPeer(
+        dst->DataPtr(), dst->MemoryTypeId(), src->DataPtr(),
+        src->MemoryTypeId(), src->ByteSize());
+
+  } else {
+    err = cudaMemcpy(dst->DataPtr(), src->DataPtr(), src->ByteSize(), kind);
+  }
 
   if (err != cudaSuccess) {
     throw PythonBackendException(
         std::string(
             "failed to copy data: " + std::string(cudaGetErrorString(err)))
             .c_str());
+  }
+
+  if (kind == cudaMemcpyDeviceToDevice) {
+    // Synchronize the default stream for d2d copies.
+    // https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html#api-sync-behavior__memcpy-sync
+    err = cudaStreamSynchronize(0);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          std::string(
+              "failed to synchronize the default CUDA stream. error: " +
+              std::string(cudaGetErrorString(err)))
+              .c_str());
+    }
   }
 #endif
 }
