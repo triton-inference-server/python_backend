@@ -877,8 +877,9 @@ Scripting (BLS)*.
 
 Starting from 21.08, you can implement BLS in your Python model. A new set of
 utility functions allows you to execute inference requests on other models
-being served by Triton as a part of executing your Python model. Example below
-shows how to use this feature:
+being served by Triton as a part of executing your Python model. Note that BLS
+should only be implemented inside the `execute` function. Example below shows
+how to use this feature:
 
 ```python
 import triton_python_backend_utils as pb_utils
