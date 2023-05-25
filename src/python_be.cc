@@ -1071,11 +1071,24 @@ ModelInstanceState::ResponseSendDecoupled(
             false /* open cuda ipc handle */);
 
     bool requires_deferred_callback = false;
+    TRITONBACKEND_Response* response;
+    SetErrorForResponseSendMessage(
+        send_message_payload,
+        WrapTritonErrorInSharedPtr(
+            TRITONBACKEND_ResponseNewFromFactory(&response, response_factory)),
+        error_message);
+
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers;
-    std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
-        response_factory, CudaStream(), requires_deferred_callback,
+    std::unique_ptr<
+        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+        response_factory_ptr;
+    if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      response_factory_ptr.reset(
+          reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
+    }
+    infer_response->Send(
+        response, CudaStream(), requires_deferred_callback,
         send_message_payload->flags, Stub()->ShmPool(), gpu_output_buffers);
-    SetErrorForResponseSendMessage(send_message_payload, error, error_message);
 
     if (requires_deferred_callback) {
       AllocatedSharedMemory<char> gpu_buffers_handle =
@@ -1466,17 +1479,13 @@ ModelInstanceState::ProcessRequests(
 
     gpu_output_buffers[r] =
         std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>{};
-    std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
-        nullptr, CudaStream(), require_deferred_callback,
+    infer_response->Send(
+        response, CudaStream(), require_deferred_callback,
         TRITONSERVER_RESPONSE_COMPLETE_FINAL, Stub()->ShmPool(),
-        gpu_output_buffers[r], requested_output_names, response);
-    GUARDED_RESPOND_IF_ERROR(responses, r, *error);
+        gpu_output_buffers[r], requested_output_names);
 
     requires_deferred_callback[r] = require_deferred_callback;
 
-    // Error object will be deleted by the GUARDED_RESPOND macro
-    *error = nullptr;
-    error.reset();
     if (requires_deferred_callback[r]) {
       has_gpu_output = true;
     }
