@@ -163,6 +163,8 @@ set(
   src/metric.cc
   src/metric_family.h
   src/metric_family.cc
+  src/gpu_buffers.cc
+  src/gpu_buffers.h
 )
 
 set(

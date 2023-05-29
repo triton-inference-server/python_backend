@@ -212,11 +212,8 @@ struct ResponseSenderBase {
 struct ResponseSendMessage : ResponseSenderBase {
   bi::managed_external_buffer::handle_t response;
 
-  // GPU Buffers handle
+  // A pointer to GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
-
-  // GPU buffers count
-  uint32_t gpu_buffers_count;
 
   uint32_t flags;
 };
@@ -224,11 +221,8 @@ struct ResponseSendMessage : ResponseSenderBase {
 struct RequestBatch {
   uint32_t batch_size;
 
-  // GPU Buffers handle
+  // A pointer to GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
-
-  // GPU buffers count
-  uint32_t gpu_buffers_count;
 };
 
 #ifdef TRITON_ENABLE_GPU

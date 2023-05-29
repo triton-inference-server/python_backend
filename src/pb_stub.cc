@@ -356,9 +356,10 @@ Stub::RunCommand()
         LoadGPUBuffers(ipc_message);
       }
       catch (const PythonBackendException& pb_exception) {
-        LOG_INFO << "An error occurred while trying to load GPU buffers in the "
-                    "Python backend stub: "
-                 << pb_exception.what() << std::endl;
+        LOG_ERROR
+            << "An error occurred while trying to load GPU buffers in the "
+               "Python backend stub: "
+            << pb_exception.what() << std::endl;
       }
 
       break;
@@ -539,43 +540,50 @@ Stub::ProcessResponse(InferResponse* response)
 void
 Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
 {
-  AllocatedSharedMemory<char> gpu_buffers_handle =
-      shm_pool_->Load<char>(ipc_message->Args());
+  ScopedDefer load_gpu_buffer_response([this] {
+    // LoadGPUBuffers must let the parent process know when loading the
+    // buffers have been finished.
+    parent_message_queue_->Push(DUMMY_MESSAGE);
+    gpu_tensors_.clear();
+  });
 
-  uint64_t* gpu_buffer_count =
-      reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
-  bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
-      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-          gpu_buffers_handle.data_.get() + sizeof(uint64_t));
+  AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_handle =
+      shm_pool_->Load<GPUBuffersShm>(ipc_message->Args());
 
-  if (gpu_tensors_.size() != *gpu_buffer_count) {
-    LOG_INFO
+  if (!gpu_buffers_handle.data_->success) {
+    std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(
+        shm_pool_, gpu_buffers_handle.data_->error);
+    LOG_ERROR << ("Failed to load GPU buffers: " + error->String());
+    return;
+  }
+
+  uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+      gpu_buffers_handle_shm =
+          shm_pool_->Load<bi::managed_external_buffer::handle_t>(
+              gpu_buffers_handle.data_->buffers);
+
+  if (gpu_tensors_.size() != gpu_buffer_count) {
+    LOG_ERROR
         << (std::string(
                 "GPU buffers size does not match the provided buffers: ") +
             std::to_string(gpu_tensors_.size()) +
-            " != " + std::to_string(*gpu_buffer_count));
+            " != " + std::to_string(gpu_buffer_count));
     return;
   }
 
   std::vector<std::unique_ptr<PbMemory>> dst_buffers;
-
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
-        shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
+        shm_pool_, gpu_buffers_handle_shm.data_.get()[i],
+        true /* open_cuda_handle */);
     dst_buffers.emplace_back(std::move(dst_buffer));
   }
-
-  ScopedDefer load_gpu_buffer_response([this] {
-    // Push a dummy message to signal the thread to terminate.
-    parent_message_queue_->Push(DUMMY_MESSAGE);
-  });
 
   for (size_t i = 0; i < gpu_tensors_.size(); i++) {
     std::shared_ptr<PbTensor>& src_buffer = gpu_tensors_[i];
     PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
   }
-
-  gpu_tensors_.clear();
 }
 
 py::list

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <future>
+#include "gpu_buffers.h"
 #include "pb_error.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -100,6 +101,7 @@ class InferResponse {
       TRITONBACKEND_Response* response, void* cuda_stream,
       bool& requires_deferred_callback, const uint32_t flags,
       std::unique_ptr<SharedMemoryManager>& shm_pool,
+      GPUBufferTransporter& gpu_buffer_transporter,
       std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
       const std::set<std::string>& requested_output_names = {});
 

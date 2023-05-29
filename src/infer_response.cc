@@ -206,6 +206,7 @@ InferResponse::Send(
     TRITONBACKEND_Response* response, void* cuda_stream,
     bool& requires_deferred_callback, const uint32_t flags,
     std::unique_ptr<SharedMemoryManager>& shm_pool,
+    GPUBufferTransporter& gpu_buffer_transporter,
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
     const std::set<std::string>& requested_output_names)
 {
@@ -228,12 +229,20 @@ InferResponse::Send(
 
   // Moves the response sending callback so that it is not called until the stub
   // process fills in the GPU buffers.
-  ScopedDefer deferred_task(
-      [this, &requires_deferred_callback, &response_error_handling] {
-        if (requires_deferred_callback) {
-          deferred_send_callback_ = std::move(response_error_handling);
-        }
-      });
+  ScopedDefer deferred_task([this, &requires_deferred_callback,
+                             &response_error_handling, &gpu_buffer_transporter,
+                             response_error, &shm_pool] {
+    if (*response_error != nullptr) {
+      gpu_buffer_transporter.Complete(
+          shm_pool, false /* success */,
+          TRITONSERVER_ErrorMessage(*response_error));
+    } else {
+      gpu_buffer_transporter.Complete(shm_pool);
+    }
+    if (requires_deferred_callback) {
+      deferred_send_callback_ = std::move(response_error_handling);
+    }
+  });
 
   if (HasError()) {
     *response_error = TRITONSERVER_ErrorNew(
@@ -302,6 +311,7 @@ InferResponse::Send(
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
                 true /* copy_gpu */));
       }
+      gpu_buffer_transporter.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
 #endif
     }
@@ -316,6 +326,7 @@ InferResponse::Send(
               shm_pool, actual_memory_type, actual_memory_type_id,
               output_tensor->ByteSize(), nullptr /* data ptr */));
 
+      gpu_buffer_transporter.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
     }
 
