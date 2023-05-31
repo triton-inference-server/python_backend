@@ -553,8 +553,8 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
   if (!gpu_buffers_handle.data_->success) {
     std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(
         shm_pool_, gpu_buffers_handle.data_->error);
-    LOG_ERROR << ("Failed to load GPU buffers: " + error->String());
-    return;
+    throw PythonBackendException(
+        "Failed to load GPU buffers: " + error->String());
   }
 
   uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
@@ -564,12 +564,10 @@ Stub::LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message)
               gpu_buffers_handle.data_->buffers);
 
   if (gpu_tensors_.size() != gpu_buffer_count) {
-    LOG_ERROR
-        << (std::string(
-                "GPU buffers size does not match the provided buffers: ") +
-            std::to_string(gpu_tensors_.size()) +
-            " != " + std::to_string(gpu_buffer_count));
-    return;
+    throw PythonBackendException(
+        std::string("GPU buffers size does not match the provided buffers: ") +
+        std::to_string(gpu_tensors_.size()) +
+        " != " + std::to_string(gpu_buffer_count));
   }
 
   std::vector<std::unique_ptr<PbMemory>> dst_buffers;
