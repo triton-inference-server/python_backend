@@ -47,9 +47,9 @@ class GPUBufferTransporter {
  public:
   GPUBufferTransporter();
   void AddBuffer(const bi::managed_external_buffer::handle_t& handle);
-  void Complete(
-      std::unique_ptr<SharedMemoryManager>& shm_pool, bool success = true,
-      const std::string& message = "");
+  void Complete(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  void SetError(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, const std::string& error);
   bi::managed_external_buffer::handle_t ShmHandle();
 
  private:

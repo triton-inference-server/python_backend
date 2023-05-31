@@ -667,8 +667,7 @@ ModelInstanceState::ExecuteBLSRequest(
         }
       }
       catch (const PythonBackendException& exception) {
-        gpu_buffer_transporter.Complete(
-            Stub()->ShmPool(), false /* success */, exception.what());
+        gpu_buffer_transporter.SetError(Stub()->ShmPool(), exception.what());
         pb_exception = exception;
       }
 
@@ -1080,6 +1079,7 @@ ModelInstanceState::ResponseSendDecoupled(
         gpu_output_buffers);
 
     if (requires_deferred_callback) {
+      gpu_buffer_transporter.Complete(Stub()->ShmPool());
       send_message_payload->gpu_buffers_handle =
           gpu_buffer_transporter.ShmHandle();
 
@@ -1468,6 +1468,7 @@ ModelInstanceState::ProcessRequests(
   // required for filling the GPU buffers provided by the main process.
   if (has_gpu_output) {
     ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
+    gpu_buffer_transporter.Complete(Stub()->ShmPool());
     ipc_message->Args() = gpu_buffer_transporter.ShmHandle();
     SendMessageAndReceiveResponse(
         ipc_message->ShmHandle(), response_message, restart, responses,

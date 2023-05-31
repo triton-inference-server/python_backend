@@ -130,20 +130,21 @@ ResponseSender::Send(
   }
 
   if (has_gpu_output) {
-    AllocatedSharedMemory<char> gpu_buffers_handle =
-        shm_pool_->Load<char>(send_message_payload->gpu_buffers_handle);
+    AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_handle =
+        shm_pool_->Load<GPUBuffersShm>(
+            send_message_payload->gpu_buffers_handle);
 
-    bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
-        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-            gpu_buffers_handle.data_.get() + sizeof(uint64_t));
-    uint64_t* gpu_buffer_count =
-        reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
-    if (gpu_tensors.size() != *gpu_buffer_count) {
+    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+        gpu_buffers_handle_shm =
+            shm_pool_->Load<bi::managed_external_buffer::handle_t>(
+                gpu_buffers_handle.data_->buffers);
+    uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
+    if (gpu_tensors.size() != gpu_buffer_count) {
       LOG_INFO
           << (std::string(
                   "GPU buffers size does not match the provided buffers: ") +
               std::to_string(gpu_tensors.size()) +
-              " != " + std::to_string(*gpu_buffer_count));
+              " != " + std::to_string(gpu_buffer_count));
       return;
     }
 
@@ -151,7 +152,8 @@ ResponseSender::Send(
 
     for (size_t i = 0; i < gpu_tensors.size(); i++) {
       std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
-          shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
+          shm_pool_, gpu_buffers_handle_shm.data_.get()[i],
+          true /* open_cuda_handle */);
       dst_buffers.emplace_back(std::move(dst_buffer));
       std::shared_ptr<PbTensor>& src_buffer = gpu_tensors[i];
       PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());

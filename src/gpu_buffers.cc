@@ -47,15 +47,20 @@ GPUBufferTransporter::AddBuffer(
 }
 
 void
-GPUBufferTransporter::Complete(
-    std::unique_ptr<SharedMemoryManager>& shm_pool, bool success,
-    const std::string& message)
+GPUBufferTransporter::SetError(
+    std::unique_ptr<SharedMemoryManager>& shm_pool, const std::string& error)
+{
+  error_shm_ = PbString::Create(shm_pool, error);
+}
+
+void
+GPUBufferTransporter::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   if (completed_) {
     return;
   }
   gpu_buffers_shm_ = shm_pool->Construct<GPUBuffersShm>();
-  if (success) {
+  if (!error_shm_) {
     buffers_handle_shm_ =
         shm_pool->Construct<bi::managed_external_buffer::handle_t>(
             buffers_.size());
@@ -66,9 +71,7 @@ GPUBufferTransporter::Complete(
       buffers_handle_shm_.data_.get()[i] = buffers_[i];
     }
   } else {
-    // If there was an error we won't look at the buffers.
     gpu_buffers_shm_.data_->success = false;
-    error_shm_ = PbString::Create(shm_pool, message);
     gpu_buffers_shm_.data_->error = error_shm_->ShmHandle();
   }
   completed_ = true;

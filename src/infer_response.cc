@@ -233,11 +233,8 @@ InferResponse::Send(
                              &response_error_handling, &gpu_buffer_transporter,
                              response_error, &shm_pool] {
     if (*response_error != nullptr) {
-      gpu_buffer_transporter.Complete(
-          shm_pool, false /* success */,
-          TRITONSERVER_ErrorMessage(*response_error));
-    } else {
-      gpu_buffer_transporter.Complete(shm_pool);
+      gpu_buffer_transporter.SetError(
+          shm_pool, TRITONSERVER_ErrorMessage(*response_error));
     }
     if (requires_deferred_callback) {
       deferred_send_callback_ = std::move(response_error_handling);
