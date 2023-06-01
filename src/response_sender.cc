@@ -140,7 +140,7 @@ ResponseSender::Send(
                 gpu_buffers_handle.data_->buffers);
     uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
     if (gpu_tensors.size() != gpu_buffer_count) {
-      LOG_INFO
+      LOG_ERROR
           << (std::string(
                   "GPU buffers size does not match the provided buffers: ") +
               std::to_string(gpu_tensors.size()) +

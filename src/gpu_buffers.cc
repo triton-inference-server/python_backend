@@ -37,13 +37,13 @@ void
 GPUBufferTransporter::AddBuffer(
     const bi::managed_external_buffer::handle_t& handle)
 {
-  if (!completed_) {
-    buffers_.emplace_back(handle);
-  } else {
+  if (completed_) {
     throw PythonBackendException(
         "It is not possible to add buffers after 'Complete' has been called on "
         "a GPUBufferTransporter.");
   }
+
+  buffers_.emplace_back(handle);
 }
 
 void
