@@ -37,14 +37,14 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 -t|--use-tensorflow        Install tensorflow-neuron is specified
 -inf2|--inf2-setup         Install pytorch or tensorflow neuronx packages for inf2, inf2 is default
 -inf1|--inf1-setup         Install pytorch of tensorflow neuron packages for inf1
---tensorflow-version       Version of Tensorflow used. Default is 1. Ignored if installing pytorch-neuron
+--tensorflow-version       Version of Tensorflow used. Default is 2. Ignored if installing pytorch-neuron
 "
 
 # Get all options:
 OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch,tensorflow-version: -- "$@")
 
 
-export INFRENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
+export INFERENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
 export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
@@ -70,8 +70,8 @@ for OPTS; do
         echo "Python version set to ${PYTHON_VERSION}"
         ;;
         -i|--inferentia-path)
-        INFRENTIA_PATH=$2
-        echo "Inferentia path set to ${INFRENTIA_PATH}"
+        INFERENTIA_PATH=$2
+        echo "Inferentia path set to ${INFERENTIA_PATH}"
         shift 2
         ;;
         -t|--use-tensorflow)
@@ -136,23 +136,6 @@ apt-get update && \
               libarchive-dev   \
               rapidjson-dev
 
-# Using CMAKE installation instruction from:: https://apt.kitware.com/
-apt install -y gpg wget && \
-    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-        gpg --dearmor - |  \
-        tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null && \
-    . /etc/os-release && \
-    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $UBUNTU_CODENAME main" | \
-    tee /etc/apt/sources.list.d/kitware.list >/dev/null && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends cmake cmake-data
-cmake --version
-
-# First compile correct python stub
-cd ${PYTHON_BACKEND_PATH}
-rm -rf build && mkdir build && cd build
-cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
-make triton-python-backend-stub -j16
 
 # Set Pip repository  to point to the Neuron repository
 # since we need to use pip to update: 
@@ -197,10 +180,5 @@ if [ ${USE_PYTORCH} -eq 1 ];then
     fi 
 fi
 
-# Upgrade the python backend stub, rules and sockets
-cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub \
-        /opt/tritonserver/backends/python/triton_python_backend_stub
+# Upgrade the rules and sockets
 cp /mylib/udev/rules.d/* /lib/udev/rules.d/
-export LD_LIBRARY_PATH=${CONDA_PATH}/envs/test_conda_env/lib:$LD_LIBRARY_PATH
-
-cd ${INFRENTIA_PATH}

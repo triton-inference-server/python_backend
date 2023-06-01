@@ -59,11 +59,10 @@ After logging into the inf1* instance, you will need to clone
 or simply clone with https.
 Clone this repo with Github to home repo `/home/ubuntu`.
 
-Ensure that the neuron runtime 1.0 demon (neuron-rtd) is not running and set up
-and install neuron 2.X runtime builds with
+The pre-container (host utilities) setup script contains options to install either -inf1 or -inf2 dependencies. To install Inferentia2 or Tranium1 dependencies
 ```
  $chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
- $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+ $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh -inf2
 ```
 
 Then, start the Triton instance with:
