@@ -276,16 +276,16 @@ def get_tensorflow_initialize_impl(is_inf2=False):
 '''
     if is_inf2:
         init_impl += '''
-            self.pred_list = [
-            tf.keras.models.load_model(compiled_model)
-            for _ in range(cores_per_instance)
+        self.pred_list = [
+        tf.keras.models.load_model(compiled_model)
+        for _ in range(cores_per_instance)
         ] * threads_per_core 
 '''
     else:
         init_impl += '''
-            self.pred_list = [
-            tf.contrib.predictor.from_saved_model(compiled_model)
-            for _ in range(cores_per_instance)
+        self.pred_list = [
+        tf.contrib.predictor.from_saved_model(compiled_model)
+        for _ in range(cores_per_instance)
         ] * threads_per_core
 '''
     return init_impl
@@ -351,12 +351,12 @@ def get_pytorch_initialize_impl(is_inf2=False):
 '''
     if is_inf2:
         init_impl += '''
-            self.model_neuron = torch.jit.load(compiled_model)
+        self.model_neuron = torch.jit.load(compiled_model)
 '''
     else:
         init_impl += '''
-            self.model_neuron = torch.neuron.DataParallel(
-            torch.jit.load(compiled_model), device_ids=consumed_cores_list) 
+        self.model_neuron = torch.neuron.DataParallel(
+        torch.jit.load(compiled_model), device_ids=consumed_cores_list) 
 '''
     init_impl += '''
         self.model_neuron.num_workers = num_threads
