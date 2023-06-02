@@ -654,7 +654,6 @@ import torch.neuron
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--inf2',
-                        type=bool,
                         required=False,
                         default=False,
                         action='store_true',
