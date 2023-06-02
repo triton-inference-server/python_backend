@@ -657,6 +657,7 @@ if __name__ == '__main__':
                         type=bool,
                         required=False,
                         default=False,
+                        action='store_true',
                         help="Specify whether the model should be generate for inf2 or inf1, default is inf1"
                         )
     parser.add_argument('--model_type',
