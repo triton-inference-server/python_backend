@@ -469,7 +469,9 @@ class TritonPythonModel:
 
         for request in requests:
             if an_error_occurred:
-              # If there is an error, the output_tensors are ignored
+              # If there is an error, there is no need to pass the
+              # "output_tensors" to the InferenceResponse. The "output_tensors"
+              # that are passed in this case will be ignored.
               responses.append(pb_utils.InferenceResponse(
                 error=pb_utils.TritonError("An Error Occurred")))
 
