@@ -212,7 +212,7 @@ struct ResponseSenderBase {
 struct ResponseSendMessage : ResponseSenderBase {
   bi::managed_external_buffer::handle_t response;
 
-  // A pointer to GPUBuffersShm object.
+  // A shm handle to a GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
 
   uint32_t flags;

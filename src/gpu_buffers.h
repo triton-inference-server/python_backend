@@ -32,7 +32,8 @@
 
 namespace triton { namespace backend { namespace python {
 
-/// \param success indicating whether the request was successful
+/// \param success indicating whether the process of fetching the GPU buffers
+/// was successful.
 /// \param error if success is equal to false, the error object will be set.
 /// \param buffers list of buffers elements.
 /// \param buffer_count the number of buffers.
@@ -43,6 +44,8 @@ struct GPUBuffersShm {
   uint32_t buffer_count;
 };
 
+/// Helper class to facilitate transfer of metadata associated
+/// the GPU buffers in shared memory.
 class GPUBufferTransporter {
  public:
   GPUBufferTransporter();

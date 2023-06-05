@@ -57,7 +57,9 @@ void
 GPUBufferTransporter::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   if (completed_) {
-    return;
+    throw PythonBackendException(
+        "Complete has already been called. Complete should only be called "
+        "once.");
   }
   gpu_buffers_shm_ = shm_pool->Construct<GPUBuffersShm>();
   if (!error_shm_) {
