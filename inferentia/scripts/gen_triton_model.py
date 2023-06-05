@@ -644,8 +644,11 @@ from concurrent import futures
     else:
         triton_model += '''
 import torch
-import torch.neuron
     '''
+        if not is_inf2:
+            triton_model += '''
+import torch.neuron
+        '''
     triton_model += get_triton_python_model_impl(
         using_tensorflow_model, disable_batch_requests_to_neuron, is_inf2)
     return triton_model
