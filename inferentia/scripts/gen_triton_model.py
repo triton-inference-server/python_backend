@@ -231,7 +231,7 @@ def get_common_initialize_impl():
 
         params = model_config['parameters']
         compiled_model = params['COMPILED_MODEL']['string_value']
-        compiled_model = os.path.join(model_config['model_repository'], compiled_model)
+        compiled_model = os.path.join(args['model_repository'], compiled_model)
 
         nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
         nc_end_idx = int(params['NEURON_CORE_END_INDEX']['string_value'])
