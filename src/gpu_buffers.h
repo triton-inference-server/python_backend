@@ -46,9 +46,9 @@ struct GPUBuffersShm {
 
 /// Helper class to facilitate transfer of metadata associated
 /// the GPU buffers in shared memory.
-class GPUBufferTransporter {
+class GPUBuffersHelper {
  public:
-  GPUBufferTransporter();
+  GPUBuffersHelper();
   void AddBuffer(const bi::managed_external_buffer::handle_t& handle);
   void Complete(std::unique_ptr<SharedMemoryManager>& shm_pool);
   void SetError(

@@ -624,7 +624,7 @@ ModelInstanceState::ExecuteBLSRequest(
 
     is_response_batch_set = true;
     bool has_gpu_tensor = false;
-    GPUBufferTransporter gpu_buffer_transporter;
+    GPUBuffersHelper gpu_buffer_helper;
 
     PythonBackendException pb_exception(std::string{});
     if (request_batch_shm_ptr->batch_size == 1) {
@@ -660,14 +660,14 @@ ModelInstanceState::ExecuteBLSRequest(
             lbackend_memory.reset(backend_memory);
             input_tensor->SetMemory(std::move(PbMemory::Create(
                 Stub()->ShmPool(), std::move(lbackend_memory))));
-            gpu_buffer_transporter.AddBuffer(
+            gpu_buffer_helper.AddBuffer(
                 input_tensor->Memory()->ShmHandle());
 #endif  // TRITON_ENABLE_GPU
           }
         }
       }
       catch (const PythonBackendException& exception) {
-        gpu_buffer_transporter.SetError(Stub()->ShmPool(), exception.what());
+        gpu_buffer_helper.SetError(Stub()->ShmPool(), exception.what());
         pb_exception = exception;
       }
 
@@ -676,9 +676,9 @@ ModelInstanceState::ExecuteBLSRequest(
       // trip must be still completed, otherwise the stub process will always be
       // waiting for a message from the parent process.
       if (has_gpu_tensor) {
-        gpu_buffer_transporter.Complete(Stub()->ShmPool());
+        gpu_buffer_helper.Complete(Stub()->ShmPool());
         request_batch_shm_ptr->gpu_buffers_handle =
-            gpu_buffer_transporter.ShmHandle();
+            gpu_buffer_helper.ShmHandle();
 
         bi::scoped_lock<bi::interprocess_mutex> lock{
             *(ipc_message->ResponseMutex())};
@@ -1068,20 +1068,20 @@ ModelInstanceState::ResponseSendDecoupled(
     std::unique_ptr<
         TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
         response_factory_ptr;
-    GPUBufferTransporter gpu_buffer_transporter;
+    GPUBuffersHelper gpu_buffer_helper;
     if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
       response_factory_ptr.reset(
           reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
     }
     infer_response->Send(
         response, CudaStream(), requires_deferred_callback,
-        send_message_payload->flags, Stub()->ShmPool(), gpu_buffer_transporter,
+        send_message_payload->flags, Stub()->ShmPool(), gpu_buffer_helper,
         gpu_output_buffers);
 
     if (requires_deferred_callback) {
-      gpu_buffer_transporter.Complete(Stub()->ShmPool());
+      gpu_buffer_helper.Complete(Stub()->ShmPool());
       send_message_payload->gpu_buffers_handle =
-          gpu_buffer_transporter.ShmHandle();
+          gpu_buffer_helper.ShmHandle();
 
       // Additional round trip so that the stub can fill the GPU output buffers.
       {
@@ -1389,7 +1389,7 @@ ModelInstanceState::ProcessRequests(
   std::vector<std::unique_ptr<InferResponse>> shm_responses;
   std::vector<std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>>
       gpu_output_buffers(request_count);
-  GPUBufferTransporter gpu_buffer_transporter;
+  GPUBuffersHelper gpu_buffer_helper;
 
   for (uint32_t r = 0; r < request_count; ++r) {
     NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
@@ -1452,7 +1452,7 @@ ModelInstanceState::ProcessRequests(
     infer_response->Send(
         response, CudaStream(), require_deferred_callback,
         TRITONSERVER_RESPONSE_COMPLETE_FINAL, Stub()->ShmPool(),
-        gpu_buffer_transporter, gpu_output_buffers[r], requested_output_names);
+        gpu_buffer_helper, gpu_output_buffers[r], requested_output_names);
 
     requires_deferred_callback[r] = require_deferred_callback;
 
@@ -1468,8 +1468,8 @@ ModelInstanceState::ProcessRequests(
   // required for filling the GPU buffers provided by the main process.
   if (has_gpu_output) {
     ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
-    gpu_buffer_transporter.Complete(Stub()->ShmPool());
-    ipc_message->Args() = gpu_buffer_transporter.ShmHandle();
+    gpu_buffer_helper.Complete(Stub()->ShmPool());
+    ipc_message->Args() = gpu_buffer_helper.ShmHandle();
     SendMessageAndReceiveResponse(
         ipc_message->ShmHandle(), response_message, restart, responses,
         requests, 0);

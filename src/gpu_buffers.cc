@@ -28,33 +28,32 @@
 #include "pb_string.h"
 
 namespace triton { namespace backend { namespace python {
-GPUBufferTransporter::GPUBufferTransporter()
+GPUBuffersHelper::GPUBuffersHelper()
 {
   completed_ = false;
 }
 
 void
-GPUBufferTransporter::AddBuffer(
-    const bi::managed_external_buffer::handle_t& handle)
+GPUBuffersHelper::AddBuffer(const bi::managed_external_buffer::handle_t& handle)
 {
   if (completed_) {
     throw PythonBackendException(
         "It is not possible to add buffers after 'Complete' has been called on "
-        "a GPUBufferTransporter.");
+        "a GPUBuffersHelper.");
   }
 
   buffers_.emplace_back(handle);
 }
 
 void
-GPUBufferTransporter::SetError(
+GPUBuffersHelper::SetError(
     std::unique_ptr<SharedMemoryManager>& shm_pool, const std::string& error)
 {
   error_shm_ = PbString::Create(shm_pool, error);
 }
 
 void
-GPUBufferTransporter::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
+GPUBuffersHelper::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   if (completed_) {
     throw PythonBackendException(
@@ -81,7 +80,7 @@ GPUBufferTransporter::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
 
 
 bi::managed_external_buffer::handle_t
-GPUBufferTransporter::ShmHandle()
+GPUBuffersHelper::ShmHandle()
 {
   return gpu_buffers_shm_.handle_;
 }

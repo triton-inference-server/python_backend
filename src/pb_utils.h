@@ -221,7 +221,7 @@ struct ResponseSendMessage : ResponseSenderBase {
 struct RequestBatch {
   uint32_t batch_size;
 
-  // A pointer to GPUBuffersShm object.
+  // A shm handle to a GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
 };
 
