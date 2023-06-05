@@ -45,6 +45,7 @@ any C++ code.
     - [`initialize`](#initialize)
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
+        - [Error Handling](#error-handling)
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
         - [Known Issues](#known-issues)
@@ -55,7 +56,7 @@ any C++ code.
     - [Building Custom Python Backend Stub](#building-custom-python-backend-stub)
     - [Creating Custom Execution Environments](#creating-custom-execution-environments)
     - [Important Notes](#important-notes)
-  - [Error Handling](#error-handling)
+  - [Error Handling](#error-handling-1)
   - [Managing Shared Memory](#managing-shared-memory)
   - [Multiple Model Instance Support](#multiple-model-instance-support)
   - [Running Multiple Instances of Triton Server](#running-multiple-instances-of-triton-server)
@@ -450,6 +451,8 @@ Upon return from the execute function all tensor data associated with the
 InferenceRequest objects passed to the function are deleted, and so
 InferenceRequest objects should not be retained by the Python model.
 
+#### Error Handling
+
 In case one of the requests has an error, you can use the `TritonError` object
 to set the error message for that specific request. Below is an example of
 setting errors for an `InferenceResponse` object:
@@ -466,9 +469,10 @@ class TritonPythonModel:
 
         for request in requests:
             if an_error_occurred:
-              # If there is an error, the output_tensors are ignored
+              # If there is an error, there is no need to pass the
+              # "output_tensors" to the InferenceResponse. The "output_tensors"
+              # that are passed in this case will be ignored.
               responses.append(pb_utils.InferenceResponse(
-                output_tensors=[],
                 error=pb_utils.TritonError("An Error Occurred")))
 
         return responses
