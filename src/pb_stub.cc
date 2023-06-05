@@ -1539,7 +1539,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::init<
               const std::vector<std::shared_ptr<PbTensor>>&,
               std::shared_ptr<PbError>>(),
-          py::arg("output_tensors").none(false),
+          py::arg("output_tensors") = py::list(),
           py::arg("error") = static_cast<std::shared_ptr<PbError>>(nullptr))
       .def(
           "output_tensors", &InferResponse::OutputTensors,
