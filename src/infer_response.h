@@ -27,6 +27,7 @@
 #pragma once
 
 #include <future>
+#include "gpu_buffers.h"
 #include "pb_error.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -49,7 +50,7 @@ struct ResponseShm {
     TRITONSERVER_Error* raasnie_err__ = (X); \
     if (raasnie_err__ != nullptr) {          \
       *E = raasnie_err__;                    \
-      return E;                              \
+      return;                                \
     }                                        \
   } while (false)
 
@@ -62,7 +63,7 @@ struct ResponseShm {
       TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
           TRITONSERVER_ERROR_INTERNAL, pb_exception.what());   \
       *E = rarie_err__;                                        \
-      return E;                                                \
+      return;                                                  \
     }                                                          \
   } while (false)
 
@@ -96,13 +97,13 @@ class InferResponse {
   /// response needs to be done in two step. The boolean
   /// 'requires_deferred_callback' indicates whether DeferredSendCallback method
   /// should be called or not.
-  std::shared_ptr<TRITONSERVER_Error*> Send(
-      TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
+  void Send(
+      TRITONBACKEND_Response* response, void* cuda_stream,
       bool& requires_deferred_callback, const uint32_t flags,
       std::unique_ptr<SharedMemoryManager>& shm_pool,
+      GPUBuffersHelper& gpu_buffer_helper,
       std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
-      const std::set<std::string>& requested_output_names = {},
-      TRITONBACKEND_Response* response = nullptr);
+      const std::set<std::string>& requested_output_names = {});
 
   void DeferredSendCallback();
 #endif
