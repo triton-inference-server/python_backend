@@ -201,64 +201,50 @@ InferResponse::IsLastResponse()
 }
 
 #ifndef TRITON_PB_STUB
-std::shared_ptr<TRITONSERVER_Error*>
+void
 InferResponse::Send(
-    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
+    TRITONBACKEND_Response* response, void* cuda_stream,
     bool& requires_deferred_callback, const uint32_t flags,
     std::unique_ptr<SharedMemoryManager>& shm_pool,
+    GPUBuffersHelper& gpu_buffer_helper,
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
-    const std::set<std::string>& requested_output_names,
-    TRITONBACKEND_Response* response)
+    const std::set<std::string>& requested_output_names)
 {
   std::shared_ptr<TRITONSERVER_Error*> response_error =
       WrapTritonErrorInSharedPtr(nullptr);
   std::unique_ptr<ScopedDefer> response_error_handling;
   requires_deferred_callback = false;
 
-  // Should only destruct the response factory whenever a response factory is
-  // being created.
-  bool destruct_response_factor = (response == nullptr);
-
-  if (response == nullptr) {
-    SET_ERROR_AND_RETURN(
-        response_error,
-        TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
-  }
-
   // This lambda expression will be called when this function exits, if the
   // inference response doesn't have any GPU tensors. Otherwise, it will be
   // called when the object is destructed or DeferredSendCallback is called.
-  response_error_handling = std::make_unique<ScopedDefer>(
-      [response, response_error, flags, response_factory,
-       destruct_response_factor] {
+  response_error_handling =
+      std::make_unique<ScopedDefer>([response, response_error, flags] {
         if (response != nullptr) {
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseSend(response, flags, *response_error),
               "failed to send the response.");
-          if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL &&
-              destruct_response_factor) {
-            std::unique_ptr<
-                TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-            response_factory_ptr(
-                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                    response_factory));
-          }
         }
       });
 
   // Moves the response sending callback so that it is not called until the stub
   // process fills in the GPU buffers.
-  ScopedDefer deferred_task(
-      [this, &requires_deferred_callback, &response_error_handling] {
-        if (requires_deferred_callback) {
-          deferred_send_callback_ = std::move(response_error_handling);
-        }
-      });
+  ScopedDefer deferred_task([this, &requires_deferred_callback,
+                             &response_error_handling, &gpu_buffer_helper,
+                             response_error, &shm_pool] {
+    if (*response_error != nullptr) {
+      gpu_buffer_helper.SetError(
+          shm_pool, TRITONSERVER_ErrorMessage(*response_error));
+    }
+    if (requires_deferred_callback) {
+      deferred_send_callback_ = std::move(response_error_handling);
+    }
+  });
 
   if (HasError()) {
     *response_error = TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
-    return nullptr;
+    return;
   }
 
   bool cuda_copy = false;
@@ -322,6 +308,7 @@ InferResponse::Send(
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
                 true /* copy_gpu */));
       }
+      gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
 #endif
     }
@@ -336,6 +323,7 @@ InferResponse::Send(
               shm_pool, actual_memory_type, actual_memory_type_id,
               output_tensor->ByteSize(), nullptr /* data ptr */));
 
+      gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
     }
 
@@ -357,8 +345,6 @@ InferResponse::Send(
     cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(cuda_stream));
   }
 #endif  // TRITON_ENABLE_GPU
-
-  return response_error;
 }
 #endif
 

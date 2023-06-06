@@ -28,6 +28,7 @@
 
 #include <boost/interprocess/sync/scoped_lock.hpp>
 
+#include "gpu_buffers.h"
 #include "pb_utils.h"
 #include "scoped_defer.h"
 #ifdef TRITON_PB_STUB
@@ -481,11 +482,19 @@ InferRequest::Exec(const bool is_decoupled)
     // Additional round trip required for asking the stub process
     // to fill in the GPU tensor buffers
     if (has_gpu_tensor) {
+      AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_shm =
+          shm_pool->Load<GPUBuffersShm>(
+              request_batch_shm_ptr->gpu_buffers_handle);
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
           gpu_buffers_handle =
               shm_pool->Load<bi::managed_external_buffer::handle_t>(
-                  request_batch_shm_ptr->gpu_buffers_handle);
+                  gpu_buffers_shm.data_->buffers);
       try {
+        if (!gpu_buffers_shm.data_->success) {
+          std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(
+              shm_pool, gpu_buffers_shm.data_->error);
+          throw PythonBackendException(error->String());
+        }
 #ifdef TRITON_ENABLE_GPU
         size_t i = 0;
         for (auto& input_tensor : this->Inputs()) {

@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "python_be.h"
 
+#include "gpu_buffers.h"
 #include "infer_payload.h"
 #include "pb_log.h"
 
@@ -623,10 +624,9 @@ ModelInstanceState::ExecuteBLSRequest(
 
     is_response_batch_set = true;
     bool has_gpu_tensor = false;
+    GPUBuffersHelper gpu_buffer_helper;
 
     PythonBackendException pb_exception(std::string{});
-
-    uint32_t gpu_buffers_count = 0;
     if (request_batch_shm_ptr->batch_size == 1) {
       std::shared_ptr<InferRequest> infer_request;
       bi::managed_external_buffer::handle_t* request_handle =
@@ -643,7 +643,6 @@ ModelInstanceState::ExecuteBLSRequest(
         for (auto& input_tensor : infer_request->Inputs()) {
           if (!input_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-            gpu_buffers_count++;
             BackendMemory* backend_memory;
             std::unique_ptr<BackendMemory> lbackend_memory;
             has_gpu_tensor = true;
@@ -661,38 +660,25 @@ ModelInstanceState::ExecuteBLSRequest(
             lbackend_memory.reset(backend_memory);
             input_tensor->SetMemory(std::move(PbMemory::Create(
                 Stub()->ShmPool(), std::move(lbackend_memory))));
+            gpu_buffer_helper.AddBuffer(
+                input_tensor->Memory()->ShmHandle());
 #endif  // TRITON_ENABLE_GPU
           }
         }
       }
       catch (const PythonBackendException& exception) {
+        gpu_buffer_helper.SetError(Stub()->ShmPool(), exception.what());
         pb_exception = exception;
       }
-      AllocatedSharedMemory<bi::managed_external_buffer::handle_t> gpu_handles;
 
       // Wait for the extra round trip to complete. The stub process will fill
       // in the data for the GPU tensors. If there is an error, the extra round
       // trip must be still completed, otherwise the stub process will always be
       // waiting for a message from the parent process.
       if (has_gpu_tensor) {
-        try {
-          gpu_handles = Stub()
-                            ->ShmPool()
-                            ->Construct<bi::managed_external_buffer::handle_t>(
-                                gpu_buffers_count);
-          request_batch_shm_ptr->gpu_buffers_count = gpu_buffers_count;
-          request_batch_shm_ptr->gpu_buffers_handle = gpu_handles.handle_;
-          size_t i = 0;
-          for (auto& input_tensor : infer_request->Inputs()) {
-            if (!input_tensor->IsCPU()) {
-              gpu_handles.data_.get()[i] = input_tensor->Memory()->ShmHandle();
-              ++i;
-            }
-          }
-        }
-        catch (const PythonBackendException& exception) {
-          pb_exception = exception;
-        }
+        gpu_buffer_helper.Complete(Stub()->ShmPool());
+        request_batch_shm_ptr->gpu_buffers_handle =
+            gpu_buffer_helper.ShmHandle();
 
         bi::scoped_lock<bi::interprocess_mutex> lock{
             *(ipc_message->ResponseMutex())};
@@ -700,7 +686,7 @@ ModelInstanceState::ExecuteBLSRequest(
         ipc_message->ResponseCondition()->wait(lock);
       }
 
-      if (pb_exception.what() != nullptr) {
+      if (pb_exception.what() == std::string{""}) {
         auto callback = std::bind(
             &ModelInstanceState::SendBLSDecoupledResponse, this,
             std::placeholders::_1);
@@ -1071,32 +1057,31 @@ ModelInstanceState::ResponseSendDecoupled(
             false /* open cuda ipc handle */);
 
     bool requires_deferred_callback = false;
+    TRITONBACKEND_Response* response;
+    SetErrorForResponseSendMessage(
+        send_message_payload,
+        WrapTritonErrorInSharedPtr(
+            TRITONBACKEND_ResponseNewFromFactory(&response, response_factory)),
+        error_message);
+
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers;
-    std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
-        response_factory, CudaStream(), requires_deferred_callback,
-        send_message_payload->flags, Stub()->ShmPool(), gpu_output_buffers);
-    SetErrorForResponseSendMessage(send_message_payload, error, error_message);
+    std::unique_ptr<
+        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+        response_factory_ptr;
+    GPUBuffersHelper gpu_buffer_helper;
+    if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      response_factory_ptr.reset(
+          reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
+    }
+    infer_response->Send(
+        response, CudaStream(), requires_deferred_callback,
+        send_message_payload->flags, Stub()->ShmPool(), gpu_buffer_helper,
+        gpu_output_buffers);
 
     if (requires_deferred_callback) {
-      AllocatedSharedMemory<char> gpu_buffers_handle =
-          Stub()->ShmPool()->Construct<char>(
-              sizeof(uint64_t) +
-              gpu_output_buffers.size() *
-                  sizeof(bi::managed_external_buffer::handle_t));
-      uint64_t* gpu_buffer_count =
-          reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
-      *gpu_buffer_count = gpu_output_buffers.size();
-      bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
-          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-              gpu_buffers_handle.data_.get() + sizeof(uint64_t));
-      send_message_payload->gpu_buffers_handle = gpu_buffers_handle.handle_;
-
-      size_t index = 0;
-      for (auto& output_buffer_pair : gpu_output_buffers) {
-        std::unique_ptr<PbMemory>& pb_memory = output_buffer_pair.first;
-        gpu_buffers_handle_shm[index] = pb_memory->ShmHandle();
-        ++index;
-      }
+      gpu_buffer_helper.Complete(Stub()->ShmPool());
+      send_message_payload->gpu_buffers_handle =
+          gpu_buffer_helper.ShmHandle();
 
       // Additional round trip so that the stub can fill the GPU output buffers.
       {
@@ -1109,7 +1094,6 @@ ModelInstanceState::ResponseSendDecoupled(
         }
       }
 
-      index = 0;
       bool cuda_copy = false;
       for (auto& output_buffer_pair : gpu_output_buffers) {
         auto& pb_memory = output_buffer_pair.first;
@@ -1125,8 +1109,6 @@ ModelInstanceState::ResponseSendDecoupled(
               CudaStream(), &cuda_used);
           cuda_copy |= cuda_used;
         }
-        gpu_buffers_handle_shm[index] = pb_memory->ShmHandle();
-        ++index;
 #ifdef TRITON_ENABLE_GPU
         if (cuda_copy) {
           cudaStreamSynchronize(stream_);
@@ -1407,6 +1389,7 @@ ModelInstanceState::ProcessRequests(
   std::vector<std::unique_ptr<InferResponse>> shm_responses;
   std::vector<std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>>
       gpu_output_buffers(request_count);
+  GPUBuffersHelper gpu_buffer_helper;
 
   for (uint32_t r = 0; r < request_count; ++r) {
     NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
@@ -1466,17 +1449,13 @@ ModelInstanceState::ProcessRequests(
 
     gpu_output_buffers[r] =
         std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>{};
-    std::shared_ptr<TRITONSERVER_Error*> error = infer_response->Send(
-        nullptr, CudaStream(), require_deferred_callback,
+    infer_response->Send(
+        response, CudaStream(), require_deferred_callback,
         TRITONSERVER_RESPONSE_COMPLETE_FINAL, Stub()->ShmPool(),
-        gpu_output_buffers[r], requested_output_names, response);
-    GUARDED_RESPOND_IF_ERROR(responses, r, *error);
+        gpu_buffer_helper, gpu_output_buffers[r], requested_output_names);
 
     requires_deferred_callback[r] = require_deferred_callback;
 
-    // Error object will be deleted by the GUARDED_RESPOND macro
-    *error = nullptr;
-    error.reset();
     if (requires_deferred_callback[r]) {
       has_gpu_output = true;
     }
@@ -1488,39 +1467,15 @@ ModelInstanceState::ProcessRequests(
   // If the output tensor is in GPU, there will be a second round trip
   // required for filling the GPU buffers provided by the main process.
   if (has_gpu_output) {
-    size_t total_gpu_buffers_count = 0;
-    for (auto& gpu_output_buffer : gpu_output_buffers) {
-      total_gpu_buffers_count += gpu_output_buffer.size();
-    }
-    AllocatedSharedMemory<char> gpu_buffers_handle =
-        Stub()->ShmPool()->Construct<char>(
-            sizeof(uint64_t) +
-            total_gpu_buffers_count *
-                sizeof(bi::managed_external_buffer::handle_t));
-    uint64_t* gpu_buffer_count =
-        reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
-    *gpu_buffer_count = total_gpu_buffers_count;
-    bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
-        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-            gpu_buffers_handle.data_.get() + sizeof(uint64_t));
-
-    size_t index = 0;
-    for (auto& gpu_output_buffer : gpu_output_buffers) {
-      for (auto& buffer_memory_pair : gpu_output_buffer) {
-        gpu_buffers_handle_shm[index] = buffer_memory_pair.first->ShmHandle();
-        ++index;
-      }
-    }
-
     ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
-    ipc_message->Args() = gpu_buffers_handle.handle_;
+    gpu_buffer_helper.Complete(Stub()->ShmPool());
+    ipc_message->Args() = gpu_buffer_helper.ShmHandle();
     SendMessageAndReceiveResponse(
         ipc_message->ShmHandle(), response_message, restart, responses,
         requests, 0);
 
     bool cuda_copy = false;
 
-    index = 0;
     uint32_t response_index = 0;
     for (auto& gpu_output_buffer : gpu_output_buffers) {
       for (auto& buffer_memory_pair : gpu_output_buffer) {
@@ -1538,8 +1493,6 @@ ModelInstanceState::ProcessRequests(
                   CudaStream(), &cuda_used));
           cuda_copy |= cuda_used;
         }
-        gpu_buffers_handle_shm[index] = pb_memory->ShmHandle();
-        ++index;
       }
       response_index++;
 #ifdef TRITON_ENABLE_GPU
