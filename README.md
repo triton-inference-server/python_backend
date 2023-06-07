@@ -1326,7 +1326,10 @@ Starting from 23.05, you can utlize Custom Metrics API to register and collect
 custom metrics in the `initialize`, `execute`, and `finalize` functions of your
 Python model. The Custom Metrics API is the Python equivalent of the
 [TRITON C API custom metrics](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/metrics.md#custom-metrics)
-support.
+support. You will need to take the ownership of the custom metrics created
+through the APIs and must manage their lifetime. Note that a `MetricFamily`
+object should be deleted only after all the `Metric` objects under it are
+deleted if you'd like to explicitly delete the custom metrics objects.
 
 Example below shows how to use this feature:
 

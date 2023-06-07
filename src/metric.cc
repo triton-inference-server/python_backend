@@ -124,11 +124,12 @@ Metric::SendCreateMetricRequest()
 void
 Metric::SendIncrementRequest(const double& value)
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  operation_value_ = value;
-  SaveToSharedMemory(stub->ShmPool());
-  CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
+    CheckIfCleared();
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    operation_value_ = value;
+    SaveToSharedMemory(stub->ShmPool());
+    CustomMetricsMessage* custom_metrics_msg = nullptr;
     stub->SendCustomMetricsMessage(
         &custom_metrics_msg, PYTHONSTUB_MetricRequestIncrement, shm_handle_);
   }
@@ -142,11 +143,12 @@ Metric::SendIncrementRequest(const double& value)
 void
 Metric::SendSetValueRequest(const double& value)
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  operation_value_ = value;
-  SaveToSharedMemory(stub->ShmPool());
-  CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
+    CheckIfCleared();
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    operation_value_ = value;
+    SaveToSharedMemory(stub->ShmPool());
+    CustomMetricsMessage* custom_metrics_msg = nullptr;
     stub->SendCustomMetricsMessage(
         &custom_metrics_msg, PYTHONSTUB_MetricRequestSet, shm_handle_);
   }
@@ -159,10 +161,11 @@ Metric::SendSetValueRequest(const double& value)
 double
 Metric::SendGetValueRequest()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
+    CheckIfCleared();
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    SaveToSharedMemory(stub->ShmPool());
     stub->SendCustomMetricsMessage(
         &custom_metrics_msg, PYTHONSTUB_MetricRequestValue, shm_handle_);
   }
@@ -194,6 +197,17 @@ Metric::Clear()
       std::cerr << "Error when deleting Metric: " << pb_exception.what()
                 << "\n";
     }
+  }
+}
+
+void
+Metric::CheckIfCleared()
+{
+  if (is_cleared_) {
+    throw PythonBackendException(
+        "Invalid metric operation as the corresponding 'MetricFamily' has been "
+        "deleted. The 'MetricFamily' object should be deleted AFTER its "
+        "corresponding 'Metric' objects have been deleted.");
   }
 }
 
