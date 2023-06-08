@@ -231,7 +231,6 @@ def get_common_initialize_impl():
 
         params = model_config['parameters']
         compiled_model = params['COMPILED_MODEL']['string_value']
-        compiled_model = os.path.join(args['model_repository'], compiled_model)
 
         nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
         nc_end_idx = int(params['NEURON_CORE_END_INDEX']['string_value'])
@@ -276,6 +275,7 @@ def get_tensorflow_initialize_impl(is_inf2=False):
 '''
     if is_inf2:
         init_impl += '''
+        compiled_model = os.path.join(args['model_repository'], compiled_model)
         self.pred_list = [
         tf.keras.models.load_model(compiled_model)
         for _ in range(cores_per_instance)
@@ -351,6 +351,7 @@ def get_pytorch_initialize_impl(is_inf2=False):
 '''
     if is_inf2:
         init_impl += '''
+        compiled_model = os.path.join(args['model_repository'], compiled_model)
         self.model_neuron = torch.jit.load(compiled_model)
 '''
     else:
