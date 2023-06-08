@@ -50,8 +50,8 @@ export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
 export USE_TENSORFLOW=0
 export TENSORFLOW_VERSION=2
-export INSTALL_INF1=0
-export INSTALL_INF2=1
+export INSTALL_INF1=1
+export INSTALL_INF2=
 
 for OPTS; do
     case "$OPTS" in
@@ -102,11 +102,6 @@ for OPTS; do
     esac
 done
 
-if [ ${INSTALL_INF1} -ne 1 ] && [ ${INSTALL_INF2} -ne 1 ]; then
-     echo "Error: need to specify either -inf1 (neuron) of -inf2 (neuronx)"
-     printf "%s\\n" ${USAGE}
-     return 1
-fi
 
 if [ ${USE_TENSORFLOW} -ne 1 ] && [ ${USE_PYTORCH} -ne 1 ]; then
     echo "Error: need to specify either -p (use pytorch) or -t (use tensorflow)."
