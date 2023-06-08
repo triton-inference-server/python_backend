@@ -32,7 +32,7 @@ usage: setup.sh [options]
 
 Sets up runtime and tools for execution on Inferentia chips.
 -h|--help                  Shows usage
--inf1|--inf1-setup         Installs runtime and tools for inf1/neuron 
+-inf1|--inf1-setup         Installs runtime and tools for inf1/neuron, inf1 is default
 -inf2|--inf2-setup         Installs runtime and tools for inf2/neuronx
 -trn1|--trn1-setup         Installs runtime, tools for inf2, and installs EFA for trn1
 "
@@ -42,7 +42,7 @@ OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,infe
 
 
 export INSTALL_INF2=0
-export INSTALL_INF1=0
+export INSTALL_INF1=1
 export INSTALL_TRN1=0
 
 export CWD=`pwd`
