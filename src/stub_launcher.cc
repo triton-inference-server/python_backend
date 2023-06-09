@@ -62,6 +62,7 @@ StubLauncher::Initialize(ModelState* model_state)
   model_state->ModelConfig().Write(&model_config_buffer_);
   is_decoupled_ = model_state->IsDecoupled();
   model_repository_path_ = model_state->RepositoryPath();
+  plugin_model_ = model_state->PluginModel();
 
   // Atomically increase and read the stub process count to avoid shared memory
   // region name collision
@@ -82,17 +83,19 @@ StubLauncher::Initialize(ModelState* model_state)
     ss << artifact_name;
   } else {
     // Default artifact name.
-    ss << "model.py";
+    ss << model_state->DefaultArtifactName();
   }
 
   model_path_ = ss.str();
   struct stat buffer;
 
-  // Check if model.py exists
+  // Check if model file exists in the path
   if (stat(model_path_.c_str(), &buffer) != 0) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
-        ("model.py does not exist in the model repository path: " + model_path_)
+        (model_state->DefaultArtifactName() +
+         " model file does not exist in the model repository path: " +
+         model_path_)
             .c_str());
   }
 
@@ -252,7 +255,8 @@ StubLauncher::Launch()
     ss << " exec " << python_backend_stub << " " << model_path_ << " "
        << shm_region_name_ << " " << shm_default_byte_size_ << " "
        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-       << " " << ipc_control_handle_ << " " << stub_name;
+       << " " << ipc_control_handle_ << " " << stub_name << " "
+       << plugin_model_;
     bash_argument = ss.str();
   }
   LOG_MESSAGE(

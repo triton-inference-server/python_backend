@@ -237,6 +237,12 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
+  // The default name for the model file in model repo
+  std::string DefaultArtifactName();
+
+  // Optional plugin model path to be used to serve the model.
+  std::string PluginModel();
+
   // Launch auto-complete stub process.
   TRITONSERVER_Error* LaunchAutoCompleteStubProcess();
 
@@ -252,6 +258,7 @@ class ModelState : public BackendModel {
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
   bool decoupled_;
+  std::string platform_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
 };
 

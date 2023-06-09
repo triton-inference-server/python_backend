@@ -1678,6 +1678,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   python_execution_env_ = "";
   force_cpu_only_input_tensors_ = true;
   decoupled_ = false;
+  platform_ = "";
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
@@ -1718,6 +1719,15 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
       }
     }
 
+    triton::common::TritonJson::Value platform;
+    if (model_config_.Find("platform", &platform)) {
+      auto error = platform.AsString(&platform_);
+      if (error != nullptr) {
+        throw BackendModelException(error);
+      }
+    }
+
+
     // Skip the FORCE_CPU_ONLY_INPUT_TENSORS variable if it doesn't exits.
     std::string force_cpu_only_input_tensor;
     error = nullptr;
@@ -1757,6 +1767,26 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   }
 }
 
+std::string
+ModelState::DefaultArtifactName()
+{
+  if (platform_ == "tensorflow_savedmodel") {
+    return "model.savedmodel";
+  } else {
+    return "model.py";
+  }
+}
+
+std::string
+ModelState::PluginModel()
+{
+  if (platform_ == "tensorflow_savedmodel") {
+    return "tensorflow_savedmodel";
+  } else {
+    return "";
+  }
+}
+
 TRITONSERVER_Error*
 ModelState::LaunchAutoCompleteStubProcess()
 {
@@ -1792,6 +1822,7 @@ ModelState::ValidateModelConfig()
 
   return nullptr;
 }
+
 
 extern "C" {
 

@@ -49,6 +49,7 @@
 #include "message_queue.h"
 #include "metric.h"
 #include "metric_family.h"
+#include "model_context.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
@@ -185,7 +186,8 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       bi::managed_external_buffer::handle_t ipc_control_handle,
-      const std::string& model_instance_name);
+      const std::string& model_instance_name,
+      const std::string& plugin_model_path);
 
   /// Get the health of the stub process.
   bool& Health();
@@ -313,7 +315,7 @@ class Stub {
   bi::interprocess_mutex* parent_mutex_;
   bi::interprocess_condition* parent_cond_;
   bi::interprocess_mutex* health_mutex_;
-  std::string model_path_;
+  ModelContext model_context_;
   std::string model_version_;
   std::string name_;
   std::string triton_install_path_;

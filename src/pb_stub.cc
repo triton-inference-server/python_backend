@@ -81,9 +81,10 @@ Stub::Instantiate(
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
     bi::managed_external_buffer::handle_t ipc_control_handle,
-    const std::string& name)
+    const std::string& name, const std::string& plugin_model)
 {
-  model_path_ = model_path;
+  model_context_.Init(
+      model_path, plugin_model, triton_install_path, model_version);
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
   name_ = name;
@@ -377,30 +378,7 @@ Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
 
-  std::string model_name =
-      model_path_.substr(model_path_.find_last_of("/") + 1);
-
-  // Model name without the .py extension
-  auto dotpy_pos = model_name.find_last_of(".py");
-  if (dotpy_pos == std::string::npos || dotpy_pos != model_name.size() - 1) {
-    throw PythonBackendException(
-        "Model name must end with '.py'. Model name is \"" + model_name +
-        "\".");
-  }
-
-  // The position of last character of the string that is searched for is
-  // returned by 'find_last_of'. Need to manually adjust the position.
-  std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
-  std::string model_path_parent =
-      model_path_.substr(0, model_path_.find_last_of("/"));
-  std::string model_path_parent_parent =
-      model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-  std::string python_backend_folder = triton_install_path_;
-  sys.attr("path").attr("append")(model_path_parent);
-  sys.attr("path").attr("append")(model_path_parent_parent);
-  sys.attr("path").attr("append")(python_backend_folder);
-  sys = py::module_::import(
-      (std::string(model_version_) + "." + model_name_trimmed).c_str());
+  model_context_.StubSetup(&sys);
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
@@ -461,6 +439,12 @@ Stub::AutoCompleteModelConfig(
   if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
     model_config = sys.attr("TritonPythonModel")
                        .attr("auto_complete_config")(model_config);
+  } else if (py::hasattr(
+                 sys.attr("TritonPythonModel"),
+                 "plugin_auto_complete_config")) {
+    model_config = sys.attr("TritonPythonModel")
+                       .attr("plugin_auto_complete_config")(
+                           model_config, model_context_.FwModelPath());
   }
 
   if (!py::isinstance(model_config, python_backend_utils.attr("ModelConfig"))) {
@@ -522,6 +506,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
     model_instance_.attr("initialize")(model_config_params);
+  } else if (py::hasattr(model_instance_, "plugin_initialize")) {
+    model_instance_.attr("plugin_initialize")(model_config_params, model_context_.FwModelPath());
   }
 
   initialized_ = true;
@@ -638,7 +624,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     response_batch_shm_ptr->is_error_set = false;
 
     if (!py::hasattr(model_instance_, "execute")) {
-      std::string message = "Python model " + model_path_ +
+      std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
@@ -725,7 +711,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         LoadRequestsFromSharedMemory(request_batch_shm_ptr);
 
     if (!py::hasattr(model_instance_, "execute")) {
-      std::string message = "Python model " + model_path_ +
+      std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
@@ -1627,7 +1613,7 @@ main(int argc, char** argv)
   signal(SIGINT, SignalHandler);
   signal(SIGTERM, SignalHandler);
 
-  // Path to model.py
+  // Path to model
   std::string model_path = argv[1];
   std::string shm_region_name = argv[2];
   int64_t shm_default_size = std::stol(argv[3]);
@@ -1655,13 +1641,14 @@ main(int argc, char** argv)
   int64_t shm_growth_size = std::stol(argv[4]);
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
+  std::string plugin_model = argv[9];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl handle */, name);
+        std::stoi(argv[7]) /* IPCControl handle */, name, plugin_model);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
