@@ -161,6 +161,30 @@ class LogMessage {
 
 #define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
+
+class ModelContext {
+ public:
+  // Scans and establishes path for serving the python model.
+  void Init(
+      const std::string& model_path, const std::string& platform,
+      const std::string& triton_install_path, const std::string& model_version);
+  // Sets up the python stub with appropriate paths.
+  void StubSetup(py::module& sys);
+
+  std::string& PythonModelPath() { return python_model_path_; }
+  std::string& ModelDir() { return model_dir_; }
+
+ private:
+  std::string python_model_path_;
+  std::string model_dir_;
+  std::string model_version_;
+  std::string python_backend_folder_;
+  std::string platform_;
+
+  enum ModelType { DEFAULT, PLATFORM };
+  ModelType type_;
+};
+
 // The payload for the stub_to_parent message queue. This struct serves as a
 // wrapper for different types of messages so that they can be sent through the
 // same buffer.
@@ -185,7 +209,7 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       bi::managed_external_buffer::handle_t ipc_control_handle,
-      const std::string& model_instance_name);
+      const std::string& model_instance_name, const std::string& platform);
 
   /// Get the health of the stub process.
   bool& Health();
@@ -198,6 +222,9 @@ class Stub {
 
   /// Setup for the stub process
   py::module StubSetup();
+
+  /// Return the path to the model
+  py::str GetModelDir() { return model_context_.ModelDir(); }
 
   /// Set the model configuration for auto-complete
   void AutoCompleteModelConfig(
@@ -315,10 +342,8 @@ class Stub {
   bi::interprocess_mutex* parent_mutex_;
   bi::interprocess_condition* parent_cond_;
   bi::interprocess_mutex* health_mutex_;
-  std::string model_path_;
-  std::string model_version_;
+  ModelContext model_context_;
   std::string name_;
-  std::string triton_install_path_;
   IPCControlShm* ipc_control_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   py::object model_instance_;
