@@ -277,15 +277,15 @@ def get_tensorflow_initialize_impl(is_inf2=False):
         init_impl += '''
         compiled_model = os.path.join(args['model_repository'], compiled_model)
         self.pred_list = [
-        tf.keras.models.load_model(compiled_model)
-        for _ in range(cores_per_instance)
+            tf.keras.models.load_model(compiled_model)
+            for _ in range(cores_per_instance)
         ] * threads_per_core 
 '''
     else:
         init_impl += '''
         self.pred_list = [
-        tf.contrib.predictor.from_saved_model(compiled_model)
-        for _ in range(cores_per_instance)
+            tf.contrib.predictor.from_saved_model(compiled_model)
+            for _ in range(cores_per_instance)
         ] * threads_per_core
 '''
     return init_impl
