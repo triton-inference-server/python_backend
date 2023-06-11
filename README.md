@@ -1152,7 +1152,7 @@ keyword and `asyncio.run` being introduced in Python 3.7.
 
 [Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/architecture.md#stateful-models)
 require setting additional flags in the inference request to indicate the
-start and of a sequence. The `flags` argument in the `pb_utils.InferenceRequest`
+start and end of a sequence. The `flags` argument in the `pb_utils.InferenceRequest`
 object can be used to indicate whether the request is the first or last request
 in the sequence. An example indicating that the request is starting the
 sequence:
