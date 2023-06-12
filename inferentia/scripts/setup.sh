@@ -51,7 +51,7 @@ export USE_PYTORCH=0
 export USE_TENSORFLOW=0
 export TENSORFLOW_VERSION=2
 export INSTALL_INF1=1
-export INSTALL_INF2=
+export INSTALL_INF2=0
 
 for OPTS; do
     case "$OPTS" in
@@ -152,12 +152,11 @@ fi
 
 
 if [ ${USE_TENSORFLOW} -eq 1 ]; then
-    # conda install tensorflow-neuron pillow -y
     # Update Neuron TensorFlow
     if [ ${INSTALL_INF1} -eq 1] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
-        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4" tensorboard-plugin-neuron
+        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc "protobuf" tensorboard-plugin-neuron
     elif [ ${INSTALL_INF1} -eq 1]; then
-        pip install --upgrade tensorflow-neuron[cc] "protobuf<4"
+        pip install --upgrade tensorflow-neuron[cc] "protobuf" tensorboard-plugin-neuron
     elif [ ${INSTALL_INF2} -eq 1 ] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
         pip install --upgrade neuronx-cc==2.* tensorflow-neuronx==1.* tensorboard-plugin-neuronx
     elif [ ${INSTALL_INF2} -eq 1 ]; then
