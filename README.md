@@ -782,7 +782,7 @@ file system paths are currently supported. The behavior of using cloud paths is
 compile it in the official Triton NGC containers. Otherwise, your compiled stub
 may use dependencies that are not available in the Triton container that you are
 using for deployment. For example, compiling the Python backend stub on an OS
-other than Ubuntu 20.04 can lead to unexpected errors.
+other than Ubuntu 22.04 can lead to unexpected errors.
 
 ## Error Handling
 
