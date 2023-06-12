@@ -99,6 +99,11 @@ class Metric {
   /// Send the request to the parent process to get the value of the metric.
   /// \return Returns the value of the metric.
   double SendGetValueRequest();
+
+  /// Throws an exception if the metric has been cleared. This check is to avoid
+  /// the user error where the corresponding metric family has been deleted
+  /// before the metric is deleted.
+  void CheckIfCleared();
 #else
   // Initialize the TRITONSERVER_Metric object.
   /// \return Returns the address of the TRITONSERVER_Metric object.
