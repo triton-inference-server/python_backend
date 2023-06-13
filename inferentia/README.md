@@ -26,7 +26,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -->
 
-# Using Triton with Inferentia
+# Using Triton with Inferentia 1
 
 Starting from 21.11 release, Triton supports
 [AWS Inferentia](https://aws.amazon.com/machine-learning/inferentia/) 
@@ -59,8 +59,6 @@ After logging into the inf1* instance, you will need to clone
 or simply clone with https.
 Clone this repo with Github to home repo `/home/ubuntu`.
 
-Ensure that the neuron runtime 1.0 demon (neuron-rtd) is not running and set up
-and install neuron 2.X runtime builds with
 ```
  $chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
  $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
@@ -87,16 +85,10 @@ After starting the Triton container, go into the `python_backend` folder and run
 ```
 This script will:
 1. Install necessary dependencies
-2. Create a [Custom Python Execution Environment](https://github.com/triton-inference-server/python_backend#creating-custom-execution-environments),
-   `python_backend_stub` to use for Inferentia
-3. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html), the Neuron compiler.
+2. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html), the Neuron compiler.
+3. Install neuron framework packages as per your preference e.g., either pytorch, or tensorflow or both.
 
 There are user configurable options available for the script as well. 
-For example, to control the python version for the python environment to 3.6, 
-you can run:
-```
- $source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -v 3.6
-```
 Please use the `-h` or `--help` options to learn about more configurable options.
 
 ## Setting up the Inferentia model
@@ -276,3 +268,79 @@ you would need to run
  $export TRITON_SERVER_REPO_TAG=<your branch name>
 ``` 
 before running the script.
+
+# Using Triton with Inferentia 2, or Trn1
+## pytorch-neuronx and tensorflow-neuronx
+1. Similar to the steps for inf1, change the argument to the pre-container and on-container setup scripts to include the `-inf2` or `-trn1`flags e.g.,
+```
+ $chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+ $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh -inf2
+```
+2. On the container, followed by the `docker run` command, you can pass similar argument to the setup.sh script
+For Pytorch:
+```
+source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -inf2 -p
+```
+For Tensorflow:
+```
+source /home/ubuntu/python_backend/inferentia/scripts/setup.sh -inf2 -t
+```
+3. Following the above steps, when using the `gen_triton_model.py` script, you can pass similar argument `--inf2` to the setup.sh script e.g., for Pytorch
+```
+python3 inferentia/scripts/gen_triton_model.py --inf2 --model_type pytorch --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
+```
+4. **Note**: When using the `--inf2` option, the `--compiled_model` path should be provided relative to the triton model directory. The `initialize()` function in model.py will derive the full path by concatenating the model path within the repository and the relative `--compiled_model` path.
+## transformers-neuronx
+To use inf2/trn1 instances with transformers-neuronx packages for serving models, generate a `pytorch` model as per above instructions. The transformers-neuronx currently supports the models listed [here](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/frameworks/torch/torch-neuronx/transformers-neuronx/readme.html#currently-supported-models). 
+
+As prescribed on the neuronx documentation page, while the neuronx load API differs per model, it follows the same pattern. 
+
+1. To serve transformers-neuronx models, first trace the model using `save_pretrained_split()` API on an inf2 instance (recommed inf2.24xl for Large Language Models). Following that, package the folder as the '--compiled_model' when using `gen_triton_model.py` file.
+2. The following tree shows a sample model structure for OPT model:
+```
+opt/
+├── 1
+│   └── model.py
+├── opt-125m-model
+│   └── pytorch_model.bin
+└── opt-125m-tp12
+    ├── FullyUnrolled.1814.1
+    │   ├── penguin-sg0000
+    │   └── sg00
+    ├── FullyUnrolled.1814.2
+    │   ├── penguin-sg0000
+    │   └── sg00
+    ├── FullyUnrolled.1814.3
+    │   ├── penguin-sg0000
+    │   └── sg00
+    ├── FullyUnrolled.1814.4
+    │   ├── penguin-sg0000
+    │   └── sg00
+    └── FullyUnrolled.1814.5
+        ├── penguin-sg0000
+        └── sg00
+  ├── config.pbtxt
+```
+3. Add the following imports (e.g., for OPT model). The import will differ as per the model you're trying to run.
+```
+from transformers_neuronx.opt.model import OPTForSampling
+```
+4. Add the following lines in `initialize()` function. Set the `batch_size`, `tp_degree`, `n_positions`, `amp` and `unroll` args as per your requirement. `tp_degree` should typically match the number of neuron cores available on inf2 instance.
+```
+batch_size = 1
+tp_degree = 12
+n_positions = 2048
+amp = 'bf16'
+unroll = None
+self.model_neuron = OPTForSampling.from_pretrained(compiled_model, batch_size=batch_size, amp=amp, tp_degree=tp_degree, n_positions=n_positions, unroll=unroll)
+self.model_neuron.to_neuron()
+
+self.model_neuron.num_workers = num_threads
+```
+You may also chose to add the `batch_size` etc. arguments to config.pbtxt as parameters and read them in the `initialize()` function similar to `--compiled-model`.
+5. Finally, in the `excute()` function, use the following API to run the inference:
+```
+batched_results = self.model_neuron.sample(batched_tensor, 2048)
+```
+Above, `2048` is a sufficiently-long output token. It may also be passed in as one of the inputs if you wanto specify it as part of the payload.
+6. Proceed to load the model, and submit the inference payload similar to any other triton model.

@@ -231,6 +231,7 @@ def get_common_initialize_impl():
 
         params = model_config['parameters']
         compiled_model = params['COMPILED_MODEL']['string_value']
+
         nc_start_idx = int(params['NEURON_CORE_START_INDEX']['string_value'])
         nc_end_idx = int(params['NEURON_CORE_END_INDEX']['string_value'])
         if nc_end_idx < nc_start_idx:
@@ -255,7 +256,7 @@ def get_common_initialize_impl():
     return init_impl
 
 
-def get_tensorflow_initialize_impl():
+def get_tensorflow_initialize_impl(is_inf2=False):
     init_impl = get_common_initialize_impl()
     init_impl += '''
         self.input_list = []
@@ -270,20 +271,27 @@ def get_tensorflow_initialize_impl():
                 (config_output['name'], config_output['data_type'],
                  config_output['dims']))
 
-        # TODO: Validate input/output from the model
-
         os.environ["NEURON_RT_NUM_CORES"] = str(cores_per_instance)
-
+'''
+    if is_inf2:
+        init_impl += '''
+        compiled_model = os.path.join(args['model_repository'], compiled_model)
+        self.pred_list = [
+            tf.keras.models.load_model(compiled_model)
+            for _ in range(cores_per_instance)
+        ] * threads_per_core 
+'''
+    else:
+        init_impl += '''
         self.pred_list = [
             tf.contrib.predictor.from_saved_model(compiled_model)
             for _ in range(cores_per_instance)
         ] * threads_per_core
-
 '''
     return init_impl
 
 
-def get_pytorch_initialize_impl():
+def get_pytorch_initialize_impl(is_inf2=False):
     init_impl = '''
     def _validate_and_get_index(self, name):
         parts = name.split('__')
@@ -340,11 +348,19 @@ def get_pytorch_initialize_impl():
         os.environ["NEURON_RT_VISIBLE_CORES"] = cores_range
 
         consumed_cores_list = [i for i in range(cores_per_instance)]
-
+'''
+    if is_inf2:
+        init_impl += '''
+        compiled_model = os.path.join(args['model_repository'], compiled_model)
+        self.model_neuron = torch.jit.load(compiled_model)
+'''
+    else:
+        init_impl += '''
         self.model_neuron = torch.neuron.DataParallel(
-            torch.jit.load(compiled_model), device_ids=consumed_cores_list)
+        torch.jit.load(compiled_model), device_ids=consumed_cores_list) 
+'''
+    init_impl += '''
         self.model_neuron.num_workers = num_threads
-
 '''
     return init_impl
 
@@ -590,7 +606,7 @@ def get_finalize_impl():
 
 
 def get_triton_python_model_impl(using_tensorflow_model,
-                                 disable_batch_requests_to_neuron):
+                                 disable_batch_requests_to_neuron, is_inf2=False):
     triton_pmi = '''
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
@@ -599,11 +615,11 @@ class TritonPythonModel:
     '''
 
     if using_tensorflow_model:
-        triton_pmi += get_tensorflow_initialize_impl()
+        triton_pmi += get_tensorflow_initialize_impl(is_inf2)
         triton_pmi += get_tensorflow_execute_impl(
             disable_batch_requests_to_neuron)
     else:
-        triton_pmi += get_pytorch_initialize_impl()
+        triton_pmi += get_pytorch_initialize_impl(is_inf2)
         triton_pmi += get_pytorch_execute_impl(disable_batch_requests_to_neuron)
 
     triton_pmi += get_finalize_impl()
@@ -611,7 +627,7 @@ class TritonPythonModel:
     return triton_pmi
 
 
-def create_model_file(using_tensorflow_model, disable_batch_requests_to_neuron):
+def create_model_file(using_tensorflow_model, disable_batch_requests_to_neuron, is_inf2=False):
     triton_model = get_model_license()
     triton_model += '''
 import json
@@ -629,15 +645,28 @@ from concurrent import futures
     else:
         triton_model += '''
 import torch
-import torch.neuron
     '''
+        if not is_inf2:
+            triton_model += '''
+import torch.neuron
+        '''
+        else:
+            triton_model += '''
+import torch_neuronx
+'''
     triton_model += get_triton_python_model_impl(
-        using_tensorflow_model, disable_batch_requests_to_neuron)
+        using_tensorflow_model, disable_batch_requests_to_neuron, is_inf2)
     return triton_model
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--inf2',
+                        required=False,
+                        default=False,
+                        action='store_true',
+                        help="Specify whether the model should be generate for inf2 or inf1, default is inf1"
+                        )
     parser.add_argument('--model_type',
                         type=str,
                         required=True,
@@ -799,7 +828,9 @@ if __name__ == '__main__':
     with open(FLAGS.triton_model_dir + "/config.pbtxt", "w") as config_file:
         config_file.write(mc)
 
+    is_inf2 = FLAGS.inf2
+
     mf = create_model_file(is_tensorflow_model,
-                           FLAGS.disable_batch_requests_to_neuron)
+                           FLAGS.disable_batch_requests_to_neuron, is_inf2)
     with open(FLAGS.triton_model_dir + "/1/model.py", "w") as model_file:
         model_file.write(mf)
