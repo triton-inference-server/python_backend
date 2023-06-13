@@ -57,7 +57,7 @@ ModelContext::Init(
 }
 
 void
-ModelContext::StubSetup(py::module* sys)
+ModelContext::StubSetup(py::module& sys)
 {
   std::string model_name =
       python_model_path_.substr(python_model_path_.find_last_of("/") + 1);
@@ -78,18 +78,18 @@ ModelContext::StubSetup(py::module* sys)
         python_model_path_.substr(0, python_model_path_.find_last_of("/"));
     std::string model_path_parent_parent =
         model_path_parent.substr(0, model_path_parent.find_last_of("/"));
-    sys->attr("path").attr("append")(model_path_parent);
-    sys->attr("path").attr("append")(model_path_parent_parent);
-    sys->attr("path").attr("append")(python_backend_folder_);
-    *sys = py::module_::import(
+    sys.attr("path").attr("append")(model_path_parent);
+    sys.attr("path").attr("append")(model_path_parent_parent);
+    sys.attr("path").attr("append")(python_backend_folder_);
+    sys = py::module_::import(
         (std::string(model_version_) + "." + model_name_trimmed).c_str());
   } else {
     // [FIXME] Improve the path generation logic to make it more flexible.
     std::string platform_model_dir(
         python_backend_folder_ + "/platform_models/tensorflow_savedmodel/");
-    sys->attr("path").attr("append")(platform_model_dir);
-    sys->attr("path").attr("append")(python_backend_folder_);
-    *sys = py::module_::import(model_name_trimmed.c_str());
+    sys.attr("path").attr("append")(platform_model_dir);
+    sys.attr("path").attr("append")(python_backend_folder_);
+    sys = py::module_::import(model_name_trimmed.c_str());
   }
 }
 

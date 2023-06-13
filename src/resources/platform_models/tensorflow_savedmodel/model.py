@@ -56,30 +56,30 @@ TF_STRING_TO_TRITON = {
 
 
 def _parse_signature_def(config):
-    if (config['parameters']):
-        if ('TF_SIGNATURE_DEF' in config['parameters'].keys()):
+    if config['parameters']:
+        if 'TF_SIGNATURE_DEF' in config['parameters'].keys():
             return config['parameters']['TF_SIGNATURE_DEF']['string_value']
     return None
 
 
 def _parse_graph_tag(config):
-    if (config['parameters']):
-        if ('TF_GRAPH_TAG' in config['parameters'].keys()):
+    if config['parameters']:
+        if 'TF_GRAPH_TAG' in config['parameters'].keys():
             return config['parameters']['TF_GRAPH_TAG']['string_value']
     return None
 
 
 def _parse_num_intra_threads(config):
-    if (config['parameters']):
-        if ('TF_NUM_INTRA_THREADS' in config['parameters'].keys()):
+    if config['parameters']:
+        if 'TF_NUM_INTRA_THREADS' in config['parameters'].keys():
             return int(
                 config['parameters']['TF_NUM_INTRA_THREADS']['string_value'])
     return None
 
 
 def _parse_num_inter_threads(config):
-    if (config['parameters']):
-        if ('TF_NUM_INTER_THREADS' in config['parameters'].keys()):
+    if config['parameters']:
+        if 'TF_NUM_INTER_THREADS' in config['parameters'].keys():
             return int(
                 config['parameters']['TF_NUM_INTER_THREADS']['string_value'])
     return None
@@ -87,15 +87,15 @@ def _parse_num_inter_threads(config):
 
 def _get_truth_value(string_value):
     val = string_value.casefold()
-    if (val == 'yes' or val == '1' or val == 'on' or val == 'true'):
+    if val == 'yes' or val == '1' or val == 'on' or val == 'true':
         return True
     else:
         return False
 
 
 def _parse_use_per_session_thread(config):
-    if (config['parameters']):
-        if ('USE_PER_SESSION_THREAD' in config['parameters'].keys()):
+    if config['parameters']:
+        if 'USE_PER_SESSION_THREAD' in config['parameters'].keys():
             val = config['parameters']['USE_PER_SESSION_THREAD']['string_value']
             return _get_truth_value(val)
     return False
@@ -104,7 +104,7 @@ def _parse_use_per_session_thread(config):
 def _get_signature_def(savedmodel_path, config):
     tag_sets = saved_model_utils.get_saved_model_tag_sets(savedmodel_path)
     graph_tag = _parse_graph_tag(config)
-    if (graph_tag is None):
+    if graph_tag is None:
         if 'serve' in tag_sets[0]:
             graph_tag = 'serve'
         else:
@@ -114,14 +114,14 @@ def _get_signature_def(savedmodel_path, config):
                       savedmodel_path, graph_tag)
     signature_def_map = meta_graph_def.signature_def
     signature_def_k = _parse_signature_def(config)
-    if (signature_def_k is None):
+    if signature_def_k is None:
         serving_default = signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY
         if serving_default in signature_def_map.keys():
             signature_def_k = serving_default
         else:
             signature_def_k = signature_def_map.keys()[0]
 
-    if (signature_def_k not in signature_def_map.keys()):
+    if signature_def_k not in signature_def_map.keys():
         raise pb_utils.TritonModelException(
             f" The model does not include the signature_def '" +
             signature_def_k + "'")
@@ -130,9 +130,9 @@ def _get_signature_def(savedmodel_path, config):
 
 
 def _has_batch_dim(tensor_info):
-    if (tensor_info.tensor_shape.unknown_rank):
+    if tensor_info.tensor_shape.unknown_rank:
         return True
-    elif (tensor_info.tensor_shape.dim[0].size == -1):
+    elif tensor_info.tensor_shape.dim[0].size == -1:
         return True
     else:
         return False
@@ -156,7 +156,7 @@ def _convert_proto_to_dict_tensor(name, tensor_proto, batching_enabled):
     dtype_dict = {value: key for (key, value) in types_pb2.DataType.items()}
     tensor_dict['data_type'] = TF_STRING_TO_TRITON[dtype_dict[
         tensor_proto.dtype]]
-    if (tensor_proto.tensor_shape.unknown_rank):
+    if tensor_proto.tensor_shape.unknown_rank:
         # FIXME: Fix the handling of unknown rank
         dims = [-1]
     else:
@@ -179,7 +179,7 @@ def _validate_datatype(tf_dtype, triton_datatype, tensor_name):
 
 
 def _validate_dims(tf_shape, triton_dims, batching_enabled, tensor_name):
-    if (tf_shape.unknown_rank):
+    if tf_shape.unknown_rank:
         return
 
     index = 0
@@ -218,16 +218,16 @@ def _validate_model_config(model_config, signature_def):
 
     batching_enabled = model_config['max_batch_size'] != 0
 
-    if (model_config['platform'] != 'tensorflow_savedmodel'):
+    if model_config['platform'] != 'tensorflow_savedmodel':
         raise pb_utils.TritonModelException(
             f"[INTERNAL]: The platform field for using this model should be set to"
             " \'tensorflow_savedmodel\' in model config, got '" +
             model_config['platform'] + "'")
-    if (model_config['batch_input']):
+    if model_config['batch_input']:
             raise pb_utils.TritonModelException(
                 f"The platform model '" + model_config['platform'] +
                 "' does not support model with batch_input")
-    if (model_config['batch_output']):
+    if model_config['batch_output']:
             raise pb_utils.TritonModelException(
                 f"The platform model '" + model_config['platform'] +
                 "' does not support model with batch_output")
@@ -279,28 +279,28 @@ class TritonPythonModel:
 
     @staticmethod
     def auto_complete_config(auto_complete_model_config, fw_model_path):
-        if (fw_model_path is None):
+        if fw_model_path is None:
             raise pb_utils.TritonModelException(
                 f"[INTERNAL]: The path to the framework model should be"
                 " provided")
         config = auto_complete_model_config.as_dict()
 
-        if (config['platform'] != 'tensorflow_savedmodel'):
+        if config['platform'] != 'tensorflow_savedmodel':
             raise pb_utils.TritonModelException(
                 f"[INTERNAL]: The platform field for using this model should be set to"
                 " \'tensorflow_savedmodel\' in model config, got '" +
                 config['platform'] + "'")
-        if (config['batch_input']):
+        if config['batch_input']:
             raise pb_utils.TritonModelException(
                 f"The platform model '" + config['platform'] +
                 "' does not support model with batch_input")
-        if (config['batch_output']):
+        if config['batch_output']:
             raise pb_utils.TritonModelException(
                 f"The platform model '" + config['platform'] +
                 "' does not support model with batch_output")
 
         batching_enabled = False
-        if (config['max_batch_size'] != 0):
+        if config['max_batch_size'] != 0:
             batching_enabled = True
 
         _, signature_def = _get_signature_def(fw_model_path, config)
@@ -337,7 +337,7 @@ class TritonPythonModel:
                         batching_enabled))
 
         if batching_enabled:
-            if (config['max_batch_size'] == 0):
+            if config['max_batch_size'] == 0:
                 auto_complete_model_config.set_max_batch_size(4)
             auto_complete_model_config.set_dynamic_batching()
 
@@ -363,14 +363,15 @@ class TritonPythonModel:
         """
 
         self.model_name = args['model_name']
-        print("Initializing platform model for " + self.model_name)
+        self.logger = pb_utils.Logger
+        self.logger.log_info("Initializing platform model for " + self.model_name)
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
 
-        if (args['model_instance_kind'] != 'KIND_CPU'):
-            print(
-                "[Warning] GPU instances are not supported by this backend. Falling back to KIND_CPU for "
+        if args['model_instance_kind'] != 'KIND_CPU':
+            self.logger.log_warn(
+                "GPU instances are not supported by this backend. Falling back to KIND_CPU for "
                 + self.model_name)
 
         tag_set, signature_def = _get_signature_def(fw_model_path, model_config)
@@ -458,4 +459,4 @@ class TritonPythonModel:
         """
         if self.tf_session is not None:
             self.tf_session.close
-        print('Removing platform model for ' + self.model_name)
+        self.logger.log_info('Removing platform model for ' + self.model_name)

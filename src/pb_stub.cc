@@ -378,7 +378,7 @@ Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
 
-  model_context_.StubSetup(&sys);
+  model_context_.StubSetup(sys);
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
@@ -437,13 +437,13 @@ Stub::AutoCompleteModelConfig(
       python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
 
   if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
-    if (model_context_.FwModelPath().empty()) {
+    if (model_context_.ModelPath().empty()) {
       model_config = sys.attr("TritonPythonModel")
                          .attr("auto_complete_config")(model_config);
     } else {
       model_config = sys.attr("TritonPythonModel")
                          .attr("auto_complete_config")(
-                             model_config, model_context_.FwModelPath());
+                             model_config, model_context_.ModelPath());
     }
   }
 
@@ -505,11 +505,11 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
-    if (model_context_.FwModelPath().empty()) {
+    if (model_context_.ModelPath().empty()) {
       model_instance_.attr("initialize")(model_config_params);
     } else {
       model_instance_.attr("initialize")(
-          model_config_params, model_context_.FwModelPath());
+          model_config_params, model_context_.ModelPath());
     }
   }
 

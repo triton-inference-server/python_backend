@@ -46,10 +46,10 @@ class ModelContext {
       const std::string& model_path, const std::string& platform_model,
       const std::string& triton_install_path, const std::string& model_version);
 
-  void StubSetup(py::module* sys);
+  void StubSetup(py::module& sys);
 
   std::string& PythonModelPath() { return python_model_path_; }
-  std::string& FwModelPath() { return fw_model_path_; }
+  std::string& ModelPath() { return fw_model_path_; }
 
  private:
   std::string python_model_path_;
