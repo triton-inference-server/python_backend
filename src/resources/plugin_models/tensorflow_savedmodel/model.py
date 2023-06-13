@@ -28,14 +28,15 @@ import json
 from tensorflow.python.tools import saved_model_utils
 import tensorflow as tf
 from tensorflow.core.framework import types_pb2
+from tensorflow.python.saved_model import loader
+from tensorflow.python.saved_model import signature_constants
+from tensorflow.python.client import session
 
 # triton_python_backend_utils is available in every Triton Python model. You
 # need to use this module to create inference requests and responses. It also
 # contains some utility functions for extracting information from model_config
 # and converting Triton input/output types to numpy types.
 import triton_python_backend_utils as pb_utils
-
-#def _validate_model_config(config):
 
 TF_STRING_TO_TRITON = {
     'DT_BOOL': 'TYPE_BOOL',
@@ -115,8 +116,9 @@ def _get_signature_def(savedmodel_path, config):
         signature_def_map = meta_graph_def.signature_def
         signature_def_k = _parse_signature_def(config)
         if (signature_def_k is None):
-            if 'serving_default' in signature_def_map.keys():
-                signature_def_k = 'serving_default'
+            serving_default = signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY
+            if serving_default in signature_def_map.keys():
+                signature_def_k = serving_default
             else:
                 signature_def_k = signature_def_map.keys()[0]
 
@@ -125,7 +127,7 @@ def _get_signature_def(savedmodel_path, config):
                 f" The model does not include the signature_def '" +
                 signature_def_k + "'")
 
-    return signature_def_map[signature_def_k]
+    return graph_tag, signature_def_map[signature_def_k]
 
 
 def _has_batch_dim(tensor_info):
@@ -169,6 +171,107 @@ def _convert_proto_to_dict_tensor(name, tensor_proto, batching_enabled):
     return tensor_dict
 
 
+def _validate_datatype(tf_dtype, triton_datatype, tensor_name):
+    dtype_dict = {value: key for (key, value) in types_pb2.DataType.items()}
+    if triton_datatype != TF_STRING_TO_TRITON[dtype_dict[tf_dtype]]:
+        raise pb_utils.TritonModelException(
+            f" Mismatch between datatype for tensor '" + tensor_name +
+            "', expected '" + TF_STRING_TO_TRITON[dtype_dict[tf_dtype]] +
+            "', got '" + triton_datatype)
+
+
+def _validate_dims(tf_shape, triton_dims, batching_enabled, tensor_name):
+    if (tf_shape.unknown_rank):
+        return
+
+    index = 0
+    offset = 1 if batching_enabled else 0
+    if len(tf_shape.dim) != (offset + len(triton_dims)):
+        raise pb_utils.TritonModelException(
+            f" Mismatch in the number of dimension with the model for tensor '"
+            + tensor_name + "', expected " + str(len(tf_shape.dim) - offset) +
+            ", got " + str(len(triton_dims)))
+
+    for dim in tf_shape.dim:
+        if index == 0 and batching_enabled:
+            if dim.size != -1:
+                raise pb_utils.TritonModelException(
+                    f" The first dimension of a batching model should be dynamic, "
+                    "however, got shape of first dimension in model for tensor '"
+                    + tensor_name + "' as " + str(dim.size))
+        else:
+            if dim.size != triton_dims[index - offset]:
+                raise pb_utils.TritonModelException(
+                    f" Mismatch in " + str(index - offset) +
+                    "th dimension for tensor '" + tensor_name + "', expected " +
+                    str(dim.size) + ", got " + str(triton_dims[index - offset]))
+        index = index + 1
+
+
+def _validate_model_config(model_config, signature_def):
+    signature_supports_batching = _get_batching_hint_from_signature(
+        signature_def)
+    if (not signature_supports_batching) and (model_config['max_batch_size'] !=
+                                              0):
+        raise pb_utils.TritonModelException(
+            f" The model signature does not support batching, yet model config"
+            " has max_batch_size set to '" +
+            str(model_config['max_batch_size']) + "'")
+
+    batching_enabled = model_config['max_batch_size'] != 0
+
+    if (model_config['platform'] != 'tensorflow_savedmodel'):
+        raise pb_utils.TritonModelException(
+            f"[INTERNAL]: The platform field for using this plugin should be set to"
+            " \'tensorflow_savedmodel\' in model config, got '" +
+            model_config['platform'] + "'")
+    if (model_config['batch_input']):
+        raise pb_utils.TritonModelException(
+            f" The plugin does not support model with batch_input")
+    if (model_config['batch_output']):
+        raise pb_utils.TritonModelException(
+            f" The plugin does not support model with batch_output")
+
+    # Validate input tensors
+    input_tensor_info = signature_def.inputs
+    config_input_names = [input['name'] for input in model_config['input']]
+    for input_name in input_tensor_info.keys():
+        if input_name not in config_input_names:
+            raise pb_utils.TritonModelException(
+                f" Missing input tensor configuration for tensor '" +
+                input_name + "'")
+    for input in model_config['input']:
+        config_input_name = input['name']
+        if config_input_name not in input_tensor_info.keys():
+            supported_names = ""
+            for valid_name in input_tensor_info.keys():
+                supported_names = supported_names + ";" + valid_name
+            raise pb_utils.TritonModelException(
+                f" No input tensor with name '" + config_input_name +
+                "', only supported input names are " + supported_names)
+        _validate_datatype(input_tensor_info[config_input_name].dtype,
+                           input['data_type'], config_input_name)
+        _validate_dims(input_tensor_info[config_input_name].tensor_shape,
+                       input['dims'], batching_enabled, config_input_name)
+
+    # Validate output tensors
+    output_tensor_info = signature_def.outputs
+    for output in model_config['output']:
+        config_output_name = output['name']
+        if config_output_name not in output_tensor_info.keys():
+            supported_names = ""
+            for valid_name in output_tensor_info.keys():
+                supported_names = supported_names + ";" + valid_name
+            raise pb_utils.TritonModelException(
+                f" No output tensor with name '" + config_output_name +
+                "', only supported output names are " + supported_names)
+
+        _validate_datatype(output_tensor_info[config_output_name].dtype,
+                           output['data_type'], config_output_name)
+        _validate_dims(output_tensor_info[config_output_name].tensor_shape,
+                       output['dims'], batching_enabled, config_output_name)
+
+
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
@@ -197,10 +300,7 @@ class TritonPythonModel:
         if (config['max_batch_size'] != 0):
             batching_enabled = True
 
-        if (config['output']):
-            auto_complete_output = True
-
-        signature_def = _get_signature_def(fw_model_path, config)
+        _, signature_def = _get_signature_def(fw_model_path, config)
 
         input_tensor_info = signature_def.inputs
         output_tensor_info = signature_def.outputs
@@ -215,12 +315,8 @@ class TritonPythonModel:
         # to confirm the hint
         batching_enabled = batching_hint
 
-        config_input_names = []
-        config_output_names = []
-        for input in config['input']:
-            config_input_names.append(input['name'])
-        for output in config['output']:
-            config_output_names.append(output['name'])
+        config_input_names = [input['name'] for input in config['input']]
+        config_output_names = [output['name'] for output in config['output']]
 
         # TODO: Add auto-completion of partial tensor specification.
         for input_name in input_tensor_info.keys():
@@ -244,7 +340,6 @@ class TritonPythonModel:
 
         return auto_complete_model_config
 
-
     def initialize(self, args, fw_model_path):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
@@ -264,22 +359,44 @@ class TritonPythonModel:
           The complete path to the framework model
         """
 
-        #print("Initializing Framework Model Path => " + fw_model_path)
         self.model_name = args['model_name']
         print("Initializing plugin model for " + self.model_name)
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
 
-        self.tf_session = tf.compat.v1.Session(graph=tf.Graph())
-        tf.compat.v1.saved_model.loader.load(self.tf_session, ["serve"],
-                                             fw_model_path)
-        # Get the output node from the graph.
-        graph = tf.compat.v1.get_default_graph()
+        if (args['model_instance_kind'] != 'KIND_CPU'):
+            print(
+                "[Warning] GPU instances are not supported by this backend. Falling back to KIND_CPU for "
+                + self.model_name)
 
-        print(graph)
+        tag_set, signature_def = _get_signature_def(fw_model_path, model_config)
+        _validate_model_config(model_config, signature_def)
 
-        # [TODO] Get the output nodes from the graph
+        self.signature_def = signature_def
+        self.input_tensor_info = self.signature_def.inputs
+        output_tensor_info = self.signature_def.outputs
+
+        # Get the input output names from model config
+        self.input_names = [input['name'] for input in model_config['input']]
+        self.output_names = [
+            output['name'] for output in model_config['output']
+        ]
+
+        # Get the output tensor names
+        self.output_tensor_names = [
+            output_tensor_info[output_name].name
+            for output_name in self.output_names
+        ]
+
+        # load the session model
+        # FIXME Add more configuration option for the model.
+        sess_config = tf.compat.v1.ConfigProto(
+            inter_op_parallelism_threads=_parse_num_inter_threads(model_config),
+            intra_op_parallelism_threads=_parse_num_intra_threads(model_config),
+            use_per_session_threads=_parse_use_per_session_thread(model_config))
+        self.tf_session = session.Session(graph=tf.Graph(), config=sess_config)
+        loader.load(self.tf_session, [tag_set], fw_model_path)
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -305,8 +422,29 @@ class TritonPythonModel:
 
         responses = []
 
-        # [TODO] Collect requests in single batch, run execution and split the
-        # result buffer into separate responses
+        # FIXME: Instead of iterating through each request, run
+        # the inference as a single batch.
+        for request in requests:
+            # Prepare the input feed for the model.
+            input_feed_dict = {}
+            for input_name in self.input_names:
+                input_feed_dict[self.input_tensor_info[input_name].
+                                name] = pb_utils.get_input_tensor_by_name(
+                                    request, input_name).as_numpy()
+
+            outputs = self.tf_session.run(self.output_tensor_names,
+                                          feed_dict=input_feed_dict)
+
+            # Create output tensors. You need pb_utils.Tensor
+            # objects to create pb_utils.InferenceResponse.
+            output_tensors = []
+            for i, output in enumerate(outputs):
+                output_tensors.append(
+                    pb_utils.Tensor(self.output_names[i], output))
+
+            inference_response = pb_utils.InferenceResponse(
+                output_tensors=output_tensors)
+            responses.append(inference_response)
 
         return responses
 
@@ -315,4 +453,6 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
+        if self.tf_session is not None:
+            self.tf_session.close
         print('Removing plugin model for ' + self.model_name)
