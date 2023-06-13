@@ -33,23 +33,23 @@ namespace triton { namespace backend { namespace python {
 
 void
 ModelContext::Init(
-    const std::string& model_path, const std::string& plugin_model,
+    const std::string& model_path, const std::string& platform_model,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  if (plugin_model.empty()) {
+  if (platform_model.empty()) {
     type_ = ModelType::DEFAULT;
     python_model_path_ = model_path;
   } else {
-    type_ = ModelType::PLUGIN;
+    type_ = ModelType::PLATFORM;
     fw_model_path_ = model_path;
     python_model_path_ =
-        triton_install_path + "/plugin_models/" + plugin_model + "/model.py";
+        triton_install_path + "/platform_models/" + platform_model + "/model.py";
     // Check if model file exists in the path
     struct stat buffer;
     if (stat(python_model_path_.c_str(), &buffer) != 0) {
       throw PythonBackendException(
           ("[INTERNAL] " + python_model_path_ +
-           " model file does not exist as plugin model"));
+           " model file does not exist as platform model"));
     }
   }
   python_backend_folder_ = triton_install_path;
@@ -85,9 +85,9 @@ ModelContext::StubSetup(py::module* sys)
         (std::string(model_version_) + "." + model_name_trimmed).c_str());
   } else {
     // [FIXME] Improve the path generation logic to make it more flexible.
-    std::string plugin_model_dir(
-        python_backend_folder_ + "/plugin_models/tensorflow_savedmodel/");
-    sys->attr("path").attr("append")(plugin_model_dir);
+    std::string platform_model_dir(
+        python_backend_folder_ + "/platform_models/tensorflow_savedmodel/");
+    sys->attr("path").attr("append")(platform_model_dir);
     sys->attr("path").attr("append")(python_backend_folder_);
     *sys = py::module_::import(model_name_trimmed.c_str());
   }

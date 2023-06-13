@@ -81,10 +81,10 @@ Stub::Instantiate(
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
     bi::managed_external_buffer::handle_t ipc_control_handle,
-    const std::string& name, const std::string& plugin_model)
+    const std::string& name, const std::string& platform_model)
 {
   model_context_.Init(
-      model_path, plugin_model, triton_install_path, model_version);
+      model_path, platform_model, triton_install_path, model_version);
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
   name_ = name;
@@ -1644,14 +1644,14 @@ main(int argc, char** argv)
   int64_t shm_growth_size = std::stol(argv[4]);
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
-  std::string plugin_model = argv[9];
+  std::string platform_model = argv[9];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl handle */, name, plugin_model);
+        std::stoi(argv[7]) /* IPCControl handle */, name, platform_model);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();

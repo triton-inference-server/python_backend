@@ -161,7 +161,7 @@ class StubLauncher {
   std::string shm_region_name_;
   std::string model_repository_path_;
   std::string model_path_;
-  std::string plugin_model_;
+  std::string platform_model_;
   const std::string stub_process_kind_;
   std::string model_name_;
   const std::string model_instance_name_;

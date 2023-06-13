@@ -36,14 +36,14 @@ using namespace pybind11::literals;
 
 namespace triton { namespace backend { namespace python {
 
-enum ModelType { DEFAULT, PLUGIN };
+enum ModelType { DEFAULT, PLATFORM };
 
 class ModelContext {
  public:
   ModelContext() {}
 
   void Init(
-      const std::string& model_path, const std::string& plugin_model,
+      const std::string& model_path, const std::string& platform_model,
       const std::string& triton_install_path, const std::string& model_version);
 
   void StubSetup(py::module* sys);

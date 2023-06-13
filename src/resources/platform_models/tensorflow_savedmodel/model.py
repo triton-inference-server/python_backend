@@ -220,15 +220,17 @@ def _validate_model_config(model_config, signature_def):
 
     if (model_config['platform'] != 'tensorflow_savedmodel'):
         raise pb_utils.TritonModelException(
-            f"[INTERNAL]: The platform field for using this plugin should be set to"
+            f"[INTERNAL]: The platform field for using this model should be set to"
             " \'tensorflow_savedmodel\' in model config, got '" +
             model_config['platform'] + "'")
     if (model_config['batch_input']):
-        raise pb_utils.TritonModelException(
-            f" The plugin does not support model with batch_input")
+            raise pb_utils.TritonModelException(
+                f"The platform model '" + model_config['platform'] +
+                "' does not support model with batch_input")
     if (model_config['batch_output']):
-        raise pb_utils.TritonModelException(
-            f" The plugin does not support model with batch_output")
+            raise pb_utils.TritonModelException(
+                f"The platform model '" + model_config['platform'] +
+                "' does not support model with batch_output")
 
     # Validate input tensors
     input_tensor_info = signature_def.inputs
@@ -285,15 +287,17 @@ class TritonPythonModel:
 
         if (config['platform'] != 'tensorflow_savedmodel'):
             raise pb_utils.TritonModelException(
-                f"[INTERNAL]: The platform field for using this plugin should be set to"
+                f"[INTERNAL]: The platform field for using this model should be set to"
                 " \'tensorflow_savedmodel\' in model config, got '" +
                 config['platform'] + "'")
         if (config['batch_input']):
             raise pb_utils.TritonModelException(
-                f" The plugin does not support model with batch_input")
+                f"The platform model '" + config['platform'] +
+                "' does not support model with batch_input")
         if (config['batch_output']):
             raise pb_utils.TritonModelException(
-                f" The plugin does not support model with batch_output")
+                f"The platform model '" + config['platform'] +
+                "' does not support model with batch_output")
 
         batching_enabled = False
         if (config['max_batch_size'] != 0):
@@ -359,7 +363,7 @@ class TritonPythonModel:
         """
 
         self.model_name = args['model_name']
-        print("Initializing plugin model for " + self.model_name)
+        print("Initializing platform model for " + self.model_name)
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
@@ -454,4 +458,4 @@ class TritonPythonModel:
         """
         if self.tf_session is not None:
             self.tf_session.close
-        print('Removing plugin model for ' + self.model_name)
+        print('Removing platform model for ' + self.model_name)
