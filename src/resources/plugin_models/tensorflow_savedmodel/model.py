@@ -110,22 +110,21 @@ def _get_signature_def(savedmodel_path, config):
         else:
             graph_tag = tag_sets[0][0]
 
-        meta_graph_def = saved_model_utils.get_meta_graph_def(
-            savedmodel_path, graph_tag)
+    meta_graph_def = saved_model_utils.get_meta_graph_def(
+                      savedmodel_path, graph_tag)
+    signature_def_map = meta_graph_def.signature_def
+    signature_def_k = _parse_signature_def(config)
+    if (signature_def_k is None):
+        serving_default = signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY
+        if serving_default in signature_def_map.keys():
+            signature_def_k = serving_default
+        else:
+            signature_def_k = signature_def_map.keys()[0]
 
-        signature_def_map = meta_graph_def.signature_def
-        signature_def_k = _parse_signature_def(config)
-        if (signature_def_k is None):
-            serving_default = signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY
-            if serving_default in signature_def_map.keys():
-                signature_def_k = serving_default
-            else:
-                signature_def_k = signature_def_map.keys()[0]
-
-        if (signature_def_k not in signature_def_map.keys()):
-            raise pb_utils.TritonModelException(
-                f" The model does not include the signature_def '" +
-                signature_def_k + "'")
+    if (signature_def_k not in signature_def_map.keys()):
+        raise pb_utils.TritonModelException(
+            f" The model does not include the signature_def '" +
+            signature_def_k + "'")
 
     return graph_tag, signature_def_map[signature_def_k]
 
@@ -140,7 +139,6 @@ def _has_batch_dim(tensor_info):
 
 
 def _get_batching_hint_from_signature(signature_def):
-    batching_hint = True
     for input_info in signature_def.inputs.values():
         if not _has_batch_dim(input_info):
             return False
@@ -277,6 +275,7 @@ class TritonPythonModel:
     that is created must have "TritonPythonModel" as the class name.
     """
 
+    @staticmethod
     def auto_complete_config(auto_complete_model_config, fw_model_path):
         if (fw_model_path is None):
             raise pb_utils.TritonModelException(
