@@ -35,19 +35,24 @@ Sets up python execution environment for AWS Neuron SDK for execution on Inferen
 -i|--inferentia-path       Inferentia path, default is: /home/ubuntu
 -p|--use-pytorch           Install pytorch-neuron if specified
 -t|--use-tensorflow        Install tensorflow-neuron is specified
---tensorflow-version       Version of Tensorflow used. Default is 1. Ignored if installing pytorch-neuron
+-inf2|--inf2-setup         Install pytorch or tensorflow neuronx packages for inf2, inf2 is default
+-inf1|--inf1-setup         Install pytorch of tensorflow neuron packages for inf1
+--tensorflow-version       Version of Tensorflow used. Default is 2. Ignored if installing pytorch-neuron
 "
 
 # Get all options:
 OPTS=$(getopt -o hb:v:i:tp --long help,python-backend-path:,python-version:,inferentia-path:,use-tensorflow,use-pytorch,tensorflow-version: -- "$@")
 
 
-export INFRENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
+export INFERENTIA_PATH=${TRITON_PATH:="/home/ubuntu"}
 export PYTHON_BACKEND_PATH="/home/ubuntu/python_backend"
 export PYTHON_VERSION=3.7
 export USE_PYTORCH=0
 export USE_TENSORFLOW=0
-export TENSORFLOW_VERSION=1
+export TENSORFLOW_VERSION=2
+export INSTALL_INF1=1
+export INSTALL_INF2=0
+
 for OPTS; do
     case "$OPTS" in
         -h|--help)
@@ -65,44 +70,60 @@ for OPTS; do
         echo "Python version set to ${PYTHON_VERSION}"
         ;;
         -i|--inferentia-path)
-        INFRENTIA_PATH=$2
-        echo "Inferentia path set to ${INFRENTIA_PATH}"
+        INFERENTIA_PATH=$2
+        echo "Inferentia path set to ${INFERENTIA_PATH}"
         shift 2
         ;;
         -t|--use-tensorflow)
         USE_TENSORFLOW=1
-        echo "Installing tensorflow-neuron"
+        echo "Installing tensorflow neuronx packages"
         shift 1
         ;;
         -p|--use-pytorch)
         USE_PYTORCH=1
-        echo "Installing pytorch-neuron"
+        echo "Installing pytorch neuronx packages"
         shift 1
         ;;
-        --use-tensorflow-version)
+        --tensorflow-version)
         TENSORFLOW_VERSION=$2
-        echo "Tensorflow version: $TENSORFLOW_VERSION"
+        echo "Tensorflow version: ${TENSORFLOW_VERSION}"
         shift 2
+        ;;
+        -inf1|--inf1-setup)
+        INSTALL_INF1=1
+        echo "Installing framework and tools for inf1."
+        shift 1
+        ;;
+        -inf2|--inf2-setup)
+        INSTALL_INF2=1
+        echo "Installing framework and tools for inf2"
+        shift 1
+        ;;
+        -trn1|--trn1-setup)
+        INSTALL_INF2=1 # same frameworks are used for inf2 and trn1
+        echo "Installing framework and tools for trn1/inf2"
+        shift 1
         ;;
     esac
 done
 
-if [ $USE_TENSORFLOW -ne 1 ] && [ $USE_PYTORCH -ne 1 ]; then
-    echo "Need to specify either -p (use pytorch) or -t (use tensorflow)."
-    printf "%s\\n" "$USAGE"
+
+if [ ${USE_TENSORFLOW} -ne 1 ] && [ ${USE_PYTORCH} -ne 1 ]; then
+    echo "Error: need to specify either -p (use pytorch) or -t (use tensorflow)."
+    printf "%s\\n" "${USAGE}"
     return 1
 fi
 
-if [ $USE_TENSORFLOW -eq 1 ] && [ $USE_PYTORCH -eq 1 ]; then
-    echo "Can specify only one of -p (use pytorch) or -t (use tensorflow)."
-    printf "%s\\n" "$USAGE"
+if [ ${USE_TENSORFLOW} -eq 1 ] && [ ${USE_PYTORCH} -eq 1 ]; then
+    echo "Error: can specify only one of -p (use pytorch) or -t (use tensorflow)."
+    printf "%s\\n" "${USAGE}"
     return 1
 fi
 
-if [ $USE_TENSORFLOW -eq 1 ]; then
-    if [ $TENSORFLOW_VERSION -ne 1 ] && [ $TENSORFLOW_VERSION -ne 2 ]; then
-        echo "Need to specify --tensorflow-version to be 1 or 2. TENSORFLOW_VERSION currently is: $TENSORFLOW_VERSION"
-        printf "%s\\n" "$USAGE"
+if [ ${USE_TENSORFLOW} -eq 1 ]; then
+    if [ ${TENSORFLOW_VERSION} -ne 1 ] && [ ${TENSORFLOW_VERSION} -ne 2 ]; then
+        echo "Error: need to specify --tensorflow-version to be 1 or 2. TENSORFLOW_VERSION currently is: ${TENSORFLOW_VERSION}"
+        printf "%s\\n" "${USAGE}"
         return 1
     fi
 fi
@@ -115,53 +136,48 @@ apt-get update && \
               libarchive-dev   \
               rapidjson-dev
 
-# Using CMAKE installation instruction from:: https://apt.kitware.com/
-apt install -y gpg wget && \
-    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-        gpg --dearmor - |  \
-        tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null && \
-    . /etc/os-release && \
-    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $UBUNTU_CODENAME main" | \
-    tee /etc/apt/sources.list.d/kitware.list >/dev/null && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends cmake cmake-data
-cmake --version
-
-# First compile correct python stub
-cd ${PYTHON_BACKEND_PATH}
-rm -rf build && mkdir build && cd build
-cmake -DTRITON_ENABLE_GPU=ON -DCMAKE_INSTALL_PREFIX:PATH=`pwd`/install ..
-make triton-python-backend-stub -j16
 
 # Set Pip repository  to point to the Neuron repository
 # since we need to use pip to update: 
 #  https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
+pip install --upgrade pip
 
-python -m pip install -U pip
-# Set pip repository pointing to the Neuron repository 
-python -m pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
-if [ $USE_TENSORFLOW -eq 1 ]; then
+if [ ${INSTALL_INF2} -eq 1 ];then
+    # Install Neuron Runtime 
+    # Then install new neuron libraries
+    . /etc/os-release
+    tee /etc/apt/sources.list.d/neuron.list > /dev/null <<EOF
+deb https://apt.repos.neuron.amazonaws.com ${VERSION_CODENAME} main
+EOF
+    wget -qO - https://apt.repos.neuron.amazonaws.com/GPG-PUB-KEY-AMAZON-AWS-NEURON.PUB |  apt-key add -
+    apt-get update
+    apt-get install -y aws-neuronx-collectives=2.* aws-neuronx-runtime-lib=2.*
+fi
+
+
+if [ ${USE_TENSORFLOW} -eq 1 ]; then
     # Update Neuron TensorFlow
-    if [ $TENSORFLOW_VERSION -eq 1 ]; then
-        # Install TensorFlow Neuron
-        python -m pip install tensorflow-neuron[cc]==1.15.5.* "protobuf"
-    else
-        # Install TensorFlow Neuron
-        python -m pip install tensorflow-neuron[cc] "protobuf"
+    if [ ${INSTALL_INF1} -eq 1 ] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
+        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
+    elif [ ${INSTALL_INF1} -eq 1 ]; then
+        pip install --upgrade tensorflow-neuron[cc]
+    elif [ ${INSTALL_INF2} -eq 1 ] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
+        pip install --upgrade neuronx-cc==2.* tensorflow-neuronx==1.* tensorboard-plugin-neuronx
+    elif [ ${INSTALL_INF2} -eq 1 ]; then
+        pip install --upgrade neuronx-cc==2.* tensorflow-neuronx==2.* tensorboard-plugin-neuronx
     fi
 fi
 
-if [ $USE_PYTORCH -eq 1 ]
-then
-    # Install PyTorch Neuron
-    python -m pip install torch-neuron neuron-cc[tensorflow] "protobuf" torchvision
+if [ ${USE_PYTORCH} -eq 1 ];then
+    # conda install torch-neuron torchvision -y
+    # Upgrade torch-neuron and install transformers
+    if [ ${INSTALL_INF1} -eq 1 ]; then
+        pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf" torchvision "transformers==4.6.0"
+    elif [ ${INSTALL_INF2} -eq 1 ]; then
+        pip install --upgrade neuronx-cc==2.* torch-neuronx torchvision transformers-neuronx 
+    fi 
 fi
 
-# Upgrade the python backend stub, rules and sockets
-cp ${INFRENTIA_PATH}/python_backend/build/triton_python_backend_stub \
-        /opt/tritonserver/backends/python/triton_python_backend_stub
+# Upgrade the rules and sockets
 cp /mylib/udev/rules.d/* /lib/udev/rules.d/
-export LD_LIBRARY_PATH=${CONDA_PATH}/envs/test_conda_env/lib:$LD_LIBRARY_PATH
-
-cd ${INFRENTIA_PATH}
