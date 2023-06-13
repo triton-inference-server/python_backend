@@ -84,7 +84,7 @@ for OPTS; do
         echo "Installing pytorch neuronx packages"
         shift 1
         ;;
-        --use-tensorflow-version)
+        --tensorflow-version)
         TENSORFLOW_VERSION=$2
         echo "Tensorflow version: ${TENSORFLOW_VERSION}"
         shift 2
@@ -97,6 +97,11 @@ for OPTS; do
         -inf2|--inf2-setup)
         INSTALL_INF2=1
         echo "Installing framework and tools for inf2"
+        shift 1
+        ;;
+        -trn1|--trn1-setup)
+        INSTALL_INF2=1 # same frameworks are used for inf2 and trn1
+        echo "Installing framework and tools for trn1/inf2"
         shift 1
         ;;
     esac
@@ -138,7 +143,7 @@ apt-get update && \
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 pip install --upgrade pip
 
-if [ ${INSTALL_INF2} -eq 1 ] || [ ${INSTALL_TRN1} -eq 1];then
+if [ ${INSTALL_INF2} -eq 1 ];then
     # Install Neuron Runtime 
     # Then install new neuron libraries
     . /etc/os-release
@@ -153,10 +158,10 @@ fi
 
 if [ ${USE_TENSORFLOW} -eq 1 ]; then
     # Update Neuron TensorFlow
-    if [ ${INSTALL_INF1} -eq 1] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
-        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc "protobuf" tensorboard-plugin-neuron
-    elif [ ${INSTALL_INF1} -eq 1]; then
-        pip install --upgrade tensorflow-neuron[cc] "protobuf" tensorboard-plugin-neuron
+    if [ ${INSTALL_INF1} -eq 1 ] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
+        pip install --upgrade tensorflow-neuron==1.15.5.* neuron-cc
+    elif [ ${INSTALL_INF1} -eq 1 ]; then
+        pip install --upgrade tensorflow-neuron[cc]
     elif [ ${INSTALL_INF2} -eq 1 ] && [ ${TENSORFLOW_VERSION} -eq 1 ]; then
         pip install --upgrade neuronx-cc==2.* tensorflow-neuronx==1.* tensorboard-plugin-neuronx
     elif [ ${INSTALL_INF2} -eq 1 ]; then
