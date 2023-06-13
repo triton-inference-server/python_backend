@@ -168,7 +168,7 @@ if [ ${USE_PYTORCH} -eq 1 ];then
     # conda install torch-neuron torchvision -y
     # Upgrade torch-neuron and install transformers
     if [ ${INSTALL_INF1} -eq 1 ]; then
-        pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf<4" torchvision "transformers==4.6.0"
+        pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf" torchvision "transformers==4.6.0"
     elif [ ${INSTALL_INF2} -eq 1 ]; then
         pip install --upgrade neuronx-cc==2.* torch-neuronx torchvision transformers-neuronx 
     fi 
