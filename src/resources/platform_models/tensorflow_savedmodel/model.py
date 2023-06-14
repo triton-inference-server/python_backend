@@ -387,8 +387,7 @@ class TritonPythonModel:
 
         self.model_name = args['model_name']
         self.logger = pb_utils.Logger
-        self.logger.log_info("Initializing platform model for " +
-                             self.model_name)
+        self.logger.log_info("Initializing model for " + self.model_name)
 
         if args['model_instance_kind'] != 'CPU':
             self.logger.log_warn(
@@ -424,6 +423,10 @@ class TritonPythonModel:
         self.tf_session = session.Session(graph=tf.Graph(), config=sess_config)
         loader.load(self.tf_session, [tag_set], savedmodel_path)
 
+        # Hoding the input dict for caching input tensor data for
+        # better inference performance
+        self.input_feed_dict = {}
+
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
         function receives a list of pb_utils.InferenceRequest as the only
@@ -452,14 +455,15 @@ class TritonPythonModel:
         # the inference as a single batch.
         for request in requests:
             # Prepare the input feed for the model.
-            input_feed_dict = {}
             for input_name in self.input_names:
-                input_feed_dict[self.input_tensor_info[input_name].
-                                name] = pb_utils.get_input_tensor_by_name(
-                                    request, input_name).as_numpy()
+                self.input_feed_dict[self.input_tensor_info[input_name].
+                                     name] = pb_utils.get_input_tensor_by_name(
+                                         request, input_name).as_numpy()
 
+            # FIXME: Add GPU Tensor handling. DLpack should be utilized
+            # for better performance
             outputs = self.tf_session.run(self.output_tensor_names,
-                                          feed_dict=input_feed_dict)
+                                          feed_dict=self.input_feed_dict)
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
@@ -481,4 +485,4 @@ class TritonPythonModel:
         """
         if self.tf_session is not None:
             self.tf_session.close
-        self.logger.log_info('Removing platform model for ' + self.model_name)
+        self.logger.log_info('Removed model instance for ' + self.model_name)

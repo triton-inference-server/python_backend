@@ -62,7 +62,7 @@ StubLauncher::Initialize(ModelState* model_state)
   model_state->ModelConfig().Write(&model_config_buffer_);
   is_decoupled_ = model_state->IsDecoupled();
   model_repository_path_ = model_state->RepositoryPath();
-  platform_model_ = "DUMMY";
+  platform_model_ = "NONE";
   if (model_state->UsesPlatformModel()) {
     platform_model_ = model_state->Platform();
   }

@@ -36,7 +36,7 @@ ModelContext::Init(
     const std::string& model_path, const std::string& platform_model,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  if (platform_model.compare("DUMMY") == 0) {
+  if (platform_model.compare("NONE") == 0) {
     type_ = ModelType::DEFAULT;
     python_model_path_ = model_path;
   } else {
@@ -86,8 +86,7 @@ ModelContext::StubSetup(py::module& sys)
   } else {
     // [FIXME] Improve the path generation logic to make it more flexible.
     std::string platform_model_dir(
-        python_backend_folder_ + "/platform_models/" +
-        platform_model_ + "/");
+        python_backend_folder_ + "/platform_models/" + platform_model_ + "/");
     sys.attr("path").attr("append")(platform_model_dir);
     sys.attr("path").attr("append")(python_backend_folder_);
     sys = py::module_::import(model_name_trimmed.c_str());
