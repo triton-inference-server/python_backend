@@ -321,10 +321,12 @@ opt/
         └── sg00
   ├── config.pbtxt
 ```
+
 3. Add the following imports (e.g., for OPT model). The import will differ as per the model you're trying to run.
 ```
 from transformers_neuronx.opt.model import OPTForSampling
 ```
+
 4. Add the following lines in `initialize()` function. Set the `batch_size`, `tp_degree`, `n_positions`, `amp` and `unroll` args as per your requirement. `tp_degree` should typically match the number of neuron cores available on inf2 instance.
 ```
 batch_size = 1
@@ -338,9 +340,11 @@ self.model_neuron.to_neuron()
 self.model_neuron.num_workers = num_threads
 ```
 You may also chose to add the `batch_size` etc. arguments to config.pbtxt as parameters and read them in the `initialize()` function similar to `--compiled-model`.
-5. Finally, in the `excute()` function, use the following API to run the inference:
+
+5. Finally, in the `execute()` function, use the following API to run the inference:
 ```
 batched_results = self.model_neuron.sample(batched_tensor, 2048)
 ```
 Above, `2048` is a sufficiently-long output token. It may also be passed in as one of the inputs if you wanto specify it as part of the payload.
+
 6. Proceed to load the model, and submit the inference payload similar to any other triton model.
