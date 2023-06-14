@@ -91,16 +91,19 @@ for OPTS; do
         ;;
         -inf1|--inf1-setup)
         INSTALL_INF1=1
+        INSTALL_INF2=0
         echo "Installing framework and tools for inf1."
         shift 1
         ;;
         -inf2|--inf2-setup)
         INSTALL_INF2=1
+        INSTALL_INF1=0
         echo "Installing framework and tools for inf2"
         shift 1
         ;;
         -trn1|--trn1-setup)
         INSTALL_INF2=1 # same frameworks are used for inf2 and trn1
+        INSTALL_INF1=0
         echo "Installing framework and tools for trn1/inf2"
         shift 1
         ;;
