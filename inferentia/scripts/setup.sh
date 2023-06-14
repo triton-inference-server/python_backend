@@ -91,6 +91,7 @@ for OPTS; do
         ;;
         -inf1|--inf1-setup)
         INSTALL_INF1=1
+        INSTALL_INF2=0
         echo "Installing framework and tools for inf1."
         shift 1
         ;;
