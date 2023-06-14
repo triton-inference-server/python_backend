@@ -390,7 +390,7 @@ class TritonPythonModel:
         self.logger.log_info("Initializing platform model for " +
                              self.model_name)
 
-        if args['model_instance_kind'] != 'KIND_CPU':
+        if args['model_instance_kind'] != 'CPU':
             self.logger.log_warn(
                 "GPU instances are not supported by this backend. Falling back to KIND_CPU for "
                 + self.model_name)
