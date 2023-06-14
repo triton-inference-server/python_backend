@@ -36,14 +36,13 @@ ModelContext::Init(
     const std::string& model_path, const std::string& platform_model,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  if (platform_model.empty()) {
+  if (platform_model.compare("DUMMY") == 0) {
     type_ = ModelType::DEFAULT;
     python_model_path_ = model_path;
   } else {
     type_ = ModelType::PLATFORM;
-    fw_model_path_ = model_path;
-    python_model_path_ =
-        triton_install_path + "/platform_models/" + platform_model + "/model.py";
+    python_model_path_ = triton_install_path + "/platform_models/" +
+                         platform_model + "/model.py";
     // Check if model file exists in the path
     struct stat buffer;
     if (stat(python_model_path_.c_str(), &buffer) != 0) {
@@ -54,6 +53,7 @@ ModelContext::Init(
   }
   python_backend_folder_ = triton_install_path;
   model_version_ = model_version;
+  platform_model_ = platform_model;
 }
 
 void
@@ -86,7 +86,8 @@ ModelContext::StubSetup(py::module& sys)
   } else {
     // [FIXME] Improve the path generation logic to make it more flexible.
     std::string platform_model_dir(
-        python_backend_folder_ + "/platform_models/tensorflow_savedmodel/");
+        python_backend_folder_ + "/platform_models/" +
+        platform_model_ + "/");
     sys.attr("path").attr("append")(platform_model_dir);
     sys.attr("path").attr("append")(python_backend_folder_);
     sys = py::module_::import(model_name_trimmed.c_str());

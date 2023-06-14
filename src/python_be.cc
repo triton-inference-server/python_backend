@@ -29,6 +29,23 @@
 #include "infer_payload.h"
 #include "pb_log.h"
 
+namespace {
+// An array of all the reserved platform fields that will
+// should use a platform model
+const std::array<std::string, 1> reserved_platforms{"tensorflow_savedmodel"};
+
+bool
+IsReservedPlatform(const std::string& platform)
+{
+  for (const auto& reserved_platform : reserved_platforms) {
+    if (reserved_platform.compare(platform) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
 namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
@@ -1727,6 +1744,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
       }
     }
 
+    uses_platform_model_ = IsReservedPlatform(platform_);
 
     // Skip the FORCE_CPU_ONLY_INPUT_TENSORS variable if it doesn't exits.
     std::string force_cpu_only_input_tensor;
@@ -1764,27 +1782,6 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         TRITONSERVER_ERROR_UNSUPPORTED,
         (std::string("unsupported artifact type for model '") + Name() + "'")
             .c_str()));
-  }
-}
-
-std::string
-ModelState::DefaultArtifactName()
-{
-  if (platform_ == "tensorflow_savedmodel") {
-    return "model.savedmodel";
-  } else {
-    return "model.py";
-  }
-}
-
-std::string
-ModelState::PlatformModel()
-{
-  // FIXME: Valida
-  if (platform_ == "tensorflow_savedmodel") {
-    return "tensorflow_savedmodel";
-  } else {
-    return "";
   }
 }
 

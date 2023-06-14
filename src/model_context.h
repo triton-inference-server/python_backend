@@ -49,13 +49,14 @@ class ModelContext {
   void StubSetup(py::module& sys);
 
   std::string& PythonModelPath() { return python_model_path_; }
-  std::string& ModelPath() { return fw_model_path_; }
+
+  bool UsesPlatformModel() { return type_ == ModelType::PLATFORM; }
 
  private:
   std::string python_model_path_;
-  std::string fw_model_path_;
   std::string model_version_;
   std::string python_backend_folder_;
+  std::string platform_model_;
 
   ModelType type_;
 };

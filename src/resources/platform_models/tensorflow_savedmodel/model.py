@@ -31,6 +31,7 @@ from tensorflow.core.framework import types_pb2
 from tensorflow.python.saved_model import loader
 from tensorflow.python.saved_model import signature_constants
 from tensorflow.python.client import session
+import os
 
 # triton_python_backend_utils is available in every Triton Python model. You
 # need to use this module to create inference requests and responses. It also
@@ -53,6 +54,22 @@ TF_STRING_TO_TRITON = {
     'DT_DOUBLE': 'TYPE_FP64',
     'DT_STRING': 'TYPE_STRING',
 }
+
+_DEFAULT_ARTIFACT_NAME = "model.savedmodel"
+
+
+def _get_savedmodel_path(args, config):
+    artifact_name = config['default_model_filename']
+    if not artifact_name:
+        artifact_name = _DEFAULT_ARTIFACT_NAME
+
+    savedmodel_path = os.path.join(args['model_repository'],
+                                   args['model_version'], artifact_name)
+    if not os.path.exists(savedmodel_path):
+        raise pb_utils.TritonModelException(f" No model file found in " +
+                                            savedmodel_path)
+
+    return savedmodel_path
 
 
 def _parse_signature_def(config):
@@ -111,7 +128,7 @@ def _get_signature_def(savedmodel_path, config):
             graph_tag = tag_sets[0][0]
 
     meta_graph_def = saved_model_utils.get_meta_graph_def(
-                      savedmodel_path, graph_tag)
+        savedmodel_path, graph_tag)
     signature_def_map = meta_graph_def.signature_def
     signature_def_k = _parse_signature_def(config)
     if signature_def_k is None:
@@ -224,13 +241,13 @@ def _validate_model_config(model_config, signature_def):
             " \'tensorflow_savedmodel\' in model config, got '" +
             model_config['platform'] + "'")
     if model_config['batch_input']:
-            raise pb_utils.TritonModelException(
-                f"The platform model '" + model_config['platform'] +
-                "' does not support model with batch_input")
+        raise pb_utils.TritonModelException(
+            f"The platform model '" + model_config['platform'] +
+            "' does not support model with batch_input")
     if model_config['batch_output']:
-            raise pb_utils.TritonModelException(
-                f"The platform model '" + model_config['platform'] +
-                "' does not support model with batch_output")
+        raise pb_utils.TritonModelException(
+            f"The platform model '" + model_config['platform'] +
+            "' does not support model with batch_output")
 
     # Validate input tensors
     input_tensor_info = signature_def.inputs
@@ -278,11 +295,8 @@ class TritonPythonModel:
     """
 
     @staticmethod
-    def auto_complete_config(auto_complete_model_config, fw_model_path):
-        if fw_model_path is None:
-            raise pb_utils.TritonModelException(
-                f"[INTERNAL]: The path to the framework model should be"
-                " provided")
+    def auto_complete_config(auto_complete_model_config, args):
+
         config = auto_complete_model_config.as_dict()
 
         if config['platform'] != 'tensorflow_savedmodel':
@@ -299,11 +313,18 @@ class TritonPythonModel:
                 f"The platform model '" + config['platform'] +
                 "' does not support model with batch_output")
 
+        savedmodel_path = _get_savedmodel_path(args, config)
+
+        if savedmodel_path is None:
+            raise pb_utils.TritonModelException(
+                f"[INTERNAL]: The path to the framework model should be"
+                " provided")
+
         batching_enabled = False
         if config['max_batch_size'] != 0:
             batching_enabled = True
 
-        _, signature_def = _get_signature_def(fw_model_path, config)
+        _, signature_def = _get_signature_def(savedmodel_path, config)
 
         input_tensor_info = signature_def.inputs
         output_tensor_info = signature_def.outputs
@@ -343,7 +364,7 @@ class TritonPythonModel:
 
         return auto_complete_model_config
 
-    def initialize(self, args, fw_model_path):
+    def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
         the model to intialize any state associated with this model.
@@ -358,23 +379,24 @@ class TritonPythonModel:
           * model_repository: Model repository path
           * model_version: Model version
           * model_name: Model name
-        fw_model_path : str
-          The complete path to the framework model
         """
+        # You must parse model_config. JSON string is not parsed here
+        self.model_config = model_config = json.loads(args['model_config'])
+
+        savedmodel_path = _get_savedmodel_path(args, model_config)
 
         self.model_name = args['model_name']
         self.logger = pb_utils.Logger
-        self.logger.log_info("Initializing platform model for " + self.model_name)
-
-        # You must parse model_config. JSON string is not parsed here
-        self.model_config = model_config = json.loads(args['model_config'])
+        self.logger.log_info("Initializing platform model for " +
+                             self.model_name)
 
         if args['model_instance_kind'] != 'KIND_CPU':
             self.logger.log_warn(
                 "GPU instances are not supported by this backend. Falling back to KIND_CPU for "
                 + self.model_name)
 
-        tag_set, signature_def = _get_signature_def(fw_model_path, model_config)
+        tag_set, signature_def = _get_signature_def(savedmodel_path,
+                                                    model_config)
         _validate_model_config(model_config, signature_def)
 
         self.signature_def = signature_def
@@ -394,13 +416,13 @@ class TritonPythonModel:
         ]
 
         # load the session model
-        # FIXME Add more configuration option for the model.
+        # FIXME Add more configuration options for the model.
         sess_config = tf.compat.v1.ConfigProto(
             inter_op_parallelism_threads=_parse_num_inter_threads(model_config),
             intra_op_parallelism_threads=_parse_num_intra_threads(model_config),
             use_per_session_threads=_parse_use_per_session_thread(model_config))
         self.tf_session = session.Session(graph=tf.Graph(), config=sess_config)
-        loader.load(self.tf_session, [tag_set], fw_model_path)
+        loader.load(self.tf_session, [tag_set], savedmodel_path)
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`

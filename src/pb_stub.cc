@@ -423,27 +423,37 @@ Stub::StubSetup()
 
 void
 Stub::AutoCompleteModelConfig(
-    bi::managed_external_buffer::handle_t string_handle,
+    bi::managed_external_buffer::handle_t map_handle,
     std::string* auto_complete_config)
 {
   py::module sys = StubSetup();
 
-  std::unique_ptr<PbString> pb_string_shm =
-      PbString::LoadFromSharedMemory(shm_pool_, string_handle);
+  std::unordered_map<std::string, std::string> map;
+  std::unique_ptr<PbMap> pb_map_shm =
+      PbMap::LoadFromSharedMemory(shm_pool_, map_handle);
+
+  // Get the unordered_map representation of the map in shared memory.
+  map = pb_map_shm->UnorderedMap();
+
+  py::dict auto_complete_config_args;
+
+  for (const auto& pair : map) {
+    auto_complete_config_args[pair.first.c_str()] = pair.second;
+  }
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
-  py::object model_config =
-      python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
+  py::object model_config = python_backend_utils.attr("ModelConfig")(
+      auto_complete_config_args["model_config"]);
 
   if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
-    if (model_context_.ModelPath().empty()) {
+    if (!model_context_.UsesPlatformModel()) {
       model_config = sys.attr("TritonPythonModel")
                          .attr("auto_complete_config")(model_config);
     } else {
       model_config = sys.attr("TritonPythonModel")
                          .attr("auto_complete_config")(
-                             model_config, model_context_.ModelPath());
+                             model_config, auto_complete_config_args);
     }
   }
 
@@ -505,12 +515,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
 
   // Call initialize if exists.
   if (py::hasattr(model_instance_, "initialize")) {
-    if (model_context_.ModelPath().empty()) {
-      model_instance_.attr("initialize")(model_config_params);
-    } else {
-      model_instance_.attr("initialize")(
-          model_config_params, model_context_.ModelPath());
-    }
+    model_instance_.attr("initialize")(model_config_params);
   }
 
   initialized_ = true;
