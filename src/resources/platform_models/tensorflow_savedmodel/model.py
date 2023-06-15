@@ -25,13 +25,18 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import json
-from tensorflow.python.tools import saved_model_utils
-import tensorflow as tf
-from tensorflow.core.framework import types_pb2
-from tensorflow.python.saved_model import loader
-from tensorflow.python.saved_model import signature_constants
-from tensorflow.python.client import session
 import os
+
+try:
+    import tensorflow as tf
+    from tensorflow.core.framework import types_pb2
+    from tensorflow.python.client import session
+    from tensorflow.python.tools import saved_model_utils
+    from tensorflow.python.saved_model import loader
+    from tensorflow.python.saved_model import signature_constants
+except ModuleNotFoundError as error:
+    raise RuntimeError(
+        'Missing/Incomplete tensorflow package installation...') from error
 
 # triton_python_backend_utils is available in every Triton Python model. You
 # need to use this module to create inference requests and responses. It also
