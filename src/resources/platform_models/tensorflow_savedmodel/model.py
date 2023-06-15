@@ -63,9 +63,9 @@ def _get_savedmodel_path(config):
     if not artifact_name:
         artifact_name = _DEFAULT_ARTIFACT_NAME
 
-    savedmodel_path = pb_utils.GetModelPath(artifact_name)
+    savedmodel_path = os.path.join(pb_utils.ModelPath, artifact_name)
     if not os.path.exists(savedmodel_path):
-        raise pb_utils.TritonModelException(f" No model file found in " +
+        raise pb_utils.TritonModelException(f"No savedmodel dir found in " +
                                             savedmodel_path)
 
     return savedmodel_path

@@ -436,6 +436,7 @@ Stub::AutoCompleteModelConfig(
       py::module_::import("triton_python_backend_utils");
   py::object model_config =
       python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
+  python_backend_utils.attr("ModelPath") = py::str(model_path_);
 
   if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
     model_config = sys.attr("TritonPythonModel")
@@ -480,6 +481,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
+  python_backend_utils.attr("ModelPath") = py::str(model_path_);
   model_instance_ = TritonPythonModel();
 
   std::unordered_map<std::string, std::string> map;

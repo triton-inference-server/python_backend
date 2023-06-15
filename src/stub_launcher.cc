@@ -78,21 +78,21 @@ StubLauncher::Initialize(ModelState* model_state)
 
   // Should check for model.py only when not using platform models.
   std::stringstream ss;
-  std::string artifact_name;
-  RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
-      "default_model_filename", &artifact_name));
   ss << model_repository_path_ << "/" << model_version_ << "/";
 
-  if (artifact_name.size() > 0) {
-    ss << artifact_name;
-  } else {
-    if (!model_state->UsesPlatformModel()) {
+  if (!model_state->UsesPlatformModel()) {
+    std::string artifact_name;
+    RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
+        "default_model_filename", &artifact_name));
+    if (artifact_name.size() > 0) {
+      ss << artifact_name;
+    } else {
       // Default artifact name.
       ss << "model.py";
-    } else {
-      // Skip adding the artifact. The specific artifact would be verified in
-      // the platform model in use.
     }
+  } else {
+    // The artifact model deduction will be performed in
+    // the platform model.
   }
 
   model_path_ = ss.str();
