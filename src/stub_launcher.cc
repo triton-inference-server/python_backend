@@ -380,21 +380,15 @@ StubLauncher::AutocompleteStubProcess()
 {
   std::string model_config = model_config_buffer_.MutableContents();
 
-  std::unordered_map<std::string, std::string> auto_complete_map = {
-      {"model_config", model_config_buffer_.MutableContents()},
-      {"model_repository", model_repository_path_},
-      {"model_version", std::to_string(model_version_)},
-      {"model_name", model_name_}};
-
   std::unique_ptr<IPCMessage> auto_complete_message =
       IPCMessage::Create(shm_pool_, false /* inline_response */);
   auto_complete_message->Command() = PYTHONSTUB_AutoCompleteRequest;
 
-  std::unique_ptr<PbMap> pb_map = PbMap::Create(shm_pool_, auto_complete_map);
-  bi::managed_external_buffer::handle_t initialize_map_handle =
-      pb_map->ShmHandle();
+  std::unique_ptr<PbString> pb_string =
+      PbString::Create(shm_pool_, model_config);
+  bi::managed_external_buffer::handle_t string_handle = pb_string->ShmHandle();
 
-  auto_complete_message->Args() = initialize_map_handle;
+  auto_complete_message->Args() = string_handle;
   stub_message_queue_->Push(auto_complete_message->ShmHandle());
 
   std::unique_ptr<IPCMessage> auto_complete_response_message =

@@ -318,6 +318,7 @@ class Stub {
   ModelContext model_context_;
   std::string model_version_;
   std::string name_;
+  std::string model_path_;
   std::string triton_install_path_;
   IPCControlShm* ipc_control_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;

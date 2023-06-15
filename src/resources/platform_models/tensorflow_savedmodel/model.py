@@ -58,13 +58,12 @@ TF_STRING_TO_TRITON = {
 _DEFAULT_ARTIFACT_NAME = "model.savedmodel"
 
 
-def _get_savedmodel_path(args, config):
+def _get_savedmodel_path(config):
     artifact_name = config['default_model_filename']
     if not artifact_name:
         artifact_name = _DEFAULT_ARTIFACT_NAME
 
-    savedmodel_path = os.path.join(args['model_repository'],
-                                   args['model_version'], artifact_name)
+    savedmodel_path = pb_utils.GetModelPath(artifact_name)
     if not os.path.exists(savedmodel_path):
         raise pb_utils.TritonModelException(f" No model file found in " +
                                             savedmodel_path)
@@ -295,7 +294,7 @@ class TritonPythonModel:
     """
 
     @staticmethod
-    def auto_complete_config(auto_complete_model_config, args):
+    def auto_complete_config(auto_complete_model_config):
 
         config = auto_complete_model_config.as_dict()
 
@@ -313,7 +312,7 @@ class TritonPythonModel:
                 f"The platform model '" + config['platform'] +
                 "' does not support model with batch_output")
 
-        savedmodel_path = _get_savedmodel_path(args, config)
+        savedmodel_path = _get_savedmodel_path(config)
 
         if savedmodel_path is None:
             raise pb_utils.TritonModelException(
@@ -383,7 +382,7 @@ class TritonPythonModel:
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
 
-        savedmodel_path = _get_savedmodel_path(args, model_config)
+        savedmodel_path = _get_savedmodel_path(model_config)
 
         self.model_name = args['model_name']
         self.logger = pb_utils.Logger
