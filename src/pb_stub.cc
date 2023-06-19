@@ -431,8 +431,12 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "MetricFamily",
       c_python_backend_utils.attr("MetricFamily"));
+  py::setattr(
+      python_backend_utils, "new_shm_tensor",
+      c_python_backend_utils.attr("new_shm_tensor"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
+  python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
@@ -494,6 +498,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
       python_backend_utils, "InferenceResponse",
       c_python_backend_utils.attr("InferenceResponse"));
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
+  python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
@@ -1516,7 +1521,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("get_response_sender", &InferRequest::GetResponseSender);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
-      .def(py::init(&PbTensor::FromNumpy))
+      .def(py::init(&PbTensor::FromNumpy), py::arg("name"),  py::arg("numpy_array"))
       .def("name", &PbTensor::Name)
       // The reference_internal is added to make sure that the NumPy object has
       // the same lifetime as the tensor object. This means even when the NumPy
@@ -1531,8 +1536,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("shape", &PbTensor::Dims)
       .def("from_dlpack", &PbTensor::FromDLPack)
       .def("__dlpack__", &PbTensor::DLPack, py::arg("stream") = py::none())
-      .def("__dlpack_device__", &PbTensor::DLPackDevice);
-
+      .def("__dlpack_device__", &PbTensor::DLPackDevice)
+      .def("memory_view", [](std::shared_ptr<PbTensor>& t) {
+        return py::memoryview::from_memory(t->DataPtr(), t->ByteSize() * 8);
+          });
   py::class_<InferResponse, std::shared_ptr<InferResponse>>(
       module, "InferenceResponse")
       .def(
@@ -1603,6 +1610,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::register_exception<PythonBackendException>(
       module, "TritonModelException");
+
+  module.def("new_shm_tensor", &PbTensor::CreateInSHM, "Creates a new Tensor directly into shared memory");
 }
 
 extern "C" {

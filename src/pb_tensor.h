@@ -130,6 +130,10 @@ class PbTensor {
   static std::shared_ptr<PbTensor> FromNumpy(
       const std::string& name, py::array& numpy_array);
 
+  static std::shared_ptr<PbTensor> CreateInSHM(
+      const std::string& name, SharedMemoryManager& shm_pool, std::vector<int64_t> dims, py::object data_type
+      );
+
   /// Get device type in DLPack format.
   DLDeviceType DeviceType();
 
