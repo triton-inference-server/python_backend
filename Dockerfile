@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/tritonserver:23.05-tf2-python-py3
+FROM asnpdsacr.azurecr.io/public/tritonserver:23.05-tf2-python-py3
 
 #RUN DEBIAN_FRONTEND="noninteractive" apt-get update && apt-get -y install tzdata
 

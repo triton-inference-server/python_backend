@@ -27,29 +27,31 @@ def breakpoint():
 class TritonPythonModel:
     def initialize(self, args):
         import triton_python_backend_utils
-        self.shm = triton_python_backend_utils.shared_memory
+        #self.shm = triton_python_backend_utils.shared_memory
 
     def execute_request(self, request):
         candidates_cache = np.random.random((500000, 200)).astype(np.float32)
         n = pb_utils.get_input_tensor_by_name(request, "n").as_numpy()[0]
         candidates = np.random.randint(100000, size=int(n))
 
-        candidate_tensor: pb_utils.Tensor = pb_utils.new_shm_tensor("candidates", self.shm, (n, 200), np.float32)
-        arr = np.ndarray((n, 200), dtype=np.float32, buffer=candidate_tensor.memory_view())
+        #candidate_tensor: pb_utils.Tensor = pb_utils.new_shm_tensor("candidates", self.shm, (n, 200), np.float32)
+        #arr = np.ndarray((n, 200), dtype=np.float32, buffer=candidate_tensor.memory_view())
         #arr[:] = np.random.random((int(n), 200)).astype(np.float32).data
 
-        s1 = time.time()
-        np.take(candidates_cache, candidates, axis=0, out=arr)
-        s2 = time.time()
-        pb_utils.Logger.log_error(f"Take time - {s2-s1}")
+        #s1 = time.time()
+
+        # Take time - 0.008064508438110352
+        #np.take(candidates_cache, candidates, axis=0, out=arr)
+        #s2 = time.time()
+        #pb_utils.Logger.log_error(f"Take time - {s2-s1}")
 
         context_array = np.random.random((10, 200)).astype(np.float32)
-        #candidates_array = np.take(candidates_cache, candidates, axis=0)
+        candidates_array = np.take(candidates_cache, candidates, axis=0)
 
-        #candidate_tensor = pb_utils.Tensor(
-        #    "candidates",
-        #    candidates_array,
-        #)
+        candidate_tensor = pb_utils.Tensor(
+            "candidates",
+            candidates_array,
+        )
 
         context_tensor = pb_utils.Tensor(
             "user_history",
