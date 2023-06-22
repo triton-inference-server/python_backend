@@ -25,9 +25,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model_loader.h"
 
-#include <fstream>
-#include <list>
-
 #ifdef TRITON_PB_STUB
 #include "pb_stub.h"
 #endif

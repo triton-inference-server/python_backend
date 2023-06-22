@@ -84,7 +84,6 @@ class ModelLoader {
   /// Save ModelLoader object to shared memory.
   /// \param shm_pool Shared memory pool to save the ModelLoader object.
   void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
-
   /// Create a ModelLoader object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param handle Shared memory handle of the ModelLoader.

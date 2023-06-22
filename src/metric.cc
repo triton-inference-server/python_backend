@@ -144,16 +144,12 @@ void
 Metric::SendSetValueRequest(const double& value)
 {
   try {
-<<<<<<< HEAD
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     operation_value_ = value;
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
-    stub->SendCustomMetricsMessage(
-=======
     stub->SendMessage<CustomMetricsMessage>(
->>>>>>> Use template functions for custom metrics
         &custom_metrics_msg, PYTHONSTUB_MetricRequestSet, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
@@ -167,14 +163,10 @@ Metric::SendGetValueRequest()
 {
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
-<<<<<<< HEAD
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     SaveToSharedMemory(stub->ShmPool());
-    stub->SendCustomMetricsMessage(
-=======
     stub->SendMessage<CustomMetricsMessage>(
->>>>>>> Use template functions for custom metrics
         &custom_metrics_msg, PYTHONSTUB_MetricRequestValue, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
