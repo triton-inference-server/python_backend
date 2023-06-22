@@ -292,16 +292,18 @@ class Stub {
   void EnqueueUtilsMessage(
       std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
 
-  /// Send the custom metrics message to the python backend
-  void SendCustomMetricsMessage(
-      CustomMetricsMessage** custom_metrics_msg,
-      PYTHONSTUB_CommandType command_type,
+  /// Send the message to the python backend. MessageType should be either
+  // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'.
+  template <typename MessageType>
+  void SendMessage(
+      MessageType** msg, PYTHONSTUB_CommandType command_type,
       bi::managed_external_buffer::handle_t handle);
 
-  /// Helper function to prepare the custom metrics message
-  void PrepareCustomMetricsMessage(
-      AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
-      CustomMetricsMessage** custom_metrics_msg);
+  /// Helper function to prepare the message. MessageType should be either
+  // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'.
+  template <typename MessageType>
+  void PrepareMessage(
+      AllocatedSharedMemory<MessageType>& msg_shm, MessageType** msg);
 
   /// Helper function to retrieve a proxy stream for dlpack synchronization
   /// for provided device
@@ -348,4 +350,70 @@ class Stub {
   std::mutex dlpack_proxy_stream_pool_mu_;
   std::unordered_map<int, cudaStream_t> dlpack_proxy_stream_pool_;
 };
+
+template <typename MessageType>
+void
+Stub::PrepareMessage(
+    AllocatedSharedMemory<MessageType>& msg_shm, MessageType** msg)
+{
+  msg_shm = shm_pool_->Construct<MessageType>();
+  *msg = msg_shm.data_.get();
+  new (&((*msg)->mu)) bi::interprocess_mutex;
+  new (&((*msg)->cv)) bi::interprocess_condition;
+  (*msg)->waiting_on_stub = false;
+  (*msg)->is_error_set = false;
+  (*msg)->has_error = false;
+}
+
+template <typename MessageType>
+void
+Stub::SendMessage(
+    MessageType** msg, PYTHONSTUB_CommandType command_type,
+    bi::managed_external_buffer::handle_t handle)
+{
+  AllocatedSharedMemory<MessageType> msg_shm;
+  PrepareMessage(msg_shm, msg);
+
+  (*msg)->message = handle;
+
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = command_type;
+  ipc_message->Args() = msg_shm.handle_;
+
+  std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
+  {
+    ScopedDefer _([&ipc_message, msg] {
+      {
+        bi::scoped_lock<bi::interprocess_mutex> guard{(*msg)->mu};
+        (*msg)->waiting_on_stub = false;
+        (*msg)->cv.notify_all();
+      }
+    });
+
+    {
+      bi::scoped_lock<bi::interprocess_mutex> guard{(*msg)->mu};
+      SendIPCUtilsMessage(ipc_message);
+      while (!(*msg)->waiting_on_stub) {
+        (*msg)->cv.wait(guard);
+      }
+    }
+  }
+  if ((*msg)->has_error) {
+    if ((*msg)->is_error_set) {
+      std::unique_ptr<PbString> pb_string =
+          PbString::LoadFromSharedMemory(shm_pool_, (*msg)->error);
+      std::string err_message =
+          std::string(
+              "Failed to process the request for model '" + name_ +
+              "', message: ") +
+          pb_string->String();
+      throw PythonBackendException(err_message);
+    } else {
+      std::string err_message = std::string(
+          "Failed to process the request for model '" + name_ + "'.");
+      throw PythonBackendException(err_message);
+    }
+  }
+}
 }}}  // namespace triton::backend::python

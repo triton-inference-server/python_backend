@@ -43,6 +43,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "model_loader.h"
 #include "pb_error.h"
 #include "pb_map.h"
 #include "pb_preferred_memory.h"
@@ -434,6 +435,15 @@ Stub::StubSetup()
   py::setattr(
       python_backend_utils, "MetricFamily",
       c_python_backend_utils.attr("MetricFamily"));
+  py::setattr(
+      python_backend_utils, "load_model",
+      c_python_backend_utils.attr("load_model"));
+  py::setattr(
+      python_backend_utils, "unload_model",
+      c_python_backend_utils.attr("unload_model"));
+  py::setattr(
+      python_backend_utils, "is_model_ready",
+      c_python_backend_utils.attr("is_model_ready"));
 
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
@@ -1203,74 +1213,6 @@ Stub::EnqueueUtilsMessage(
   stub_to_parent_message_cv_.notify_one();
 }
 
-void
-Stub::PrepareCustomMetricsMessage(
-    AllocatedSharedMemory<CustomMetricsMessage>& custom_metrics_msg_shm,
-    CustomMetricsMessage** custom_metrics_msg)
-{
-  custom_metrics_msg_shm = shm_pool_->Construct<CustomMetricsMessage>();
-  *custom_metrics_msg = custom_metrics_msg_shm.data_.get();
-  new (&((*custom_metrics_msg)->mu)) bi::interprocess_mutex;
-  new (&((*custom_metrics_msg)->cv)) bi::interprocess_condition;
-  (*custom_metrics_msg)->waiting_on_stub = false;
-  (*custom_metrics_msg)->is_error_set = false;
-  (*custom_metrics_msg)->has_error = false;
-}
-
-void
-Stub::SendCustomMetricsMessage(
-    CustomMetricsMessage** custom_metrics_msg,
-    PYTHONSTUB_CommandType command_type,
-    bi::managed_external_buffer::handle_t handle)
-{
-  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_msg_shm;
-  PrepareCustomMetricsMessage(custom_metrics_msg_shm, custom_metrics_msg);
-
-  (*custom_metrics_msg)->message = handle;
-
-  std::unique_ptr<IPCMessage> ipc_message =
-      IPCMessage::Create(shm_pool_, false /* inline_response */);
-  ipc_message->Command() = command_type;
-  ipc_message->Args() = custom_metrics_msg_shm.handle_;
-
-  std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
-  {
-    ScopedDefer _([&ipc_message, custom_metrics_msg] {
-      {
-        bi::scoped_lock<bi::interprocess_mutex> guard{
-            (*custom_metrics_msg)->mu};
-        (*custom_metrics_msg)->waiting_on_stub = false;
-        (*custom_metrics_msg)->cv.notify_all();
-      }
-    });
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{(*custom_metrics_msg)->mu};
-      SendIPCUtilsMessage(ipc_message);
-      while (!(*custom_metrics_msg)->waiting_on_stub) {
-        (*custom_metrics_msg)->cv.wait(guard);
-      }
-    }
-  }
-  if ((*custom_metrics_msg)->has_error) {
-    if ((*custom_metrics_msg)->is_error_set) {
-      std::unique_ptr<PbString> pb_string = PbString::LoadFromSharedMemory(
-          shm_pool_, (*custom_metrics_msg)->error);
-      std::string err_message =
-          std::string(
-              "Failed to process the custom metrics request for model '" +
-              name_ + "', message: ") +
-          pb_string->String();
-      throw PythonBackendException(err_message);
-    } else {
-      std::string err_message = std::string(
-          "Failed to process the custom metrics request for model '" + name_ +
-          "'.");
-      throw PythonBackendException(err_message);
-    }
-  }
-}
-
 cudaStream_t
 Stub::GetProxyStream(const int& device_id)
 {
@@ -1603,6 +1545,17 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("labels").none(false) = py::dict());
   module.attr("MetricFamily").attr("COUNTER") = MetricKind::COUNTER;
   module.attr("MetricFamily").attr("GAUGE") = MetricKind::GAUGE;
+
+  module.def(
+      "load_model", &LoadModel, py::arg("model_name").none(false),
+      py::arg("config").none(false) = "",
+      py::arg("files").none(false) = py::dict());
+  module.def(
+      "unload_model", &UnloadModel, py::arg("model_name").none(false),
+      py::arg("unload_dependents").none(false) = false);
+  module.def(
+      "is_model_ready", &IsModelReady, py::arg("model_name").none(false),
+      py::arg("model_version").none(false) = "");
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
