@@ -59,7 +59,7 @@ MetricFamily::~MetricFamily()
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
-    stub->SendCustomMetricsMessage(
+    stub->SendMessage<CustomMetricsMessage>(
         &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestDelete, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
@@ -90,7 +90,7 @@ MetricFamily::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   custom_metric_family_shm_ = std::move(custom_metric_family_shm);
   name_shm_ = std::move(name_shm);
   description_shm_ = std::move(description_shm);
-  shm_handle_ = custom_metric_family_shm.handle_;
+  shm_handle_ = custom_metric_family_shm_.handle_;
 }
 
 std::unique_ptr<MetricFamily>
@@ -151,7 +151,7 @@ MetricFamily::SendCreateMetricFamilyRequest()
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
-    stub->SendCustomMetricsMessage(
+    stub->SendMessage<CustomMetricsMessage>(
         &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {

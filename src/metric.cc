@@ -65,7 +65,7 @@ Metric::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   // Save the references to shared memory.
   custom_metric_shm_ = std::move(custom_metric_shm);
   labels_shm_ = std::move(labels_shm);
-  shm_handle_ = custom_metric_shm.handle_;
+  shm_handle_ = custom_metric_shm_.handle_;
 }
 
 std::unique_ptr<Metric>
@@ -111,7 +111,7 @@ Metric::SendCreateMetricRequest()
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
-    stub->SendCustomMetricsMessage(
+    stub->SendMessage<CustomMetricsMessage>(
         &custom_metrics_msg, PYTHONSTUB_MetricRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
@@ -130,7 +130,7 @@ Metric::SendIncrementRequest(const double& value)
     operation_value_ = value;
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
-    stub->SendCustomMetricsMessage(
+    stub->SendMessage<CustomMetricsMessage>(
         &custom_metrics_msg, PYTHONSTUB_MetricRequestIncrement, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
@@ -144,12 +144,16 @@ void
 Metric::SendSetValueRequest(const double& value)
 {
   try {
+<<<<<<< HEAD
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     operation_value_ = value;
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
     stub->SendCustomMetricsMessage(
+=======
+    stub->SendMessage<CustomMetricsMessage>(
+>>>>>>> Use template functions for custom metrics
         &custom_metrics_msg, PYTHONSTUB_MetricRequestSet, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
@@ -163,10 +167,14 @@ Metric::SendGetValueRequest()
 {
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   try {
+<<<<<<< HEAD
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     SaveToSharedMemory(stub->ShmPool());
     stub->SendCustomMetricsMessage(
+=======
+    stub->SendMessage<CustomMetricsMessage>(
+>>>>>>> Use template functions for custom metrics
         &custom_metrics_msg, PYTHONSTUB_MetricRequestValue, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
@@ -190,7 +198,7 @@ Metric::Clear()
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
     try {
-      stub->SendCustomMetricsMessage(
+      stub->SendMessage<CustomMetricsMessage>(
           &custom_metrics_msg, PYTHONSTUB_MetricRequestDelete, shm_handle_);
     }
     catch (const PythonBackendException& pb_exception) {
