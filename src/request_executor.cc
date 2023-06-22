@@ -27,6 +27,7 @@
 #include "request_executor.h"
 
 #include <future>
+
 #include "pb_utils.h"
 #include "scoped_defer.h"
 #include "triton/backend/backend_common.h"

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <string>
+
 #include "ipc_message.h"
 #include "pb_string.h"
 #include "pb_utils.h"

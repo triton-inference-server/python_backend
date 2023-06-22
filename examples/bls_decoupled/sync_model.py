@@ -126,8 +126,8 @@ class TritonPythonModel:
 
             # Check for the last empty response.
             if len(infer_response.output_tensors()) > 0:
-              response_sum += pb_utils.get_output_tensor_by_name(
-                  infer_response, "OUT").as_numpy()
+                response_sum += pb_utils.get_output_tensor_by_name(
+                    infer_response, "OUT").as_numpy()
 
         response = [
             pb_utils.InferenceResponse(

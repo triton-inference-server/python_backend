@@ -28,6 +28,7 @@
 
 #include <future>
 #include <string>
+
 #include "infer_response.h"
 #include "pb_preferred_memory.h"
 #include "pb_tensor.h"

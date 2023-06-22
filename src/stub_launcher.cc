@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "stub_launcher.h"
+
 #include "python_be.h"
 
 namespace triton { namespace backend { namespace python {

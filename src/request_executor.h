@@ -27,6 +27,7 @@
 #pragma once
 
 #include <memory>
+
 #include "infer_payload.h"
 #include "infer_request.h"
 #include "infer_response.h"

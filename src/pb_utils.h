@@ -30,6 +30,7 @@
 #include <cuda.h>
 #endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
+
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <climits>
@@ -38,6 +39,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
 #include "pb_exception.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
