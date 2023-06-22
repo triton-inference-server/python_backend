@@ -28,6 +28,7 @@
 
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
+
 #include "shm_manager.h"
 
 

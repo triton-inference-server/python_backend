@@ -126,8 +126,7 @@ class TritonPythonModel:
         # Wait for all the inference requests to finish. The execution
         # of the Python script will be blocked until all the awaitables
         # are resolved.
-        async_responses = await asyncio.gather(
-            *inference_response_awaits)
+        async_responses = await asyncio.gather(*inference_response_awaits)
 
         # The variable that will store the sum of the responses.
         response_sum = np.array([0])

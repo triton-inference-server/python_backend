@@ -80,7 +80,7 @@ class TritonPythonModel:
         self.metric_family = pb_utils.MetricFamily(
             name="requests_process_latency_ns",
             description="Cumulative time spent processing requests",
-            kind=pb_utils.MetricFamily.COUNTER # or pb_utils.MetricFamily.GAUGE
+            kind=pb_utils.MetricFamily.COUNTER  # or pb_utils.MetricFamily.GAUGE
         )
 
         # Create a Metric object under the MetricFamily object. The 'labels'

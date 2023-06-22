@@ -27,6 +27,7 @@
 #pragma once
 
 #include <queue>
+
 #include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {

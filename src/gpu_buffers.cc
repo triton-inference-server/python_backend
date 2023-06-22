@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gpu_buffers.h"
+
 #include "pb_string.h"
 
 namespace triton { namespace backend { namespace python {

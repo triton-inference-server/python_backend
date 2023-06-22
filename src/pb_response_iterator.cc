@@ -25,10 +25,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "pb_response_iterator.h"
-#include <chrono>
-#include "pb_stub.h"
 
 #include <pybind11/embed.h>
+
+#include <chrono>
+
+#include "pb_stub.h"
 namespace py = pybind11;
 
 namespace triton { namespace backend { namespace python {

@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <pybind11/pybind11.h>
+
 #include "../shm_manager.h"
 
 namespace triton { namespace backend { namespace python {

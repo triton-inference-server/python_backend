@@ -27,6 +27,7 @@
 #pragma once
 
 #include <future>
+
 #include "gpu_buffers.h"
 #include "pb_error.h"
 #include "pb_tensor.h"

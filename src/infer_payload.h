@@ -28,6 +28,7 @@
 
 #include <functional>
 #include <queue>
+
 #include "infer_response.h"
 #include "pb_preferred_memory.h"
 

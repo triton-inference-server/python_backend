@@ -25,8 +25,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "response_sender.h"
+
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
+
 #include "pb_stub.h"
 #include "pb_stub_utils.h"
 #include "scoped_defer.h"

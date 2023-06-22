@@ -606,7 +606,8 @@ def get_finalize_impl():
 
 
 def get_triton_python_model_impl(using_tensorflow_model,
-                                 disable_batch_requests_to_neuron, is_inf2=False):
+                                 disable_batch_requests_to_neuron,
+                                 is_inf2=False):
     triton_pmi = '''
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
@@ -627,7 +628,9 @@ class TritonPythonModel:
     return triton_pmi
 
 
-def create_model_file(using_tensorflow_model, disable_batch_requests_to_neuron, is_inf2=False):
+def create_model_file(using_tensorflow_model,
+                      disable_batch_requests_to_neuron,
+                      is_inf2=False):
     triton_model = get_model_license()
     triton_model += '''
 import json
@@ -661,12 +664,14 @@ import torch_neuronx
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--inf2',
-                        required=False,
-                        default=False,
-                        action='store_true',
-                        help="Specify whether the model should be generate for inf2 or inf1, default is inf1"
-                        )
+    parser.add_argument(
+        '--inf2',
+        required=False,
+        default=False,
+        action='store_true',
+        help=
+        "Specify whether the model should be generate for inf2 or inf1, default is inf1"
+    )
     parser.add_argument('--model_type',
                         type=str,
                         required=True,
