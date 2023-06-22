@@ -31,6 +31,7 @@
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/thread/thread_time.hpp>
 #include <cstddef>
+
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {

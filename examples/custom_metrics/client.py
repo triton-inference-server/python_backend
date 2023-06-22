@@ -34,11 +34,13 @@ import numpy as np
 model_name = "custom_metrics"
 shape = [4]
 
+
 def get_metrics():
     metrics_url = "http://localhost:8002/metrics"
     r = requests.get(metrics_url)
     r.raise_for_status()
     return r.text
+
 
 with httpclient.InferenceServerClient("localhost:8000") as client:
     input0_data = np.random.rand(*shape).astype(np.float32)
@@ -78,13 +80,18 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     patterns = [
         '# HELP requests_process_latency_ns Cumulative time spent processing requests',
         '# TYPE requests_process_latency_ns counter',
-        'requests_process_latency_ns{model="custom_metrics",version="1"}']
+        'requests_process_latency_ns{model="custom_metrics",version="1"}'
+    ]
     for pattern in patterns:
         if pattern not in metrics:
-            print("custom_metrics example error: missing pattern '{}' in metrics".format(pattern))
+            print(
+                "custom_metrics example error: missing pattern '{}' in metrics".
+                format(pattern))
             sys.exit(1)
         else:
-            print("custom_metrics example: found pattern '{}' in metrics".format(pattern))
+            print(
+                "custom_metrics example: found pattern '{}' in metrics".format(
+                    pattern))
 
     print('PASS: custom_metrics')
     sys.exit(0)

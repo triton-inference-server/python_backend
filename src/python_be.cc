@@ -660,8 +660,7 @@ ModelInstanceState::ExecuteBLSRequest(
             lbackend_memory.reset(backend_memory);
             input_tensor->SetMemory(std::move(PbMemory::Create(
                 Stub()->ShmPool(), std::move(lbackend_memory))));
-            gpu_buffer_helper.AddBuffer(
-                input_tensor->Memory()->ShmHandle());
+            gpu_buffer_helper.AddBuffer(input_tensor->Memory()->ShmHandle());
 #endif  // TRITON_ENABLE_GPU
           }
         }
@@ -1080,8 +1079,7 @@ ModelInstanceState::ResponseSendDecoupled(
 
     if (requires_deferred_callback) {
       gpu_buffer_helper.Complete(Stub()->ShmPool());
-      send_message_payload->gpu_buffers_handle =
-          gpu_buffer_helper.ShmHandle();
+      send_message_payload->gpu_buffers_handle = gpu_buffer_helper.ShmHandle();
 
       // Additional round trip so that the stub can fill the GPU output buffers.
       {
@@ -1125,8 +1123,8 @@ ModelInstanceState::ResponseSendDecoupled(
     if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
       std::unique_ptr<
           TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-      response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-          send_message_payload->response_factory_address));
+          response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              send_message_payload->response_factory_address));
     }
   }
 }
