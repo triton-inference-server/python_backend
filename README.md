@@ -61,7 +61,9 @@ any C++ code.
   - [Multiple Model Instance Support](#multiple-model-instance-support)
   - [Running Multiple Instances of Triton Server](#running-multiple-instances-of-triton-server)
 - [Business Logic Scripting](#business-logic-scripting)
+  - [Using BLS with Decoupled Models](#using-bls-with-decoupled-models)
   - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
+  - [Model Loading API](#model-loading-api)
   - [Limitation](#limitation)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
@@ -994,6 +996,8 @@ class TritonPythonModel:
 A complete example for sync and async BLS in Python backend is included in the
 [Examples](#examples) section.
 
+## Using BLS with Decoupled Models
+
 Starting from 23.03 release, you can execute inference requests on decoupled
 models in both [default mode](#default-mode) and
 [decoupled mode](#decoupled-mode). By setting the `decoupled` parameter to
@@ -1147,6 +1151,67 @@ shared memory error.
 
 Note: Async BLS is not supported on Python 3.6 or lower due to the `async`
 keyword and `asyncio.run` being introduced in Python 3.7.
+
+## Model Loading API
+
+Starting from 23.07 release, you can use the model loading API to load models
+required by your BLS model. The model loading API is equivalent to the Triton C
+API for loading models which are documented in
+[tritonserver.h](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
+Below is an example of how to use the model loading API:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    def initialize(self, args):
+        self.model_name="onnx_model"
+        # Check if the model is ready, and load the model if it is not ready.
+        # You can specify the model version in string format. The version is
+        # optional, and if not provided, the server will choose a version based
+        # on the model and internal policy.
+        if not pb_utils.is_model_ready(model_name=self.model_name,
+                                       model_version="1"):
+            # Load the model from the model repository
+            pb_utils.load_model(model_name=self.model_name)
+
+            # Load the model with an optional override model config in JSON
+            # representation. If provided, this config will be used for
+            # loading the model.
+            config = "{\"backend\":\"onnxruntime\", \"version_policy\":{\"specific\":{\"versions\":[1]}}}"
+            pb_utils.load_model(model_name=self.model_name, config=config)
+
+            # Load the mode with optional override files. The override files are
+            # specified as a dictionary where the key is the file path (with
+            # "file:" prefix) and the value is the file content as bytes. The
+            # files will form the model directory that the model will be loaded
+            # from. If specified, 'config' must be provided to be the model
+            # configuration of the override model directory.
+            with open('models/onnx_int32_int32_int32/1/model.onnx', 'rb') as file:
+                data = file.read()
+            files = {"file:1/model.onnx": data}
+            pb_utils.load_model(model_name=self.model_name,
+                                config=config, files=files)
+
+    def execute(self, requests):
+        # Execute the model
+        ...
+        # If the model is no longer needed, you can unload it. You can also
+        # specify whether the dependents of the model should also be unloaded by
+        # setting the 'unload_dependents' parameter to True. The default value
+        # is False.
+        pb_utils.unload_model(model_name=self.model_name,
+                              unload_dependents=True)
+
+```
+
+Note that the model loading API is only supported if the server is running in
+[explicit model control mode](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_management.md#model-control-mode-explicit).
+Additionally, the model loading API should only be used after the server has
+been running, which means that the BLS model should not be loaded during server
+startup. You can use different
+[client endpoints](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_model_repository.md)
+to load the model after the server has been started.
 
 ## Using BLS with Stateful Models
 
