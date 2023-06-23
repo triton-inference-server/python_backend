@@ -358,15 +358,9 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
     if (err != cudaSuccess) {
       throw PythonBackendException("Failed to get current CUDA device id.");
     }
+    ScopedSetDevice scoped_set_device(capsule_device_info.second);
 
     bool overridden = (current_device != capsule_device_info.second);
-    err = overridden ? cudaSetDevice(capsule_device_info.second) : cudaSuccess;
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          "Failed to set CUDA device to device with id " +
-          std::to_string(capsule_device_info.second));
-    }
-
     cudaStream_t proxy_stream = stub->GetProxyStream(current_device);
 
     // Array API requirements for the stream argument:
@@ -394,13 +388,6 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
               overridden ? capsule_device_info.second : current_device));
     }
 
-    err = overridden ? cudaSetDevice(current_device) : cudaSuccess;
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          "Failed to set CUDA device back to initial compute device "
-          "with id " +
-          std::to_string(current_device));
-    }
     return ptr_to_tensor;
 #else
     throw PythonBackendException(
