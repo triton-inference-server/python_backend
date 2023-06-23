@@ -1536,10 +1536,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("shape", &PbTensor::Dims)
       .def("from_dlpack", &PbTensor::FromDLPack)
       .def("__dlpack__", &PbTensor::DLPack, py::arg("stream") = py::none())
-      .def("__dlpack_device__", &PbTensor::DLPackDevice)
-      .def("memory_view", [](std::shared_ptr<PbTensor>& t) {
-        return py::memoryview::from_memory(t->DataPtr(), t->ByteSize() * 8);
-          });
+      .def("__dlpack_device__", &PbTensor::DLPackDevice);
+
   py::class_<InferResponse, std::shared_ptr<InferResponse>>(
       module, "InferenceResponse")
       .def(

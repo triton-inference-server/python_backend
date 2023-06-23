@@ -1,0 +1,22 @@
+name: "test_take"
+backend: "python"
+
+input [
+  {
+    name: "n"
+    data_type: TYPE_INT32
+    dims: [ -1]
+
+  }
+]
+
+output [
+  {
+    name: "scores"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  }
+]
+
+
+instance_group [{ kind: KIND_CPU }]

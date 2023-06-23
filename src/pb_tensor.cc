@@ -279,14 +279,9 @@ PbTensor::CreateInSHM(const std::string& name, SharedMemoryManager& shm_pool, st
           reinterpret_cast<char*>(tensor_shm_ptr) + pb_memory_offset,
           shm_handle + pb_memory_offset, false);
     tensor_shm_ptr->memory = 0;
-
-    LOG_INFO << "CreateInSHM written to: ";
-    LOG_INFO << "tensor_shm_ptr: " << tensor_shm_ptr ;
-    LOG_INFO << "name_offset: " << name_offset ;
-    LOG_INFO << "pb_memory_offset: " << pb_memory_offset ;
-
+    std::cout << "Offset is - " << pb_memory_offset<<  "\n";
     return std::unique_ptr<PbTensor>(
-            new PbTensor(tensor_shm, name_shm, pb_memory));
+        new PbTensor(tensor_shm, name_shm, pb_memory));
 }
 
 
@@ -595,17 +590,7 @@ void
 PbTensor::SaveToSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu)
 {
-  LOG_INFO << "Save to memory PbTensor- " << name_;
-  LOG_INFO << "tensor_shm_.data_" << static_cast<void*>(tensor_shm_.data_.get());
-
-  auto mem = static_cast<float*>(memory_ptr_);
-  for ( unsigned int i = 0; i < 10; i++ ) {
-    LOG_INFO << mem[i] << " ";
-  }
-
   if (!tensor_shm_.data_) {
-    LOG_INFO << "SaveToSharedMemory - tensor_shm_.data is empty" << name_;
-
     uint64_t byte_size;
     if (!pb_memory_) {
       byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
@@ -676,11 +661,8 @@ PbTensor::LoadFromSharedMemory(
     pb_memory = PbMemory::LoadFromSharedMemory(
         shm_pool, tensor_shm_ptr->memory, open_cuda_handle);
   }
-  //
-  LOG_INFO << "Loaded from memory PbTensor- " << name_shm->String();
-
   return std::unique_ptr<PbTensor>(
-      new PbTensor(tensor_shm, name_shm, pb_memory));
+          new PbTensor(tensor_shm, name_shm, pb_memory));
 }
 
 TRITONSERVER_DataType
@@ -714,7 +696,6 @@ PbTensor::PbTensor(
       reinterpret_cast<char*>(tensor_shm_ptr_) + sizeof(TensorShm));
 
   name_ = name_shm_->String();
-  LOG_INFO << "Creating PbTensor from SHM" << name_;
 
   dims_ = std::vector<int64_t>(
       dims_shm_ptr_, dims_shm_ptr_ + tensor_shm_ptr_->dims_count);
@@ -727,26 +708,17 @@ PbTensor::PbTensor(
   shm_handle_ = tensor_shm_.handle_;
 
 
-  auto mem = static_cast<float*>(memory_ptr_);
-  for ( unsigned int i = 0; i < 10; i++ ) {
-    LOG_INFO << mem[i] << " ";
-  }
-
-  LOG_INFO << "    shm_handle_ -" << shm_handle_;
-  LOG_INFO << "    memory_ptr_ -" << memory_ptr_;
-  LOG_INFO << "    byte_size_ -" << byte_size_;
-
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
     if (dtype_ != TRITONSERVER_TYPE_BYTES) {
       py::object numpy_array =
-          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
-      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_, py::none());
+         numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
     } else {
       py::object numpy_array = py::array(
           triton_to_pybind_dtype(TRITONSERVER_TYPE_UINT8), {byte_size_},
-          (void*)memory_ptr_);
+          (void*)memory_ptr_, py::none());
       py::module triton_pb_utils =
           py::module::import("triton_python_backend_utils");
       numpy_array_ =
