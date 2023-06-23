@@ -85,7 +85,7 @@ def serialize_byte_tensor(input_tensor):
                     s = str(obj.item()).encode('utf-8')
             else:
                 s = obj.item()
-            flattened_ls.append(struct.pack("<I", len(s)))
+            flattened_ls.append(struct.pack("I", len(s)))
             flattened_ls.append(s)
         flattened = b''.join(flattened_ls)
         return flattened
@@ -111,16 +111,12 @@ def deserialize_bytes_tensor(encoded_tensor):
     strs = list()
     offset = 0
     val_buf = encoded_tensor
-    print("here")
-    print(val_buf)
     while offset < len(val_buf):
-        l = struct.unpack_from(">I", val_buf, offset)[0]
-        print(l)
+        l = struct.unpack_from("I", val_buf, offset)[0]
         offset += 4
-        sb = struct.unpack_from(">{}s".format(l), val_buf, offset)[0]
+        sb = struct.unpack_from("{}s".format(l), val_buf, offset)[0]
         offset += l
         strs.append(sb)
-    print("here2")
     return (np.array(strs, dtype=np.object_))
 
 
