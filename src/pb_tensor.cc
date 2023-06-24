@@ -35,6 +35,9 @@ namespace py = pybind11;
 #endif
 #include "pb_tensor.h"
 
+#ifndef TRITON_PB_STUB
+#include "triton/common/logging.h"
+#endif
 
 namespace triton { namespace backend { namespace python {
 
@@ -225,6 +228,68 @@ delete_unused_dltensor(PyObject* dlp)
     dl_managed_tensor->deleter(dl_managed_tensor);
   }
 }
+
+std::shared_ptr<PbTensor>
+PbTensor::CreateInSHM(const std::string& name, SharedMemoryManager& shm_pool, std::vector<int64_t> dims, py::object data_type)
+{
+
+    // Input params of tensor
+    //std::vector<int64_t> dims = std::vector<int64_t>({10, 10});
+    TRITONSERVER_DataType dtype = numpy_to_triton_type(data_type);
+
+    TRITONSERVER_MemoryType memory_type_ = TRITONSERVER_MEMORY_CPU;
+    uint64_t elements = 1;
+    for (size_t i = 0; i < dims.size(); i++) {
+      elements *= dims[i];
+    }
+    py::module np = py::module::import("numpy");
+    uint64_t item_size = np.attr("dtype")(data_type).attr("itemsize").cast<uint64_t>();
+    uint64_t byte_size_ = elements * item_size;
+
+    // Calculate the offset of the data and add padding so the numpy array is memory aligned
+    std::size_t name_offset = sizeof(TensorShm) + sizeof(int64_t) * dims.size();
+    std::size_t pb_memory_offset = name_offset + PbString::ShmStructSize(name);
+    std::size_t padding = pb_memory_offset % item_size;
+    std::cout << "Required padding " << padding << "\n";
+    uint64_t byte_size;
+    byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims.size() +
+                PbString::ShmStructSize(name) +
+                PbMemory::ShmStructSize(memory_type_, byte_size_);
+
+    // Do the allocation
+    AllocatedSharedMemory<char> tensor_shm = shm_pool.Construct<char>(byte_size);
+    auto shm_handle = tensor_shm.handle_;
+    auto shm_data = tensor_shm.data_.get();
+
+    // Wrap the raw memory in TensorShm
+    auto* tensor_shm_ptr = reinterpret_cast<TensorShm*>(shm_data);
+    tensor_shm_ptr->dtype = dtype;
+    tensor_shm_ptr->dims_count = dims.size();
+
+    // Write the dimensions data to shared memory.
+    auto* dims_shm_ptr_ = reinterpret_cast<int64_t*>(
+        reinterpret_cast<char*>(tensor_shm_ptr) + sizeof(TensorShm));
+    for (size_t i = 0; i < dims.size(); i++) {
+      dims_shm_ptr_[i] = dims[i];
+    }
+
+    // Write the name data to shared memory.
+    auto name_shm = PbString::Create(name, reinterpret_cast<char*>(tensor_shm_ptr) + name_offset, shm_handle + name_offset);
+
+    int64_t memory_type_id_ = 0; // Maybe
+
+    auto pb_memory = PbMemory::Create(
+          memory_type_, memory_type_id_, byte_size_,
+          nullptr,
+          reinterpret_cast<char*>(tensor_shm_ptr) + pb_memory_offset,
+          shm_handle + pb_memory_offset, false);
+    tensor_shm_ptr->memory = 0;
+    std::cout << "Offset is - " << pb_memory_offset<<  "\n";
+    
+    return std::unique_ptr<PbTensor>(
+        new PbTensor(tensor_shm, name_shm, pb_memory));
+}
+
 
 std::shared_ptr<PbTensor>
 PbTensor::FromNumpy(const std::string& name, py::array& numpy_array)
@@ -602,9 +667,8 @@ PbTensor::LoadFromSharedMemory(
     pb_memory = PbMemory::LoadFromSharedMemory(
         shm_pool, tensor_shm_ptr->memory, open_cuda_handle);
   }
-
   return std::unique_ptr<PbTensor>(
-      new PbTensor(tensor_shm, name_shm, pb_memory));
+          new PbTensor(tensor_shm, name_shm, pb_memory));
 }
 
 TRITONSERVER_DataType
@@ -631,11 +695,14 @@ PbTensor::PbTensor(
     : tensor_shm_(std::move(tensor_shm)), name_shm_(std::move(name_shm)),
       pb_memory_(std::move(pb_memory))
 {
+
+
   tensor_shm_ptr_ = reinterpret_cast<TensorShm*>(tensor_shm_.data_.get());
   dims_shm_ptr_ = reinterpret_cast<int64_t*>(
       reinterpret_cast<char*>(tensor_shm_ptr_) + sizeof(TensorShm));
 
   name_ = name_shm_->String();
+
   dims_ = std::vector<int64_t>(
       dims_shm_ptr_, dims_shm_ptr_ + tensor_shm_ptr_->dims_count);
   dtype_ = tensor_shm_ptr_->dtype;
@@ -646,17 +713,18 @@ PbTensor::PbTensor(
   memory_type_id_ = pb_memory_->MemoryTypeId();
   shm_handle_ = tensor_shm_.handle_;
 
+
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
     if (dtype_ != TRITONSERVER_TYPE_BYTES) {
       py::object numpy_array =
-          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
-      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_, py::none());
+         numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
     } else {
       py::object numpy_array = py::array(
           triton_to_pybind_dtype(TRITONSERVER_TYPE_UINT8), {byte_size_},
-          (void*)memory_ptr_);
+          (void*)memory_ptr_, py::none());
       py::module triton_pb_utils =
           py::module::import("triton_python_backend_utils");
       numpy_array_ =
