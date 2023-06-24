@@ -11,7 +11,7 @@ parameters: {
 
 input [
   {
-    name: "candidates"
+    name: "candidatesss"
     data_type: TYPE_FP32
     dims: [ -1 , -1]
 

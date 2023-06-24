@@ -31,12 +31,17 @@ class TritonPythonModel:
         self.candidates_cache = np.random.random((500000, 200)).astype(np.float32)
 
     def execute_request(self, request):
-        n = int(pb_utils.get_input_tensor_by_name(request, "n").as_numpy()[0])
-        candidates = np.random.randint(100000, size=n)
-        candidate_tensor: pb_utils.Tensor = pb_utils.new_shm_tensor("candidatesss", self.shm, (n, 200), np.float32)
-        np.take(self.candidates_cache, candidates, axis=0, out=candidate_tensor.as_numpy(), mode='clip')
+        n = pb_utils.get_input_tensor_by_name(request, "n").as_numpy()[0]
+        candidates = np.random.randint(100000, size=int(n))
 
         context_array = np.random.random((10, 200)).astype(np.float32)
+        candidates_array = np.take(self.candidates_cache, candidates, axis=0)
+
+        candidate_tensor = pb_utils.Tensor(
+            "candidatesss",
+            candidates_array,
+        )
+
         context_tensor = pb_utils.Tensor(
             "user_history",
             context_array,
