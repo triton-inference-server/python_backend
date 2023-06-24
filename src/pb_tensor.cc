@@ -243,8 +243,14 @@ PbTensor::CreateInSHM(const std::string& name, SharedMemoryManager& shm_pool, st
       elements *= dims[i];
     }
     py::module np = py::module::import("numpy");
-    uint64_t byte_size_ = elements * np.attr("dtype")(data_type).attr("itemsize").cast<uint64_t>();
+    uint64_t item_size = np.attr("dtype")(data_type).attr("itemsize").cast<uint64_t>();
+    uint64_t byte_size_ = elements * item_size;
 
+    // Calculate the offset of the data and add padding so the numpy array is memory aligned
+    std::size_t name_offset = sizeof(TensorShm) + sizeof(int64_t) * dims.size();
+    std::size_t pb_memory_offset = name_offset + PbString::ShmStructSize(name);
+    std::size_t padding = pb_memory_offset % item_size;
+    std::cout << "Required padding " << padding << "\n";
     uint64_t byte_size;
     byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims.size() +
                 PbString::ShmStructSize(name) +
@@ -252,12 +258,13 @@ PbTensor::CreateInSHM(const std::string& name, SharedMemoryManager& shm_pool, st
 
     // Do the allocation
     AllocatedSharedMemory<char> tensor_shm = shm_pool.Construct<char>(byte_size);
+    auto shm_handle = tensor_shm.handle_;
+    auto shm_data = tensor_shm.data_.get();
 
     // Wrap the raw memory in TensorShm
-    auto* tensor_shm_ptr = reinterpret_cast<TensorShm*>(tensor_shm.data_.get());
+    auto* tensor_shm_ptr = reinterpret_cast<TensorShm*>(shm_data);
     tensor_shm_ptr->dtype = dtype;
     tensor_shm_ptr->dims_count = dims.size();
-    auto shm_handle = tensor_shm.handle_;
 
     // Write the dimensions data to shared memory.
     auto* dims_shm_ptr_ = reinterpret_cast<int64_t*>(
@@ -267,12 +274,10 @@ PbTensor::CreateInSHM(const std::string& name, SharedMemoryManager& shm_pool, st
     }
 
     // Write the name data to shared memory.
-    std::size_t name_offset = sizeof(TensorShm) + sizeof(int64_t) * dims.size();
     auto name_shm = PbString::Create(name, reinterpret_cast<char*>(tensor_shm_ptr) + name_offset, shm_handle + name_offset);
 
     int64_t memory_type_id_ = 0; // Maybe
 
-    std::size_t pb_memory_offset = name_offset + PbString::ShmStructSize(name);
     auto pb_memory = PbMemory::Create(
           memory_type_, memory_type_id_, byte_size_,
           nullptr,
@@ -280,6 +285,7 @@ PbTensor::CreateInSHM(const std::string& name, SharedMemoryManager& shm_pool, st
           shm_handle + pb_memory_offset, false);
     tensor_shm_ptr->memory = 0;
     std::cout << "Offset is - " << pb_memory_offset<<  "\n";
+    
     return std::unique_ptr<PbTensor>(
         new PbTensor(tensor_shm, name_shm, pb_memory));
 }
