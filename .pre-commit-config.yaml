@@ -55,7 +55,6 @@ repos:
   rev: 23.1.0
   hooks:
       - id: black
-        args: [--line-length=88]
         types_or: [python, cython]
 - repo: https://github.com/PyCQA/flake8
   rev: 5.0.4
