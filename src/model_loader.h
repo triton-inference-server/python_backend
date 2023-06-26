@@ -84,6 +84,7 @@ class ModelLoader {
   /// Save ModelLoader object to shared memory.
   /// \param shm_pool Shared memory pool to save the ModelLoader object.
   void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+
   /// Create a ModelLoader object from shared memory.
   /// \param shm_pool Shared memory pool
   /// \param handle Shared memory handle of the ModelLoader.
@@ -95,21 +96,26 @@ class ModelLoader {
 #ifdef TRITON_PB_STUB
   /// Send a request to load the model.
   void SendLoadModelRequest();
+
   /// Send a request to unload the model.
   void SendUnloadModelRequest();
+
   /// Send a request to check if the model is ready.
   bool SendModelReadinessRequest();
 #else
   /// Use Triton C API to load the model.
   /// \param server The Triton server object.
   void LoadModel(TRITONSERVER_Server* server);
+
   /// Use Triton C API to unload the model.
   /// \param server The Triton server object.
   void UnloadModel(TRITONSERVER_Server* server);
+
   /// Use Triton C API to check if the model is ready.
   /// \param server The Triton server object.
   /// \return Returns true if the model is ready.
   bool IsModelReady(TRITONSERVER_Server* server);
+
   /// Get the model version from the version string.
   /// \param version_string The version string.
   /// \return Returns the model version in uint64_t.
