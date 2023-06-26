@@ -26,8 +26,6 @@
 
 import io
 import json
-import os
-import sys
 
 import numpy as np
 import torchvision.transforms as transforms
