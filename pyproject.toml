@@ -54,7 +54,7 @@
 # note: pre-commit passes explicit lists of files here, which this skip file list doesn't override -
 # this is only to allow you to run codespell interactively
 skip = "./.git,./.github"
-# ignore short words, and typename parameters like offset
+# ignore short words, and typename parameters like OffsetT
 ignore-regex = "\\b(.{1,4}|[A-Z]\\w*T)\\b"
 # use the 'clear' dictionary for unambiguous spelling mistakes
 builtin = "clear"
