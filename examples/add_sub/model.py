@@ -41,7 +41,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -56,21 +56,25 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = model_config = json.loads(args['model_config'])
+        self.model_config = model_config = json.loads(args["model_config"])
 
         # Get OUTPUT0 configuration
         output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT0")
+            model_config, "OUTPUT0"
+        )
 
         # Get OUTPUT1 configuration
         output1_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT1")
+            model_config, "OUTPUT1"
+        )
 
         # Convert Triton types to numpy types
         self.output0_dtype = pb_utils.triton_string_to_numpy(
-            output0_config['data_type'])
+            output0_config["data_type"]
+        )
         self.output1_dtype = pb_utils.triton_string_to_numpy(
-            output1_config['data_type'])
+            output1_config["data_type"]
+        )
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -107,15 +111,19 @@ class TritonPythonModel:
             # Get INPUT1
             in_1 = pb_utils.get_input_tensor_by_name(request, "INPUT1")
 
-            out_0, out_1 = (in_0.as_numpy() + in_1.as_numpy(),
-                            in_0.as_numpy() - in_1.as_numpy())
+            out_0, out_1 = (
+                in_0.as_numpy() + in_1.as_numpy(),
+                in_0.as_numpy() - in_1.as_numpy(),
+            )
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
-            out_tensor_0 = pb_utils.Tensor("OUTPUT0",
-                                           out_0.astype(output0_dtype))
-            out_tensor_1 = pb_utils.Tensor("OUTPUT1",
-                                           out_1.astype(output1_dtype))
+            out_tensor_0 = pb_utils.Tensor(
+                "OUTPUT0", out_0.astype(output0_dtype)
+            )
+            out_tensor_1 = pb_utils.Tensor(
+                "OUTPUT1", out_1.astype(output1_dtype)
+            )
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
@@ -123,9 +131,10 @@ class TritonPythonModel:
             # response:
             #
             # pb_utils.InferenceResponse(
-            #    output_tensors=..., TritonError("An error occured"))
+            #    output_tensors=..., TritonError("An error occurred"))
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[out_tensor_0, out_tensor_1])
+                output_tensors=[out_tensor_0, out_tensor_1]
+            )
             responses.append(inference_response)
 
         # You should return a list of pb_utils.InferenceResponse. Length
@@ -137,4 +146,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        print('Cleaning up...')
+        print("Cleaning up...")

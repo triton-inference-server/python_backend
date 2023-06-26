@@ -39,7 +39,7 @@ and the second section shows how to execute asynchronous BLS requests.
 
 ## Synchronous BLS Requests with Decoupled Models
 
-The goal of `bls_decoupled_sync` model is to caculate the sum of the responses
+The goal of `bls_decoupled_sync` model is to calculate the sum of the responses
 returned from the [square](../decoupled) model and return the summation as the final response. The value of input 'IN' will be passed as an input to the
 [square](../decoupled) model which determines how many responses the
 [square](../decoupled) model will generate.
@@ -105,7 +105,7 @@ model execution and can lead to speedups under certain conditions.
 
 The `bls_decoupled_async` model will perform two async BLS requests on the
 [square](../decoupled) model. Then, it will wait until the inference requests
-are completed. It will caculate the sum of the output `OUT` from the
+are completed. It will calculate the sum of the output `OUT` from the
 [square](../decoupled) model in both two requests to construct the final
 inference response object using these tensors.
 

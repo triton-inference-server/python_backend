@@ -48,7 +48,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -63,15 +63,17 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = model_config = json.loads(args['model_config'])
+        self.model_config = model_config = json.loads(args["model_config"])
 
         # Get OUTPUT0 configuration
         output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT_0")
+            model_config, "OUTPUT_0"
+        )
 
         # Convert Triton types to numpy types
         self.output0_dtype = pb_utils.triton_string_to_numpy(
-            output0_config['data_type'])
+            output0_config["data_type"]
+        )
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -105,18 +107,22 @@ class TritonPythonModel:
             # Get INPUT0
             in_0 = pb_utils.get_input_tensor_by_name(request, "INPUT_0")
 
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                             std=[0.229, 0.224, 0.225])
+            normalize = transforms.Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            )
 
-            loader = transforms.Compose([
-                transforms.Resize([224, 224]),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(), normalize
-            ])
+            loader = transforms.Compose(
+                [
+                    transforms.Resize([224, 224]),
+                    transforms.CenterCrop(224),
+                    transforms.ToTensor(),
+                    normalize,
+                ]
+            )
 
             def image_loader(image_name):
                 image = loader(image_name)
-                #expand the dimension to nchw
+                # expand the dimension to nchw
                 image = image.unsqueeze(0)
                 return image
 
@@ -126,8 +132,9 @@ class TritonPythonModel:
             img_out = image_loader(image)
             img_out = np.array(img_out)
 
-            out_tensor_0 = pb_utils.Tensor("OUTPUT_0",
-                                           img_out.astype(output0_dtype))
+            out_tensor_0 = pb_utils.Tensor(
+                "OUTPUT_0", img_out.astype(output0_dtype)
+            )
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
@@ -135,9 +142,10 @@ class TritonPythonModel:
             # response:
             #
             # pb_utils.InferenceResponse(
-            #    output_tensors=..., TritonError("An error occured"))
+            #    output_tensors=..., TritonError("An error occurred"))
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[out_tensor_0])
+                output_tensors=[out_tensor_0]
+            )
             responses.append(inference_response)
 
         # You should return a list of pb_utils.InferenceResponse. Length
@@ -149,4 +157,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        print('Cleaning up...')
+        print("Cleaning up...")

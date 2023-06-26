@@ -41,7 +41,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -56,7 +56,7 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = json.loads(args['model_config'])
+        self.model_config = json.loads(args["model_config"])
 
     # You must add the Python 'async' keyword to the beginning of `execute`
     # function if you want to use `async_exec` function.
@@ -94,12 +94,13 @@ class TritonPythonModel:
 
             # List of awaitables containing inflight inference responses.
             inference_response_awaits = []
-            for model_name in ['pytorch', 'add_sub']:
+            for model_name in ["pytorch", "add_sub"]:
                 # Create inference request object
                 infer_request = pb_utils.InferenceRequest(
                     model_name=model_name,
                     requested_output_names=["OUTPUT0", "OUTPUT1"],
-                    inputs=[in_0, in_1])
+                    inputs=[in_0, in_1],
+                )
 
                 # Store the awaitable inside the array. We don't need
                 # the inference response immediately so we do not `await`
@@ -110,7 +111,8 @@ class TritonPythonModel:
             # of the Python script will be blocked until all the awaitables
             # are resolved.
             inference_responses = await asyncio.gather(
-                *inference_response_awaits)
+                *inference_response_awaits
+            )
 
             for infer_response in inference_responses:
                 # Make sure that the inference response doesn't have an error.
@@ -118,15 +120,18 @@ class TritonPythonModel:
                 # execution you can raise an exception.
                 if infer_response.has_error():
                     raise pb_utils.TritonModelException(
-                        infer_response.error().message())
+                        infer_response.error().message()
+                    )
 
             # Get the OUTPUT0 from the "pytorch" model inference response
             pytorch_output0_tensor = pb_utils.get_output_tensor_by_name(
-                inference_responses[0], "OUTPUT0")
+                inference_responses[0], "OUTPUT0"
+            )
 
             # Get the OUTPUT1 from the "addsub" model inference response
             addsub_output1_tensor = pb_utils.get_output_tensor_by_name(
-                inference_responses[1], "OUTPUT1")
+                inference_responses[1], "OUTPUT1"
+            )
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
@@ -134,13 +139,14 @@ class TritonPythonModel:
             # response:
             #
             # pb_utils.InferenceResponse(
-            #    output_tensors=..., TritonError("An error occured"))
+            #    output_tensors=..., TritonError("An error occurred"))
             #
             # Because the infer_response of the models contains the final
             # outputs with correct output names, we can just pass the list
             # of outputs to the InferenceResponse object.
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[pytorch_output0_tensor, addsub_output1_tensor])
+                output_tensors=[pytorch_output0_tensor, addsub_output1_tensor]
+            )
             responses.append(inference_response)
 
         # You should return a list of pb_utils.InferenceResponse. Length
@@ -152,4 +158,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        print('Cleaning up...')
+        print("Cleaning up...")

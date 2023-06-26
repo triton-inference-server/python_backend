@@ -84,7 +84,7 @@ class SharedMemoryManager {
     bi::managed_external_buffer::handle_t handle = 0;
 
     {
-      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
       std::size_t requested_bytes =
           sizeof(T) * count + sizeof(AllocatedShmOwnership);
       GrowIfNeeded(0);
@@ -121,7 +121,7 @@ class SharedMemoryManager {
     AllocatedShmOwnership* shm_ownership_data;
 
     {
-      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
       GrowIfNeeded(0);
       shm_ownership_data = reinterpret_cast<AllocatedShmOwnership*>(
           managed_buffer_->get_address_from_handle(handle));
@@ -140,7 +140,7 @@ class SharedMemoryManager {
 
   void Deallocate(bi::managed_external_buffer::handle_t handle)
   {
-    bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+    bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
     GrowIfNeeded(0);
     void* ptr = managed_buffer_->get_address_from_handle(handle);
     managed_buffer_->deallocate(ptr);
@@ -181,7 +181,7 @@ class SharedMemoryManager {
     std::function<void(T*)> deleter = [this, handle,
                                        shm_ownership_data](T* memory) {
       bool destroy = false;
-      bi::scoped_lock<bi::interprocess_mutex> gaurd{*shm_mutex_};
+      bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
       // Before using any shared memory function you need to make sure that you
       // are using the correct mapping. For example, shared memory growth may
       // happen between the time an object was created and the time the object

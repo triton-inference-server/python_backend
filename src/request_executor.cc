@@ -153,7 +153,7 @@ InferResponseComplete(
           output_tensors, pb_error, true /* is_last_response */);
     } else {
       if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
-        // Not the last reponse.
+        // Not the last response.
         infer_response = std::make_unique<InferResponse>(
             output_tensors, pb_error, false /* is_last_response */,
             userp /* id */);
@@ -171,7 +171,7 @@ InferResponseComplete(
   } else if (
       (infer_payload)->IsDecoupled() &&
       (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
-    // An empty response may be the last reponse for decoupled models.
+    // An empty response may be the last response for decoupled models.
     infer_response = std::make_unique<InferResponse>(
         output_tensors, pb_error, true /* is_last_response */, userp /* id */);
   } else {

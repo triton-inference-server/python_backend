@@ -32,7 +32,7 @@ input [
     name: "input"
     data_type: TYPE_FP32
     dims: [3, -1, -1 ]
-    
+
 }
 ]
 output[

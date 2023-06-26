@@ -61,7 +61,7 @@ CUDAHandler::CUDAHandler()
 {
   dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
 
-  // If libcuda.so is succesfully opened, it must be able to find
+  // If libcuda.so is successfully opened, it must be able to find
   // "cuPointerGetAttribute" and "cuGetErrorString" symbols.
   if (dl_open_handle_ != nullptr) {
     void* cu_pointer_get_attribute_fn =

@@ -38,29 +38,34 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     for in_value in in_values:
         input_data = np.array([in_value], dtype=np.int32)
         inputs = [
-            httpclient.InferInput("IN", input_data.shape,
-                                  np_to_triton_dtype(input_data.dtype))
+            httpclient.InferInput(
+                "IN", input_data.shape, np_to_triton_dtype(input_data.dtype)
+            )
         ]
         inputs[0].set_data_from_numpy(input_data)
         outputs = [httpclient.InferRequestedOutput("SUM")]
 
-        response = client.infer(model_name,
-                                inputs,
-                                request_id=str(1),
-                                outputs=outputs)
+        response = client.infer(
+            model_name, inputs, request_id=str(1), outputs=outputs
+        )
 
         result = response.get_response()
         # output_data contains two times of the square value of the input value.
         output_data = response.as_numpy("SUM")
         print("==========model result==========")
-        print("Two times the square value of {} is {}\n".format(
-            input_data, output_data))
+        print(
+            "Two times the square value of {} is {}\n".format(
+                input_data, output_data
+            )
+        )
 
         if not np.allclose((2 * input_data * input_data), output_data):
             print(
-                "BLS Decoupled Async example error: incorrect output value. Expected {}, got {}."
-                .format((2 * input_data * input_data), output_data))
+                "BLS Decoupled Async example error: incorrect output value. Expected {}, got {}.".format(
+                    (2 * input_data * input_data), output_data
+                )
+            )
             sys.exit(1)
 
-    print('PASS: BLS Decoupled Async')
+    print("PASS: BLS Decoupled Async")
     sys.exit(0)

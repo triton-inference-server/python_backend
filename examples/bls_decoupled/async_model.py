@@ -45,7 +45,7 @@ class TritonPythonModel:
       - Input 'IN' shape must be equal to [1], datatype must be INT32.
       - For each response, output 'SUM' shape must be equal to [1], datatype
         must be INT32.
-    
+
     For every request, the model will send a single response that contains an
     output named 'SUM'. We will send two BLS requests to the square model and
     the 'SUM' will contain the summation of the 'OUT' response output returned
@@ -56,7 +56,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -71,7 +71,7 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = json.loads(args['model_config'])
+        self.model_config = json.loads(args["model_config"])
 
     # You must add the Python 'async' keyword to the beginning of `execute`
     # function if you want to use `async_exec` function.
@@ -100,8 +100,9 @@ class TritonPythonModel:
         # This model does not support batching, so 'request_count' should
         # always be 1.
         if len(requests) != 1:
-            raise pb_utils.TritonModelException("unsupported batch size " +
-                                                len(requests))
+            raise pb_utils.TritonModelException(
+                "unsupported batch size " + len(requests)
+            )
 
         response_num = pb_utils.get_input_tensor_by_name(requests[0], "IN")
 
@@ -116,12 +117,14 @@ class TritonPythonModel:
             infer_request = pb_utils.InferenceRequest(
                 model_name="square_int32",
                 inputs=[response_num],
-                requested_output_names=["OUT"])
+                requested_output_names=["OUT"],
+            )
             # Store the awaitable inside the array. We don't need
             # the inference response immediately so we do not `await`
             # here.
             inference_response_awaits.append(
-                infer_request.async_exec(decoupled=True))
+                infer_request.async_exec(decoupled=True)
+            )
 
         # Wait for all the inference requests to finish. The execution
         # of the Python script will be blocked until all the awaitables
@@ -139,16 +142,19 @@ class TritonPythonModel:
                 # If inference response has an error, raise an exception
                 if infer_response.has_error():
                     raise pb_utils.TritonModelException(
-                        infer_response.error().message())
+                        infer_response.error().message()
+                    )
 
                 # Check for the last empty response.
                 if len(infer_response.output_tensors()) > 0:
                     response_sum += pb_utils.get_output_tensor_by_name(
-                        infer_response, "OUT").as_numpy()
+                        infer_response, "OUT"
+                    ).as_numpy()
 
         response = [
             pb_utils.InferenceResponse(
-                output_tensors=[pb_utils.Tensor("SUM", response_sum)])
+                output_tensors=[pb_utils.Tensor("SUM", response_sum)]
+            )
         ]
 
         # Since the model is using the default mode in this example, we
@@ -160,4 +166,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        print('Cleaning up...')
+        print("Cleaning up...")

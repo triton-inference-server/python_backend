@@ -40,7 +40,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -55,7 +55,7 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = json.loads(args['model_config'])
+        self.model_config = json.loads(args["model_config"])
 
     def execute(self, requests):
         """`execute` must be implemented in every Python model. `execute`
@@ -91,7 +91,8 @@ class TritonPythonModel:
 
             # Get Model Name
             model_name = pb_utils.get_input_tensor_by_name(
-                request, "MODEL_NAME")
+                request, "MODEL_NAME"
+            )
 
             # Model Name string
             model_name_string = model_name.as_numpy()[0]
@@ -100,7 +101,8 @@ class TritonPythonModel:
             infer_request = pb_utils.InferenceRequest(
                 model_name=model_name_string,
                 requested_output_names=["OUTPUT0", "OUTPUT1"],
-                inputs=[in_0, in_1])
+                inputs=[in_0, in_1],
+            )
 
             # Perform synchronous blocking inference request
             infer_response = infer_request.exec()
@@ -110,7 +112,8 @@ class TritonPythonModel:
             # you can raise an exception.
             if infer_response.has_error():
                 raise pb_utils.TritonModelException(
-                    infer_response.error().message())
+                    infer_response.error().message()
+                )
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
@@ -118,13 +121,14 @@ class TritonPythonModel:
             # response:
             #
             # pb_utils.InferenceResponse(
-            #    output_tensors=..., TritonError("An error occured"))
+            #    output_tensors=..., TritonError("An error occurred"))
             #
             # Because the infer_response of the models contains the final
             # outputs with correct output names, we can just pass the list
             # of outputs to the InferenceResponse object.
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=infer_response.output_tensors())
+                output_tensors=infer_response.output_tensors()
+            )
             responses.append(inference_response)
 
         # You should return a list of pb_utils.InferenceResponse. Length
@@ -136,4 +140,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        print('Cleaning up...')
+        print("Cleaning up...")

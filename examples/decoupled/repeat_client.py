@@ -34,7 +34,6 @@ import tritonclient.grpc as grpcclient
 
 
 class UserData:
-
     def __init__(self):
         self._completed_requests = queue.Queue()
 
@@ -56,18 +55,19 @@ delay_value = [1, 2, 3, 4]
 wait_value = 5
 
 inputs = []
-inputs.append(grpcclient.InferInput('IN', [len(in_value)], "INT32"))
-inputs.append(grpcclient.InferInput('DELAY', [len(delay_value)], "UINT32"))
-inputs.append(grpcclient.InferInput('WAIT', [1], "UINT32"))
+inputs.append(grpcclient.InferInput("IN", [len(in_value)], "INT32"))
+inputs.append(grpcclient.InferInput("DELAY", [len(delay_value)], "UINT32"))
+inputs.append(grpcclient.InferInput("WAIT", [1], "UINT32"))
 
 outputs = []
-outputs.append(grpcclient.InferRequestedOutput('OUT'))
-outputs.append(grpcclient.InferRequestedOutput('IDX'))
+outputs.append(grpcclient.InferRequestedOutput("OUT"))
+outputs.append(grpcclient.InferRequestedOutput("IDX"))
 
 user_data = UserData()
 
-with grpcclient.InferenceServerClient(url="localhost:8001",
-                                      verbose=True) as triton_client:
+with grpcclient.InferenceServerClient(
+    url="localhost:8001", verbose=True
+) as triton_client:
     # Establish stream
     triton_client.start_stream(callback=partial(callback, user_data))
 
@@ -79,10 +79,12 @@ with grpcclient.InferenceServerClient(url="localhost:8001",
     inputs[2].set_data_from_numpy(wait_data)
 
     request_id = "0"
-    triton_client.async_stream_infer(model_name=model_name,
-                                     inputs=inputs,
-                                     request_id=request_id,
-                                     outputs=outputs)
+    triton_client.async_stream_infer(
+        model_name=model_name,
+        inputs=inputs,
+        request_id=request_id,
+        outputs=outputs,
+    )
 
     # Retrieve results...
     recv_count = 0
@@ -102,18 +104,24 @@ with grpcclient.InferenceServerClient(url="localhost:8001",
 
     # Validate results...
     if len(result_dict[request_id]) != len(in_value):
-        print("expected {} many responses for request id {}, got {}".format(
-            len(in_value), request_id, len(result_dict[request_id])))
+        print(
+            "expected {} many responses for request id {}, got {}".format(
+                len(in_value), request_id, len(result_dict[request_id])
+            )
+        )
         sys.exit(1)
 
     result_list = result_dict[request_id]
     for i in range(len(result_list)):
         expected_data = np.array([in_value[i]], dtype=np.int32)
-        this_data = result_list[i][1].as_numpy('OUT')
+        this_data = result_list[i][1].as_numpy("OUT")
         if not np.array_equal(expected_data, this_data):
-            print("incorrect data: expected {}, got {}".format(
-                expected_data, this_data))
+            print(
+                "incorrect data: expected {}, got {}".format(
+                    expected_data, this_data
+                )
+            )
             sys.exit(1)
 
-    print('PASS: repeat_int32')
+    print("PASS: repeat_int32")
     sys.exit(0)
