@@ -24,10 +24,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import torch
-import torchvision.models as models
 import argparse
 import os
+
+import torch
+import torchvision.models as models
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -24,13 +24,13 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import queue
 import sys
 from functools import partial
-import numpy as np
-import queue
 
-from tritonclient.utils import *
+import numpy as np
 import tritonclient.grpc as grpcclient
+from tritonclient.utils import *
 
 
 class UserData:

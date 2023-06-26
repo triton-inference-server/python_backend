@@ -60,3 +60,14 @@ ignore-regex = "\\b(.{1,4}|[A-Z]\\w*T)\\b"
 builtin = "clear"
 # disable warnings about binary files and wrong encoding
 quiet-level = 3
+
+[tool.isort]
+use_parentheses = true
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+ensure_newline_before_comments = true
+line_length = 88
+balanced_wrapping = true
+indent = "    "
+skip = ["build"]

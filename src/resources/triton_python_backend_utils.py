@@ -24,9 +24,10 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
-import struct
 import json
+import struct
+
+import numpy as np
 
 TRITON_STRING_TO_NUMPY = {
     "TYPE_BOOL": bool,

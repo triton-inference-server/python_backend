@@ -24,11 +24,13 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os, sys
-import numpy as np
-import json
-import tritongrpcclient
 import argparse
+import json
+import os
+import sys
+
+import numpy as np
+import tritongrpcclient
 
 
 def load_image(img_path: str):

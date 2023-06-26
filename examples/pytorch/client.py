@@ -24,10 +24,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from tritonclient.utils import *
-import tritonclient.http as httpclient
 import sys
+
 import numpy as np
+import tritonclient.http as httpclient
+from tritonclient.utils import *
 
 model_name = "pytorch"
 shape = [4]
