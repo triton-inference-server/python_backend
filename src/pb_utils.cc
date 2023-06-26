@@ -61,8 +61,9 @@ CUDAHandler::CUDAHandler()
 {
   dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
 
-  // If libcuda.so is successfully opened, it must be able to find
-  // "cuPointerGetAttribute" and "cuGetErrorString" symbols.
+  // If libcuda.so is succesfully opened, it must be able to find
+  // "cuPointerGetAttribute", "cuGetErrorString", and
+  // "cuDevicePrimaryCtxGetState" symbols.
   if (dl_open_handle_ != nullptr) {
     void* cu_pointer_get_attribute_fn =
         dlsym(dl_open_handle_, "cuPointerGetAttribute");
@@ -88,12 +89,15 @@ CUDAHandler::CUDAHandler()
     }
     *((void**)&cu_init_fn_) = cu_init_fn;
 
-    void* cu_device_primary_ctx_get_state_fn = dlsym(dl_open_handle_, "cuDevicePrimaryCtxGetState");
+    void* cu_device_primary_ctx_get_state_fn =
+        dlsym(dl_open_handle_, "cuDevicePrimaryCtxGetState");
     if (cu_device_primary_ctx_get_state_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuDevicePrimaryCtxGetState'. Error: ") + dlerror());
+          std::string("Failed to dlsym 'cuDevicePrimaryCtxGetState'. Error: ") +
+          dlerror());
     }
-    *((void**)&cu_device_primary_ctx_get_state_fn_) = cu_device_primary_ctx_get_state_fn;
+    *((void**)&cu_device_primary_ctx_get_state_fn_) =
+        cu_device_primary_ctx_get_state_fn;
 
     // Initialize the driver API.
     CUresult cuda_err = (*cu_init_fn_)(0 /* flags */);
@@ -175,17 +179,18 @@ CUDAHandler::CloseCudaHandle(int64_t memory_type_id, void* data_ptr)
 }
 
 bool
-CUDAHandler::HasPrimaryContext(int device) {
+CUDAHandler::HasPrimaryContext(int device)
+{
   unsigned int ctx_flags;
   int ctx_is_active = 0;
-  CUresult cuda_err =(*cu_device_primary_ctx_get_state_fn_)(device, &ctx_flags, &ctx_is_active);
+  CUresult cuda_err = (*cu_device_primary_ctx_get_state_fn_)(
+      device, &ctx_flags, &ctx_is_active);
   if (cuda_err != CUDA_SUCCESS) {
     const char* error_string;
     (*cu_get_error_string_fn_)(cuda_err, &error_string);
     throw PythonBackendException(
         std::string(
-            "failed to get primary context state: " +
-            std::string(error_string))
+            "failed to get primary context state: " + std::string(error_string))
             .c_str());
   }
 
@@ -200,8 +205,7 @@ CUDAHandler::MaybeSetDevice(int device)
     if (err != cudaSuccess) {
       throw PythonBackendException(
           std::string("Failed to set the CUDA device to ") +
-          std::to_string(device) +
-          ". error: " + cudaGetErrorString(err));
+          std::to_string(device) + ". error: " + cudaGetErrorString(err));
     }
   }
 }
@@ -233,7 +237,6 @@ ScopedSetDevice::~ScopedSetDevice()
     CUDAHandler& cuda_handler = CUDAHandler::getInstance();
     cuda_handler.MaybeSetDevice(current_device_);
   }
-
 }
 #endif
 

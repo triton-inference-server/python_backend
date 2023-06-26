@@ -243,7 +243,8 @@ class CUDAHandler {
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
   CUresult (*cu_init_fn_)(unsigned int) = nullptr;
-  CUresult (*cu_device_primary_ctx_get_state_fn_)(CUdevice, unsigned int*, int*)  = nullptr;
+  CUresult (*cu_device_primary_ctx_get_state_fn_)(
+      CUdevice, unsigned int*, int*) = nullptr;
   CUDAHandler();
 
   /// Check if a primary context has already been created for a device.
@@ -270,14 +271,15 @@ class CUDAHandler {
 
 
 /// A helper class to change the current device and restore the old context. The
-/// old context will be restored only when if the primary context for that
-/// device is already created, otherwise the CUDA context will remain as the
-/// primary context of 'device'.
+/// old context will be restored only if the primary context for that device is
+/// already created, otherwise the CUDA context will remain as the primary
+/// context of 'device'.
 class ScopedSetDevice {
-public:
+ public:
   ScopedSetDevice(int device);
   ~ScopedSetDevice();
-private:
+
+ private:
   int device_;
   int current_device_;
 };
