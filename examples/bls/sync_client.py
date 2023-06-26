@@ -42,9 +42,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         httpclient.InferInput(
             "INPUT1", input1_data.shape, np_to_triton_dtype(input1_data.dtype)
         ),
-        httpclient.InferInput(
-            "MODEL_NAME", [1], np_to_triton_dtype(np.object_)
-        ),
+        httpclient.InferInput("MODEL_NAME", [1], np_to_triton_dtype(np.object_)),
     ]
     inputs[0].set_data_from_numpy(input0_data)
     inputs[1].set_data_from_numpy(input1_data)
@@ -57,9 +55,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         httpclient.InferRequestedOutput("OUTPUT1"),
     ]
 
-    response = client.infer(
-        model_name, inputs, request_id=str(1), outputs=outputs
-    )
+    response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
     result = response.get_response()
     output0_data = response.as_numpy("OUTPUT0")
@@ -85,9 +81,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
 
     # Will perform the inference request on the pytorch model:
     inputs[2].set_data_from_numpy(np.array(["pytorch"], dtype=np.object_))
-    response = client.infer(
-        model_name, inputs, request_id=str(1), outputs=outputs
-    )
+    response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
     result = response.get_response()
     output0_data = response.as_numpy("OUTPUT0")
@@ -117,12 +111,8 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     print("\n")
     print("=========='undefined' model result==========")
     try:
-        inputs[2].set_data_from_numpy(
-            np.array(["undefined_model"], dtype=np.object_)
-        )
-        response = client.infer(
-            model_name, inputs, request_id=str(1), outputs=outputs
-        )
+        inputs[2].set_data_from_numpy(np.array(["undefined_model"], dtype=np.object_))
+        response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
     except InferenceServerException as e:
         print(e.message())
 

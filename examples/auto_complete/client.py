@@ -66,13 +66,8 @@ if __name__ == "__main__":
         for model_name in models:
             # Validate the auto-complete model configuration
             model_config = client.get_model_config(model_name)
-            if (
-                model_config["max_batch_size"]
-                != expected_max_batch_size[model_name]
-            ):
-                print(
-                    "model '" + model_name + "' has unexpected max_batch_size"
-                )
+            if model_config["max_batch_size"] != expected_max_batch_size[model_name]:
+                print("model '" + model_name + "' has unexpected max_batch_size")
                 sys.exit(1)
             validate_ios(model_config["input"], expected_inputs, model_name)
             validate_ios(model_config["output"], expected_outputs, model_name)

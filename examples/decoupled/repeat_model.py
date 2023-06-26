@@ -108,12 +108,8 @@ class TritonPythonModel:
         idx_config = pb_utils.get_output_config_by_name(model_config, "IDX")
 
         # Convert Triton types to numpy types
-        self.out_dtype = pb_utils.triton_string_to_numpy(
-            out_config["data_type"]
-        )
-        self.idx_dtype = pb_utils.triton_string_to_numpy(
-            idx_config["data_type"]
-        )
+        self.out_dtype = pb_utils.triton_string_to_numpy(out_config["data_type"])
+        self.idx_dtype = pb_utils.triton_string_to_numpy(idx_config["data_type"])
 
         # To keep track of response threads so that we can delay
         # the finalizing the model until all response threads
@@ -156,12 +152,8 @@ class TritonPythonModel:
                 "unsupported batch size " + len(requests)
             )
 
-        in_input = pb_utils.get_input_tensor_by_name(
-            requests[0], "IN"
-        ).as_numpy()
-        delay_input = pb_utils.get_input_tensor_by_name(
-            requests[0], "DELAY"
-        ).as_numpy()
+        in_input = pb_utils.get_input_tensor_by_name(requests[0], "IN").as_numpy()
+        delay_input = pb_utils.get_input_tensor_by_name(requests[0], "DELAY").as_numpy()
         if in_input.shape != delay_input.shape:
             raise pb_utils.TritonModelException(
                 f"expected IN and DELAY shape to match, got {list(in_input.shape)} and {list(delay_input.shape)}."
@@ -187,9 +179,7 @@ class TritonPythonModel:
 
         # Read WAIT input for wait time, then return so that Triton can call
         # execute again with another request.
-        wait_input = pb_utils.get_input_tensor_by_name(
-            requests[0], "WAIT"
-        ).as_numpy()
+        wait_input = pb_utils.get_input_tensor_by_name(requests[0], "WAIT").as_numpy()
         time.sleep(wait_input[0] / 1000)
 
         # Unlike in non-decoupled model transaction policy, execute function
@@ -218,9 +208,7 @@ class TritonPythonModel:
             time.sleep(delay_value / 1000)
 
             idx_output = pb_utils.Tensor("IDX", numpy.array([idx], idx_dtype))
-            out_output = pb_utils.Tensor(
-                "OUT", numpy.array([in_value], out_dtype)
-            )
+            out_output = pb_utils.Tensor("OUT", numpy.array([in_value], out_dtype))
             response = pb_utils.InferenceResponse(
                 output_tensors=[idx_output, out_output]
             )
@@ -230,9 +218,7 @@ class TritonPythonModel:
         # done sending responses for the corresponding request. We can't use the
         # response sender after closing it. The response sender is closed by
         # setting the TRITONSERVER_RESPONSE_COMPLETE_FINAL.
-        response_sender.send(
-            flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL
-        )
+        response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
         with self.inflight_thread_count_lck:
             self.inflight_thread_count -= 1

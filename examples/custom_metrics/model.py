@@ -58,20 +58,12 @@ class TritonPythonModel:
 
         # Parse model_config and extract OUTPUT0 and OUTPUT1 configuration
         self.model_config = model_config = json.loads(args["model_config"])
-        output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT0"
-        )
-        output1_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT1"
-        )
+        output0_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT0")
+        output1_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT1")
 
         # Convert Triton types to numpy types
-        self.out0_dtype = pb_utils.triton_string_to_numpy(
-            output0_config["data_type"]
-        )
-        self.out1_dtype = pb_utils.triton_string_to_numpy(
-            output1_config["data_type"]
-        )
+        self.out0_dtype = pb_utils.triton_string_to_numpy(output0_config["data_type"])
+        self.out1_dtype = pb_utils.triton_string_to_numpy(output1_config["data_type"])
 
         # Create a MetricFamily object to report the latency of the model
         # execution. The 'kind' parameter must be either 'COUNTER' or
@@ -137,12 +129,8 @@ class TritonPythonModel:
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
-            out_tensor_0 = pb_utils.Tensor(
-                "OUTPUT0", out_0.astype(self.out0_dtype)
-            )
-            out_tensor_1 = pb_utils.Tensor(
-                "OUTPUT1", out_1.astype(self.out1_dtype)
-            )
+            out_tensor_0 = pb_utils.Tensor("OUTPUT0", out_0.astype(self.out0_dtype))
+            out_tensor_1 = pb_utils.Tensor("OUTPUT1", out_1.astype(self.out1_dtype))
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
@@ -171,9 +159,7 @@ class TritonPythonModel:
         self.metric.increment(end_ns - start_ns)
         logger = pb_utils.Logger
         logger.log_info(
-            "Cumulative requests processing latency: {}".format(
-                self.metric.value()
-            )
+            "Cumulative requests processing latency: {}".format(self.metric.value())
         )
 
         # You should return a list of pb_utils.InferenceResponse. Length

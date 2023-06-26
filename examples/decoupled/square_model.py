@@ -202,9 +202,7 @@ class TritonPythonModel:
         # corresponding request.
 
         for idx in range(in_input[0]):
-            out_output = pb_utils.Tensor(
-                "OUT", np.array([in_input[0]], np.int32)
-            )
+            out_output = pb_utils.Tensor("OUT", np.array([in_input[0]], np.int32))
             response = pb_utils.InferenceResponse(output_tensors=[out_output])
             response_sender.send(response)
 
@@ -212,9 +210,7 @@ class TritonPythonModel:
         # done sending responses for the corresponding request. We can't use the
         # response sender after closing it. The response sender is closed by
         # setting the TRITONSERVER_RESPONSE_COMPLETE_FINAL.
-        response_sender.send(
-            flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL
-        )
+        response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
         with self.inflight_thread_count_lck:
             self.inflight_thread_count -= 1

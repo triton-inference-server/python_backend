@@ -117,9 +117,7 @@ with grpcclient.InferenceServerClient(
         this_data = result_list[i][1].as_numpy("OUT")
         if not np.array_equal(expected_data, this_data):
             print(
-                "incorrect data: expected {}, got {}".format(
-                    expected_data, this_data
-                )
+                "incorrect data: expected {}, got {}".format(expected_data, this_data)
             )
             sys.exit(1)
 

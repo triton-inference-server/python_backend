@@ -72,14 +72,10 @@ class TritonPythonModel:
         self.model_config = model_config = json.loads(args["model_config"])
 
         # Get OUTPUT0 configuration
-        output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT0"
-        )
+        output0_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT0")
 
         # Get OUTPUT1 configuration
-        output1_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT1"
-        )
+        output1_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT1")
 
         # Convert Triton types to numpy types
         self.output0_dtype = pb_utils.triton_string_to_numpy(

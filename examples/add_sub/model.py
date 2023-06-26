@@ -59,14 +59,10 @@ class TritonPythonModel:
         self.model_config = model_config = json.loads(args["model_config"])
 
         # Get OUTPUT0 configuration
-        output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT0"
-        )
+        output0_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT0")
 
         # Get OUTPUT1 configuration
-        output1_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT1"
-        )
+        output1_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT1")
 
         # Convert Triton types to numpy types
         self.output0_dtype = pb_utils.triton_string_to_numpy(
@@ -118,12 +114,8 @@ class TritonPythonModel:
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
-            out_tensor_0 = pb_utils.Tensor(
-                "OUTPUT0", out_0.astype(output0_dtype)
-            )
-            out_tensor_1 = pb_utils.Tensor(
-                "OUTPUT1", out_1.astype(output1_dtype)
-            )
+            out_tensor_0 = pb_utils.Tensor("OUTPUT0", out_0.astype(output0_dtype))
+            out_tensor_1 = pb_utils.Tensor("OUTPUT1", out_1.astype(output1_dtype))
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.

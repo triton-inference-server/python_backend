@@ -62,9 +62,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         httpclient.InferRequestedOutput("OUTPUT1"),
     ]
 
-    response = client.infer(
-        model_name, inputs, request_id=str(1), outputs=outputs
-    )
+    response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
     output0_data = response.as_numpy("OUTPUT0")
     output1_data = response.as_numpy("OUTPUT1")
@@ -93,9 +91,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
             sys.exit(1)
         else:
             print(
-                "custom_metrics example: found pattern '{}' in metrics".format(
-                    pattern
-                )
+                "custom_metrics example: found pattern '{}' in metrics".format(pattern)
             )
 
     print("PASS: custom_metrics")

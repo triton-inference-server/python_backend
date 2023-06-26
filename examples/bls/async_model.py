@@ -110,9 +110,7 @@ class TritonPythonModel:
             # Wait for all the inference requests to finish. The execution
             # of the Python script will be blocked until all the awaitables
             # are resolved.
-            inference_responses = await asyncio.gather(
-                *inference_response_awaits
-            )
+            inference_responses = await asyncio.gather(*inference_response_awaits)
 
             for infer_response in inference_responses:
                 # Make sure that the inference response doesn't have an error.

@@ -53,9 +53,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         httpclient.InferRequestedOutput("OUTPUT1"),
     ]
 
-    response = client.infer(
-        model_name, inputs, request_id=str(1), outputs=outputs
-    )
+    response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
     result = response.get_response()
     output0_data = response.as_numpy("OUTPUT0")

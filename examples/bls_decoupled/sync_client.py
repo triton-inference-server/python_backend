@@ -45,9 +45,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         inputs[0].set_data_from_numpy(input_data)
         outputs = [httpclient.InferRequestedOutput("SUM")]
 
-        response = client.infer(
-            model_name, inputs, request_id=str(1), outputs=outputs
-        )
+        response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
         result = response.get_response()
         output_data = response.as_numpy("SUM")

@@ -48,9 +48,7 @@ if __name__ == "__main__":
         default="ensemble_python_resnet50",
         help="Model name",
     )
-    parser.add_argument(
-        "--image", type=str, required=True, help="Path to the image"
-    )
+    parser.add_argument("--image", type=str, required=True, help="Path to the image")
     parser.add_argument(
         "--url",
         type=str,
@@ -92,9 +90,7 @@ if __name__ == "__main__":
     image_data = load_image(args.image)
     image_data = np.expand_dims(image_data, axis=0)
 
-    inputs.append(
-        tritongrpcclient.InferInput(input_name, image_data.shape, "UINT8")
-    )
+    inputs.append(tritongrpcclient.InferInput(input_name, image_data.shape, "UINT8"))
     outputs.append(tritongrpcclient.InferRequestedOutput(output_name))
 
     inputs[0].set_data_from_numpy(image_data)

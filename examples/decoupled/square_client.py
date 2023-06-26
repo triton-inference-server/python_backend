@@ -101,9 +101,7 @@ with grpcclient.InferenceServerClient(
             print("response for request id {} not received".format(this_id))
             sys.exit(1)
         elif in_values[i] == 0 and this_id in result_dict.keys():
-            print(
-                "received unexpected response for request id {}".format(this_id)
-            )
+            print("received unexpected response for request id {}".format(this_id))
             sys.exit(1)
         if in_values[i] != 0:
             if len(result_dict[this_id]) != in_values[i]:

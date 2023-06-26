@@ -90,9 +90,7 @@ class TritonPythonModel:
             in_1 = pb_utils.get_input_tensor_by_name(request, "INPUT1")
 
             # Get Model Name
-            model_name = pb_utils.get_input_tensor_by_name(
-                request, "MODEL_NAME"
-            )
+            model_name = pb_utils.get_input_tensor_by_name(request, "MODEL_NAME")
 
             # Model Name string
             model_name_string = model_name.as_numpy()[0]
@@ -111,9 +109,7 @@ class TritonPythonModel:
             # it has an error and you can't proceed with your model execution
             # you can raise an exception.
             if infer_response.has_error():
-                raise pb_utils.TritonModelException(
-                    infer_response.error().message()
-                )
+                raise pb_utils.TritonModelException(infer_response.error().message())
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.

@@ -122,9 +122,7 @@ class TritonPythonModel:
             # Store the awaitable inside the array. We don't need
             # the inference response immediately so we do not `await`
             # here.
-            inference_response_awaits.append(
-                infer_request.async_exec(decoupled=True)
-            )
+            inference_response_awaits.append(infer_request.async_exec(decoupled=True))
 
         # Wait for all the inference requests to finish. The execution
         # of the Python script will be blocked until all the awaitables

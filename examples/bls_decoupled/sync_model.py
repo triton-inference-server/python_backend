@@ -123,9 +123,7 @@ class TritonPythonModel:
         for infer_response in infer_responses:
             # If inference response has an error, raise an exception
             if infer_response.has_error():
-                raise pb_utils.TritonModelException(
-                    infer_response.error().message()
-                )
+                raise pb_utils.TritonModelException(infer_response.error().message())
 
             # Check for the last empty response.
             if len(infer_response.output_tensors()) > 0:

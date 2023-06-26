@@ -71,9 +71,7 @@ def serialize_byte_tensor(input_tensor):
     # If the input is a tensor of string/bytes objects, then must flatten those
     # into a 1-dimensional array containing the 4-byte byte size followed by the
     # actual element bytes. All elements are concatenated together in "C" order.
-    if (input_tensor.dtype == np.object_) or (
-        input_tensor.dtype.type == np.bytes_
-    ):
+    if (input_tensor.dtype == np.object_) or (input_tensor.dtype.type == np.bytes_):
         flattened_ls = []
         for obj in np.nditer(input_tensor, flags=["refs_ok"], order="C"):
             # If directly passing bytes to BYTES type,
@@ -437,10 +435,7 @@ class ModelConfig:
                         + "', model provides "
                         + input["data_type"]
                     )
-                elif (
-                    current_input["dims"]
-                    and current_input["dims"] != input["dims"]
-                ):
+                elif current_input["dims"] and current_input["dims"] != input["dims"]:
                     raise ValueError(
                         "model '"
                         + self._model_config["name"]
@@ -523,8 +518,7 @@ class ModelConfig:
                         + output["data_type"]
                     )
                 elif (
-                    current_output["dims"]
-                    and current_output["dims"] != output["dims"]
+                    current_output["dims"] and current_output["dims"] != output["dims"]
                 ):
                     raise ValueError(
                         "model '"

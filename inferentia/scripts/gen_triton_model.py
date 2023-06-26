@@ -64,9 +64,7 @@ def tf_to_triton_dtype(dtype):
 def parse_tf_tensors(saved_model_dir, tag_set, signature_def_key):
     from tensorflow.python.tools import saved_model_utils
 
-    meta_graph_def = saved_model_utils.get_meta_graph_def(
-        saved_model_dir, tag_set
-    )
+    meta_graph_def = saved_model_utils.get_meta_graph_def(saved_model_dir, tag_set)
 
     input_dict = {}
     input_signatures = list(
@@ -103,10 +101,8 @@ def parse_io_tensors(tensors):
 
 
 def get_parameter_spec(key1, value):
-    param_spec = (
-        'parameters: {{key: "{}", value: {{string_value: "{}"}}}} \n'.format(
-            key1, value
-        )
+    param_spec = 'parameters: {{key: "{}", value: {{string_value: "{}"}}}} \n'.format(
+        key1, value
     )
 
     return param_spec
@@ -644,9 +640,7 @@ class TritonPythonModel:
 
     if using_tensorflow_model:
         triton_pmi += get_tensorflow_initialize_impl(is_inf2)
-        triton_pmi += get_tensorflow_execute_impl(
-            disable_batch_requests_to_neuron
-        )
+        triton_pmi += get_tensorflow_execute_impl(disable_batch_requests_to_neuron)
     else:
         triton_pmi += get_pytorch_initialize_impl(is_inf2)
         triton_pmi += get_pytorch_execute_impl(disable_batch_requests_to_neuron)
@@ -869,9 +863,7 @@ if __name__ == "__main__":
             FLAGS.compiled_model, FLAGS.tag_set, FLAGS.signature_def_key
         )
 
-    nc_start_idx, nc_end_idx = [
-        int(i) for i in FLAGS.neuron_core_range.split(":")
-    ]
+    nc_start_idx, nc_end_idx = [int(i) for i in FLAGS.neuron_core_range.split(":")]
 
     model_version_dir = FLAGS.triton_model_dir + "/" + str(FLAGS.model_version)
     try:

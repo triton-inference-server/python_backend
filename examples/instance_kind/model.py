@@ -72,8 +72,6 @@ class TritonPythonModel:
                 result = self.model(
                     torch.as_tensor(input_tensor.as_numpy(), device=self.device)
                 )
-            out_tensor = pb_utils.Tensor.from_dlpack(
-                "OUTPUT", to_dlpack(result)
-            )
+            out_tensor = pb_utils.Tensor.from_dlpack("OUTPUT", to_dlpack(result))
             responses.append(pb_utils.InferenceResponse([out_tensor]))
         return responses

@@ -94,11 +94,7 @@ if __name__ == "__main__":
         labels_dict = {idx: line.strip() for idx, line in enumerate(f)}
 
     if args.verbose:
-        print(
-            json.dumps(
-                triton_client.get_model_config(args.model_name), indent=4
-            )
-        )
+        print(json.dumps(triton_client.get_model_config(args.model_name), indent=4))
 
     input_name = "INPUT"
     output_name = "OUTPUT"
