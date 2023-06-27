@@ -49,7 +49,7 @@ endif()
 #
 # Dependencies
 #
-# FetchContent's composibility isn't very good. We must include the
+# FetchContent's composability isn't very good. We must include the
 # transitive closure of all repos so that we can override the tag.
 #
 include(FetchContent)
@@ -249,7 +249,7 @@ target_link_libraries(
     Threads::Threads
     triton-backend-utils          # from repo-backend
     ${CMAKE_DL_LIBS}              # dlopen and dlclose
-    -lrt                          # shared memory 
+    -lrt                          # shared memory
     triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
     -larchive
@@ -263,7 +263,7 @@ target_link_libraries(
    triton-backend-utils           # from repo-backend
    ${CMAKE_DL_LIBS}               # dlopen and dlclose
    pybind11::embed
-   -lrt                           # shared memory 
+   -lrt                           # shared memory
    -larchive                      # libarchive
 )
 

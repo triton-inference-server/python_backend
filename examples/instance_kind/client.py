@@ -34,46 +34,55 @@ import torch
 import tritonclient.http as httpclient
 from tritonclient.utils import *
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name",
-                        type=str,
-                        required=False,
-                        default="resnet50",
-                        help="Model name")
-    parser.add_argument("--image_url",
-                        type=str,
-                        required=False,
-                        default=\
-                            "http://images.cocodataset.org/test2017/000000557146.jpg",
-                        help=\
-                            "Image URL. Default is:\
-                            http://images.cocodataset.org/test2017/000000557146.jpg"
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        required=False,
+        default="resnet50",
+        help="Model name",
     )
-    parser.add_argument("--url",
-                        type=str,
-                        required=False,
-                        default="localhost:8000",
-                        help="Inference server URL. Default is localhost:8000.")
-    parser.add_argument('-v',
-                        "--verbose",
-                        action="store_true",
-                        required=False,
-                        default=False,
-                        help='Enable verbose output')
-    parser.add_argument("--label_file",
-                        type=str,
-                        required=False,
-                        default="./resnet50_labels.txt",
-                        help="Path to the file with text representation \
-                        of available labels")
+    parser.add_argument(
+        "--image_url",
+        type=str,
+        required=False,
+        default="http://images.cocodataset.org/test2017/000000557146.jpg",
+        help="Image URL. Default is:\
+                            http://images.cocodataset.org/test2017/000000557146.jpg",
+    )
+    parser.add_argument(
+        "--url",
+        type=str,
+        required=False,
+        default="localhost:8000",
+        help="Inference server URL. Default is localhost:8000.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        required=False,
+        default=False,
+        help="Enable verbose output",
+    )
+    parser.add_argument(
+        "--label_file",
+        type=str,
+        required=False,
+        default="./resnet50_labels.txt",
+        help="Path to the file with text representation \
+                        of available labels",
+    )
     args = parser.parse_args()
 
-    utils = torch.hub.load('NVIDIA/DeepLearningExamples:torchhub',
-                           'nvidia_convnets_processing_utils',
-                           skip_validation=True)
+    utils = torch.hub.load(
+        "NVIDIA/DeepLearningExamples:torchhub",
+        "nvidia_convnets_processing_utils",
+        skip_validation=True,
+    )
 
     try:
         triton_client = httpclient.InferenceServerClient(args.url)
@@ -85,9 +94,7 @@ if __name__ == "__main__":
         labels_dict = {idx: line.strip() for idx, line in enumerate(f)}
 
     if args.verbose:
-        print(
-            json.dumps(triton_client.get_model_config(args.model_name),
-                       indent=4))
+        print(json.dumps(triton_client.get_model_config(args.model_name), indent=4))
 
     input_name = "INPUT"
     output_name = "OUTPUT"
@@ -97,13 +104,13 @@ if __name__ == "__main__":
     output = httpclient.InferRequestedOutput(output_name)
 
     input.set_data_from_numpy(batch)
-    results = triton_client.infer(model_name=args.model_name,
-                                  inputs=[input],
-                                  outputs=[output])
+    results = triton_client.infer(
+        model_name=args.model_name, inputs=[input], outputs=[output]
+    )
 
     output_data = results.as_numpy(output_name)
     max_id = np.argmax(output_data, axis=1)[0]
     print("Results is class: {}".format(labels_dict[max_id]))
 
-    print('PASS: ResNet50 instance kind')
+    print("PASS: ResNet50 instance kind")
     sys.exit(0)

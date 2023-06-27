@@ -1,4 +1,4 @@
-# Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
+# Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -24,53 +24,59 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os, sys
-import numpy as np
-import json
-import tritongrpcclient
 import argparse
+import json
+import sys
+
+import numpy as np
+import tritongrpcclient
 
 
 def load_image(img_path: str):
     """
     Loads an encoded image as an array of bytes.
-    
+
     """
-    return np.fromfile(img_path, dtype='uint8')
+    return np.fromfile(img_path, dtype="uint8")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name",
-                        type=str,
-                        required=False,
-                        default="ensemble_python_resnet50",
-                        help="Model name")
-    parser.add_argument("--image",
-                        type=str,
-                        required=True,
-                        help="Path to the image")
-    parser.add_argument("--url",
-                        type=str,
-                        required=False,
-                        default="localhost:8001",
-                        help="Inference server URL. Default is localhost:8001.")
-    parser.add_argument('-v',
-                        "--verbose",
-                        action="store_true",
-                        required=False,
-                        default=False,
-                        help='Enable verbose output')
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        required=False,
+        default="ensemble_python_resnet50",
+        help="Model name",
+    )
+    parser.add_argument("--image", type=str, required=True, help="Path to the image")
+    parser.add_argument(
+        "--url",
+        type=str,
+        required=False,
+        default="localhost:8001",
+        help="Inference server URL. Default is localhost:8001.",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        required=False,
+        default=False,
+        help="Enable verbose output",
+    )
     parser.add_argument(
         "--label_file",
         type=str,
         default="./model_repository/resnet50_trt/labels.txt",
-        help="Path to the file with text representation of available labels")
+        help="Path to the file with text representation of available labels",
+    )
     args = parser.parse_args()
 
     try:
         triton_client = tritongrpcclient.InferenceServerClient(
-            url=args.url, verbose=args.verbose)
+            url=args.url, verbose=args.verbose
+        )
     except Exception as e:
         print("channel creation failed: " + str(e))
         sys.exit(1)
@@ -85,14 +91,13 @@ if __name__ == "__main__":
     image_data = load_image(args.image)
     image_data = np.expand_dims(image_data, axis=0)
 
-    inputs.append(
-        tritongrpcclient.InferInput(input_name, image_data.shape, "UINT8"))
+    inputs.append(tritongrpcclient.InferInput(input_name, image_data.shape, "UINT8"))
     outputs.append(tritongrpcclient.InferRequestedOutput(output_name))
 
     inputs[0].set_data_from_numpy(image_data)
-    results = triton_client.infer(model_name=args.model_name,
-                                  inputs=inputs,
-                                  outputs=outputs)
+    results = triton_client.infer(
+        model_name=args.model_name, inputs=inputs, outputs=outputs
+    )
 
     output0_data = results.as_numpy(output_name)
     print(output0_data)

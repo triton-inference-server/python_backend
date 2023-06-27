@@ -291,7 +291,7 @@ Stub::RunCommand()
           shm_pool_->Construct<InitializeResponseShm>();
 
       // The initialization is done in three steps. First the main process sends
-      // a message to the stub process asking to begin to initilize the Python
+      // a message to the stub process asking to begin to initialize the Python
       // model. After that is finished stub process sends a message to the
       // parent process that the initialization is finished.  Finally, the
       // parent process sends a message to the stub process asking the stub

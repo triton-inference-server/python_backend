@@ -42,7 +42,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -57,17 +57,13 @@ class TritonPythonModel:
         """
 
         # Parse model_config and extract OUTPUT0 and OUTPUT1 configuration
-        self.model_config = model_config = json.loads(args['model_config'])
-        output0_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT0")
-        output1_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT1")
+        self.model_config = model_config = json.loads(args["model_config"])
+        output0_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT0")
+        output1_config = pb_utils.get_output_config_by_name(model_config, "OUTPUT1")
 
         # Convert Triton types to numpy types
-        self.out0_dtype = pb_utils.triton_string_to_numpy(
-            output0_config['data_type'])
-        self.out1_dtype = pb_utils.triton_string_to_numpy(
-            output1_config['data_type'])
+        self.out0_dtype = pb_utils.triton_string_to_numpy(output0_config["data_type"])
+        self.out1_dtype = pb_utils.triton_string_to_numpy(output1_config["data_type"])
 
         # Create a MetricFamily object to report the latency of the model
         # execution. The 'kind' parameter must be either 'COUNTER' or
@@ -80,7 +76,7 @@ class TritonPythonModel:
         self.metric_family = pb_utils.MetricFamily(
             name="requests_process_latency_ns",
             description="Cumulative time spent processing requests",
-            kind=pb_utils.MetricFamily.COUNTER  # or pb_utils.MetricFamily.GAUGE
+            kind=pb_utils.MetricFamily.COUNTER,  # or pb_utils.MetricFamily.GAUGE
         )
 
         # Create a Metric object under the MetricFamily object. The 'labels'
@@ -88,10 +84,9 @@ class TritonPythonModel:
         # objects under the same MetricFamily object with unique labels. Empty
         # labels is allowed. The 'labels' parameter is optional. If you don't
         # specify the 'labels' parameter, empty labels will be used.
-        self.metric = self.metric_family.Metric(labels={
-            "model": "custom_metrics",
-            "version": "1"
-        })
+        self.metric = self.metric_family.Metric(
+            labels={"model": "custom_metrics", "version": "1"}
+        )
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -127,15 +122,15 @@ class TritonPythonModel:
             # Get INPUT1
             in_1 = pb_utils.get_input_tensor_by_name(request, "INPUT1")
 
-            out_0, out_1 = (in_0.as_numpy() + in_1.as_numpy(),
-                            in_0.as_numpy() - in_1.as_numpy())
+            out_0, out_1 = (
+                in_0.as_numpy() + in_1.as_numpy(),
+                in_0.as_numpy() - in_1.as_numpy(),
+            )
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
-            out_tensor_0 = pb_utils.Tensor("OUTPUT0",
-                                           out_0.astype(self.out0_dtype))
-            out_tensor_1 = pb_utils.Tensor("OUTPUT1",
-                                           out_1.astype(self.out1_dtype))
+            out_tensor_0 = pb_utils.Tensor("OUTPUT0", out_0.astype(self.out0_dtype))
+            out_tensor_1 = pb_utils.Tensor("OUTPUT1", out_1.astype(self.out1_dtype))
 
             # Create InferenceResponse. You can set an error here in case
             # there was a problem with handling this inference request.
@@ -143,9 +138,10 @@ class TritonPythonModel:
             # response:
             #
             # pb_utils.InferenceResponse(
-            #    output_tensors=..., TritonError("An error occured"))
+            #    output_tensors=..., TritonError("An error occurred"))
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[out_tensor_0, out_tensor_1])
+                output_tensors=[out_tensor_0, out_tensor_1]
+            )
             responses.append(inference_response)
 
         # Record the end time of processing the requests
@@ -162,8 +158,9 @@ class TritonPythonModel:
         #   - Metric.value(): Get the current value of the metric.
         self.metric.increment(end_ns - start_ns)
         logger = pb_utils.Logger
-        logger.log_info("Cumulative requests processing latency: {}".format(
-            self.metric.value()))
+        logger.log_info(
+            "Cumulative requests processing latency: {}".format(self.metric.value())
+        )
 
         # You should return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
@@ -174,4 +171,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        print('Cleaning up...')
+        print("Cleaning up...")
