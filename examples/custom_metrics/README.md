@@ -34,7 +34,7 @@ In this section we demonstrate an end-to-end example for
 should contain [custom_metrics](./model.py) model. The
 [custom_metrics](./model.py) model uses
 [Custom Metrics API](../../README.md#custom-metrics) to register and collect
-custom metrics. 
+custom metrics.
 
 ## Deploying the Custom Metrics Models
 

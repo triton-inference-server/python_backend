@@ -291,7 +291,7 @@ StubLauncher::Launch()
   if (pid == 0) {
     // Replace this child process with the new stub process.
     execvp("bash", (char**)stub_args);
-    // execvp() never return if succeeded. Otherwise, an error has occured.
+    // execvp() never return if succeeded. Otherwise, an error has occurred.
     std::stringstream ss;
     ss << "Failed to run python backend stub. Errno = " << errno << '\n'
        << "Python backend stub path: " << python_backend_stub << '\n'

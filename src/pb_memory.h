@@ -137,7 +137,7 @@ class PbMemory {
   bool opened_cuda_ipc_handle_;
 
 #ifdef TRITON_ENABLE_GPU
-  /// Calculate the pointer offest from the base address.
+  /// Calculate the pointer offset from the base address.
   /// \return The offset of a device pointer.
   /// \throws PythonBackendException if the tensor is stored in CPU.
   uint64_t GetGPUPointerOffset();

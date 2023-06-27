@@ -24,10 +24,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from tritonclient.utils import *
-import tritonclient.http as httpclient
-import numpy as np
 import sys
+
+import numpy as np
+import tritonclient.http as httpclient
+from tritonclient.utils import *
 
 model_name = "bls_decoupled_sync"
 shape = [1]
@@ -38,16 +39,14 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     for in_value in in_values:
         input_data = np.array([in_value], dtype=np.int32)
         inputs = [
-            httpclient.InferInput("IN", input_data.shape,
-                                  np_to_triton_dtype(input_data.dtype))
+            httpclient.InferInput(
+                "IN", input_data.shape, np_to_triton_dtype(input_data.dtype)
+            )
         ]
         inputs[0].set_data_from_numpy(input_data)
         outputs = [httpclient.InferRequestedOutput("SUM")]
 
-        response = client.infer(model_name,
-                                inputs,
-                                request_id=str(1),
-                                outputs=outputs)
+        response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
         result = response.get_response()
         output_data = response.as_numpy("SUM")
@@ -60,5 +59,5 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
             ).format(input_data * input_data, output_data)
             sys.exit(1)
 
-    print('PASS: BLS Decoupled Sync')
+    print("PASS: BLS Decoupled Sync")
     sys.exit(0)

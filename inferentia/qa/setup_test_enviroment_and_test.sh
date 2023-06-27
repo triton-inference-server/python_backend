@@ -51,7 +51,7 @@ UPSTREAM_CONTAINER_VERSION=""
 USAGE="
 usage: setup_test_enviroment_and_test.sh [options]. These setting will override exported variables
 
-Setup enviroment for testing on Inferentia chips and run perf analyzer tests. 
+Setup environment for testing on Inferentia chips and run perf analyzer tests.
 -h|--help                        Shows usage
 -d|--default-repo-tag            DEFAULT_REPO_TAG for building the test container. Default is main
 -s|--server-repo-tag             TRITON_SERVER_REPO_TAG for building test container. Default same DEFAULT_REPO_TAG
@@ -113,7 +113,7 @@ cd ${TRITON_PATH}/server
 git clone --single-branch --depth=1 -b ${TRITON_CLIENT_REPO_TAG} \
           https://github.com/triton-inference-server/client.git clientrepo
 
-# First set up inferentia and run in detatched mode
+# First set up inferentia and run in detached mode
 cd ${TRITON_PATH}/python_backend
 chmod 777 ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
 sudo ${TRITON_PATH}/python_backend/inferentia/scripts/setup-pre-container.sh
@@ -131,7 +131,7 @@ if [ "${UPSTREAM_CONTAINER_VERSION}" = "" ]; then
     echo "found upstream container version: ${UPSTREAM_CONTAINER_VERSION} from build.py"
 fi
 
-# Build container with only python backend 
+# Build container with only python backend
 cd ${TRITON_PATH}/server
 pip3 install docker
 ./build.py --container-version=${CONTAINER_VERSION} \

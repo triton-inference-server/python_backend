@@ -141,13 +141,13 @@ apt-get update && \
 
 
 # Set Pip repository  to point to the Neuron repository
-# since we need to use pip to update: 
+# since we need to use pip to update:
 #  https://aws.amazon.com/blogs/developer/neuron-conda-packages-eol/
 pip config set global.extra-index-url https://pip.repos.neuron.amazonaws.com
 pip install --upgrade pip
 
 if [ ${INSTALL_INF2} -eq 1 ];then
-    # Install Neuron Runtime 
+    # Install Neuron Runtime
     # Then install new neuron libraries
     . /etc/os-release
     tee /etc/apt/sources.list.d/neuron.list > /dev/null <<EOF
@@ -178,8 +178,8 @@ if [ ${USE_PYTORCH} -eq 1 ];then
     if [ ${INSTALL_INF1} -eq 1 ]; then
         pip install --upgrade torch-neuron neuron-cc[tensorflow] "protobuf" torchvision "transformers==4.6.0"
     elif [ ${INSTALL_INF2} -eq 1 ]; then
-        pip install --upgrade neuronx-cc==2.* torch-neuronx torchvision transformers-neuronx 
-    fi 
+        pip install --upgrade neuronx-cc==2.* torch-neuronx torchvision transformers-neuronx
+    fi
 fi
 
 # Upgrade the rules and sockets

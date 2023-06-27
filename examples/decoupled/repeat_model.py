@@ -25,9 +25,10 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import json
-import numpy
 import threading
 import time
+
+import numpy
 
 # triton_python_backend_utils is available in every Triton Python model. You
 # need to use this module to create inference requests and responses. It also
@@ -72,7 +73,7 @@ class TritonPythonModel:
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
-        the model to intialize any state associated with this model.
+        the model to initialize any state associated with this model.
 
         Parameters
         ----------
@@ -87,15 +88,19 @@ class TritonPythonModel:
         """
 
         # You must parse model_config. JSON string is not parsed here
-        self.model_config = model_config = json.loads(args['model_config'])
+        self.model_config = model_config = json.loads(args["model_config"])
 
         using_decoupled = pb_utils.using_decoupled_model_transaction_policy(
-            model_config)
+            model_config
+        )
         if not using_decoupled:
             raise pb_utils.TritonModelException(
                 """the model `{}` can generate any number of responses per request,
                 enable decoupled transaction policy in model configuration to
-                serve this model""".format(args['model_name']))
+                serve this model""".format(
+                    args["model_name"]
+                )
+            )
 
         # Get OUT configuration
         out_config = pb_utils.get_output_config_by_name(model_config, "OUT")
@@ -104,10 +109,8 @@ class TritonPythonModel:
         idx_config = pb_utils.get_output_config_by_name(model_config, "IDX")
 
         # Convert Triton types to numpy types
-        self.out_dtype = pb_utils.triton_string_to_numpy(
-            out_config['data_type'])
-        self.idx_dtype = pb_utils.triton_string_to_numpy(
-            idx_config['data_type'])
+        self.out_dtype = pb_utils.triton_string_to_numpy(out_config["data_type"])
+        self.idx_dtype = pb_utils.triton_string_to_numpy(idx_config["data_type"])
 
         # To keep track of response threads so that we can delay
         # the finalizing the model until all response threads
@@ -146,13 +149,12 @@ class TritonPythonModel:
         # This model does not support batching, so 'request_count' should always
         # be 1.
         if len(requests) != 1:
-            raise pb_utils.TritonModelException("unsupported batch size " +
-                                                len(requests))
+            raise pb_utils.TritonModelException(
+                "unsupported batch size " + len(requests)
+            )
 
-        in_input = pb_utils.get_input_tensor_by_name(requests[0],
-                                                     'IN').as_numpy()
-        delay_input = pb_utils.get_input_tensor_by_name(requests[0],
-                                                        'DELAY').as_numpy()
+        in_input = pb_utils.get_input_tensor_by_name(requests[0], "IN").as_numpy()
+        delay_input = pb_utils.get_input_tensor_by_name(requests[0], "DELAY").as_numpy()
         if in_input.shape != delay_input.shape:
             raise pb_utils.TritonModelException(
                 f"expected IN and DELAY shape to match, got {list(in_input.shape)} and {list(delay_input.shape)}."
@@ -160,9 +162,10 @@ class TritonPythonModel:
 
         # Start a separate thread to send the responses for the request. The
         # sending back the responses is delegated to this thread.
-        thread = threading.Thread(target=self.response_thread,
-                                  args=(requests[0].get_response_sender(),
-                                        in_input, delay_input))
+        thread = threading.Thread(
+            target=self.response_thread,
+            args=(requests[0].get_response_sender(), in_input, delay_input),
+        )
 
         # A model using decoupled transaction policy is not required to send all
         # responses for the current request before returning from the execute.
@@ -177,8 +180,7 @@ class TritonPythonModel:
 
         # Read WAIT input for wait time, then return so that Triton can call
         # execute again with another request.
-        wait_input = pb_utils.get_input_tensor_by_name(requests[0],
-                                                       'WAIT').as_numpy()
+        wait_input = pb_utils.get_input_tensor_by_name(requests[0], "WAIT").as_numpy()
         time.sleep(wait_input[0] / 1000)
 
         # Unlike in non-decoupled model transaction policy, execute function
@@ -207,18 +209,17 @@ class TritonPythonModel:
             time.sleep(delay_value / 1000)
 
             idx_output = pb_utils.Tensor("IDX", numpy.array([idx], idx_dtype))
-            out_output = pb_utils.Tensor("OUT",
-                                         numpy.array([in_value], out_dtype))
+            out_output = pb_utils.Tensor("OUT", numpy.array([in_value], out_dtype))
             response = pb_utils.InferenceResponse(
-                output_tensors=[idx_output, out_output])
+                output_tensors=[idx_output, out_output]
+            )
             response_sender.send(response)
 
         # We must close the response sender to indicate to Triton that we are
         # done sending responses for the corresponding request. We can't use the
         # response sender after closing it. The response sender is closed by
         # setting the TRITONSERVER_RESPONSE_COMPLETE_FINAL.
-        response_sender.send(
-            flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
+        response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
         with self.inflight_thread_count_lck:
             self.inflight_thread_count -= 1
@@ -230,17 +231,17 @@ class TritonPythonModel:
         Here we will wait for all response threads to complete sending
         responses.
         """
-        print('Finalize invoked')
+        print("Finalize invoked")
 
         inflight_threads = True
         cycles = 0
         logging_time_sec = 5
         sleep_time_sec = 0.1
-        cycle_to_log = (logging_time_sec / sleep_time_sec)
+        cycle_to_log = logging_time_sec / sleep_time_sec
         while inflight_threads:
             with self.inflight_thread_count_lck:
-                inflight_threads = (self.inflight_thread_count != 0)
-                if (cycles % cycle_to_log == 0):
+                inflight_threads = self.inflight_thread_count != 0
+                if cycles % cycle_to_log == 0:
                     print(
                         f"Waiting for {self.inflight_thread_count} response threads to complete..."
                     )
@@ -248,4 +249,4 @@ class TritonPythonModel:
                 time.sleep(sleep_time_sec)
                 cycles += 1
 
-        print('Finalize complete...')
+        print("Finalize complete...")

@@ -24,10 +24,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from tritonclient.utils import *
-import tritonclient.http as httpclient
-import numpy as np
 import sys
+
+import numpy as np
+import tritonclient.http as httpclient
+from tritonclient.utils import *
 
 model_name = "bls_sync"
 shape = [4]
@@ -36,37 +37,41 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     input0_data = np.random.rand(*shape).astype(np.float32)
     input1_data = np.random.rand(*shape).astype(np.float32)
     inputs = [
-        httpclient.InferInput("INPUT0", input0_data.shape,
-                              np_to_triton_dtype(input0_data.dtype)),
-        httpclient.InferInput("INPUT1", input1_data.shape,
-                              np_to_triton_dtype(input1_data.dtype)),
-        httpclient.InferInput("MODEL_NAME", [1],
-                              np_to_triton_dtype(np.object_)),
+        httpclient.InferInput(
+            "INPUT0", input0_data.shape, np_to_triton_dtype(input0_data.dtype)
+        ),
+        httpclient.InferInput(
+            "INPUT1", input1_data.shape, np_to_triton_dtype(input1_data.dtype)
+        ),
+        httpclient.InferInput("MODEL_NAME", [1], np_to_triton_dtype(np.object_)),
     ]
     inputs[0].set_data_from_numpy(input0_data)
     inputs[1].set_data_from_numpy(input1_data)
 
     # Will perform the inference request on the 'add_sub' model.
-    inputs[2].set_data_from_numpy(np.array(['add_sub'], dtype=np.object_))
+    inputs[2].set_data_from_numpy(np.array(["add_sub"], dtype=np.object_))
 
     outputs = [
         httpclient.InferRequestedOutput("OUTPUT0"),
         httpclient.InferRequestedOutput("OUTPUT1"),
     ]
 
-    response = client.infer(model_name,
-                            inputs,
-                            request_id=str(1),
-                            outputs=outputs)
+    response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
     result = response.get_response()
     output0_data = response.as_numpy("OUTPUT0")
     output1_data = response.as_numpy("OUTPUT1")
     print("=========='add_sub' model result==========")
-    print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
-        input0_data, input1_data, output0_data))
-    print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
-        input0_data, input1_data, output1_data))
+    print(
+        "INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
+            input0_data, input1_data, output0_data
+        )
+    )
+    print(
+        "INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
+            input0_data, input1_data, output1_data
+        )
+    )
     if not np.allclose(input0_data + input1_data, output0_data):
         print("BLS sync example error: incorrect sum")
         sys.exit(1)
@@ -76,21 +81,24 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         sys.exit(1)
 
     # Will perform the inference request on the pytorch model:
-    inputs[2].set_data_from_numpy(np.array(['pytorch'], dtype=np.object_))
-    response = client.infer(model_name,
-                            inputs,
-                            request_id=str(1),
-                            outputs=outputs)
+    inputs[2].set_data_from_numpy(np.array(["pytorch"], dtype=np.object_))
+    response = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
 
     result = response.get_response()
     output0_data = response.as_numpy("OUTPUT0")
     output1_data = response.as_numpy("OUTPUT1")
     print("\n")
     print("=========='pytorch' model result==========")
-    print("INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
-        input0_data, input1_data, output0_data))
-    print("INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
-        input0_data, input1_data, output1_data))
+    print(
+        "INPUT0 ({}) + INPUT1 ({}) = OUTPUT0 ({})".format(
+            input0_data, input1_data, output0_data
+        )
+    )
+    print(
+        "INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
+            input0_data, input1_data, output1_data
+        )
+    )
     if not np.allclose(input0_data + input1_data, output0_data):
         print("BLS sync example error: incorrect sum")
         sys.exit(1)
@@ -104,14 +112,10 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
     print("\n")
     print("=========='undefined' model result==========")
     try:
-        inputs[2].set_data_from_numpy(
-            np.array(['undefined_model'], dtype=np.object_))
-        response = client.infer(model_name,
-                                inputs,
-                                request_id=str(1),
-                                outputs=outputs)
+        inputs[2].set_data_from_numpy(np.array(["undefined_model"], dtype=np.object_))
+        _ = client.infer(model_name, inputs, request_id=str(1), outputs=outputs)
     except InferenceServerException as e:
         print(e.message())
 
-    print('PASS: BLS Sync')
+    print("PASS: BLS Sync")
     sys.exit(0)

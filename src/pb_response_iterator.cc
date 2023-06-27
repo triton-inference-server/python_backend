@@ -105,7 +105,7 @@ ResponseIterator::Iter()
 {
   if (is_finished_) {
     // If the previous iteration is finished, reset the index so that it will
-    // iterator from the begining of the responses. Otherwise just resume the
+    // iterator from the beginning of the responses. Otherwise just resume the
     // iteration from the previous index.
     if (idx_ >= responses_.size()) {
       idx_ = 0;

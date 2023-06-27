@@ -503,7 +503,7 @@ ModelInstanceState::GetInputTensor(
   } else {
 #ifdef TRITON_ENABLE_GPU
 
-    // Retreiving GPU input tensors
+    // Retrieving GPU input tensors
     const void* buffer = nullptr;
     std::vector<std::pair<TRITONSERVER_MemoryType, int64_t>> alloc_perference;
     alloc_perference = {{TRITONSERVER_MEMORY_GPU, src_memory_type_id}};
@@ -1309,9 +1309,9 @@ ModelInstanceState::ProcessRequests(
           Stub()->ShmPool(), response_message));
 
   // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
-  // that inference request exeuction has finished and there are no more BLS
-  // requests to execute. Otherwise, the Python backend will continuosly execute
-  // BLS requests pushed to the message queue.
+  // that inference request execution has finished and there are no more BLS
+  // requests to execute. Otherwise, the Python backend will continuously
+  // execute BLS requests pushed to the message queue.
   while (ipc_message->Command() ==
              PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest ||
          ipc_message->Command() ==

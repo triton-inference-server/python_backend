@@ -85,7 +85,7 @@ then
     return 1
 fi
 
-if [ ${INSTALL_INF1} -eq 1 ] && [ ${INSTALL_TRN1} -eq 1 ] 
+if [ ${INSTALL_INF1} -eq 1 ] && [ ${INSTALL_TRN1} -eq 1 ]
 then
     echo "Error: cannot install both inf1 and trn1 dependencies. Selecting -trn1 will install inf2 dependencies and EFA."
 fi
@@ -115,13 +115,13 @@ echo "Installation complete for inf2 runtime and tools."
 if [ ${INSTALL_TRN1} -eq 1 ]
 then
     # Install EFA Driver (only required for multi-instance training)
-    curl -O https://efa-installer.amazonaws.com/aws-efa-installer-latest.tar.gz 
-    wget https://efa-installer.amazonaws.com/aws-efa-installer.key && gpg --import aws-efa-installer.key 
-    cat aws-efa-installer.key | gpg --fingerprint 
-    wget https://efa-installer.amazonaws.com/aws-efa-installer-latest.tar.gz.sig && gpg --verify ./aws-efa-installer-latest.tar.gz.sig 
-    tar -xvf aws-efa-installer-latest.tar.gz 
-    cd aws-efa-installer && sudo bash efa_installer.sh --yes 
-    cd 
+    curl -O https://efa-installer.amazonaws.com/aws-efa-installer-latest.tar.gz
+    wget https://efa-installer.amazonaws.com/aws-efa-installer.key && gpg --import aws-efa-installer.key
+    cat aws-efa-installer.key | gpg --fingerprint
+    wget https://efa-installer.amazonaws.com/aws-efa-installer-latest.tar.gz.sig && gpg --verify ./aws-efa-installer-latest.tar.gz.sig
+    tar -xvf aws-efa-installer-latest.tar.gz
+    cd aws-efa-installer && sudo bash efa_installer.sh --yes
+    cd
     sudo rm -rf aws-efa-installer-latest.tar.gz aws-efa-installer
 fi
 

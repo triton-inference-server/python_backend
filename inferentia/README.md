@@ -29,7 +29,7 @@
 # Using Triton with Inferentia 1
 
 Starting from 21.11 release, Triton supports
-[AWS Inferentia](https://aws.amazon.com/machine-learning/inferentia/) 
+[AWS Inferentia](https://aws.amazon.com/machine-learning/inferentia/)
 and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-intro/get-started.html).
 
 ## Table of Contents
@@ -65,7 +65,7 @@ Clone this repo with Github to home repo `/home/ubuntu`.
 ```
 
 Then, start the Triton instance with:
-``` 
+```
  $docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
 Note 1: The user would need to list any neuron device to run during container initialization.
@@ -73,11 +73,11 @@ For example, to use 4 neuron devices on an instance, the user would need to run 
 ```
  $docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
 ```
-Note 2: `/mylib/udev` is used for Neuron parameter passing. 
+Note 2: `/mylib/udev` is used for Neuron parameter passing.
 
-Note 3: For Triton container version xx.yy, please refer to 
+Note 3: For Triton container version xx.yy, please refer to
 [Triton Inference Server Container Release Notes](https://docs.nvidia.com/deeplearning/triton-inference-server/release-notes/index.html).
- The current build script has been tested with container version `21.10`. 
+ The current build script has been tested with container version `21.10`.
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
@@ -88,17 +88,17 @@ This script will:
 2. Install [neuron-cc](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/index.html), the Neuron compiler.
 3. Install neuron framework packages as per your preference e.g., either pytorch, or tensorflow or both.
 
-There are user configurable options available for the script as well. 
+There are user configurable options available for the script as well.
 Please use the `-h` or `--help` options to learn about more configurable options.
 
 ## Setting up the Inferentia model
 
 Currently, we only support [PyTorch](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/pytorch-neuron/index.html)
 and [TensorFlow](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-frameworks/tensorflow-neuron/index.html)
-workflows for execution on inferentia. 
+workflows for execution on inferentia.
 
-The user is required to create their own `*.pt` (for pytorch) or `*.savedmodels` 
-(for tensorflow) models. This is a critical step since Inferentia will need 
+The user is required to create their own `*.pt` (for pytorch) or `*.savedmodels`
+(for tensorflow) models. This is a critical step since Inferentia will need
 the underlying `.NEFF` graph to execute the inference request. Please refer to:
 
 - [Neuron compiler CLI Reference Guide](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-guide/neuron-cc/command-line-reference.html)
@@ -228,13 +228,13 @@ their need.
 ### Using Triton's Dynamic Batching
 
 To enable dynamic batching, `--enable_dynamic_batching`
-flag needs to be specified. `gen_triton_model.py` supports following three 
+flag needs to be specified. `gen_triton_model.py` supports following three
 options for configuring [Triton's dynamic batching](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md):
 
 1. `--preferred_batch_size`: Please refer to [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#preferred-batch-sizes) for details on preferred batch size. To optimize
    performance, this is recommended to be multiples of engaged neuron cores.
    For example, if each instance is using 2 neuron cores, `preferred_batch_size`
-   could be 2, 4 or 6. 
+   could be 2, 4 or 6.
 2. `--max_queue_delay_microseconds`: Please refer to
    [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#delayed-batching) for details.
 3. `--disable_batch_requests_to_neuron`: Enable the non-default way for Triton to
@@ -256,7 +256,7 @@ requires an instance with more than 8 inferentia cores to run, eg:`inf1.6xlarge`
 start the test, run
 ```
  $source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
-``` 
+```
 where `<triton path>` is usually `/home/ubuntu`/.
 This script will pull the [server repo](https://github.com/triton-inference-server/server)
 that contains the tests for inferentia. It will then build the most recent
@@ -266,7 +266,7 @@ Note: If you would need to change some of the tests in the server repo,
 you would need to run
 ```
  $export TRITON_SERVER_REPO_TAG=<your branch name>
-``` 
+```
 before running the script.
 
 # Using Triton with Inferentia 2, or Trn1
@@ -291,11 +291,11 @@ python3 inferentia/scripts/gen_triton_model.py --inf2 --model_type pytorch --tri
 ```
 4. **Note**: When using the `--inf2` option, the `--compiled_model` path should be provided relative to the triton model directory. The `initialize()` function in model.py will derive the full path by concatenating the model path within the repository and the relative `--compiled_model` path.
 ## transformers-neuronx
-To use inf2/trn1 instances with transformers-neuronx packages for serving models, generate a `pytorch` model as per above instructions. The transformers-neuronx currently supports the models listed [here](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/frameworks/torch/torch-neuronx/transformers-neuronx/readme.html#currently-supported-models). 
+To use inf2/trn1 instances with transformers-neuronx packages for serving models, generate a `pytorch` model as per above instructions. The transformers-neuronx currently supports the models listed [here](https://awsdocs-neuron.readthedocs-hosted.com/en/latest/frameworks/torch/torch-neuronx/transformers-neuronx/readme.html#currently-supported-models).
 
-As prescribed on the neuronx documentation page, while the neuronx load API differs per model, it follows the same pattern. 
+As prescribed on the neuronx documentation page, while the neuronx load API differs per model, it follows the same pattern.
 
-1. To serve transformers-neuronx models, first trace the model using `save_pretrained_split()` API on an inf2 instance (recommed inf2.24xl for Large Language Models). Following that, package the folder as the '--compiled_model' when using `gen_triton_model.py` file.
+1. To serve transformers-neuronx models, first trace the model using `save_pretrained_split()` API on an inf2 instance (recommend inf2.24xl for Large Language Models). Following that, package the folder as the '--compiled_model' when using `gen_triton_model.py` file.
 2. The following tree shows a sample model structure for OPT model:
 ```
 opt/

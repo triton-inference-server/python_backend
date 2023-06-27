@@ -181,7 +181,7 @@ stream stopped...
 
 ```
 
-Look how a single request generated 4 responses. 
+Look how a single request generated 4 responses.
 
 ## Running inference on Square model:
 

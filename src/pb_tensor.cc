@@ -295,7 +295,7 @@ PbTensor::ToDLPack()
   py::handle tensor_handle = py::cast(tensor);
 
   // Increase the reference count by one to make sure that the DLPack
-  // represenation doesn't become invalid when the tensor object goes out of
+  // representation doesn't become invalid when the tensor object goes out of
   // scope.
   tensor_handle.inc_ref();
 
