@@ -62,9 +62,9 @@ StubLauncher::Initialize(ModelState* model_state)
   model_state->ModelConfig().Write(&model_config_buffer_);
   is_decoupled_ = model_state->IsDecoupled();
   model_repository_path_ = model_state->RepositoryPath();
-  platform_model_ = "NONE";
-  if (model_state->UsesPlatformModel()) {
-    platform_model_ = model_state->Platform();
+  platform_ = model_state->Platform();
+  if (platform_.empty()) {
+    platform_ = "NONE";
   }
 
   // Atomically increase and read the stub process count to avoid shared memory
@@ -80,32 +80,17 @@ StubLauncher::Initialize(ModelState* model_state)
   std::stringstream ss;
   ss << model_repository_path_ << "/" << model_version_ << "/";
 
-  if (!model_state->UsesPlatformModel()) {
-    std::string artifact_name;
-    RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
-        "default_model_filename", &artifact_name));
-    if (artifact_name.size() > 0) {
-      ss << artifact_name;
-    } else {
-      // Default artifact name.
-      ss << "model.py";
-    }
+  std::string artifact_name;
+  RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
+      "default_model_filename", &artifact_name));
+  if (artifact_name.size() > 0) {
+    ss << artifact_name;
   } else {
-    // The artifact model deduction will be performed in
-    // the platform model.
+    // Default artifact name.
+    ss << "model.py";
   }
 
   model_path_ = ss.str();
-  struct stat buffer;
-
-  // Check if model file exists in the path
-  if (stat(model_path_.c_str(), &buffer) != 0) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("model file does not exist in the model repository path: " +
-         model_path_)
-            .c_str());
-  }
 
   // Path to the extracted Python env
   std::string python_execution_env = "";
@@ -255,8 +240,7 @@ StubLauncher::Launch()
        << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
        << " " << shm_region_name_ << " " << shm_default_byte_size_ << " "
        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-       << " " << ipc_control_handle_ << " " << stub_name << " "
-       << platform_model_;
+       << " " << ipc_control_handle_ << " " << stub_name << " " << platform_;
     ipc_control_->uses_env = true;
     bash_argument = ss.str();
   } else {
@@ -264,8 +248,7 @@ StubLauncher::Launch()
     ss << " exec " << python_backend_stub << " " << model_path_ << " "
        << shm_region_name_ << " " << shm_default_byte_size_ << " "
        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-       << " " << ipc_control_handle_ << " " << stub_name << " "
-       << platform_model_;
+       << " " << ipc_control_handle_ << " " << stub_name << " " << platform_;
     bash_argument = ss.str();
   }
   LOG_MESSAGE(

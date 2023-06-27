@@ -29,23 +29,6 @@
 #include "infer_payload.h"
 #include "pb_log.h"
 
-namespace {
-// An array of all the reserved platform fields that will
-// should use a platform model
-const std::array<std::string, 1> reserved_platforms{"tensorflow_savedmodel"};
-
-bool
-IsReservedPlatform(const std::string& platform)
-{
-  for (const auto& reserved_platform : reserved_platforms) {
-    if (reserved_platform.compare(platform) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-}  // namespace
-
 namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
@@ -1743,8 +1726,6 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         throw BackendModelException(error);
       }
     }
-
-    uses_platform_model_ = IsReservedPlatform(platform_);
 
     // Skip the FORCE_CPU_ONLY_INPUT_TENSORS variable if it doesn't exits.
     std::string force_cpu_only_input_tensor;

@@ -237,9 +237,6 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
-  // Whether or not uses platform model
-  bool UsesPlatformModel() { return uses_platform_model_; }
-
   // Returns the value in the platform field
   std::string Platform() { return platform_; }
 
@@ -259,7 +256,6 @@ class ModelState : public BackendModel {
   bool force_cpu_only_input_tensors_;
   bool decoupled_;
   std::string platform_;
-  bool uses_platform_model_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
 };
 

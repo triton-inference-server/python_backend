@@ -81,11 +81,10 @@ Stub::Instantiate(
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
     bi::managed_external_buffer::handle_t ipc_control_handle,
-    const std::string& name, const std::string& platform_model)
+    const std::string& name, const std::string& platform)
 {
-  model_context_.Init(
-      model_path, platform_model, triton_install_path, model_version);
-  model_path_ = model_path;
+  model_scanner_.Init(model_path, platform, triton_install_path, model_version);
+  model_path_ = model_scanner_.ModelPath();
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
   name_ = name;
@@ -379,7 +378,7 @@ Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
 
-  model_context_.StubSetup(sys);
+  model_scanner_.StubSetup(sys);
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
@@ -619,7 +618,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     response_batch_shm_ptr->is_error_set = false;
 
     if (!py::hasattr(model_instance_, "execute")) {
-      std::string message = "Python model " + model_context_.PythonModelPath() +
+      std::string message = "Python model " + model_scanner_.PythonModelPath() +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
@@ -706,7 +705,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         LoadRequestsFromSharedMemory(request_batch_shm_ptr);
 
     if (!py::hasattr(model_instance_, "execute")) {
-      std::string message = "Python model " + model_context_.PythonModelPath() +
+      std::string message = "Python model " + model_scanner_.PythonModelPath() +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
@@ -1593,6 +1592,97 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::register_exception<PythonBackendException>(
       module, "TritonModelException");
 }
+
+
+void
+ModelScanner::Init(
+    const std::string& model_path, const std::string& platform,
+    const std::string& triton_install_path, const std::string& model_version)
+{
+  bool python_model_found = false;
+  std::string platform_model_path;
+
+  if (platform != "NONE") {
+    platform_model_path =
+        triton_install_path + "/platform_models/" + platform + "/model.py";
+    // Check if model file exists in the path.
+    struct stat buffer;
+    if (stat(platform_model_path.c_str(), &buffer) == 0) {
+      // Use the Platform model for serving the model.
+      python_model_found = true;
+      type_ = ModelType::PLATFORM;
+      python_model_path_ = platform_model_path;
+      // Trimming the model name from the model path, the platform model
+      // will populate the exepected default model file name into model_path_.
+      model_path_ = model_path.substr(0, model_path.find_last_of("\\/"));
+    } else {
+      LOG_WARN << "Unable to find model \'" << platform_model_path
+               << "\' for platform field \'" << platform << "\'";
+    }
+  }
+
+  if (!python_model_found) {
+    python_model_path_ = model_path;
+    // Check if model file exists in this path.
+    struct stat buffer;
+    if (stat(python_model_path_.c_str(), &buffer) == 0) {
+      python_model_found = true;
+      type_ = ModelType::DEFAULT;
+    }
+  }
+
+  if (!python_model_found) {
+    if (platform != "NONE") {
+      throw PythonBackendException(
+          ("Python model file not found in neither \'" + platform_model_path +
+           "\' nor \'" + model_path + "\'"));
+    } else {
+      throw PythonBackendException(
+          ("Python model file not found in \'" + model_path + "\'"));
+    }
+  }
+
+  python_backend_folder_ = triton_install_path;
+  model_version_ = model_version;
+  platform_model_ = platform;
+}
+
+void
+ModelScanner::StubSetup(py::module& sys)
+{
+  std::string model_name =
+      python_model_path_.substr(python_model_path_.find_last_of("/") + 1);
+
+  // Model name without the .py extension
+  auto dotpy_pos = model_name.find_last_of(".py");
+  if (dotpy_pos == std::string::npos || dotpy_pos != model_name.size() - 1) {
+    throw PythonBackendException(
+        "Model name must end with '.py'. Model name is \"" + model_name +
+        "\".");
+  }
+  // The position of last character of the string that is searched for is
+  // returned by 'find_last_of'. Need to manually adjust the position.
+  std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
+
+  if (type_ == ModelType::DEFAULT) {
+    std::string model_path_parent =
+        python_model_path_.substr(0, python_model_path_.find_last_of("/"));
+    std::string model_path_parent_parent =
+        model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+    sys.attr("path").attr("append")(model_path_parent);
+    sys.attr("path").attr("append")(model_path_parent_parent);
+    sys.attr("path").attr("append")(python_backend_folder_);
+    sys = py::module_::import(
+        (std::string(model_version_) + "." + model_name_trimmed).c_str());
+  } else {
+    std::string platform_model_dir(
+        python_backend_folder_ + "/platform_models/" + platform_model_ + "/");
+    sys.attr("path").attr("append")(platform_model_dir);
+    sys.attr("path").attr("append")(python_backend_folder_);
+    sys = py::module_::import(model_name_trimmed.c_str());
+  }
+}
+
 
 extern "C" {
 
