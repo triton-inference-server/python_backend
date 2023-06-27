@@ -251,8 +251,12 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   time_t last_modified_time;
   LastModifiedTime(canonical_env_path, &last_modified_time);
 
-  bool env_extracted = false;
+  bool env_extracted = false;  
   bool re_extraction = false;
+  std::string subPath = canonical_env_path.substr(canonical_env_path.size() - 6);
+  if(subPath == "tar.gz") {
+    return canonical_env_path;
+  }
   const auto env_itr = env_map_.find(canonical_env_path);
   if (env_itr != env_map_.end()) {
     // Check if the environment has been modified and would
