@@ -1542,14 +1542,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("kind").none(false))
       .def(
           "Metric", &MetricFamily::CreateMetric,
-          py::arg("labels").none(false) = py::dict());
+          py::arg("labels").none(true) = py::none());
   module.attr("MetricFamily").attr("COUNTER") = MetricKind::COUNTER;
   module.attr("MetricFamily").attr("GAUGE") = MetricKind::GAUGE;
 
   module.def(
       "load_model", &LoadModel, py::arg("model_name").none(false),
       py::arg("config").none(false) = "",
-      py::arg("files").none(false) = py::dict());
+      py::arg("files").none(true) = py::none());
   module.def(
       "unload_model", &UnloadModel, py::arg("model_name").none(false),
       py::arg("unload_dependents").none(false) = false);

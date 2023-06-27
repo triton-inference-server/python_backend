@@ -163,8 +163,16 @@ MetricFamily::SendCreateMetricFamilyRequest()
 }
 
 std::shared_ptr<Metric>
-MetricFamily::CreateMetric(py::dict labels)
+MetricFamily::CreateMetric(const py::object& labels)
 {
+  if (!labels.is_none()) {
+    if (!py::isinstance<py::dict>(labels)) {
+      throw PythonBackendException(
+          "Failed to create metric. Labels must be a "
+          "dictionary.");
+    }
+  }
+
   py::module json = py::module_::import("json");
   std::string labels_str = std::string(py::str(json.attr("dumps")(labels)));
   auto metric = std::make_shared<Metric>(labels_str, metric_family_address_);

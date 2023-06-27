@@ -156,7 +156,8 @@ class ModelLoader {
 #ifdef TRITON_PB_STUB
 // The binding functions for the Python stub.
 void LoadModel(
-    const std::string& name, const std::string& config, const py::dict& files);
+    const std::string& name, const std::string& config,
+    const py::object& files = py::none());
 void UnloadModel(const std::string& name, const bool unload_dependents);
 bool IsModelReady(const std::string& name, const std::string& version);
 #endif

@@ -149,16 +149,26 @@ ModelLoader::SendModelReadinessRequest()
 
 void
 LoadModel(
-    const std::string& name, const std::string& config, const py::dict& files)
+    const std::string& name, const std::string& config, const py::object& files)
 {
   std::unordered_map<std::string, std::string> files_map;
 
-  for (const auto& item : files) {
-    std::string key = py::cast<std::string>(item.first);
-    py::bytes value = py::cast<py::bytes>(item.second);
-    std::string content(value);
-    files_map[key] = content;
+  if (!files.is_none()) {
+    if (!py::isinstance<py::dict>(files)) {
+      throw PythonBackendException(
+          "failed to load model '" + name +
+          "', files should be a dictionary of file paths and file contents");
+    }
+
+    py::dict files_dict = py::cast<py::dict>(files);
+    for (const auto& item : files_dict) {
+      std::string key = py::cast<std::string>(item.first);
+      py::bytes value = py::cast<py::bytes>(item.second);
+      std::string content(value);
+      files_map[key] = content;
+    }
   }
+
   ModelLoader model_loader(name, config, files_map);
   model_loader.SendLoadModelRequest();
 }
