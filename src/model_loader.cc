@@ -104,9 +104,11 @@ ModelLoader::SendLoadModelRequest()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   ModelLoaderMessage* model_loader_msg = nullptr;
+  std::unique_ptr<IPCMessage> ipc_message;
   try {
     stub->SendMessage<ModelLoaderMessage>(
-        &model_loader_msg, PYTHONSTUB_LoadModelRequest, shm_handle_);
+        ipc_message, &model_loader_msg, PYTHONSTUB_LoadModelRequest,
+        shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -120,9 +122,11 @@ ModelLoader::SendUnloadModelRequest()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   ModelLoaderMessage* model_loader_msg = nullptr;
+  std::unique_ptr<IPCMessage> ipc_message;
   try {
     stub->SendMessage<ModelLoaderMessage>(
-        &model_loader_msg, PYTHONSTUB_UnloadModelRequest, shm_handle_);
+        ipc_message, &model_loader_msg, PYTHONSTUB_UnloadModelRequest,
+        shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -136,9 +140,11 @@ ModelLoader::SendModelReadinessRequest()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   ModelLoaderMessage* model_loader_msg = nullptr;
+  std::unique_ptr<IPCMessage> ipc_message;
   try {
     stub->SendMessage<ModelLoaderMessage>(
-        &model_loader_msg, PYTHONSTUB_ModelReadinessRequest, shm_handle_);
+        ipc_message, &model_loader_msg, PYTHONSTUB_ModelReadinessRequest,
+        shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(

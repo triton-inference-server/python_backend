@@ -293,10 +293,15 @@ class Stub {
       std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
 
   /// Send the message to the python backend. MessageType should be either
-  // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'.
+  // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'. In some
+  // cases, the 'msg' object will hold the return value from the parent process,
+  // so we need to pass the 'ipc_message' from the caller function to make sure
+  // the 'msg' object is not deallocated along with the 'ipc_message' object
+  // before the stub process retrieves the return value.
   template <typename MessageType>
   void SendMessage(
-      MessageType** msg, PYTHONSTUB_CommandType command_type,
+      std::unique_ptr<IPCMessage>& ipc_message, MessageType** msg,
+      PYTHONSTUB_CommandType command_type,
       bi::managed_external_buffer::handle_t handle);
 
   /// Helper function to prepare the message. MessageType should be either
@@ -368,7 +373,8 @@ Stub::PrepareMessage(
 template <typename MessageType>
 void
 Stub::SendMessage(
-    MessageType** msg, PYTHONSTUB_CommandType command_type,
+    std::unique_ptr<IPCMessage>& ipc_message, MessageType** msg,
+    PYTHONSTUB_CommandType command_type,
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<MessageType> msg_shm;
@@ -376,8 +382,7 @@ Stub::SendMessage(
 
   (*msg)->message = handle;
 
-  std::unique_ptr<IPCMessage> ipc_message =
-      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message = IPCMessage::Create(shm_pool_, false /* inline_response */);
   ipc_message->Command() = command_type;
   ipc_message->Args() = msg_shm.handle_;
 
