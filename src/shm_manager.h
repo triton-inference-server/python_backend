@@ -37,10 +37,6 @@
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
-<<<<<<< HEAD
-
-=======
->>>>>>> Interfacing with plugin models
 #include "pb_exception.h"
 
 namespace triton { namespace backend { namespace python {
