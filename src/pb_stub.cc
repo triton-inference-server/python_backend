@@ -1613,7 +1613,7 @@ ModelScanner::Init(
       type_ = ModelType::PLATFORM;
       python_model_path_ = platform_model_path;
       // Trimming the model name from the model path, the platform model
-      // will populate the exepected default model file name into model_path_.
+      // will populate the expected default model file name into model_path_.
       model_path_ = model_path.substr(0, model_path.find_last_of("\\/"));
     } else {
       LOG_WARN << "Unable to find model \'" << platform_model_path

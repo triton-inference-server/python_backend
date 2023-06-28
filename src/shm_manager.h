@@ -37,6 +37,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
+
 #include "pb_exception.h"
 
 namespace triton { namespace backend { namespace python {
