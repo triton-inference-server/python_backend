@@ -251,11 +251,18 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   time_t last_modified_time;
   LastModifiedTime(canonical_env_path, &last_modified_time);
 
-  bool env_extracted = false;  
+  bool env_extracted = false;
   bool re_extraction = false;
-  std::string subPath = canonical_env_path.substr(canonical_env_path.size() - 6);
-  std::cout << "subpath: " << subPath << " canonical env path" << canonical_env_path << std::endl;
-  if(subPath == "tar.gz") {
+
+  // If the path is not a conda-packed file, then bypass the extraction process
+  std::string subPath = env_path.substr(env_path.size() - 6);
+  if (subPath != "tar.gz") {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_VERBOSE,
+        (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
+                     "not contain tar. Path: ") +
+         canonical_env_path)
+            .c_str());
     return canonical_env_path;
   }
   const auto env_itr = env_map_.find(canonical_env_path);
@@ -277,7 +284,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Extracting Python execution env ") + "subpath: " + subPath + " canonical env path" + canonical_env_path)
+        (std::string("Extracting Python execution env ") + canonical_env_path)
             .c_str());
     std::string dst_env_path;
     if (re_extraction) {
