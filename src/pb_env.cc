@@ -254,6 +254,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   bool env_extracted = false;  
   bool re_extraction = false;
   std::string subPath = canonical_env_path.substr(canonical_env_path.size() - 6);
+  std::cout << "subpath: " << subPath << " canonical env path" << canonical_env_path << std::endl;
   if(subPath == "tar.gz") {
     return canonical_env_path;
   }
@@ -276,7 +277,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Extracting Python execution env ") + canonical_env_path)
+        (std::string("Extracting Python execution env ") + "subpath: " + subPath + " canonical env path" + canonical_env_path)
             .c_str());
     std::string dst_env_path;
     if (re_extraction) {
