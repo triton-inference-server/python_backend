@@ -296,7 +296,6 @@ class Stub {
   // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'.
   template <typename MessageType>
   void SendMessage(
-      std::unique_ptr<IPCMessage>& ipc_message, MessageType** msg,
       AllocatedSharedMemory<MessageType>& msg_shm,
       PYTHONSTUB_CommandType command_type,
       bi::managed_external_buffer::handle_t handle);
@@ -370,15 +369,16 @@ Stub::PrepareMessage(
 template <typename MessageType>
 void
 Stub::SendMessage(
-    std::unique_ptr<IPCMessage>& ipc_message, MessageType** msg,
     AllocatedSharedMemory<MessageType>& msg_shm,
     PYTHONSTUB_CommandType command_type,
     bi::managed_external_buffer::handle_t handle)
 {
-  PrepareMessage(msg_shm, msg);
-  (*msg)->message = handle;
+  MessageType* msg = nullptr;
+  PrepareMessage(msg_shm, &msg);
+  msg->message = handle;
 
-  ipc_message = IPCMessage::Create(shm_pool_, false /* inline_response */);
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
   ipc_message->Command() = command_type;
   ipc_message->Args() = msg_shm.handle_;
 
@@ -386,24 +386,24 @@ Stub::SendMessage(
   {
     ScopedDefer _([&ipc_message, msg] {
       {
-        bi::scoped_lock<bi::interprocess_mutex> guard{(*msg)->mu};
-        (*msg)->waiting_on_stub = false;
-        (*msg)->cv.notify_all();
+        bi::scoped_lock<bi::interprocess_mutex> guard{msg->mu};
+        msg->waiting_on_stub = false;
+        msg->cv.notify_all();
       }
     });
 
     {
-      bi::scoped_lock<bi::interprocess_mutex> guard{(*msg)->mu};
+      bi::scoped_lock<bi::interprocess_mutex> guard{msg->mu};
       SendIPCUtilsMessage(ipc_message);
-      while (!(*msg)->waiting_on_stub) {
-        (*msg)->cv.wait(guard);
+      while (!msg->waiting_on_stub) {
+        msg->cv.wait(guard);
       }
     }
   }
-  if ((*msg)->has_error) {
-    if ((*msg)->is_error_set) {
+  if (msg->has_error) {
+    if (msg->is_error_set) {
       std::unique_ptr<PbString> pb_string =
-          PbString::LoadFromSharedMemory(shm_pool_, (*msg)->error);
+          PbString::LoadFromSharedMemory(shm_pool_, msg->error);
       std::string err_message =
           std::string(
               "Failed to process the request for model '" + name_ +
