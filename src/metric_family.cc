@@ -58,11 +58,13 @@ MetricFamily::~MetricFamily()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   std::unique_ptr<IPCMessage> ipc_message;
+
   try {
     stub->SendMessage<CustomMetricsMessage>(
-        ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestDelete,
-        shm_handle_);
+        ipc_message, &custom_metrics_msg, custom_metrics_shm,
+        PYTHONSTUB_MetricFamilyRequestDelete, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     std::cerr << "Error when deleting MetricFamily: " << pb_exception.what()
@@ -152,11 +154,13 @@ MetricFamily::SendCreateMetricFamilyRequest()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   std::unique_ptr<IPCMessage> ipc_message;
+
   try {
     stub->SendMessage<CustomMetricsMessage>(
-        ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestNew,
-        shm_handle_);
+        ipc_message, &custom_metrics_msg, custom_metrics_shm,
+        PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(

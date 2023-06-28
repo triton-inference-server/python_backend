@@ -110,11 +110,13 @@ Metric::SendCreateMetricRequest()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   std::unique_ptr<IPCMessage> ipc_message;
+
   try {
     stub->SendMessage<CustomMetricsMessage>(
-        ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricRequestNew,
-        shm_handle_);
+        ipc_message, &custom_metrics_msg, custom_metrics_shm,
+        PYTHONSTUB_MetricRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -132,10 +134,12 @@ Metric::SendIncrementRequest(const double& value)
     operation_value_ = value;
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
+    AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
     std::unique_ptr<IPCMessage> ipc_message;
+
     stub->SendMessage<CustomMetricsMessage>(
-        ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricRequestIncrement,
-        shm_handle_);
+        ipc_message, &custom_metrics_msg, custom_metrics_shm,
+        PYTHONSTUB_MetricRequestIncrement, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -153,10 +157,12 @@ Metric::SendSetValueRequest(const double& value)
     operation_value_ = value;
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
+    AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
     std::unique_ptr<IPCMessage> ipc_message;
+
     stub->SendMessage<CustomMetricsMessage>(
-        ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricRequestSet,
-        shm_handle_);
+        ipc_message, &custom_metrics_msg, custom_metrics_shm,
+        PYTHONSTUB_MetricRequestSet, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -168,14 +174,15 @@ double
 Metric::SendGetValueRequest()
 {
   CustomMetricsMessage* custom_metrics_msg = nullptr;
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   std::unique_ptr<IPCMessage> ipc_message;
   try {
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     SaveToSharedMemory(stub->ShmPool());
     stub->SendMessage<CustomMetricsMessage>(
-        ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricRequestValue,
-        shm_handle_);
+        ipc_message, &custom_metrics_msg, custom_metrics_shm,
+        PYTHONSTUB_MetricRequestValue, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
@@ -197,11 +204,13 @@ Metric::Clear()
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
     SaveToSharedMemory(stub->ShmPool());
     CustomMetricsMessage* custom_metrics_msg = nullptr;
+    AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
     std::unique_ptr<IPCMessage> ipc_message;
+
     try {
       stub->SendMessage<CustomMetricsMessage>(
-          ipc_message, &custom_metrics_msg, PYTHONSTUB_MetricRequestDelete,
-          shm_handle_);
+          ipc_message, &custom_metrics_msg, custom_metrics_shm,
+          PYTHONSTUB_MetricRequestDelete, shm_handle_);
     }
     catch (const PythonBackendException& pb_exception) {
       std::cerr << "Error when deleting Metric: " << pb_exception.what()

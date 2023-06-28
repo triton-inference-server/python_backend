@@ -293,14 +293,11 @@ class Stub {
       std::unique_ptr<UtilsMessagePayload> utils_msg_payload);
 
   /// Send the message to the python backend. MessageType should be either
-  // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'. In some
-  // cases, the 'msg' object will hold the return value from the parent process,
-  // so we need to pass the 'ipc_message' from the caller function to make sure
-  // the 'msg' object is not deallocated along with the 'ipc_message' object
-  // before the stub process retrieves the return value.
+  // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'.
   template <typename MessageType>
   void SendMessage(
       std::unique_ptr<IPCMessage>& ipc_message, MessageType** msg,
+      AllocatedSharedMemory<MessageType>& msg_shm,
       PYTHONSTUB_CommandType command_type,
       bi::managed_external_buffer::handle_t handle);
 
@@ -374,12 +371,11 @@ template <typename MessageType>
 void
 Stub::SendMessage(
     std::unique_ptr<IPCMessage>& ipc_message, MessageType** msg,
+    AllocatedSharedMemory<MessageType>& msg_shm,
     PYTHONSTUB_CommandType command_type,
     bi::managed_external_buffer::handle_t handle)
 {
-  AllocatedSharedMemory<MessageType> msg_shm;
   PrepareMessage(msg_shm, msg);
-
   (*msg)->message = handle;
 
   ipc_message = IPCMessage::Create(shm_pool_, false /* inline_response */);
