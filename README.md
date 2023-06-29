@@ -706,14 +706,14 @@ If this variable is not exported and similar packages are installed outside your
 conda environment, your tar file may not contain all the dependencies required
 for an isolated Python environment.
 
-Alternatively, Triton also supports unpacked Conda execution enviroments, given 
-it  points to an activation script to setup the Conda enviroment. Usually the 
+Alternatively, Triton also supports unpacked Conda execution environments, given 
+it  points to an activation script to setup the Conda environment. Usually the 
 Conda activation script is located in:
 ````$path_to_conda_pack/lib/python3.7/site-packages/conda_pack/scripts/posix/activate``` 
 This speeds up the server loading time for models.
 
 After creating the tar file from the conda environment or creating a conda
-enviroment with a custom activation script, you need to tell Python
+environment with a custom activation script, you need to tell Python
 backend to use that environment for your model. You can do this by adding the
 lines below to the `config.pbtxt` file:
 
@@ -796,9 +796,9 @@ may use dependencies that are not available in the Triton container that you are
 using for deployment. For example, compiling the Python backend stub on an OS
 other than Ubuntu 22.04 can lead to unexpected errors.
 
-7. The custom execution enviroment needs to be compressed with the name 
+7. The custom execution environment needs to be compressed with the name 
 `*.tar.gz` for the Python Backend to unpack the package. Otherwise the 
-Python Backend will treat the enviroment as is. 
+Python Backend will treat the environment as is. 
 
 ## Error Handling
 
