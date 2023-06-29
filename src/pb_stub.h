@@ -303,8 +303,7 @@ class Stub {
   /// Helper function to prepare the message. MessageType should be either
   // 'MetricFamilyMessage', 'MetricMessage' or 'ModelLoaderMessage'.
   template <typename MessageType>
-  void PrepareMessage(
-      AllocatedSharedMemory<MessageType>& msg_shm, MessageType** msg);
+  void PrepareMessage(AllocatedSharedMemory<MessageType>& msg_shm);
 
   /// Helper function to retrieve a proxy stream for dlpack synchronization
   /// for provided device
@@ -354,16 +353,15 @@ class Stub {
 
 template <typename MessageType>
 void
-Stub::PrepareMessage(
-    AllocatedSharedMemory<MessageType>& msg_shm, MessageType** msg)
+Stub::PrepareMessage(AllocatedSharedMemory<MessageType>& msg_shm)
 {
   msg_shm = shm_pool_->Construct<MessageType>();
-  *msg = msg_shm.data_.get();
-  new (&((*msg)->mu)) bi::interprocess_mutex;
-  new (&((*msg)->cv)) bi::interprocess_condition;
-  (*msg)->waiting_on_stub = false;
-  (*msg)->is_error_set = false;
-  (*msg)->has_error = false;
+  MessageType* msg = msg_shm.data_.get();
+  new (&(msg->mu)) bi::interprocess_mutex;
+  new (&(msg->cv)) bi::interprocess_condition;
+  msg->waiting_on_stub = false;
+  msg->is_error_set = false;
+  msg->has_error = false;
 }
 
 template <typename MessageType>
@@ -373,8 +371,8 @@ Stub::SendMessage(
     PYTHONSTUB_CommandType command_type,
     bi::managed_external_buffer::handle_t handle)
 {
-  MessageType* msg = nullptr;
-  PrepareMessage(msg_shm, &msg);
+  PrepareMessage(msg_shm);
+  MessageType* msg = msg_shm.data_.get();
   msg->message = handle;
 
   std::unique_ptr<IPCMessage> ipc_message =
