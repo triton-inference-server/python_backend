@@ -27,6 +27,7 @@
 
 #include "gpu_buffers.h"
 #include "infer_payload.h"
+#include "model_loader.h"
 #include "pb_log.h"
 
 namespace triton { namespace backend { namespace python {
@@ -811,6 +812,12 @@ ModelInstanceState::StubToParentMQMonitor()
         ProcessMetricRequest(message);
         break;
       }
+      case PYTHONSTUB_ModelReadinessRequest:
+      case PYTHONSTUB_LoadModelRequest:
+      case PYTHONSTUB_UnloadModelRequest: {
+        ProcessModelControlRequest(message);
+        break;
+      }
       default: {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR, "Unexpected message type received.");
@@ -893,47 +900,46 @@ ModelInstanceState::ProcessBLSCleanupRequest(
   }
 }
 
-template <typename T>
+template <typename T, typename MessageType>
 void
-ModelInstanceState::ProcessCustomMetricsRequest(
-    const std::unique_ptr<IPCMessage>& message,
-    std::function<void(std::unique_ptr<T>&, CustomMetricsMessage*)>
-        request_handler)
+ModelInstanceState::ProcessMessage(
+    const std::unique_ptr<IPCMessage>& ipc_message,
+    std::function<void(std::unique_ptr<T>&, MessageType*)> request_handler)
 {
-  AllocatedSharedMemory<CustomMetricsMessage> metrics_message =
-      Stub()->ShmPool()->Load<CustomMetricsMessage>(message->Args());
-  CustomMetricsMessage* metrics_message_ptr =
-      reinterpret_cast<CustomMetricsMessage*>(metrics_message.data_.get());
+  AllocatedSharedMemory<MessageType> message =
+      Stub()->ShmPool()->Load<MessageType>(ipc_message->Args());
+  MessageType* message_ptr =
+      reinterpret_cast<MessageType*>(message.data_.get());
   std::unique_ptr<PbString> pb_error_message;
   PythonBackendException pb_exception(std::string{});
-  std::unique_ptr<T> metrics_object =
-      T::LoadFromSharedMemory(Stub()->ShmPool(), metrics_message_ptr->message);
+  std::unique_ptr<T> object =
+      T::LoadFromSharedMemory(Stub()->ShmPool(), message_ptr->message);
 
-  ScopedDefer _([metrics_message_ptr] {
+  ScopedDefer _([message_ptr] {
     {
-      bi::scoped_lock<bi::interprocess_mutex> guard{metrics_message_ptr->mu};
-      metrics_message_ptr->waiting_on_stub = true;
-      metrics_message_ptr->cv.notify_all();
-      while (metrics_message_ptr->waiting_on_stub) {
-        metrics_message_ptr->cv.wait(guard);
+      bi::scoped_lock<bi::interprocess_mutex> guard{message_ptr->mu};
+      message_ptr->waiting_on_stub = true;
+      message_ptr->cv.notify_all();
+      while (message_ptr->waiting_on_stub) {
+        message_ptr->cv.wait(guard);
       }
     }
   });
 
   try {
-    request_handler(metrics_object, metrics_message_ptr);
+    request_handler(object, message_ptr);
   }
   catch (const PythonBackendException& exception) {
     pb_exception = exception;
   }
 
   if (pb_exception.what() != std::string{}) {
-    metrics_message_ptr->has_error = true;
+    message_ptr->has_error = true;
     LOG_IF_EXCEPTION(
         pb_error_message =
             PbString::Create(Stub()->ShmPool(), pb_exception.what()));
-    metrics_message_ptr->error = pb_error_message->ShmHandle();
-    metrics_message_ptr->is_error_set = true;
+    message_ptr->error = pb_error_message->ShmHandle();
+    message_ptr->is_error_set = true;
   }
 }
 
@@ -942,7 +948,7 @@ ModelInstanceState::ProcessMetricFamilyRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
   auto command = message->Command();
-  ProcessCustomMetricsRequest<MetricFamily>(
+  ProcessMessage<MetricFamily, CustomMetricsMessage>(
       message, [this, command](
                    std::unique_ptr<MetricFamily>& metric_family,
                    CustomMetricsMessage* metrics_message_ptr) {
@@ -968,7 +974,7 @@ ModelInstanceState::ProcessMetricRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
   auto command = message->Command();
-  ProcessCustomMetricsRequest<Metric>(
+  ProcessMessage<Metric, CustomMetricsMessage>(
       message, [this, command](
                    std::unique_ptr<Metric>& metric,
                    CustomMetricsMessage* metrics_message_ptr) {
@@ -995,6 +1001,37 @@ ModelInstanceState::ProcessMetricRequest(
         }
         catch (const PythonBackendException& exception) {
           throw exception;
+        }
+      });
+}
+
+void
+ModelInstanceState::ProcessModelControlRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  auto command = message->Command();
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  ProcessMessage<ModelLoader, ModelLoaderMessage>(
+      message, [this, command, model_state](
+                   std::unique_ptr<ModelLoader>& model_loader,
+                   ModelLoaderMessage* model_loader_msg_ptr) {
+        switch (command) {
+          case PYTHONSTUB_LoadModelRequest: {
+            model_loader->LoadModel(model_state->TritonServer());
+            break;
+          }
+          case PYTHONSTUB_UnloadModelRequest: {
+            model_loader->UnloadModel(model_state->TritonServer());
+            break;
+          }
+          case PYTHONSTUB_ModelReadinessRequest: {
+            model_loader_msg_ptr->is_model_ready =
+                model_loader->IsModelReady(model_state->TritonServer());
+            break;
+          }
+          default: {
+            throw PythonBackendException("Unknown model loader request kind");
+          }
         }
       });
 }

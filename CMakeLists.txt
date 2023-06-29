@@ -166,6 +166,8 @@ set(
   src/metric_family.cc
   src/gpu_buffers.cc
   src/gpu_buffers.h
+  src/model_loader.h
+  src/model_loader.cc
 )
 
 set(

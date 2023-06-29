@@ -390,18 +390,22 @@ class ModelInstanceState : public BackendModelInstance {
   // Process the bls decoupled cleanup request
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
-  // Process a custom metrics request. The function 'request_handler' is invoked
-  // to handle the request. T should be either 'MetricFamily' or 'Metric'.
-  template <typename T>
-  void ProcessCustomMetricsRequest(
+  // Process a message. The function 'request_handler' is invoked
+  // to handle the request. T should be either 'MetricFamily', 'Metric' or
+  // 'ModelLoader', and MessageType should be either 'MetricFamilyMessage',
+  // 'MetricMessage' or 'ModelLoaderMessage'.
+  template <typename T, typename MessageType>
+  void ProcessMessage(
       const std::unique_ptr<IPCMessage>& message,
-      std::function<void(std::unique_ptr<T>&, CustomMetricsMessage*)>
-          request_handler);
+      std::function<void(std::unique_ptr<T>&, MessageType*)> request_handler);
 
   // Process a metric family request
   void ProcessMetricFamilyRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process a metric request
   void ProcessMetricRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process a model control request
+  void ProcessModelControlRequest(const std::unique_ptr<IPCMessage>& message);
 };
 }}}  // namespace triton::backend::python

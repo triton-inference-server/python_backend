@@ -98,7 +98,7 @@ class MetricFamily {
   /// Create a metric from the metric family and store it in the metric map.
   /// \param labels The labels of the metric.
   /// \return Returns the shared pointer to the created metric.
-  std::shared_ptr<Metric> CreateMetric(py::dict labels);
+  std::shared_ptr<Metric> CreateMetric(const py::object& labels);
 #else
   /// Initialize the TRITONSERVER_MetricFamily object.
   /// \return Returns the address of the TRITONSERVER_MetricFamily object.

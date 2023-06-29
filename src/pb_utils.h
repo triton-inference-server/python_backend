@@ -200,6 +200,14 @@ struct CustomMetricsMessage : SendMessageBase {
   void* address;
 };
 
+struct ModelLoaderMessage : SendMessageBase {
+  bi::managed_external_buffer::handle_t message;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  bool is_model_ready;
+};
+
 struct ResponseSenderBase {
   bi::interprocess_mutex mu;
   bi::interprocess_condition cv;
