@@ -84,7 +84,6 @@ Stub::Instantiate(
     const std::string& name, const std::string& platform)
 {
   model_scanner_.Init(model_path, platform, triton_install_path, model_version);
-  model_path_ = model_scanner_.ModelPath();
   model_version_ = model_version;
   triton_install_path_ = triton_install_path;
   name_ = name;
@@ -435,7 +434,13 @@ Stub::AutoCompleteModelConfig(
       py::module_::import("triton_python_backend_utils");
   py::object model_config =
       python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
-  python_backend_utils.attr("ModelPath") = py::str(model_path_);
+  python_backend_utils.def(
+      "get_model_path",
+      []() {
+        std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+        return stub->GetModelPath();
+      },
+      py::return_value_policy::reference);
 
   if (py::hasattr(sys.attr("TritonPythonModel"), "auto_complete_config")) {
     model_config = sys.attr("TritonPythonModel")
@@ -480,7 +485,13 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
-  python_backend_utils.attr("ModelPath") = py::str(model_path_);
+  python_backend_utils.def(
+      "get_model_path",
+      []() {
+        std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+        return stub->GetModelPath();
+      },
+      py::return_value_policy::reference);
   model_instance_ = TritonPythonModel();
 
   std::unordered_map<std::string, std::string> map;

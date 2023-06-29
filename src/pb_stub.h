@@ -224,6 +224,9 @@ class Stub {
   /// Setup for the stub process
   py::module StubSetup();
 
+  /// Function to return the path to the model.
+  py::str GetModelPath() { return model_scanner_.ModelPath(); }
+
   /// Set the model configuration for auto-complete
   void AutoCompleteModelConfig(
       bi::managed_external_buffer::handle_t string_handle,
