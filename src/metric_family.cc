@@ -57,10 +57,10 @@ MetricFamily::~MetricFamily()
   // Send the request to delete the MetricFamily to the parent process
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
-  CustomMetricsMessage* custom_metrics_msg = nullptr;
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   try {
-    stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestDelete, shm_handle_);
+    stub->SendMessage<CustomMetricsMessage>(
+        custom_metrics_shm, PYTHONSTUB_MetricFamilyRequestDelete, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     std::cerr << "Error when deleting MetricFamily: " << pb_exception.what()
@@ -90,7 +90,7 @@ MetricFamily::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   custom_metric_family_shm_ = std::move(custom_metric_family_shm);
   name_shm_ = std::move(name_shm);
   description_shm_ = std::move(description_shm);
-  shm_handle_ = custom_metric_family_shm.handle_;
+  shm_handle_ = custom_metric_family_shm_.handle_;
 }
 
 std::unique_ptr<MetricFamily>
@@ -150,21 +150,32 @@ MetricFamily::SendCreateMetricFamilyRequest()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
+  AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   try {
-    stub->SendCustomMetricsMessage(
-        &custom_metrics_msg, PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
+    stub->SendMessage<CustomMetricsMessage>(
+        custom_metrics_shm, PYTHONSTUB_MetricFamilyRequestNew, shm_handle_);
   }
   catch (const PythonBackendException& pb_exception) {
     throw PythonBackendException(
         "Error when creating MetricFamily: " +
         std::string(pb_exception.what()));
   }
+
+  custom_metrics_msg = custom_metrics_shm.data_.get();
   metric_family_address_ = custom_metrics_msg->address;
 }
 
 std::shared_ptr<Metric>
-MetricFamily::CreateMetric(py::dict labels)
+MetricFamily::CreateMetric(const py::object& labels)
 {
+  if (!labels.is_none()) {
+    if (!py::isinstance<py::dict>(labels)) {
+      throw PythonBackendException(
+          "Failed to create metric. Labels must be a "
+          "dictionary.");
+    }
+  }
+
   py::module json = py::module_::import("json");
   std::string labels_str = std::string(py::str(json.attr("dumps")(labels)));
   auto metric = std::make_shared<Metric>(labels_str, metric_family_address_);
