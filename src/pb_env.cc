@@ -256,7 +256,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
 
   // If the path is not a conda-packed file, then bypass the extraction process
   std::size_t subStrPos = env_path.size() > 6 ? env_path.size() - 6 : 0;
-  std::string subPath =  env_path.substr(subStrPos);
+  std::string subPath = env_path.substr(subStrPos);
   if (subPath != "tar.gz") {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
