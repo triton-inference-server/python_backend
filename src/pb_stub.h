@@ -162,7 +162,7 @@ class LogMessage {
 #define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
 
 
-class ModelScanner {
+class ModelContext {
  public:
   // Scans and establishes path for serving the python model.
   void Init(
@@ -179,7 +179,7 @@ class ModelScanner {
   std::string model_path_;
   std::string model_version_;
   std::string python_backend_folder_;
-  std::string platform_model_;
+  std::string platform_;
 
   enum ModelType { DEFAULT, PLATFORM };
   ModelType type_;
@@ -209,8 +209,7 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       bi::managed_external_buffer::handle_t ipc_control_handle,
-      const std::string& model_instance_name,
-      const std::string& platform_model);
+      const std::string& model_instance_name, const std::string& platform);
 
   /// Get the health of the stub process.
   bool& Health();
@@ -224,8 +223,8 @@ class Stub {
   /// Setup for the stub process
   py::module StubSetup();
 
-  /// Function to return the path to the model.
-  py::str GetModelPath() { return model_scanner_.ModelPath(); }
+  /// Return the path to the model
+  py::str GetModelPath() { return model_context_.ModelPath(); }
 
   /// Set the model configuration for auto-complete
   void AutoCompleteModelConfig(
@@ -341,11 +340,8 @@ class Stub {
   bi::interprocess_mutex* parent_mutex_;
   bi::interprocess_condition* parent_cond_;
   bi::interprocess_mutex* health_mutex_;
-  ModelScanner model_scanner_;
-  std::string model_version_;
+  ModelContext model_context_;
   std::string name_;
-  std::string model_path_;
-  std::string triton_install_path_;
   IPCControlShm* ipc_control_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
   py::object model_instance_;

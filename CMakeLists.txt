@@ -307,7 +307,7 @@ install(
 
 install(
   DIRECTORY
-    src/resources/platform_models
+    src/resources/platform_handlers
   DESTINATION
     ${CMAKE_INSTALL_PREFIX}/backends/python
 )

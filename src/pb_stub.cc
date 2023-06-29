@@ -83,9 +83,7 @@ Stub::Instantiate(
     bi::managed_external_buffer::handle_t ipc_control_handle,
     const std::string& name, const std::string& platform)
 {
-  model_scanner_.Init(model_path, platform, triton_install_path, model_version);
-  model_version_ = model_version;
-  triton_install_path_ = triton_install_path;
+  model_context_.Init(model_path, platform, triton_install_path, model_version);
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
@@ -377,7 +375,7 @@ Stub::StubSetup()
 {
   py::module sys = py::module_::import("sys");
 
-  model_scanner_.StubSetup(sys);
+  model_context_.StubSetup(sys);
 
   py::module python_backend_utils =
       py::module_::import("triton_python_backend_utils");
@@ -629,7 +627,7 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
     response_batch_shm_ptr->is_error_set = false;
 
     if (!py::hasattr(model_instance_, "execute")) {
-      std::string message = "Python model " + model_scanner_.PythonModelPath() +
+      std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
@@ -716,7 +714,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         LoadRequestsFromSharedMemory(request_batch_shm_ptr);
 
     if (!py::hasattr(model_instance_, "execute")) {
-      std::string message = "Python model " + model_scanner_.PythonModelPath() +
+      std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
       throw PythonBackendException(message);
     }
@@ -1606,7 +1604,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
 
 void
-ModelScanner::Init(
+ModelContext::Init(
     const std::string& model_path, const std::string& platform,
     const std::string& triton_install_path, const std::string& model_version)
 {
@@ -1615,7 +1613,7 @@ ModelScanner::Init(
 
   if (platform != "NONE") {
     platform_model_path =
-        triton_install_path + "/platform_models/" + platform + "/model.py";
+        triton_install_path + "/platform_handlers/" + platform + "/model.py";
     // Check if model file exists in the path.
     struct stat buffer;
     if (stat(platform_model_path.c_str(), &buffer) == 0) {
@@ -1627,7 +1625,7 @@ ModelScanner::Init(
       // will populate the expected default model file name into model_path_.
       model_path_ = model_path.substr(0, model_path.find_last_of("\\/"));
     } else {
-      LOG_WARN << "Unable to find model \'" << platform_model_path
+      LOG_WARN << "Unable to find model(handler) \'" << platform_model_path
                << "\' for platform field \'" << platform << "\'";
     }
   }
@@ -1655,11 +1653,11 @@ ModelScanner::Init(
 
   python_backend_folder_ = triton_install_path;
   model_version_ = model_version;
-  platform_model_ = platform;
+  platform_ = platform;
 }
 
 void
-ModelScanner::StubSetup(py::module& sys)
+ModelContext::StubSetup(py::module& sys)
 {
   std::string model_name =
       python_model_path_.substr(python_model_path_.find_last_of("/") + 1);
@@ -1687,7 +1685,7 @@ ModelScanner::StubSetup(py::module& sys)
         (std::string(model_version_) + "." + model_name_trimmed).c_str());
   } else {
     std::string platform_model_dir(
-        python_backend_folder_ + "/platform_models/" + platform_model_ + "/");
+        python_backend_folder_ + "/platform_handlers/" + platform_ + "/");
     sys.attr("path").attr("append")(platform_model_dir);
     sys.attr("path").attr("append")(python_backend_folder_);
     sys = py::module_::import(model_name_trimmed.c_str());
@@ -1737,14 +1735,14 @@ main(int argc, char** argv)
   int64_t shm_growth_size = std::stol(argv[4]);
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
-  std::string platform_model = argv[9];
+  std::string platform = argv[9];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl handle */, name, platform_model);
+        std::stoi(argv[7]) /* IPCControl handle */, name, platform);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();

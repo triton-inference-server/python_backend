@@ -76,10 +76,8 @@ StubLauncher::Initialize(ModelState* model_state)
 
   model_version_ = model_state->Version();
 
-  // Should check for model.py only when not using platform models.
   std::stringstream ss;
   ss << model_repository_path_ << "/" << model_version_ << "/";
-
   std::string artifact_name;
   RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
       "default_model_filename", &artifact_name));
