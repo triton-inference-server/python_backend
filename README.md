@@ -681,7 +681,7 @@ If you want to create a tar file that contains all your Python dependencies or
 you want to use different Python environments for each Python model you need to
 create a *Custom Execution Environment* in Python backend.
 Currently, Python backend supports
-[conda-pack](https://conda.github.io/conda-pack/) for this purpose. 
+[conda-pack](https://conda.github.io/conda-pack/) for this purpose.
 [conda-pack](https://conda.github.io/conda-pack/) ensures that your conda
 environment is portable. You can create a tar file for your conda environment
 using `conda-pack` command:
@@ -706,10 +706,10 @@ If this variable is not exported and similar packages are installed outside your
 conda environment, your tar file may not contain all the dependencies required
 for an isolated Python environment.
 
-Alternatively, Triton also supports unpacked Conda execution environments, given 
-it  points to an activation script to setup the Conda environment. Usually the 
+Alternatively, Triton also supports unpacked Conda execution environments, given
+it  points to an activation script to setup the Conda environment. Usually the
 Conda activation script is located in:
-````$path_to_conda_pack/lib/python3.7/site-packages/conda_pack/scripts/posix/activate``` 
+````$path_to_conda_pack/lib/python3.7/site-packages/conda_pack/scripts/posix/activate```
 This speeds up the server loading time for models.
 
 After creating the tar file from the conda environment or creating a conda
@@ -796,9 +796,9 @@ may use dependencies that are not available in the Triton container that you are
 using for deployment. For example, compiling the Python backend stub on an OS
 other than Ubuntu 22.04 can lead to unexpected errors.
 
-7. The custom execution environment needs to be compressed with the name 
-`*.tar.gz` for the Python Backend to unpack the package. Otherwise the 
-Python Backend will treat the environment as is. 
+7. The custom execution environment needs to be compressed with the name
+`*.tar.gz` for the Python Backend to unpack the package. Otherwise the
+Python Backend will treat the environment as is.
 
 ## Error Handling
 
