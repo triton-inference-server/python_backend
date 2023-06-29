@@ -62,7 +62,8 @@ CUDAHandler::CUDAHandler()
   dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
 
   // If libcuda.so is successfully opened, it must be able to find
-  // "cuPointerGetAttribute" and "cuGetErrorString" symbols.
+  // "cuPointerGetAttribute", "cuGetErrorString", and
+  // "cuDevicePrimaryCtxGetState" symbols.
   if (dl_open_handle_ != nullptr) {
     void* cu_pointer_get_attribute_fn =
         dlsym(dl_open_handle_, "cuPointerGetAttribute");
@@ -87,6 +88,16 @@ CUDAHandler::CUDAHandler()
           std::string("Failed to dlsym 'cuInit'. Error: ") + dlerror());
     }
     *((void**)&cu_init_fn_) = cu_init_fn;
+
+    void* cu_device_primary_ctx_get_state_fn =
+        dlsym(dl_open_handle_, "cuDevicePrimaryCtxGetState");
+    if (cu_device_primary_ctx_get_state_fn == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to dlsym 'cuDevicePrimaryCtxGetState'. Error: ") +
+          dlerror());
+    }
+    *((void**)&cu_device_primary_ctx_get_state_fn_) =
+        cu_device_primary_ctx_get_state_fn;
 
     // Initialize the driver API.
     CUresult cuda_err = (*cu_init_fn_)(0 /* flags */);
@@ -132,41 +143,9 @@ CUDAHandler::OpenCudaHandle(
     void** data_ptr)
 {
   std::lock_guard<std::mutex> guard{mu_};
-  int current_device;
+  ScopedSetDevice scoped_set_device(memory_type_id);
 
-  // Save the previous device
-  cudaError_t err = cudaGetDevice(&current_device);
-  if (err != cudaSuccess) {
-    throw PythonBackendException(
-        std::string("Failed to get the current CUDA device. error: ") +
-        cudaGetErrorString(err));
-  }
-
-  bool overridden = (current_device != memory_type_id);
-
-  // Restore the previous device before returning from the function.
-  ScopedDefer _(std::bind([&overridden, &current_device] {
-    if (overridden) {
-      cudaError_t err = cudaSetDevice(current_device);
-      if (err != cudaSuccess) {
-        throw PythonBackendException(
-            "Failed to set the CUDA device to " +
-            std::to_string(current_device) +
-            ". error: " + cudaGetErrorString(err));
-      }
-    }
-  }));
-
-  if (overridden) {
-    err = cudaSetDevice(memory_type_id);
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          "Failed to set the CUDA device to " + std::to_string(memory_type_id) +
-          ". error: " + cudaGetErrorString(err));
-    }
-  }
-
-  err = cudaIpcOpenMemHandle(
+  cudaError_t err = cudaIpcOpenMemHandle(
       data_ptr, *cuda_mem_handle, cudaIpcMemLazyEnablePeerAccess);
   if (err != cudaSuccess) {
     throw PythonBackendException(
@@ -189,31 +168,8 @@ CUDAHandler::CloseCudaHandle(int64_t memory_type_id, void* data_ptr)
         cudaGetErrorString(err));
   }
 
-  bool overridden = (current_device != memory_type_id);
-
   // Restore the previous device before returning from the function.
-  ScopedDefer _(std::bind([&overridden, &current_device] {
-    if (overridden) {
-      cudaError_t err = cudaSetDevice(current_device);
-      if (err != cudaSuccess) {
-        throw PythonBackendException(
-            "Failed to set the CUDA device to " +
-            std::to_string(current_device) +
-            ". error: " + cudaGetErrorString(err));
-      }
-    }
-  }));
-
-  if (overridden) {
-    err = cudaSetDevice(memory_type_id);
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          std::string("Failed to set the CUDA device to ") +
-          std::to_string(memory_type_id) +
-          ". error: " + cudaGetErrorString(err));
-    }
-  }
-
+  ScopedSetDevice scoped_set_device(memory_type_id);
   err = cudaIpcCloseMemHandle(data_ptr);
   if (err != cudaSuccess) {
     throw PythonBackendException(
@@ -222,6 +178,39 @@ CUDAHandler::CloseCudaHandle(int64_t memory_type_id, void* data_ptr)
   }
 }
 
+bool
+CUDAHandler::HasPrimaryContext(int device)
+{
+  unsigned int ctx_flags;
+  int ctx_is_active = 0;
+  CUresult cuda_err = (*cu_device_primary_ctx_get_state_fn_)(
+      device, &ctx_flags, &ctx_is_active);
+  if (cuda_err != CUDA_SUCCESS) {
+    const char* error_string;
+    (*cu_get_error_string_fn_)(cuda_err, &error_string);
+    throw PythonBackendException(
+        std::string(
+            "failed to get primary context state: " + std::string(error_string))
+            .c_str());
+  }
+
+  return ctx_is_active == 1;
+}
+
+void
+CUDAHandler::MaybeSetDevice(int device)
+{
+  if (HasPrimaryContext(device)) {
+    cudaError_t err = cudaSetDevice(device);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          std::string("Failed to set the CUDA device to ") +
+          std::to_string(device) + ". error: " + cudaGetErrorString(err));
+    }
+  }
+}
+
+
 CUDAHandler::~CUDAHandler() noexcept(false)
 {
   if (dl_open_handle_ != nullptr) {
@@ -229,6 +218,24 @@ CUDAHandler::~CUDAHandler() noexcept(false)
     if (status != 0) {
       throw PythonBackendException("Failed to close the libcuda handle.");
     }
+  }
+}
+
+ScopedSetDevice::ScopedSetDevice(int device)
+{
+  device_ = device;
+  THROW_IF_CUDA_ERROR(cudaGetDevice(&current_device_));
+
+  if (current_device_ != device_) {
+    THROW_IF_CUDA_ERROR(cudaSetDevice(device_));
+  }
+}
+
+ScopedSetDevice::~ScopedSetDevice()
+{
+  if (current_device_ != device_) {
+    CUDAHandler& cuda_handler = CUDAHandler::getInstance();
+    cuda_handler.MaybeSetDevice(current_device_);
   }
 }
 #endif

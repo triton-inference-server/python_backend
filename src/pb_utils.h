@@ -243,7 +243,12 @@ class CUDAHandler {
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
   CUresult (*cu_init_fn_)(unsigned int) = nullptr;
+  CUresult (*cu_device_primary_ctx_get_state_fn_)(
+      CUdevice, unsigned int*, int*) = nullptr;
   CUDAHandler();
+
+  /// Check if a primary context has already been created for a device.
+  bool HasPrimaryContext(int device);
   ~CUDAHandler() noexcept(false);
 
  public:
@@ -257,7 +262,28 @@ class CUDAHandler {
       int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
       void** data_ptr);
   void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
+
+  /// Set the device only if the primary context has already been created for
+  /// this device. Inspired from PyTorch's MaybeSetDevice.
+  /// \param device The cuda device index.
+  void MaybeSetDevice(int device);
 };
+
+
+/// A helper class to change the current device and restore the old context. The
+/// old context will be restored only if the primary context for that device is
+/// already created, otherwise the CUDA context will remain as the primary
+/// context of 'device'.
+class ScopedSetDevice {
+ public:
+  ScopedSetDevice(int device);
+  ~ScopedSetDevice();
+
+ private:
+  int device_;
+  int current_device_;
+};
+
 #endif  // TRITON_ENABLE_GPU
 
 #ifndef TRITON_PB_STUB

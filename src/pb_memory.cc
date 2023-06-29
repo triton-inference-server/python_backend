@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -189,8 +189,7 @@ PbMemory::FillShmData(
 #ifdef TRITON_ENABLE_GPU
     if (data != nullptr) {
       if (copy_gpu) {
-        // [FIXME] Restore the previous device
-        THROW_IF_CUDA_ERROR(cudaSetDevice(memory_type_id));
+        ScopedSetDevice scoped_set_device(memory_type_id);
         THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
             reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm), data));
       }
