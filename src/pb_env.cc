@@ -30,6 +30,7 @@
 #include <archive_entry.h>
 #include <fts.h>
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -255,9 +256,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   bool re_extraction = false;
 
   // If the path is not a conda-packed file, then bypass the extraction process
-  std::size_t subStrPos = env_path.size() > 6 ? env_path.size() - 6 : 0;
-  std::string subPath = env_path.substr(subStrPos);
-  if (subPath != "tar.gz") {
+  if (!boost::algorithm::ends_with(env_path, "tar.gz")) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
