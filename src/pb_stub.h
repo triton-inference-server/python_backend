@@ -172,11 +172,11 @@ class ModelContext {
   void StubSetup(py::module& sys);
 
   std::string& PythonModelPath() { return python_model_path_; }
-  std::string& ModelPath() { return model_path_; }
+  std::string& ModelParentPath() { return model_parent_path_; }
 
  private:
   std::string python_model_path_;
-  std::string model_path_;
+  std::string model_parent_path_;
   std::string model_version_;
   std::string python_backend_folder_;
   std::string platform_;
@@ -224,7 +224,7 @@ class Stub {
   py::module StubSetup();
 
   /// Return the path to the model
-  py::str GetModelPath() { return model_context_.ModelPath(); }
+  py::str GetModelParentPath() { return model_context_.ModelParentPath(); }
 
   /// Set the model configuration for auto-complete
   void AutoCompleteModelConfig(

@@ -433,10 +433,10 @@ Stub::AutoCompleteModelConfig(
   py::object model_config =
       python_backend_utils.attr("ModelConfig")(pb_string_shm->String());
   python_backend_utils.def(
-      "get_model_path",
+      "get_model_parent_path",
       []() {
         std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-        return stub->GetModelPath();
+        return stub->GetModelParentPath();
       },
       py::return_value_policy::reference);
 
@@ -484,10 +484,10 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
   python_backend_utils.def(
-      "get_model_path",
+      "get_model_parent_path",
       []() {
         std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-        return stub->GetModelPath();
+        return stub->GetModelParentPath();
       },
       py::return_value_policy::reference);
   model_instance_ = TritonPythonModel();
@@ -1623,7 +1623,7 @@ ModelContext::Init(
       python_model_path_ = platform_model_path;
       // Trimming the model name from the model path, the platform model
       // will populate the expected default model file name into model_path_.
-      model_path_ = model_path.substr(0, model_path.find_last_of("\\/"));
+      model_parent_path_ = model_path.substr(0, model_path.find_last_of("\\/"));
     } else {
       LOG_WARN << "Unable to find model(handler) \'" << platform_model_path
                << "\' for platform field \'" << platform << "\'";
@@ -1638,6 +1638,8 @@ ModelContext::Init(
       python_model_found = true;
       type_ = ModelType::DEFAULT;
     }
+    // Initializing here for consistency with platform model case.
+    model_parent_path_ = model_path.substr(0, model_path.find_last_of("\\/"));
   }
 
   if (!python_model_found) {
