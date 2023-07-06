@@ -256,11 +256,11 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   bool re_extraction = false;
 
   // If the path is not a conda-packed file, then bypass the extraction process
-  if (!boost::algorithm::ends_with(env_path, "tar.gz")) {
+  if (boost::filesystem::exists(env_path)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
-                     "not contain tar. Path: ") +
+                     "not contain compressed path. Path: ") +
          canonical_env_path)
             .c_str());
     return canonical_env_path;

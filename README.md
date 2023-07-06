@@ -62,8 +62,8 @@ any C++ code.
   - [Running Multiple Instances of Triton Server](#running-multiple-instances-of-triton-server)
 - [Business Logic Scripting](#business-logic-scripting)
   - [Using BLS with Decoupled Models](#using-bls-with-decoupled-models)
-  - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Model Loading API](#model-loading-api)
+  - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Limitation](#limitation)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
@@ -706,9 +706,9 @@ If this variable is not exported and similar packages are installed outside your
 conda environment, your tar file may not contain all the dependencies required
 for an isolated Python environment.
 
-Alternatively, Triton also supports unpacked Conda execution environments, given
-it  points to an activation script to setup the Conda environment. Usually the
-Conda activation script is located in:
+Alternatively, Python backend also supports unpacked conda execution 
+environments, given it points to an activation script to setup the conda 
+environment. Usually the conda activation script is located in:
 ````$path_to_conda_pack/lib/python3.7/site-packages/conda_pack/scripts/posix/activate```
 This speeds up the server loading time for models.
 
