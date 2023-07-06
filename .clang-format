@@ -2,6 +2,7 @@
 BasedOnStyle: Google
 
 IndentWidth: 2
+ColumnLimit: 80
 ContinuationIndentWidth: 4
 UseTab: Never
 MaxEmptyLinesToKeep: 2
@@ -35,4 +36,3 @@ BinPackParameters: true
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
 
 IndentCaseLabels: true
-
