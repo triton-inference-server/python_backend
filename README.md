@@ -337,11 +337,12 @@ class TritonPythonModel:
         responses = []
 
         # Every Python backend must iterate through list of requests and create
-        # an instance of pb_utils.InferenceResponse class for each of them. You
-        # should avoid storing any of the input Tensors in the class attributes
-        # as they will be overridden in subsequent inference requests. You can
-        # make a copy of the underlying NumPy array and store it if it is
-        # required.
+        # an instance of pb_utils.InferenceResponse class for each of them.
+        # Reusing the same pb_utils.InferenceResponse object for multiple
+        # requests may result in segmentation faults. You should avoid storing
+        # any of the input Tensors in the class attributes as they will be
+        # overridden in subsequent inference requests. You can make a copy of
+        # the underlying NumPy array and store it if it is required.
         for request in requests:
             # Perform inference on the request and append it to responses
             # list...
