@@ -45,7 +45,7 @@ any C++ code.
     - [`initialize`](#initialize)
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
-        - [Error Handling](#error-handling)
+      - [Error Handling](#error-handling)
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
         - [Known Issues](#known-issues)
@@ -62,8 +62,8 @@ any C++ code.
   - [Running Multiple Instances of Triton Server](#running-multiple-instances-of-triton-server)
 - [Business Logic Scripting](#business-logic-scripting)
   - [Using BLS with Decoupled Models](#using-bls-with-decoupled-models)
-  - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Model Loading API](#model-loading-api)
+  - [Using BLS with Stateful Models](#using-bls-with-stateful-models)
   - [Limitation](#limitation)
 - [Interoperability and GPU Support](#interoperability-and-gpu-support)
   - [`pb_utils.Tensor.to_dlpack() -> PyCapsule`](#pb_utilstensorto_dlpack---pycapsule)
@@ -72,7 +72,9 @@ any C++ code.
   - [Input Tensor Device Placement](#input-tensor-device-placement)
 - [Frameworks](#frameworks)
   - [PyTorch](#pytorch)
+    - [PyTorch Determinism](#pytorch-determinism)
   - [TensorFlow](#tensorflow)
+    - [TensorFlow Determinism](#tensorflow-determinism)
 - [Custom Metrics](#custom-metrics)
 - [Examples](#examples)
   - [AddSub in NumPy](#addsub-in-numpy)
@@ -81,7 +83,8 @@ any C++ code.
   - [Business Logic Scripting](#business-logic-scripting-1)
   - [Preprocessing](#preprocessing)
   - [Decoupled Models](#decoupled-models)
-  - [Auto-complete Config](#auto-complete-config)
+  - [Model Instance Kind](#model-instance-kind)
+  - [Auto-complete config](#auto-complete-config)
   - [Custom Metrics](#custom-metrics-1)
 - [Running with Inferentia](#running-with-inferentia)
 - [Logging](#logging)
@@ -678,7 +681,7 @@ above.
 If you want to create a tar file that contains all your Python dependencies or
 you want to use different Python environments for each Python model you need to
 create a *Custom Execution Environment* in Python backend.
-Currently, Python backend only supports
+Currently, Python backend supports
 [conda-pack](https://conda.github.io/conda-pack/) for this purpose.
 [conda-pack](https://conda.github.io/conda-pack/) ensures that your conda
 environment is portable. You can create a tar file for your conda environment
@@ -704,7 +707,17 @@ If this variable is not exported and similar packages are installed outside your
 conda environment, your tar file may not contain all the dependencies required
 for an isolated Python environment.
 
-After creating the tar file from the conda environment, you need to tell Python
+Alternatively, Python backend also supports unpacked conda execution
+environments, given it points to an activation script to setup the conda
+environment. To do this, the execution environment can be first packed using
+[conda-pack](https://conda.github.io/conda-pack/) and then unpacked, or created
+using [conda create -p](https://docs.conda.io/projects/conda/en/latest/commands/create.html).
+In this case, the conda activation script is located in:
+```$path_to_conda_pack/lib/python<your.python.version>/site-packages/conda_pack/scripts/posix/activate```
+This speeds up the server loading time for models.
+
+After creating the packed file from the conda environment or creating a conda
+environment with a custom activation script, you need to tell Python
 backend to use that environment for your model. You can do this by adding the
 lines below to the `config.pbtxt` file:
 
