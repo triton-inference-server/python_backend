@@ -30,7 +30,7 @@
 #include <archive_entry.h>
 #include <fts.h>
 
-#include <boost/algorithm/string/predicate.hpp>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -256,7 +256,8 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   bool re_extraction = false;
 
   // If the path is not a conda-packed file, then bypass the extraction process
-  if (boost::filesystem::exists(env_path)) {
+  struct stat info;
+  if (stat(canonical_env_path, &info) == 0 && S_ISDIR(info.st_mode)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         (std::string("Returning canonical path since EXECUTION_ENV_PATH does "

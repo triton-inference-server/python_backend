@@ -706,13 +706,16 @@ If this variable is not exported and similar packages are installed outside your
 conda environment, your tar file may not contain all the dependencies required
 for an isolated Python environment.
 
-Alternatively, Python backend also supports unpacked conda execution 
-environments, given it points to an activation script to setup the conda 
-environment. Usually the conda activation script is located in:
-````$path_to_conda_pack/lib/python3.7/site-packages/conda_pack/scripts/posix/activate```
+Alternatively, Python backend also supports unpacked conda execution
+environments, given it points to an activation script to setup the conda
+environment. To do this, the execution environment can be first packed using
+[conda-pack](https://conda.github.io/conda-pack/) and then unpacked, or created
+using [conda create -p](https://docs.conda.io/projects/conda/en/latest/commands/create.html).
+In this case, the conda activation script is located in:
+```$path_to_conda_pack/lib/python<your.python.version>/site-packages/conda_pack/scripts/posix/activate```
 This speeds up the server loading time for models.
 
-After creating the tar file from the conda environment or creating a conda
+After creating the packed file from the conda environment or creating a conda
 environment with a custom activation script, you need to tell Python
 backend to use that environment for your model. You can do this by adding the
 lines below to the `config.pbtxt` file:
@@ -795,10 +798,6 @@ compile it in the official Triton NGC containers. Otherwise, your compiled stub
 may use dependencies that are not available in the Triton container that you are
 using for deployment. For example, compiling the Python backend stub on an OS
 other than Ubuntu 22.04 can lead to unexpected errors.
-
-7. The custom execution environment needs to be compressed with the name
-`*.tar.gz` for the Python Backend to unpack the package. Otherwise the
-Python Backend will treat the environment as is.
 
 ## Error Handling
 
