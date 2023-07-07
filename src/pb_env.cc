@@ -29,6 +29,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <fts.h>
+#include <sys/stat.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -253,6 +254,21 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
 
   bool env_extracted = false;
   bool re_extraction = false;
+
+  // If the path is not a conda-packed file, then bypass the extraction process
+  struct stat info;
+  if (stat(canonical_env_path, &info) != 0) {
+    throw PythonBackendException(
+        std::string("stat() of : ") + canonical_env_path + " returned error.");
+  } else if (S_ISDIR(info.st_mode)) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_VERBOSE,
+        (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
+                     "not contain compressed path. Path: ") +
+         canonical_env_path)
+            .c_str());
+    return canonical_env_path;
+  }
   const auto env_itr = env_map_.find(canonical_env_path);
   if (env_itr != env_map_.end()) {
     // Check if the environment has been modified and would
