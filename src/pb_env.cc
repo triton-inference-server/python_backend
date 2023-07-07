@@ -29,8 +29,8 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <fts.h>
-
 #include <sys/stat.h>
+
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -257,7 +257,10 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
 
   // If the path is not a conda-packed file, then bypass the extraction process
   struct stat info;
-  if (stat(canonical_env_path, &info) == 0 && S_ISDIR(info.st_mode)) {
+  if (stat(canonical_env_path, &info) != 0) {
+    throw PythonBackendException(
+        std::string("stat() of : ") + canonical_env_path + " returned error.");
+  } else if (S_ISDIR(info.st_mode)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
