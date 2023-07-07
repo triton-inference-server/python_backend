@@ -462,7 +462,7 @@ ModelInstanceState::GetInputTensor(
   CUDAHandler& cuda_handler = CUDAHandler::getInstance();
   // If CUDA driver API is not available, the input tensors will be moved to
   // CPU.
-  if (!cuda_handler.IsAvailable()) {
+  if (!cuda_handler.IsAvailable() && !cpu_only_tensors) {
     if (!cuda_handler.GetErrorString().empty()) {
       LOG_MESSAGE(
           TRITONSERVER_LOG_WARN, (std::string(
