@@ -104,11 +104,12 @@ CUDAHandler::CUDAHandler()
     if (cuda_err != CUDA_SUCCESS) {
       const char* error_string;
       (*cu_get_error_string_fn_)(cuda_err, &error_string);
-      throw PythonBackendException(
-          std::string(
-              "failed to get cuda pointer device attribute: " +
-              std::string(error_string))
-              .c_str());
+      error_str_ = std::string("failed to call cuInit: ") + error_string;
+      int status = dlclose(dl_open_handle_);
+      if (status != 0) {
+        throw PythonBackendException("Failed to close the libcuda handle.");
+      }
+      dl_open_handle_ = nullptr;
     }
   }
 }

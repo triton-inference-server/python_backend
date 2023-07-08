@@ -247,6 +247,7 @@ class CUDAHandler {
  private:
   std::mutex mu_;
   void* dl_open_handle_ = nullptr;
+  std::string error_str_;
   CUresult (*cu_pointer_get_attribute_fn_)(
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
@@ -263,6 +264,8 @@ class CUDAHandler {
   CUDAHandler(CUDAHandler const&) = delete;
   void operator=(CUDAHandler const&) = delete;
   bool IsAvailable();
+  const std::string& GetErrorString() const { return error_str_; }
+  void ClearErrorString() { return error_str_.clear(); }
   void PointerGetAttribute(
       CUdeviceptr* start_address, CUpointer_attribute attr,
       CUdeviceptr device_ptr);
