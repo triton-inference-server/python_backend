@@ -1213,7 +1213,8 @@ class TritonPythonModel:
         # If the model is no longer needed, you can unload it. You can also
         # specify whether the dependents of the model should also be unloaded by
         # setting the 'unload_dependents' parameter to True. The default value
-        # is False.
+        # is False. Need to be careful when unloading the model as it can affect
+        # other model instances or other models that depend on it.
         pb_utils.unload_model(model_name=self.model_name,
                               unload_dependents=True)
 
