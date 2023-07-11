@@ -68,7 +68,8 @@ class InferRequest {
       const int32_t timeout = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
-          PreferredMemory(PreferredMemory::DEFAULT, 0));
+          PreferredMemory(PreferredMemory::DEFAULT, 0),
+      TRITONSERVER_InferenceTrace* trace = nullptr);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
@@ -117,6 +118,8 @@ class InferRequest {
   TRITONSERVER_Error* DeleteResponseFactory();
 #endif
 
+  TRITONSERVER_InferenceTrace* Trace();
+
  private:
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,
@@ -155,5 +158,7 @@ class InferRequest {
 #ifdef TRITON_PB_STUB
   std::shared_ptr<ResponseSender> response_sender_;
 #endif
+
+  TRITONSERVER_InferenceTrace* trace_;
 };
 }}};  // namespace triton::backend::python

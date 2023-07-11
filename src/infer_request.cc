@@ -44,12 +44,13 @@ InferRequest::InferRequest(
     const std::string& model_name, const int64_t model_version,
     const std::string& parameters, const uint32_t flags, const int32_t timeout,
     const intptr_t response_factory_address, const intptr_t request_address,
-    const PreferredMemory& preferred_memory)
+    const PreferredMemory& preferred_memory, TRITONSERVER_InferenceTrace* trace)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
       model_version_(model_version), parameters_(parameters), flags_(flags),
       timeout_(timeout), response_factory_address_(response_factory_address),
-      request_address_(request_address), preferred_memory_(preferred_memory)
+      request_address_(request_address), preferred_memory_(preferred_memory),
+      trace_(trace)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -164,6 +165,12 @@ PreferredMemory&
 InferRequest::GetPreferredMemory()
 {
   return preferred_memory_;
+}
+
+TRITONSERVER_InferenceTrace*
+InferRequest::Trace()
+{
+  return trace_;
 }
 
 void
