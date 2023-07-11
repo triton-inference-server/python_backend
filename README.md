@@ -549,7 +549,7 @@ for more details on how to host a decoupled model.
 
 ##### Known Issues
 
-* Currently, async BLS requests are not supported in decoupled mode.
+* Currently, decoupled Python models can not make async infer requests.
 
 ### `finalize`
 
