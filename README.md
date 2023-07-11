@@ -1227,7 +1227,8 @@ been running, which means that the BLS model should not be loaded during server
 startup. You can use different
 [client endpoints](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_model_repository.md)
 to load the model after the server has been started. The model loading API is
-currently not supported during the `finalize` phase.
+currently not supported during the `auto_complete_config` and `finalize`
+functions.
 
 ## Using BLS with Stateful Models
 
