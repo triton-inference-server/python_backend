@@ -36,6 +36,7 @@ builtin = "clear"
 quiet-level = 3
 
 [tool.isort]
+profile = "black"
 use_parentheses = true
 multi_line_output = 3
 include_trailing_comma = true
