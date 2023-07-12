@@ -112,7 +112,7 @@ def deserialize_bytes_tensor(encoded_tensor):
     offset = 0
     val_buf = encoded_tensor
     while offset < len(val_buf):
-        l = struct.unpack_from("I", val_buf, offset)[0]
+        l = struct.unpack_from("@I", val_buf, offset)[0]
         offset += 4
         sb = struct.unpack_from("{}s".format(l), val_buf, offset)[0]
         offset += l
