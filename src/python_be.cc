@@ -364,6 +364,9 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));
 
+    TRITONSERVER_InferenceTrace* trace;
+    RETURN_IF_ERROR(TRITONBACKEND_RequestTrace(request, &trace));
+
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
       TRITONBACKEND_ResponseFactory* factory_ptr;
@@ -378,7 +381,8 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, 0 /* response_factory_address */,
-          reinterpret_cast<intptr_t>(request));
+          reinterpret_cast<intptr_t>(request), 
+          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     }
 
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));

@@ -359,6 +359,12 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));
 
+    TRITONSERVER_InferenceTrace* trace = nullptr;
+    if (infer_request->Trace() != nullptr) {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceTraceSpawnChildTrace(
+          infer_request->Trace(), &trace));
+    }
+
     for (auto& infer_input : infer_request->Inputs()) {
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAddInput(
           irequest, infer_input->Name().c_str(),
@@ -388,8 +394,8 @@ RequestExecutor::Infer(
           reinterpret_cast<void*>(infer_payload->ResponseAllocUserp().get()),
           InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
-      THROW_IF_TRITON_ERROR(TRITONSERVER_ServerInferAsync(
-          server_, irequest, nullptr /* trace */));
+      THROW_IF_TRITON_ERROR(
+          TRITONSERVER_ServerInferAsync(server_, irequest, trace));
     }
   }
   catch (const PythonBackendException& pb_exception) {

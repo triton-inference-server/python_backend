@@ -55,6 +55,7 @@ struct InferRequestShm {
   bool is_decoupled;
   int32_t timeout;
   PreferredMemory preferred_memory;
+  TRITONSERVER_InferenceTrace* trace;
 };
 
 class InferRequest {
@@ -85,6 +86,9 @@ class InferRequest {
   bool IsDecoupled();
   void SetIsDecoupled(const bool is_decoupled);
   PreferredMemory& GetPreferredMemory();
+  TRITONSERVER_InferenceTrace* Trace();
+  uint32_t CustomTrace();
+
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
@@ -118,8 +122,6 @@ class InferRequest {
   TRITONSERVER_Error* DeleteResponseFactory();
 #endif
 
-  TRITONSERVER_InferenceTrace* Trace();
-
  private:
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,
@@ -142,6 +144,7 @@ class InferRequest {
   intptr_t request_address_;
   bool is_decoupled_;
   PreferredMemory preferred_memory_;
+  TRITONSERVER_InferenceTrace* trace_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;
@@ -158,7 +161,5 @@ class InferRequest {
 #ifdef TRITON_PB_STUB
   std::shared_ptr<ResponseSender> response_sender_;
 #endif
-
-  TRITONSERVER_InferenceTrace* trace_;
 };
 }}};  // namespace triton::backend::python

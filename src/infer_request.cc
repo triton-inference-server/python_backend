@@ -173,6 +173,7 @@ InferRequest::Trace()
   return trace_;
 }
 
+
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
@@ -198,6 +199,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->is_decoupled = is_decoupled_;
   infer_request_shm_ptr_->timeout = timeout_;
   infer_request_shm_ptr_->preferred_memory = preferred_memory_;
+  infer_request_shm_ptr_->trace = trace_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -375,6 +377,7 @@ InferRequest::InferRequest(
   is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
   timeout_ = infer_request_shm_ptr_->timeout;
   preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
+  trace_ = infer_request_shm_ptr_->trace;
 
 #ifdef TRITON_PB_STUB
   response_sender_ = std::make_shared<ResponseSender>(

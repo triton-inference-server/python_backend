@@ -1371,17 +1371,21 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const std::string& model_name,
                       const int64_t model_version, const uint32_t flags,
                       const int32_t timeout,
-                      const PreferredMemory& preferred_memory) {
+                      const PreferredMemory& preferred_memory,
+                      std::shared_ptr<InferRequest>& request) {
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
+
+            auto trace = (request != nullptr) ? request->Trace() : nullptr;
+
             // FIXME: InferenceRequest parameters are not supported in BLS now.
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
                 model_name, model_version, "" /*parameters*/, flags, timeout,
                 0 /*response_factory_address*/, 0 /*request_address*/,
-                preferred_memory);
+                preferred_memory, trace);
           }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,
@@ -1391,7 +1395,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("model_version").none(false) = -1,
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
-              PreferredMemory(PreferredMemory::DEFAULT, 0))
+              PreferredMemory(PreferredMemory::DEFAULT, 0),
+          py::arg("request").none(false) = nullptr)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
