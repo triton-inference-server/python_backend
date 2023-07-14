@@ -31,7 +31,7 @@
 *NOTE*: This feature is subject to change and removal, and should not
 be used in production.
 
-Starting from 23.07, we are adding an experimental support for loading
+Starting from 23.07, we are adding experimental support for loading
 and serving of models in [TensorFlow SavedModel](https://www.tensorflow.org/guide/saved_model)
 format via Python backend. The `model.savedmodel` can be provided within
 the triton server model repository without `model.py` and backend will
