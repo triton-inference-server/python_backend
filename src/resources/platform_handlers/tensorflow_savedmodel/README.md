@@ -48,7 +48,7 @@ Alternatively, you can create a
 with the TensorFlow dependency.
 
 By default, Triton will use the [TensorFlow backend](https://github.com/triton-inference-server/tensorflow_backend)
-to load and serve the saved model. In order to use the python backend with
+to load and serve the saved model. In order to use the Python backend with
 TensorFlow Platform Handler, [model configuration](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md)
 should explicitly provide the following settings:
 
