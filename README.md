@@ -1393,41 +1393,6 @@ it as needed, see
 
 ## TensorFlow
 
-### TensorFlow SavedModel Platform Handler
-
-Starting from 23.07, python backend ships with a platform handler for loading
-and serving models in [TensorFlow SavedModel](https://www.tensorflow.org/guide/saved_model)
-format. The `model.savedmodel` can be provided within the model repository
-without `model.py` and backend will automatically use a pre-baked platform
-handler (`model.py`) to load and serve the TF SavedModel. The handler can
-[auto-complete](#auto_complete_config) the missing model configuration.
-
-In order to use the feature, make sure that [TensorFlow pip package](https://pypi.org/project/tensorflow/2.13.0/)
-is available in the same Python environment.
-
-```
-pip install tensorfow==2.13.0
-```
-
-Alternatively, you can create a
-[Python Execution Environment](#using-custom-python-execution-environments)
-with the TensorFlow dependency.
-
-By default, Triton will use the [TensorFlow backend](https://github.com/triton-inference-server/tensorflow_backend)
-to load and serve the saved model. In order to use the python backend with
-TensorFlow Platform Handler, [model configuration](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md)
-should explicitly provide the following settings:
-
-```
-backend: "python"
-platform: "tensorflow_savedmodel"
-```
-
-Following are few known limitations of the TF platform handler:
-- GPU execution is not supported.
-- List of requests received in model [`execute`](#execute) function are
-not run in a single batch but one after the other.
-
 ### TensorFlow Determinism
 
 Similar to the PyTorch determinism section above, TensorFlow can have slight
