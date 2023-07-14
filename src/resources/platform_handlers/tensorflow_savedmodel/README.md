@@ -30,7 +30,7 @@
 
 This platform handler enables loading and serving of models
 in [TensorFlow SavedModel](https://www.tensorflow.org/guide/saved_model)
-format via python backend. The `model.savedmodel` can be provided within
+format via Python backend. The `model.savedmodel` can be provided within
 the triton server model repository without `model.py` and backend will
 automatically use a pre-baked platform handler (`model.py`) to load and
 serve the TF SavedModel. The handler can [auto-complete](../../../../README.md#auto_complete_config)
