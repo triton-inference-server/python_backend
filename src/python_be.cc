@@ -382,7 +382,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, 0 /* response_factory_address */,
-          reinterpret_cast<intptr_t>(request), 
+          reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     }
 
