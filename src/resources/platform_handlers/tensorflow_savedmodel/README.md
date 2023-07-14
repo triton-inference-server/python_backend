@@ -71,11 +71,12 @@ platform: "tensorflow_savedmodel"
 ```
 
 It has been observed that certain DLFW like TensorFlow do not release the entire
-memory allocated while loading a model back to the system. This can be problematic
-when working with a large number of models and dynamically loading/unloading them.
-Using Python backend for TF SavedModel serving will allow the models to be loaded
-in a separate process, which ensures that entire memory allocated within the process
-would be released to the system upon a model unload.
+memory allocated for loading a model back to the system when the model gets
+unloaded. This can be problematic when working with a large number of models and
+dynamically loading/unloading them. Using Python backend for TF SavedModel serving
+will allow the models to be loaded in a separate process, which ensures that entire
+memory allocated within the process would be released to the system upon a model
+unload.
 
 Following are few known limitations of this feature:
 - GPU execution is not supported.
