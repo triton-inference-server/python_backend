@@ -173,7 +173,6 @@ InferRequest::Trace()
   return trace_;
 }
 
-
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {

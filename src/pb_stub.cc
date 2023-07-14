@@ -1377,9 +1377,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
-
             auto trace = (request != nullptr) ? request->Trace() : nullptr;
-
             // FIXME: InferenceRequest parameters are not supported in BLS now.
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,

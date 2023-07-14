@@ -87,8 +87,6 @@ class InferRequest {
   void SetIsDecoupled(const bool is_decoupled);
   PreferredMemory& GetPreferredMemory();
   TRITONSERVER_InferenceTrace* Trace();
-  uint32_t CustomTrace();
-
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
