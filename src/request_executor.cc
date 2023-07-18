@@ -360,9 +360,9 @@ RequestExecutor::Infer(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));
 
     TRITONSERVER_InferenceTrace* trace = nullptr;
-    if (infer_request->Trace() != nullptr) {
+    if (infer_request->Trace().triton_trace_ != nullptr) {
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceTraceSpawnChildTrace(
-          infer_request->Trace(), &trace));
+          infer_request->Trace().triton_trace_, &trace));
     }
 
     for (auto& infer_input : infer_request->Inputs()) {

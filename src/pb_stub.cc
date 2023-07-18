@@ -1362,6 +1362,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .value("TRITONSERVER_MEMORY_CPU", PreferredMemory::MemoryType::CPU)
       .export_values();
 
+  py::class_<InferenceTrace, std::shared_ptr<InferenceTrace>>(
+      module, "InferenceTrace");
+
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
@@ -1372,12 +1375,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const int64_t model_version, const uint32_t flags,
                       const int32_t timeout,
                       const PreferredMemory& preferred_memory,
-                      std::shared_ptr<InferRequest>& request) {
+                      const InferenceTrace& trace) {
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
-            auto trace = (request != nullptr) ? request->Trace() : nullptr;
             // FIXME: InferenceRequest parameters are not supported in BLS now.
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
@@ -1394,7 +1396,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
               PreferredMemory(PreferredMemory::DEFAULT, 0),
-          py::arg("request").none(false) = nullptr)
+          py::arg("trace").none(false) = nullptr)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
@@ -1404,6 +1406,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("set_flags", &InferRequest::SetFlags)
       .def("timeout", &InferRequest::Timeout)
       .def("parameters", &InferRequest::Parameters)
+      .def("trace", &InferRequest::Trace)
       .def(
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,
