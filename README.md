@@ -800,6 +800,15 @@ may use dependencies that are not available in the Triton container that you are
 using for deployment. For example, compiling the Python backend stub on an OS
 other than Ubuntu 22.04 can lead to unexpected errors.
 
+7. If you encounter the "GLIBCXX_3.4.30 not found" error during runtime, we
+recommend upgrading your conda version and installing `libstdcxx-ng=12` by
+running `conda install -c conda-forge libstdcxx-ng=12 -y`. If this solution does
+not resolve the issue, please feel free to open an issue on the
+[GitHub issue page](https://github.com/triton-inference-server/server/issues)
+following the provided
+[instructions](https://github.com/triton-inference-server/server#reporting-problems-asking-questions).
+
+
 ## Error Handling
 
 If there is an error that affects the `initialize`, `execute`, or `finalize`
