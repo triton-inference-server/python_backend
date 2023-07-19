@@ -65,7 +65,7 @@ with httpclient.InferenceServerClient("localhost:8000") as client:
         )
     )
     print(
-        "INPUT0 ({}) - INPUT1 ({}) = OUTPUT0 ({})".format(
+        "INPUT0 ({}) - INPUT1 ({}) = OUTPUT1 ({})".format(
             input0_data, input1_data, output1_data
         )
     )
