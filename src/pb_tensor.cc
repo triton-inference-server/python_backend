@@ -433,12 +433,14 @@ PbTensor::FromDLPackCapsule(
     int64_t calculated_stride{1};
     bool is_contiguous_c_order = true;
     for (size_t i = 1; i < dims.size(); i++) {
-      if (strides[ndim - i] != calculated_stride) {
-        is_contiguous_c_order = false;
-        break;
-      }
+      if (dims[ndim-i] != 1) {
+        if (strides[ndim - i] != calculated_stride) {
+          is_contiguous_c_order = false;
+          break;
+        }
 
-      calculated_stride *= dims[ndim - i];
+        calculated_stride *= dims[ndim - i];
+      }
     }
 
     if (!is_contiguous_c_order) {
