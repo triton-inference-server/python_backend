@@ -43,7 +43,12 @@ class TritonPythonModel:
         not specified in the config file, then models will be loaded onto
         the default device of the framework.
         """
-        self.device = "cuda" if args["model_instance_kind"] == "GPU" else "cpu"
+        # Here we set up the device onto which our model will beloaded,
+        # based on specified `model_instance_kind` and `model_instance_device_id`
+        # fields.
+        device = "cuda" if args["model_instance_kind"] == "GPU" else "cpu"
+        device_id = args["model_instance_device_id"]
+        self.device = f"{device}:{device_id}"
         # This example is configured to work with torch=1.13
         # and torchvision=0.14. Thus, we need to provide a proper tag `0.14.1`
         # to make sure loaded Resnet50 is compatible with
