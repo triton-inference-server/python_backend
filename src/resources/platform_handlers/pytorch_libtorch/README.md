@@ -32,16 +32,16 @@
 be used in production.
 
 Starting from 23.08, we are adding an experimental support for loading and
-serving PyTorch models directly without using TorchScript via Python backend.
-The model can be provided within the triton server model repository without
-crafting the `model.py`, and a pre-built Python model [`model.py`](model.py)
-will be used to load and serve the provided PyTorch model.
+serving PyTorch models directly via Python backend. The model can be provided
+within the triton server model repository without crafting the `model.py`, and a
+pre-built Python model [`model.py`](model.py) will be used to load and serve the
+PyTorch model.
 
 The model repository structure should look like:
 
 ```
 model_repository/
-`-- pytorch_model
+`-- model_directory
     |-- 1
     |   |-- model.py
     |   `-- model.py.pt
@@ -49,18 +49,16 @@ model_repository/
 ```
 
 The `model.py` contains the class definition of the PyTorch model. The class
-name needs to match the model name (i.e. `pytorch_model`), and the class should
-extend the
+should extend the
 [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module).
-
 The `model.py.pt` may be optionally provided which contains the saved
 [`state_dict`](https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference)
-of the model.
+of the model. For serving TorchScript models, the `model.py` and `model.py.pt`
+files can be replaced with `model.pt` TorchScript.
 
 By default, Triton will use the
 [PyTorch backend](https://github.com/triton-inference-server/pytorch_backend) to
-load and serve PyTorch models in TorchScript format. In order to use the Python
-backend to serve PyTorch models directly without TorchScript,
+load and serve PyTorch models. In order to serve from Python backend,
 [model configuration](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md)
 should explicitly provide the following settings:
 
@@ -71,7 +69,7 @@ platform: "pytorch_libtorch"
 
 This feature will take advantage of the
 [`torch.compile`](https://pytorch.org/docs/stable/generated/torch.compile.html#torch-compile)
-optimization, make sure the
+optimization if possible, make sure the
 [PyTorch pip package](https://pypi.org/project/torch/2.0.1/) is available in the
 same Python environment.
 
@@ -83,6 +81,6 @@ Alternatively, a
 with the PyTorch dependency may be used.
 
 Following are few known limitations of this feature:
-- GPU execution is not yet supported.
 - List of requests received in model [`execute`](../../../../README.md#execute)
-function are not yet ran in a single batch but one after the other.
+function are not ran in a single batch but one after the other.
+- Serving of arbitrary function(s) in the `model.py` file is not supported.
