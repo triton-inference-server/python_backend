@@ -32,6 +32,7 @@ import os
 
 try:
     import torch
+    import torch.utils.dlpack
 except ModuleNotFoundError as error:
     raise RuntimeError(
         "Missing/Incomplete PyTorch package installation... (Did you run `pip3 install torch`?)"
@@ -74,6 +75,24 @@ def _import_module_from_path(module_name, file_path):
     return module
 
 
+def _parse_io_config(io_config):
+    io = []
+    for conf in io_config:
+        io.append({"name": conf["name"]})
+    return io
+
+
+def _get_device_name(model_instance_kind):
+    return "cuda" if model_instance_kind == "GPU" else "cpu"
+
+
+def _get_map_location(model_instance_kind, model_instance_device_id):
+    map_location = _get_device_name(model_instance_kind)
+    if map_location == "cuda":
+        map_location += ":" + model_instance_device_id
+    return map_location
+
+
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
@@ -96,44 +115,33 @@ class TritonPythonModel:
           * model_name: Model name
         """
         self._model_name = args["model_name"]
-        self._model_config = json.loads(args["model_config"])
-
         self._logger = pb_utils.Logger
         self._logger.log_info("Initializing model instance for " + self._model_name)
 
+        self._model_config = json.loads(args["model_config"])
+        self._inputs = _parse_io_config(self._model_config["input"])
+        self._outputs = _parse_io_config(self._model_config["output"])
+
         model_path = _get_model_path(self._model_config)
         data_path = _get_model_data_path(self._model_config)
+        kind = args["model_instance_kind"]
+        device_id = args["model_instance_device_id"]
 
         self._model_module = _import_module_from_path(self._model_name, model_path)
         self._model_class = getattr(self._model_module, self._model_name)
+        self._device = torch.device(_get_device_name(kind))
         self._raw_model = self._model_class()
         if data_path != "":
-            self._raw_model.load_state_dict(torch.load(data_path))
+            self._raw_model.load_state_dict(
+                torch.load(data_path, map_location=_get_map_location(kind, device_id))
+            )
         else:
-            self._logger.log_info("Model weights not found for " + self._model_name)
+            self._logger.log_info(
+                "Model parameter pickle file not found for " + self._model_name
+            )
+        self._raw_model.to(self._device)
         self._raw_model.eval()
         self._model = torch.compile(self._raw_model)
-
-        self._inputs = []
-        for io_config in self._model_config["input"]:
-            self._inputs.append(
-                {
-                    "name": io_config["name"],
-                    "data_type": pb_utils.triton_string_to_numpy(
-                        io_config["data_type"]
-                    ),
-                }
-            )
-        self._outputs = []
-        for io_config in self._model_config["output"]:
-            self._outputs.append(
-                {
-                    "name": io_config["name"],
-                    "data_type": pb_utils.triton_string_to_numpy(
-                        io_config["data_type"]
-                    ),
-                }
-            )
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -164,19 +172,17 @@ class TritonPythonModel:
             for io in self._inputs:
                 tensor = pb_utils.get_input_tensor_by_name(
                     request, io["name"]
-                ).as_numpy()
-                input_tensors.append(torch.from_numpy(tensor))
+                ).to_dlpack()
+                tensor = torch.from_dlpack(tensor).to(self._device)
+                input_tensors.append(tensor)
 
-            # FIXME: Add GPU Tensor handling. DLpack should be utilized for better performance.
             raw_output_tensors = self._model(*input_tensors)
 
             output_tensors = []
             for i in range(len(self._outputs)):
                 io = self._outputs[i]
-                tensor = pb_utils.Tensor(
-                    io["name"],
-                    raw_output_tensors[i].detach().numpy().astype(io["data_type"]),
-                )
+                tensor = torch.to_dlpack(raw_output_tensors[i].detach())
+                tensor = pb_utils.Tensor.from_dlpack(io["name"], tensor)
                 output_tensors.append(tensor)
 
             inference_response = pb_utils.InferenceResponse(
