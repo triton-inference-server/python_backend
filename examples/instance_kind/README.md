@@ -84,11 +84,11 @@ folder is located), run the following command:
 docker run --gpus all --shm-size 1G -it --rm -p 8000:8000 -v `pwd`:/instance_kind nvcr.io/nvidia/tritonserver:<yy.mm>-py3 /bin/bash
 ```
 
-Inside the container, we need to install `torch` and `pillow` to run
+Inside the container, we need to install `torch`, `torchvision` and `pillow` to run
 this example. We recommend to use `pip` method for the installation:
 
 ```
-pip3 install torch==1.13.0+cu117 -f https://download.pytorch.org/whl/torch_stable.html pillow
+pip3 install torch==1.13.0+cu117 -f https://download.pytorch.org/whl/torch_stable.html torchvision==0.14.0+cu117 pillow
 ```
 
 Finally, we need to start the Triton Server:
