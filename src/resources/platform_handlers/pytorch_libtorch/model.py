@@ -32,7 +32,6 @@ import os
 
 try:
     import torch
-    import torch.utils.dlpack
 except ModuleNotFoundError as error:
     raise RuntimeError(
         "Missing/Incomplete PyTorch package installation... (Did you run `pip3 install torch`?)"
@@ -45,27 +44,30 @@ except ModuleNotFoundError as error:
 import triton_python_backend_utils as pb_utils
 
 
-def _get_model_filename(config):
-    model_filename = config["default_model_filename"]
-    if not model_filename:
-        model_filename = "model.py"
-    return model_filename
-
-
 def _get_model_path(config):
-    model_filename = _get_model_filename(config)
-    model_path = os.path.join(pb_utils.get_model_dir(), model_filename)
-    if not os.path.exists(model_path):
-        raise pb_utils.TritonModelException(f"No model found in " + model_path)
-    return model_path
+    filenames = ["model.py", "model.pt", "model.pth"]
+    if config["default_model_filename"]:
+        filenames.insert(0, config["default_model_filename"])
+    for filename in filenames:
+        model_path = os.path.join(pb_utils.get_model_dir(), filename)
+        if os.path.exists(model_path):
+            return model_path
+    raise pb_utils.TritonModelException(
+        "No model found in " + pb_utils.get_model_dir() + "/" + str(filenames)
+    )
 
 
-def _get_model_data_path(config):
-    model_data_filename = _get_model_filename(config) + ".pt"
-    model_data_path = os.path.join(pb_utils.get_model_dir(), model_data_filename)
-    if not os.path.exists(model_data_path):
-        return ""  # pickled data not provided
-    return model_data_path
+def _get_model_data_path(model_path):
+    data_path_extensions = [".pt", ".pth"]
+    for extension in data_path_extensions:
+        data_path = model_path + extension
+        if os.path.exists(data_path):
+            return data_path
+    return ""  # data file not provided
+
+
+def _is_py_class_model(model_path):
+    return True if model_path[-3:] == ".py" else False
 
 
 def _import_module_from_path(module_name, file_path):
@@ -84,7 +86,7 @@ def _get_model_class_from_module(module):
                 return attr
         except:
             pass  # attr may not be a class
-    return None  # model class not found
+    raise pb_utils.TritonModelException("Cannot find a subclass of torch.nn.Module")
 
 
 def _parse_io_config(io_config):
@@ -94,15 +96,10 @@ def _parse_io_config(io_config):
     return io
 
 
-def _get_device_name(model_instance_kind):
-    return "cuda" if model_instance_kind == "GPU" else "cpu"
-
-
-def _get_map_location(model_instance_kind, model_instance_device_id):
-    map_location = _get_device_name(model_instance_kind)
-    if map_location == "cuda":
-        map_location += ":" + model_instance_device_id
-    return map_location
+def _get_device_name(model_instance_kind, model_instance_device_id):
+    if model_instance_kind == "GPU":
+        return "cuda:" + model_instance_device_id
+    return "cpu"
 
 
 class TritonPythonModel:
@@ -134,26 +131,35 @@ class TritonPythonModel:
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
 
-        model_path = _get_model_path(self._model_config)
-        data_path = _get_model_data_path(self._model_config)
         kind = args["model_instance_kind"]
         device_id = args["model_instance_device_id"]
+        self._device = torch.device(_get_device_name(kind, device_id))
+
+        model_path = _get_model_path(self._model_config)
+        if not _is_py_class_model(model_path):
+            self._model = torch.jit.load(model_path)
+            self._model.to(self._device)
+            self._model.eval()
+            return
 
         self._model_module = _import_module_from_path(self._model_name, model_path)
         self._model_class = _get_model_class_from_module(self._model_module)
-        self._device = torch.device(_get_device_name(kind))
         self._raw_model = self._model_class()
+        data_path = _get_model_data_path(model_path)
         if data_path != "":
             self._raw_model.load_state_dict(
-                torch.load(data_path, map_location=_get_map_location(kind, device_id))
+                torch.load(data_path, map_location=self._device)
             )
         else:
             self._logger.log_info(
-                "Model parameter pickle file not found for " + self._model_name
+                "Model parameter file not found for " + self._model_name
             )
         self._raw_model.to(self._device)
         self._raw_model.eval()
-        self._model = torch.compile(self._raw_model)
+        if int(torch.__version__.split(".")[0]) >= 2:
+            self._model = torch.compile(self._raw_model)  # PyTorch 2.0+ only
+        else:
+            self._model = self._raw_model
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
