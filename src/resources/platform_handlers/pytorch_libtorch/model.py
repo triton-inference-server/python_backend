@@ -75,6 +75,18 @@ def _import_module_from_path(module_name, file_path):
     return module
 
 
+def _get_model_class_from_module(module):
+    names = dir(module)
+    for name in names:
+        attr = getattr(module, name)
+        try:
+            if issubclass(getattr(module, name), torch.nn.Module):
+                return attr
+        except:
+            pass  # attr may not be a class
+    return None  # model class not found
+
+
 def _parse_io_config(io_config):
     io = []
     for conf in io_config:
@@ -128,7 +140,7 @@ class TritonPythonModel:
         device_id = args["model_instance_device_id"]
 
         self._model_module = _import_module_from_path(self._model_name, model_path)
-        self._model_class = getattr(self._model_module, self._model_name)
+        self._model_class = _get_model_class_from_module(self._model_module)
         self._device = torch.device(_get_device_name(kind))
         self._raw_model = self._model_class()
         if data_path != "":
