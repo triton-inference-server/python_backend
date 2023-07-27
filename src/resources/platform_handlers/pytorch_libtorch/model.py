@@ -195,6 +195,10 @@ class TritonPythonModel:
                 input_tensors.append(tensor)
 
             raw_output_tensors = self._model(*input_tensors)
+            if not isinstance(raw_output_tensors, tuple) and not isinstance(
+                raw_output_tensors, list
+            ):
+                raw_output_tensors = [raw_output_tensors]
 
             output_tensors = []
             for i in range(len(self._outputs)):
