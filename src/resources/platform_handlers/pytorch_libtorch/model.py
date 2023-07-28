@@ -68,7 +68,7 @@ def _get_model_data_path(model_path):
 
 
 def _is_py_class_model(model_path):
-    return True if model_path[-3:] == ".py" else False
+    return model_path[-3:] == ".py"
 
 
 def _import_module_from_path(module_name, file_path):
