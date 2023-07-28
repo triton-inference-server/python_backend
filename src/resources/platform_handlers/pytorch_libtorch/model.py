@@ -222,7 +222,7 @@ class TritonPythonModel:
             output_tensors = []
             for i in range(len(self._outputs)):
                 io = self._outputs[i]
-                tensor = torch.to_dlpack(raw_output_tensors[i].detach())
+                tensor = raw_output_tensors[i].detach()
                 tensor = pb_utils.Tensor.from_dlpack(io["name"], tensor)
                 output_tensors.append(tensor)
 
