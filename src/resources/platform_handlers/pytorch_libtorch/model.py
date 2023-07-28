@@ -84,7 +84,7 @@ def _get_model_class_from_module(module):
         try:
             if issubclass(getattr(module, name), torch.nn.Module):
                 return attr
-        except:
+        except TypeError:
             pass  # attr may not be a class
     raise pb_utils.TritonModelException("Cannot find a subclass of torch.nn.Module")
 
@@ -100,6 +100,16 @@ def _get_device_name(model_instance_kind, model_instance_device_id):
     if model_instance_kind == "GPU":
         return "cuda:" + model_instance_device_id
     return "cpu"
+
+
+def _enable_torch_compile(config):
+    if int(torch.__version__.split(".")[0]) < 2:
+        return False
+    if "DISABLE_TORCH_COMPILE" in config["parameters"]:
+        val = config["parameters"]["DISABLE_TORCH_COMPILE"]["string_value"].upper()
+        if val == "YES" or val == "TRUE" or val == "1":
+            return False
+    return True
 
 
 class TritonPythonModel:
@@ -125,7 +135,9 @@ class TritonPythonModel:
         """
         self._model_name = args["model_name"]
         self._logger = pb_utils.Logger
-        self._logger.log_info("Initializing model instance for " + self._model_name)
+        self._logger.log_info(
+            "Initializing model instance for '" + self._model_name + "'"
+        )
 
         self._model_config = json.loads(args["model_config"])
         self._inputs = _parse_io_config(self._model_config["input"])
@@ -137,6 +149,7 @@ class TritonPythonModel:
 
         model_path = _get_model_path(self._model_config)
         if not _is_py_class_model(model_path):
+            self._logger.log_info("Loading '" + self._model_name + "' as TorchScript")
             self._model = torch.jit.load(model_path)
             self._model.to(self._device)
             self._model.eval()
@@ -152,13 +165,16 @@ class TritonPythonModel:
             )
         else:
             self._logger.log_info(
-                "Model parameter file not found for " + self._model_name
+                "Model parameter file not found for '" + self._model_name + "'"
             )
         self._raw_model.to(self._device)
         self._raw_model.eval()
-        if int(torch.__version__.split(".")[0]) >= 2:
+        if _enable_torch_compile(self._model_config):
             self._model = torch.compile(self._raw_model)  # PyTorch 2.0+ only
         else:
+            self._logger.log_info(
+                "'torch.compile' is disabled for '" + self._model_name + "'"
+            )
             self._model = self._raw_model
 
     def execute(self, requests):
@@ -219,4 +235,4 @@ class TritonPythonModel:
         Implementing `finalize` function is OPTIONAL. This function allows
         the model to perform any necessary clean ups before exit.
         """
-        self._logger.log_info("Removing model instance for " + self._model_name)
+        self._logger.log_info("Removing model instance for '" + self._model_name + "'")
