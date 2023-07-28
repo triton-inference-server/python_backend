@@ -83,7 +83,7 @@ def _get_model_class_from_module(module):
     for name in names:
         attr = getattr(module, name)
         try:
-            if issubclass(getattr(module, name), torch.nn.Module):
+            if issubclass(attr, torch.nn.Module):
                 return attr
         except TypeError:
             # attr may not be a class
