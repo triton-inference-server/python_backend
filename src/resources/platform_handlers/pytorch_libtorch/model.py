@@ -34,7 +34,7 @@ try:
     import torch
 except ModuleNotFoundError as error:
     raise RuntimeError(
-        "Missing/Incomplete PyTorch package installation... (Did you run `pip3 install torch`?)"
+        "Missing/Incomplete PyTorch package installation... (Did you install PyTorch?)"
     ) from error
 
 # triton_python_backend_utils is available in every Triton Python model. You
@@ -63,7 +63,8 @@ def _get_model_data_path(model_path):
         data_path = model_path + extension
         if os.path.exists(data_path):
             return data_path
-    return ""  # data file not provided
+    # data file not provided
+    return ""
 
 
 def _is_py_class_model(model_path):
@@ -85,7 +86,8 @@ def _get_model_class_from_module(module):
             if issubclass(getattr(module, name), torch.nn.Module):
                 return attr
         except TypeError:
-            pass  # attr may not be a class
+            # attr may not be a class
+            pass
     raise pb_utils.TritonModelException("Cannot find a subclass of torch.nn.Module")
 
 
@@ -104,6 +106,7 @@ def _get_device_name(model_instance_kind, model_instance_device_id):
 
 def _enable_torch_compile(config):
     if int(torch.__version__.split(".")[0]) < 2:
+        # torch.compile is supported starting from PyTorch 2.0
         return False
     if "DISABLE_TORCH_COMPILE" in config["parameters"]:
         val = config["parameters"]["DISABLE_TORCH_COMPILE"]["string_value"].upper()
@@ -170,7 +173,7 @@ class TritonPythonModel:
         self._raw_model.to(self._device)
         self._raw_model.eval()
         if _enable_torch_compile(self._model_config):
-            self._model = torch.compile(self._raw_model)  # PyTorch 2.0+ only
+            self._model = torch.compile(self._raw_model)
         else:
             self._logger.log_info(
                 "'torch.compile' is disabled for '" + self._model_name + "'"
