@@ -33,9 +33,9 @@ be used in production.
 
 Starting from 23.08, we are adding an experimental support for loading and
 serving PyTorch models directly via Python backend. The model can be provided
-within the triton server model repository without crafting the `model.py`, and a
-pre-built Python model [`model.py`](model.py) will be used to load and serve the
-PyTorch model.
+within the triton server model repository, and a
+[pre-built Python model](model.py) will be used to load and serve the PyTorch
+model.
 
 The model repository structure should look like:
 
@@ -83,4 +83,8 @@ with the PyTorch dependency may be used.
 Following are few known limitations of this feature:
 - List of requests received in model [`execute`](../../../../README.md#execute)
 function are not ran in a single batch but one after the other.
-- Serving of arbitrary function(s) in the `model.py` file is not supported.
+- Python functions optimizable by `torch.compile` may not be served directly in
+the `model.py` file, they need to be enclosed by a class extending the
+[`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module).
+- Model weights cannot be shared across multiple instances on the same GPU
+device.
