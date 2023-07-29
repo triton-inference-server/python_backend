@@ -101,7 +101,25 @@ def _parse_io_config(io_config):
 def _get_device_name(model_instance_kind, model_instance_device_id):
     if model_instance_kind == "GPU":
         return "cuda:" + model_instance_device_id
-    return "cpu"
+    if model_instance_kind == "CPU":
+        return "cpu"
+    # unspecified device
+    return ""
+
+
+def _get_device(model_instance_kind, model_instance_device_id):
+    device_name = _get_device_name(model_instance_kind, model_instance_device_id)
+    if device_name != "":
+        return torch.device(device_name)
+    # leave torch objects at its default device
+    return None
+
+
+def _torch_object_to_device(obj, device):
+    if device != None:
+        return obj.to(device)
+    # leave object at its current device
+    return obj
 
 
 def _enable_torch_compile(config):
@@ -146,15 +164,15 @@ class TritonPythonModel:
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
 
-        kind = args["model_instance_kind"]
-        device_id = args["model_instance_device_id"]
-        self._device = torch.device(_get_device_name(kind, device_id))
+        self._device = _get_device(
+            args["model_instance_kind"], args["model_instance_device_id"]
+        )
 
         model_path = _get_model_path(self._model_config)
         if not _is_py_class_model(model_path):
             self._logger.log_info("Loading '" + self._model_name + "' as TorchScript")
             self._model = torch.jit.load(model_path)
-            self._model.to(self._device)
+            _torch_object_to_device(self._model, self._device)
             self._model.eval()
             return
 
@@ -170,7 +188,7 @@ class TritonPythonModel:
             self._logger.log_info(
                 "Model parameter file not found for '" + self._model_name + "'"
             )
-        self._raw_model.to(self._device)
+        _torch_object_to_device(self._raw_model, self._device)
         self._raw_model.eval()
         if _enable_torch_compile(self._model_config):
             self._model = torch.compile(self._raw_model)
@@ -210,7 +228,9 @@ class TritonPythonModel:
                 tensor = pb_utils.get_input_tensor_by_name(
                     request, io["name"]
                 ).to_dlpack()
-                tensor = torch.from_dlpack(tensor).to(self._device)
+                tensor = _torch_object_to_device(
+                    torch.from_dlpack(tensor), self._device
+                )
                 input_tensors.append(tensor)
 
             raw_output_tensors = self._model(*input_tensors)
