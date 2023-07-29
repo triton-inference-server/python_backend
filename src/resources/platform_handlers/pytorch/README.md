@@ -64,7 +64,7 @@ should explicitly provide the following settings:
 
 ```
 backend: "python"
-platform: "pytorch_libtorch"
+platform: "pytorch"
 ```
 
 This feature will take advantage of the
