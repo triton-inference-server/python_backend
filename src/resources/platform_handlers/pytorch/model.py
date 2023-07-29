@@ -164,6 +164,9 @@ class TritonPythonModel:
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
 
+        self._infer_mode = torch.inference_mode(mode=True)
+        self._infer_mode.__enter__()
+
         self._device = _get_device(
             args["model_instance_kind"], args["model_instance_device_id"]
         )
@@ -259,3 +262,4 @@ class TritonPythonModel:
         the model to perform any necessary clean ups before exit.
         """
         self._logger.log_info("Removing model instance for '" + self._model_name + "'")
+        self._infer_mode.__exit__()
