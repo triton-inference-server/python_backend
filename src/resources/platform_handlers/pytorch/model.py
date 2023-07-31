@@ -122,6 +122,19 @@ def _torch_object_to_device(obj, device):
     return obj
 
 
+def _set_torch_parallelism(config, model_name, logger):
+    parallelism_settings = ["NUM_THREADS", "NUM_INTEROP_THREADS"]
+    for setting in parallelism_settings:
+        torch_setting = setting.lower()
+        if setting in config["parameters"]:
+            val = config["parameters"][setting]["string_value"]
+            getattr(torch, "set_" + torch_setting)(int(val))
+        val = str(getattr(torch, "get_" + torch_setting)())
+        logger.log_verbose(
+            "Using '" + setting + "' at '" + val + "' for '" + model_name + "'"
+        )
+
+
 def _enable_torch_compile(config):
     if int(torch.__version__.split(".")[0]) < 2:
         # torch.compile is supported starting from PyTorch 2.0
@@ -163,6 +176,8 @@ class TritonPythonModel:
         self._model_config = json.loads(args["model_config"])
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
+
+        _set_torch_parallelism(self._model_config, self._model_name, self._logger)
 
         self._infer_mode = torch.inference_mode(mode=True)
         self._infer_mode.__enter__()
