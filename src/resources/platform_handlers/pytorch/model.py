@@ -122,7 +122,8 @@ def _torch_object_to_device(obj, device):
     return obj
 
 
-def _set_torch_parallelism(config, model_name, logger):
+def _set_torch_parallelism(config):
+    log_msg = ""
     parallelism_settings = ["NUM_THREADS", "NUM_INTEROP_THREADS"]
     for setting in parallelism_settings:
         torch_setting = setting.lower()
@@ -130,20 +131,20 @@ def _set_torch_parallelism(config, model_name, logger):
             val = config["parameters"][setting]["string_value"]
             getattr(torch, "set_" + torch_setting)(int(val))
         val = str(getattr(torch, "get_" + torch_setting)())
-        logger.log_verbose(
-            "Using '" + setting + "' at '" + val + "' for '" + model_name + "'"
-        )
+        log_msg += setting + " = " + val + "; "
+    return log_msg
 
 
-def _enable_torch_compile(config):
-    if int(torch.__version__.split(".")[0]) < 2:
-        # torch.compile is supported starting from PyTorch 2.0
-        return False
-    if "DISABLE_TORCH_COMPILE" in config["parameters"]:
-        val = config["parameters"]["DISABLE_TORCH_COMPILE"]["string_value"].upper()
-        if val == "YES" or val == "TRUE" or val == "1":
-            return False
-    return True
+def _get_torch_compile_params(config):
+    params = {}
+    if "TORCH_COMPILE_OPTIONAL_PARAMETERS" in config["parameters"]:
+        val = config["parameters"]["TORCH_COMPILE_OPTIONAL_PARAMETERS"]["string_value"]
+        params = json.loads(val)
+        if "model" in params:
+            raise pb_utils.TritonModelException(
+                "'model' is not an optional parameter for 'torch.compile'"
+            )
+    return params
 
 
 class TritonPythonModel:
@@ -168,16 +169,18 @@ class TritonPythonModel:
           * model_name: Model name
         """
         self._model_name = args["model_name"]
+        for_model = "for '" + self._model_name + "'"
         self._logger = pb_utils.Logger
-        self._logger.log_info(
-            "Initializing model instance for '" + self._model_name + "'"
-        )
+        self._logger.log_info("Initializing model instance " + for_model)
 
         self._model_config = json.loads(args["model_config"])
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
 
-        _set_torch_parallelism(self._model_config, self._model_name, self._logger)
+        setting_msg = _set_torch_parallelism(self._model_config)
+        self._logger.log_verbose(
+            "Torch parallelism settings " + for_model + ": " + setting_msg
+        )
 
         self._infer_mode = torch.inference_mode(mode=True)
         self._infer_mode.__enter__()
@@ -203,18 +206,15 @@ class TritonPythonModel:
                 torch.load(data_path, map_location=self._device)
             )
         else:
-            self._logger.log_info(
-                "Model parameter file not found for '" + self._model_name + "'"
-            )
+            self._logger.log_info("Model parameter file not found " + for_model)
         _torch_object_to_device(self._raw_model, self._device)
         self._raw_model.eval()
-        if _enable_torch_compile(self._model_config):
-            self._model = torch.compile(self._raw_model)
-        else:
-            self._logger.log_info(
-                "'torch.compile' is disabled for '" + self._model_name + "'"
-            )
-            self._model = self._raw_model
+
+        params = _get_torch_compile_params(self._model_config)
+        self._logger.log_verbose(
+            "'torch.compile' optional parameter(s) " + for_model + ": " + str(params)
+        )
+        self._model = torch.compile(self._raw_model, **params)
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
