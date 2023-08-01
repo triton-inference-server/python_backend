@@ -2274,6 +2274,11 @@ TRITONBACKEND_GetBackendAttribute(
       backend_attributes, TRITONSERVER_INSTANCEGROUPKIND_CPU, 0, nullptr, 0));
 #endif
 
+  // This backend can safely handle parallel calls to
+  // TRITONBACKEND_ModelInstanceInitialize (thread-safe).
+  RETURN_IF_ERROR(TRITONBACKEND_BackendAttributeSetParallelModelInstanceLoading(
+      backend_attributes, true));
+
   return nullptr;
 }
 
