@@ -147,6 +147,39 @@ def _get_torch_compile_params(config):
     return params
 
 
+def _batch_torch_tensors(requests_tensors):
+    batch_tensors = []
+    sections = []
+    for i in range(len(requests_tensors)):
+        request_tensors = requests_tensors[i]
+        for j in range(len(request_tensors)):
+            request_tensor = request_tensors[j]
+            if j < len(batch_tensors):
+                # add to existing tensor
+                tensor = batch_tensors[j]
+                torch.cat((tensor, request_tensor), 0)
+            else:
+                # start a new tensor
+                batch_tensors.append(request_tensor)
+        # record section
+        section_length = request_tensors[0].size()[0]
+        sections.append(section_length)
+    return [batch_tensors], sections
+
+
+def _unbatch_torch_tensors(response_tensors, sections):
+    responses_tensors = []
+    for j in range(len(response_tensors)):
+        responses_tensor = torch.split(response_tensors[j], sections)
+        for i in range(len(responses_tensor)):
+            response_tensor = responses_tensor[i]
+            if i >= len(responses_tensors):
+                # add a new response
+                responses_tensors.append([])
+            responses_tensors[i].append(response_tensor)
+    return responses_tensors
+
+
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
@@ -174,6 +207,7 @@ class TritonPythonModel:
         self._logger.log_info("Initializing model instance " + for_model)
 
         self._model_config = json.loads(args["model_config"])
+        self._support_batching = self._model_config["max_batch_size"] > 0
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
 
@@ -188,6 +222,14 @@ class TritonPythonModel:
         self._device = _get_device(
             args["model_instance_kind"], args["model_instance_device_id"]
         )
+
+        params = _get_torch_compile_params(self._model_config)
+        self._logger.log_verbose(
+            "'torch.compile' optional parameter(s) " + for_model + ": " + str(params)
+        )
+        if self._support_batching:
+            self._batcher = torch.compile(_batch_torch_tensors, **params)
+            self._unbatcher = torch.compile(_unbatch_torch_tensors, **params)
 
         model_path = _get_model_path(self._model_config)
         if not _is_py_class_model(model_path):
@@ -209,11 +251,6 @@ class TritonPythonModel:
             self._logger.log_info("Model parameter file not found " + for_model)
         _torch_object_to_device(self._raw_model, self._device)
         self._raw_model.eval()
-
-        params = _get_torch_compile_params(self._model_config)
-        self._logger.log_verbose(
-            "'torch.compile' optional parameter(s) " + for_model + ": " + str(params)
-        )
         self._model = torch.compile(self._raw_model, **params)
 
     def execute(self, requests):
@@ -237,11 +274,12 @@ class TritonPythonModel:
           A list of pb_utils.InferenceResponse. The length of this list must
           be the same as `requests`
         """
+
         responses = []
 
-        # FIXME: Instead of iterating through each request, run the inference as a single batch.
+        requests_tensors = []
         for request in requests:
-            input_tensors = []
+            tensors = []
             for io in self._inputs:
                 tensor = pb_utils.get_input_tensor_by_name(
                     request, io["name"]
@@ -249,21 +287,31 @@ class TritonPythonModel:
                 tensor = _torch_object_to_device(
                     torch.from_dlpack(tensor), self._device
                 )
-                input_tensors.append(tensor)
+                tensors.append(tensor)
+            requests_tensors.append(tensors)
 
-            raw_output_tensors = self._model(*input_tensors)
-            if not isinstance(raw_output_tensors, tuple) and not isinstance(
-                raw_output_tensors, list
+        if self._support_batching:
+            requests_tensors, sections = self._batcher(requests_tensors)
+
+        responses_tensors = []
+        for input_tensors in requests_tensors:
+            output_tensors = self._model(*input_tensors)
+            if not isinstance(output_tensors, tuple) and not isinstance(
+                output_tensors, list
             ):
-                raw_output_tensors = [raw_output_tensors]
+                output_tensors = [output_tensors]
+            responses_tensors.append(output_tensors)
 
+        if self._support_batching:
+            responses_tensors = self._unbatcher(responses_tensors[0], sections)
+
+        for response_tensors in responses_tensors:
             output_tensors = []
             for i in range(len(self._outputs)):
                 io = self._outputs[i]
-                tensor = raw_output_tensors[i].detach()
+                tensor = response_tensors[i].detach()
                 tensor = pb_utils.Tensor.from_dlpack(io["name"], tensor)
                 output_tensors.append(tensor)
-
             inference_response = pb_utils.InferenceResponse(
                 output_tensors=output_tensors
             )
@@ -277,4 +325,4 @@ class TritonPythonModel:
         the model to perform any necessary clean ups before exit.
         """
         self._logger.log_info("Removing model instance for '" + self._model_name + "'")
-        self._infer_mode.__exit__()
+        self._infer_mode.__exit__(exc_type=None, exc_value=None, traceback=None)
