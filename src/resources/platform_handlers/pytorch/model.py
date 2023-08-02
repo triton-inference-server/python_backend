@@ -45,7 +45,7 @@ import triton_python_backend_utils as pb_utils
 
 
 def _get_model_path(config):
-    filenames = ["model.py", "model.pt", "model.pth"]
+    filenames = ["model.py", "model.pt"]
     if config["default_model_filename"]:
         filenames.insert(0, config["default_model_filename"])
     for filename in filenames:
@@ -58,7 +58,7 @@ def _get_model_path(config):
 
 
 def _get_model_data_path(model_path):
-    data_path_extensions = [".pt", ".pth"]
+    data_path_extensions = [".pt"]
     model_path_no_extension = model_path[: -(len(model_path.split(".")[-1]) + 1)]
     for extension in data_path_extensions:
         data_path = model_path_no_extension + extension
