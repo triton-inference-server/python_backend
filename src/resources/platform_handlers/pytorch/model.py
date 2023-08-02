@@ -290,6 +290,7 @@ class TritonPythonModel:
                 tensors.append(tensor)
             requests_tensors.append(tensors)
 
+        sections = None
         if self._support_batching:
             requests_tensors, sections = self._batcher(requests_tensors)
 

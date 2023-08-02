@@ -69,7 +69,7 @@ platform: "pytorch"
 
 This feature will take advantage of the
 [`torch.compile`](https://pytorch.org/docs/stable/generated/torch.compile.html#torch-compile)
-optimization if possible, make sure the
+optimization, make sure the
 [PyTorch pip package](https://pypi.org/project/torch/2.0.1/) is available in the
 same Python environment.
 
@@ -81,8 +81,6 @@ Alternatively, a
 with the PyTorch dependency may be used.
 
 Following are few known limitations of this feature:
-- List of requests received in model [`execute`](../../../../README.md#execute)
-function are not ran in a single batch but one after the other.
 - Python functions optimizable by `torch.compile` may not be served directly in
 the `model.py` file, they need to be enclosed by a class extending the
 [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module).
