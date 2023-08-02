@@ -44,17 +44,17 @@ model_repository/
 `-- model_directory
     |-- 1
     |   |-- model.py
-    |   `-- model.py.pt
+    |   `-- model.pt
     `-- config.pbtxt
 ```
 
 The `model.py` contains the class definition of the PyTorch model. The class
 should extend the
 [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module).
-The `model.py.pt` may be optionally provided which contains the saved
+The `model.pt` may be optionally provided which contains the saved
 [`state_dict`](https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference)
-of the model. For serving TorchScript models, the `model.py` and `model.py.pt`
-files can be replaced with `model.pt` TorchScript.
+of the model. For serving TorchScript models, a `model.pt` TorchScript can be
+provided in place of the `model.py` file.
 
 By default, Triton will use the
 [PyTorch backend](https://github.com/triton-inference-server/pytorch_backend) to

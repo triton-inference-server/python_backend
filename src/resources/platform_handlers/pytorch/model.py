@@ -59,8 +59,9 @@ def _get_model_path(config):
 
 def _get_model_data_path(model_path):
     data_path_extensions = [".pt", ".pth"]
+    model_path_no_extension = model_path[: -(len(model_path.split(".")[-1]) + 1)]
     for extension in data_path_extensions:
-        data_path = model_path + extension
+        data_path = model_path_no_extension + extension
         if os.path.exists(data_path):
             return data_path
     # data file not provided
