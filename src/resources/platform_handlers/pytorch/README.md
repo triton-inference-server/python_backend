@@ -101,12 +101,12 @@ interpreter) on CPU.
 [`torch.compile()` parameters](https://pytorch.org/docs/stable/generated/torch.compile.html#torch-compile)
 - Key: TORCH_COMPILE_OPTIONAL_PARAMETERS
 - Value: Any of following parameter(s) encoded as a JSON object.
-  - `fullgraph (bool)`: Whether it is ok to break model into several subgraphs.
-  - `dynamic (bool)`: Use dynamic shape tracing.
-  - `backend (str)`: The backend to be used.
-  - `mode (str)`: Can be either "default", "reduce-overhead" or "max-autotune".
-  - `options (dict)`: A dictionary of options to pass to the backend.
-  - `disable (bool)`: Turn `torch.compile()` into a no-op for testing.
+  - fullgraph (*bool*): Whether it is ok to break model into several subgraphs.
+  - dynamic (*bool*): Use dynamic shape tracing.
+  - backend (*str*): The backend to be used.
+  - mode (*str*): Can be either "default", "reduce-overhead" or "max-autotune".
+  - options (*dict*): A dictionary of options to pass to the backend.
+  - disable (*bool*): Turn `torch.compile()` into a no-op for testing.
 
 For example:
 ```
