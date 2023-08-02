@@ -126,11 +126,10 @@ def _set_torch_parallelism(config):
     log_msg = ""
     parallelism_settings = ["NUM_THREADS", "NUM_INTEROP_THREADS"]
     for setting in parallelism_settings:
-        torch_setting = setting.lower()
+        val = "1"
         if setting in config["parameters"]:
             val = config["parameters"][setting]["string_value"]
-            getattr(torch, "set_" + torch_setting)(int(val))
-        val = str(getattr(torch, "get_" + torch_setting)())
+        getattr(torch, "set_" + setting.lower())(int(val))
         log_msg += setting + " = " + val + "; "
     return log_msg
 
