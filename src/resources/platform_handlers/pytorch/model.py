@@ -147,7 +147,7 @@ def _get_torch_compile_params(config):
     return params
 
 
-def _batch_torch_tensors(requests_tensors):
+def _gather_torch_tensors(requests_tensors):
     batch_tensors = []
     sections = []
     for i in range(len(requests_tensors)):
@@ -167,7 +167,7 @@ def _batch_torch_tensors(requests_tensors):
     return [batch_tensors], sections
 
 
-def _unbatch_torch_tensors(response_tensors, sections):
+def _scatter_torch_tensors(response_tensors, sections):
     responses_tensors = []
     for j in range(len(response_tensors)):
         responses_tensor = torch.split(response_tensors[j], sections)
@@ -228,8 +228,8 @@ class TritonPythonModel:
             "'torch.compile' optional parameter(s) " + for_model + ": " + str(params)
         )
         if self._support_batching:
-            self._batcher = torch.compile(_batch_torch_tensors, **params)
-            self._unbatcher = torch.compile(_unbatch_torch_tensors, **params)
+            self._gather = torch.compile(_gather_torch_tensors, **params)
+            self._scatter = torch.compile(_scatter_torch_tensors, **params)
 
         model_path = _get_model_path(self._model_config)
         if not _is_py_class_model(model_path):
@@ -292,7 +292,7 @@ class TritonPythonModel:
 
         sections = None
         if self._support_batching:
-            requests_tensors, sections = self._batcher(requests_tensors)
+            requests_tensors, sections = self._gather(requests_tensors)
 
         responses_tensors = []
         for input_tensors in requests_tensors:
@@ -304,7 +304,7 @@ class TritonPythonModel:
             responses_tensors.append(output_tensors)
 
         if self._support_batching:
-            responses_tensors = self._unbatcher(responses_tensors[0], sections)
+            responses_tensors = self._scatter(responses_tensors[0], sections)
 
         for response_tensors in responses_tensors:
             output_tensors = []
