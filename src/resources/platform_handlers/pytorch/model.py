@@ -147,37 +147,38 @@ def _get_torch_compile_params(config):
     return params
 
 
-def _gather_torch_tensors(requests_tensors):
-    batch_tensors = []
+def _gather_torch_tensors(scatter_tensors):
+    gather_tensors = []
     sections = []
-    for i in range(len(requests_tensors)):
-        request_tensors = requests_tensors[i]
-        for j in range(len(request_tensors)):
-            request_tensor = request_tensors[j]
-            if j < len(batch_tensors):
+    for i in range(len(scatter_tensors)):
+        tensors = scatter_tensors[i]
+        for j in range(len(tensors)):
+            tensor = tensors[j]
+            if j < len(gather_tensors):
                 # add to existing tensor
-                tensor = batch_tensors[j]
-                torch.cat((tensor, request_tensor), 0)
+                gather_tensors[j] = torch.cat((gather_tensors[j], tensor), 0)
             else:
                 # start a new tensor
-                batch_tensors.append(request_tensor)
+                gather_tensors.append(tensor)
         # record section
-        section_length = request_tensors[0].size()[0]
+        section_length = tensors[0].size()[0]
         sections.append(section_length)
-    return [batch_tensors], sections
+    return gather_tensors, sections
 
 
-def _scatter_torch_tensors(response_tensors, sections):
-    responses_tensors = []
-    for j in range(len(response_tensors)):
-        responses_tensor = torch.split(response_tensors[j], sections)
-        for i in range(len(responses_tensor)):
-            response_tensor = responses_tensor[i]
-            if i >= len(responses_tensors):
-                # add a new response
-                responses_tensors.append([])
-            responses_tensors[i].append(response_tensor)
-    return responses_tensors
+def _scatter_torch_tensors(gather_tensors, sections):
+    scatter_tensors = []
+    for j in range(len(gather_tensors)):
+        scatter_tensor = torch.split(gather_tensors[j], sections)
+        for i in range(len(scatter_tensor)):
+            tensor = scatter_tensor[i]
+            if i < len(scatter_tensors):
+                # add to existing response
+                scatter_tensors[i].append(tensor)
+            else:
+                # start a new response
+                scatter_tensors.append([tensor])
+    return scatter_tensors
 
 
 class TritonPythonModel:
@@ -293,6 +294,7 @@ class TritonPythonModel:
         sections = None
         if self._support_batching:
             requests_tensors, sections = self._gather(requests_tensors)
+            requests_tensors = [requests_tensors]
 
         responses_tensors = []
         for input_tensors in requests_tensors:
