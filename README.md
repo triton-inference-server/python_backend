@@ -764,6 +764,23 @@ models
 In the example above, `$$TRITON_MODEL_DIRECTORY` is resolved to
 `$pwd/models/model_a`.
 
+To accelerate the loading time of `model_a`, you can follow the steps below to
+unpack the conda environment in the model folder:
+
+```bash
+mkdir -p $pwd/models/model_a/python3.6
+tar -xvf $pwd/models/model_a/python3.6.tar.gz -C $pwd/models/model_a/python3.6
+```
+
+Then you can change the `EXECUTION_ENV_PATH` to point to the unpacked directory:
+
+```
+parameters: {
+  key: "EXECUTION_ENV_PATH",
+  value: {string_value: "$$TRITON_MODEL_DIRECTORY/python3.6"}
+}
+```
+
 This is useful if you want to use S3, GCS, or Azure and you do not have access
 to the absolute path of the execution env that is stored in the cloud object
 storage service.
