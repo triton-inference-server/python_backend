@@ -113,7 +113,7 @@ def _get_device(kind, device_id, model):
     if device_name == "":
         for param in model.parameters():
             return param.device
-        device_name = "cpu"
+        raise pb_utils.TritonModelException("Cannot determine model device")
     return torch.device(device_name)
 
 
