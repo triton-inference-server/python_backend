@@ -99,28 +99,22 @@ def _parse_io_config(io_config):
     return io
 
 
-def _get_device_name(model_instance_kind, model_instance_device_id):
-    if model_instance_kind == "GPU":
-        return "cuda:" + model_instance_device_id
-    if model_instance_kind == "CPU":
+def _get_device_name(kind, device_id):
+    if kind == "GPU":
+        return "cuda:" + device_id
+    if kind == "CPU":
         return "cpu"
     # unspecified device
     return ""
 
 
-def _get_device(model_instance_kind, model_instance_device_id):
-    device_name = _get_device_name(model_instance_kind, model_instance_device_id)
-    if device_name != "":
-        return torch.device(device_name)
-    # leave torch objects at its default device
-    return None
-
-
-def _torch_object_to_device(obj, device):
-    if device != None:
-        return obj.to(device)
-    # leave object at its current device
-    return obj
+def _get_device(kind, device_id, model):
+    device_name = _get_device_name(kind, device_id)
+    if device_name == "":
+        for param in model.parameters():
+            return param.device
+        device_name = "cpu"
+    return torch.device(device_name)
 
 
 def _set_torch_parallelism(config):
@@ -208,6 +202,8 @@ class TritonPythonModel:
         self._logger.log_info("Initializing model instance " + for_model)
 
         self._model_config = json.loads(args["model_config"])
+        self._kind = args["model_instance_kind"]
+        self._device_id = args["model_instance_device_id"]
         self._support_batching = self._model_config["max_batch_size"] > 0
         self._inputs = _parse_io_config(self._model_config["input"])
         self._outputs = _parse_io_config(self._model_config["output"])
@@ -219,10 +215,6 @@ class TritonPythonModel:
 
         self._infer_mode = torch.inference_mode(mode=True)
         self._infer_mode.__enter__()
-
-        self._device = _get_device(
-            args["model_instance_kind"], args["model_instance_device_id"]
-        )
 
         params = _get_torch_compile_params(self._model_config)
         self._logger.log_verbose(
@@ -236,13 +228,15 @@ class TritonPythonModel:
         if not _is_py_class_model(model_path):
             self._logger.log_info("Loading '" + self._model_name + "' as TorchScript")
             self._model = torch.jit.load(model_path)
-            _torch_object_to_device(self._model, self._device)
+            self._device = _get_device(self._kind, self._device_id, self._model)
+            self._model.to(self._device)
             self._model.eval()
             return
 
         self._model_module = _import_module_from_path(self._model_name, model_path)
         self._model_class = _get_model_class_from_module(self._model_module)
         self._raw_model = self._model_class()
+        self._device = _get_device(self._kind, self._device_id, self._raw_model)
         data_path = _get_model_data_path(model_path)
         if data_path != "":
             self._raw_model.load_state_dict(
@@ -250,7 +244,7 @@ class TritonPythonModel:
             )
         else:
             self._logger.log_info("Model parameter file not found " + for_model)
-        _torch_object_to_device(self._raw_model, self._device)
+        self._raw_model.to(self._device)
         self._raw_model.eval()
         self._model = torch.compile(self._raw_model, **params)
 
@@ -285,9 +279,7 @@ class TritonPythonModel:
                 tensor = pb_utils.get_input_tensor_by_name(
                     request, io["name"]
                 ).to_dlpack()
-                tensor = _torch_object_to_device(
-                    torch.from_dlpack(tensor), self._device
-                )
+                tensor = torch.from_dlpack(tensor).to(self._device)
                 tensors.append(tensor)
             requests_tensors.append(tensors)
 

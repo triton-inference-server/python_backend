@@ -128,3 +128,6 @@ the `model.py` file, they need to be enclosed by a class extending the
 [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module).
 - Model weights cannot be shared across multiple instances on the same GPU
 device.
+- When using `KIND_MODEL` as model instance kind, the default device of the
+first parameter on the model is used. If no parameter is defined on the model,
+`cpu` device will be used.
