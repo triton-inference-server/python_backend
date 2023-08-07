@@ -1397,6 +1397,10 @@ this workflow.
 For a simple example of using PyTorch in a Python Backend model, see the
 [AddSubNet PyTorch example](#addsubnet-in-pytorch).
 
+PyTorch models may be served directly without implementing the `model.py`, see
+[Serving PyTorch models using Python Backend \[Experimental\]](src/resources/platform_handlers/pytorch/README.md)
+for more details.
+
 ### PyTorch Determinism
 
 When running PyTorch code, you may notice slight differences in output values
