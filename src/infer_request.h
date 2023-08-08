@@ -47,9 +47,14 @@ class Stub;
 struct InferenceTrace {
 #ifndef TRITON_PB_STUB
   TRITONSERVER_InferenceTrace* triton_trace_;
+  InferenceTrace(TRITONSERVER_InferenceTrace* triton_trace)
+      : triton_trace_(triton_trace)
+  {
+  }
 #else
   void* triton_trace_;
 #endif
+  InferenceTrace() : triton_trace_(nullptr) {}
 };
 
 //
@@ -81,7 +86,7 @@ class InferRequest {
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
           PreferredMemory(PreferredMemory::DEFAULT, 0),
-      const InferenceTrace& trace = {.triton_trace_ = nullptr});
+      const InferenceTrace& trace = InferenceTrace());
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
