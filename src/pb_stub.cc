@@ -1396,7 +1396,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
               PreferredMemory(PreferredMemory::DEFAULT, 0),
-          py::arg("trace").none(false) = nullptr)
+          py::arg("trace").none(false) = InferenceTrace())
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)

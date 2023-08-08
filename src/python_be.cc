@@ -367,7 +367,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     TRITONSERVER_InferenceTrace* triton_trace;
     RETURN_IF_ERROR(TRITONBACKEND_RequestTrace(request, &triton_trace));
 
-    InferenceTrace trace = {triton_trace};
+    InferenceTrace trace = InferenceTrace(triton_trace);
 
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
