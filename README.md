@@ -1398,8 +1398,7 @@ For a simple example of using PyTorch in a Python Backend model, see the
 [AddSubNet PyTorch example](#addsubnet-in-pytorch).
 
 PyTorch models may be served directly without implementing the `model.py`, see
-[Serving PyTorch models using Python Backend \[Experimental\]](src/resources/platform_handlers/pytorch/README.md)
-for more details.
+the [PyTorch models example](#pytorch-models).
 
 ### PyTorch Determinism
 
@@ -1562,6 +1561,13 @@ instructions in [examples/auto_complete](examples/auto_complete/README.md).
 The example shows how to use custom metrics API in Python Backend. You can find
 the complete example instructions in
 [examples/custom_metrics](examples/custom_metrics/README.md).
+
+## PyTorch models
+
+The example shows how to use the
+[PyTorch platform handler](src/resources/platform_handlers/pytorch/README.md) to
+serve a PyTorch model. You can find the complete example instructions in
+[examples/pytorch_platform_handler](examples/pytorch_platform_handler/README.md).
 
 # Running with Inferentia
 
