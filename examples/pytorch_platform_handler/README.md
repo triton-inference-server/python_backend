@@ -29,8 +29,9 @@
 # PyTorch Example
 
 In this section, we demonstrate an end-to-end example for using the
-[PyTorch platform handler](../../src/resources/platform_handlers/pytorch/README.md)
-to serve a PyTorch model.
+[PyTorch Platform \[Experimental\]](../../README.md#pytorch-platform-experimental)
+to serve a PyTorch model directly, **without** the need to implement the
+`TritonPythonModel` class.
 
 ## Create a ResNet50 model repository
 
