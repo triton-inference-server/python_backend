@@ -30,7 +30,7 @@
 
 In this section, we demonstrate an end-to-end example for using the
 [PyTorch Platform \[Experimental\]](../../README.md#pytorch-platform-experimental)
-to serve a PyTorch model directly, **without** the need to implement the
+to serve a PyTorch model directly, **without** needing to implement the
 `TritonPythonModel` class.
 
 ## Create a ResNet50 model repository

@@ -41,36 +41,45 @@ model_name = "resnet50_pytorch"
 input_name = "INPUT"
 output_name = "OUTPUT"
 label_path = os.path.join(script_directory, "resnet50_labels.txt")
+# https://raw.githubusercontent.com/triton-inference-server/server/main/qa/images/mug.jpg
 image_path = os.path.join(script_directory, "mug.jpg")
 expected_output_class = "COFFEE MUG"
 
-# prepare input image
-raw_image = Image.open(image_path)
-raw_image = raw_image.convert("RGB").resize((224, 224), Image.BILINEAR)
-input_image = np.array(raw_image).astype(np.float32)
-input_image = (input_image / 127.5) - 1
-input_image = np.transpose(input_image, (2, 0, 1))
-input_image = np.reshape(input_image, (1, 3, 224, 224))
 
-# load labels
-with open(label_path) as f:
-    labels_dict = {idx: line.strip() for idx, line in enumerate(f)}
+def _load_input_image():
+    raw_image = Image.open(image_path)
+    raw_image = raw_image.convert("RGB").resize((224, 224), Image.BILINEAR)
+    input_image = np.array(raw_image).astype(np.float32)
+    input_image = (input_image / 127.5) - 1
+    input_image = np.transpose(input_image, (2, 0, 1))
+    input_image = np.reshape(input_image, (1, 3, 224, 224))
+    return input_image
 
-# inference
-with httpclient.InferenceServerClient(server_url) as client:
-    input_tensors = httpclient.InferInput(input_name, input_image.shape, "FP32")
-    input_tensors.set_data_from_numpy(input_image)
-    results = client.infer(model_name=model_name, inputs=[input_tensors])
-    output_tensors = results.as_numpy(output_name)
 
-# check output
-max_id = np.argmax(output_tensors, axis=1)[0]
-output_class = labels_dict[max_id]
-print("Result: " + output_class)
-print("Expected result: " + expected_output_class)
-if output_class != expected_output_class:
-    print("PyTorch platform handler example error: Unexpected result")
-    sys.exit(1)
+def _check_output(output_tensors):
+    with open(label_path) as f:
+        labels_dict = {idx: line.strip() for idx, line in enumerate(f)}
+    max_id = np.argmax(output_tensors, axis=1)[0]
+    output_class = labels_dict[max_id]
+    print("Result: " + output_class)
+    print("Expected result: " + expected_output_class)
+    if output_class != expected_output_class:
+        return False
+    return True
 
-print("PASS: PyTorch platform handler")
-sys.exit(0)
+
+if __name__ == "__main__":
+    input_image = _load_input_image()
+
+    with httpclient.InferenceServerClient(server_url) as client:
+        input_tensors = httpclient.InferInput(input_name, input_image.shape, "FP32")
+        input_tensors.set_data_from_numpy(input_image)
+        results = client.infer(model_name=model_name, inputs=[input_tensors])
+        output_tensors = results.as_numpy(output_name)
+
+    if not _check_output(output_tensors):
+        print("PyTorch platform handler example error: Unexpected result")
+        sys.exit(1)
+
+    print("PASS: PyTorch platform handler")
+    sys.exit(0)
