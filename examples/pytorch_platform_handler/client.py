@@ -56,6 +56,15 @@ def _load_input_image():
     return input_image
 
 
+def _infer(input_image):
+    with httpclient.InferenceServerClient(server_url) as client:
+        input_tensors = httpclient.InferInput(input_name, input_image.shape, "FP32")
+        input_tensors.set_data_from_numpy(input_image)
+        results = client.infer(model_name=model_name, inputs=[input_tensors])
+        output_tensors = results.as_numpy(output_name)
+    return output_tensors
+
+
 def _check_output(output_tensors):
     with open(label_path) as f:
         labels_dict = {idx: line.strip() for idx, line in enumerate(f)}
@@ -70,14 +79,10 @@ def _check_output(output_tensors):
 
 if __name__ == "__main__":
     input_image = _load_input_image()
+    output_tensors = _infer(input_image)
+    result_valid = _check_output(output_tensors)
 
-    with httpclient.InferenceServerClient(server_url) as client:
-        input_tensors = httpclient.InferInput(input_name, input_image.shape, "FP32")
-        input_tensors.set_data_from_numpy(input_image)
-        results = client.infer(model_name=model_name, inputs=[input_tensors])
-        output_tensors = results.as_numpy(output_name)
-
-    if not _check_output(output_tensors):
+    if not result_valid:
         print("PyTorch platform handler example error: Unexpected result")
         sys.exit(1)
 
