@@ -87,4 +87,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("PASS: PyTorch platform handler")
-    sys.exit(0)
