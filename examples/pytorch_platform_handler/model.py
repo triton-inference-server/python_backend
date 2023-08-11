@@ -30,8 +30,7 @@ import torch
 
 
 class ResNet50(torch.nn.Module):
-    # This is a native PyTorch model class.
-    # `TritonPythonModel` does not need to be implemented.
+    # This is a native PyTorch model class. `TritonPythonModel` is not implemented.
 
     def __init__(self):
         super().__init__()
