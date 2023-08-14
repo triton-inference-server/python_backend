@@ -41,7 +41,8 @@ model_name = "resnet50_pytorch"
 input_name = "INPUT"
 output_name = "OUTPUT"
 label_path = os.path.join(script_directory, "resnet50_labels.txt")
-# https://raw.githubusercontent.com/triton-inference-server/server/main/qa/images/mug.jpg
+# on sdk container: /workspace/images/mug.jpg
+# on qa container: /opt/tritonserver/qa/images/mug.jpg
 image_path = os.path.join(script_directory, "mug.jpg")
 expected_output_class = "COFFEE MUG"
 
