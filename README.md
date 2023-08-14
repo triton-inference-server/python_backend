@@ -1716,6 +1716,31 @@ how to adjust them dynamically, please see Triton's
 [logging extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_logging.md)
 documentation.
 
+# Adding Custom Parameters in the Model Configuration
+
+If your model requires custom parameters in the configuration, you can specify
+that in the `parameters` section of the model config. For example:
+
+```
+parameters {
+  key: "custom_key"
+  value: {
+    string_value: "custom_value"
+  }
+}
+```
+
+Now you can access this parameter in the `args` argument of the `initialize`
+function:
+
+```python
+def initialize(self, args):
+    print(json.loads(args['model_config'])['parameters'])
+    # Should print {'custom_key': {'string_value': 'custom_value'}}
+```
+
+
+
 # Reporting problems, asking questions
 
 We appreciate any feedback, questions or bug reporting regarding this
