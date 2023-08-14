@@ -1432,7 +1432,7 @@ provided in place of the `model.py` file.
 
 By default, Triton will use the
 [PyTorch backend](https://github.com/triton-inference-server/pytorch_backend) to
-load and serve PyTorch models. In order to serve from Python backend,
+load and serve TorchScript models. In order to serve from Python backend,
 [model configuration](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md)
 should explicitly provide the following settings:
 
