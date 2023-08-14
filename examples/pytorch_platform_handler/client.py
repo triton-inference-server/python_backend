@@ -41,8 +41,10 @@ model_name = "resnet50_pytorch"
 input_name = "INPUT"
 output_name = "OUTPUT"
 label_path = os.path.join(script_directory, "resnet50_labels.txt")
-# on sdk container: /workspace/images/mug.jpg
-# on qa container: /opt/tritonserver/qa/images/mug.jpg
+# The 'mug.jpg' image will be present at the script_directory if the steps on
+# the provided README.md are followed. The image may also be found at
+# '/workspace/images/mug.jpg' on the SDK container or
+# '/opt/tritonserver/qa/images/mug.jpg' on the QA container.
 image_path = os.path.join(script_directory, "mug.jpg")
 expected_output_class = "COFFEE MUG"
 
