@@ -1901,8 +1901,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 
   std::unique_ptr<BackendState> backend_state(new BackendState());
   triton::common::TritonJson::Value cmdline;
-  backend_state->shm_default_byte_size = 64 * 1024 * 1024;  // 64 MBs
-  backend_state->shm_growth_byte_size = 64 * 1024 * 1024;   // 64 MBs
+  backend_state->shm_default_byte_size = 1 * 1024 * 1024;  // 1 MB
+  backend_state->shm_growth_byte_size = 1 * 1024 * 1024;   // 1 MB
   backend_state->stub_timeout_seconds = 30;
   backend_state->shm_message_queue_size = 1000;
   backend_state->number_of_instance_inits = 0;
@@ -1936,8 +1936,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       RETURN_IF_ERROR(shm_default_size.AsString(&shm_default_byte_size));
       try {
         backend_state->shm_default_byte_size = std::stol(shm_default_byte_size);
-        // Shared memory default byte size can't be less than 4 MBs.
-        if (backend_state->shm_default_byte_size < 4 * 1024 * 1024) {
+        // Shared memory default byte size can't be less than 1 MB.
+        if (backend_state->shm_default_byte_size < 1 * 1024 * 1024) {
           return TRITONSERVER_ErrorNew(
               TRITONSERVER_ERROR_INVALID_ARG,
               (std::string("shm-default-byte-size") +
