@@ -852,8 +852,8 @@ Starting from 21.04 release, Python backend uses shared memory to connect
 user's code to Triton. Note that this change is completely transparent and
 does not require any change to the existing user's model code.
 
-Python backend, by default, allocates 64 MBs for each model instance. Then,
-it will grow the shared memory region by 64 MBs whenever an increase is
+Python backend, by default, allocates 1 MB for each model instance. Then,
+it will grow the shared memory region by 1 MB chunks whenever an increase is
 required. You can configure the default shared memory used by each model
 instance using the `shm-default-byte-size` flag. The amount of shared memory
 growth can be configured using the `shm-growth-byte-size`.

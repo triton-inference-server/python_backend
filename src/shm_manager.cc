@@ -76,7 +76,7 @@ SharedMemoryManager::SharedMemoryManager(
          "' to requested size (" + std::to_string(shm_size) +
          " bytes). If you are running Triton inside docker, use '--shm-size' "
          "flag to control the shared memory region size. Each Python backend "
-         "model instance requires at least 64MBs of shared memory. Error: " +
+         "model instance requires at least 1 MB of shared memory. Error: " +
          ex.what());
     // Remove the shared memory region if there was an error.
     bi::shared_memory_object::remove(shm_region_name.c_str());
