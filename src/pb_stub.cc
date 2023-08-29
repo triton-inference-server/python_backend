@@ -383,9 +383,6 @@ Stub::StubSetup()
   py::module c_python_backend_utils =
       py::module_::import("c_python_backend_utils");
   py::setattr(
-      python_backend_utils, "ErrorCode",
-      c_python_backend_utils.attr("ErrorCode"));
-  py::setattr(
       python_backend_utils, "TritonError",
       c_python_backend_utils.attr("TritonError"));
   py::setattr(
@@ -477,9 +474,6 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
       py::module_::import("triton_python_backend_utils");
   py::module c_python_backend_utils =
       py::module_::import("c_python_backend_utils");
-  py::setattr(
-      python_backend_utils, "ErrorCode",
-      c_python_backend_utils.attr("ErrorCode"));
   py::setattr(
       python_backend_utils, "TritonError",
       c_python_backend_utils.attr("TritonError"));
@@ -1352,40 +1346,33 @@ Logger::BackendLoggingActive()
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
-  py::enum_<TRITONSERVER_Error_Code>(module, "ErrorCode")
+  py::class_<PbError, std::shared_ptr<PbError>> triton_error(
+      module, "TritonError");
+  py::enum_<TRITONSERVER_Error_Code>(triton_error, "ErrorCode")
+      .value("UNKNOWN", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_UNKNOWN)
+      .value("INTERNAL", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_INTERNAL)
+      .value("NOT_FOUND", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_NOT_FOUND)
       .value(
-          "TRITONSERVER_ERROR_UNKNOWN",
-          TRITONSERVER_Error_Code::TRITONSERVER_ERROR_UNKNOWN)
-      .value(
-          "TRITONSERVER_ERROR_INTERNAL",
-          TRITONSERVER_Error_Code::TRITONSERVER_ERROR_INTERNAL)
-      .value(
-          "TRITONSERVER_ERROR_NOT_FOUND",
-          TRITONSERVER_Error_Code::TRITONSERVER_ERROR_NOT_FOUND)
-      .value(
-          "TRITONSERVER_ERROR_INVALID_ARG",
+          "INVALID_ARG",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_INVALID_ARG)
       .value(
-          "TRITONSERVER_ERROR_UNAVAILABLE",
+          "UNAVAILABLE",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_UNAVAILABLE)
       .value(
-          "TRITONSERVER_ERROR_UNSUPPORTED",
+          "UNSUPPORTED",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_UNSUPPORTED)
       .value(
-          "TRITONSERVER_ERROR_ALREADY_EXISTS",
+          "ALREADY_EXISTS",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_ALREADY_EXISTS)
       .export_values();
-
-  py::class_<PbError, std::shared_ptr<PbError>>(module, "TritonError")
-      .def(
-          py::init(
-              [](const std::string& message, TRITONSERVER_Error_Code code) {
-                return std::make_shared<PbError>(code, message);
-              }),
-          py::arg("message").none(false),
-          py::arg("code").none(false) = TRITONSERVER_ERROR_INTERNAL)
-      .def("code", &PbError::Code)
-      .def("message", &PbError::Message);
+  triton_error.def(
+      py::init([](const std::string& message, TRITONSERVER_Error_Code code) {
+        return std::make_shared<PbError>(code, message);
+      }),
+      py::arg("message").none(false),
+      py::arg("code").none(false) = TRITONSERVER_ERROR_INTERNAL);
+  triton_error.def("code", &PbError::Code);
+  triton_error.def("message", &PbError::Message);
 
   py::class_<PreferredMemory, std::shared_ptr<PreferredMemory>>(
       module, "PreferredMemory")
