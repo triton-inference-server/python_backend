@@ -1348,7 +1348,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 {
   py::class_<PbError, std::shared_ptr<PbError>> triton_error(
       module, "TritonError");
-  py::enum_<TRITONSERVER_Error_Code>(triton_error, "ErrorCode")
+  py::enum_<TRITONSERVER_Error_Code>(triton_error, "__ErrorCode")
       .value("UNKNOWN", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_UNKNOWN)
       .value("INTERNAL", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_INTERNAL)
       .value("NOT_FOUND", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_NOT_FOUND)
@@ -1365,6 +1365,27 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "ALREADY_EXISTS",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_ALREADY_EXISTS)
       .export_values();
+  triton_error.def_property_readonly_static(
+      "UNKNOWN",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_UNKNOWN; });
+  triton_error.def_property_readonly_static(
+      "INTERNAL",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_INTERNAL; });
+  triton_error.def_property_readonly_static(
+      "NOT_FOUND",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_NOT_FOUND; });
+  triton_error.def_property_readonly_static(
+      "INVALID_ARG",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_INVALID_ARG; });
+  triton_error.def_property_readonly_static(
+      "UNAVAILABLE",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_UNAVAILABLE; });
+  triton_error.def_property_readonly_static(
+      "UNSUPPORTED",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_UNSUPPORTED; });
+  triton_error.def_property_readonly_static(
+      "ALREADY_EXISTS",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_ALREADY_EXISTS; });
   triton_error.def(
       py::init([](const std::string& message, TRITONSERVER_Error_Code code) {
         return std::make_shared<PbError>(code, message);
