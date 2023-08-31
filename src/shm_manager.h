@@ -157,6 +157,20 @@ class SharedMemoryManager {
 
   void SetDeleteRegion(bool delete_region);
 
+  void SetCUDAPoolAddress(void* cuda_pool_address)
+  {
+    cuda_pool_address_ = cuda_pool_address;
+  }
+
+  void* CUDAPoolAddress() { return cuda_pool_address_; }
+
+  void SetTritonMemoryManager(void* triton_memory_manager)
+  {
+    triton_memory_manager_ = triton_memory_manager;
+  }
+
+  void* TritonMemoryManager() { return triton_memory_manager_; }
+
   ~SharedMemoryManager() noexcept(false);
 
  private:
@@ -171,6 +185,10 @@ class SharedMemoryManager {
   uint64_t* total_size_;
   bool create_;
   bool delete_region_;
+  // The base address of the Triton CUDA memory pool
+  void* cuda_pool_address_;
+  // TRITONBACKEND_MemoryManager
+  void* triton_memory_manager_;
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(

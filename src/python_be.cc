@@ -410,6 +410,9 @@ ModelInstanceState::LaunchStubProcess()
   RETURN_IF_ERROR(Stub()->Setup());
   StartMonitor();
   RETURN_IF_ERROR(Stub()->Launch());
+#ifdef TRITON_ENABLE_GPU
+  Stub()->ShareCUDAMemoryPool(Model()->TritonMemoryManager());
+#endif  // TRITON_ENABLE_GPU
 
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
@@ -571,7 +574,7 @@ ModelInstanceState::GetInputTensor(
       void* dev_ptr;
       RETURN_IF_CUDA_ERROR(
           cudaMalloc(&dev_ptr, input_byte_size), TRITONSERVER_ERROR_INTERNAL,
-          std::string("Failed to allocated CUDA memory"));
+          std::string("Failed to allocate CUDA memory"));
 
       size_t byte_size = input_byte_size;
 
@@ -1579,6 +1582,12 @@ ModelInstanceState::ProcessRequests(
                   pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
                   CudaStream(), &cuda_used));
           cuda_copy |= cuda_used;
+        } else if (
+            pb_memory->MemoryType() == TRITONSERVER_MEMORY_GPU &&
+            pb_memory->UseCudaSharedPool()) {
+          // Copy the data from the CUDA shared memory pool to the output buffer
+          // provided by Triton
+          pb_memory->WriteBackOutput(Stub()->ShmPool());
         }
       }
       response_index++;
@@ -2256,9 +2265,23 @@ TRITONBACKEND_ModelInstanceExecute(
       if (err == nullptr) {
         instance_state->StartMonitor();
       }
-      LOG_IF_ERROR(err, "Failed to restart the stub process.");
+      LOG_IF_ERROR(
+          err,
+          "Failed to restart the stub process: failed to start "
+          "the monitor.");
       err = instance_state->Stub()->Launch();
-      LOG_IF_ERROR(err, "Failed to restart the stub process.");
+      LOG_IF_ERROR(
+          err,
+          "Failed to restart the stub process: failed to launch "
+          "the stub process.");
+#ifdef TRITON_ENABLE_GPU
+      err = instance_state->Stub()->ShareCUDAMemoryPool(
+          instance_state->Model()->TritonMemoryManager());
+      LOG_IF_ERROR(
+          err,
+          "Failed to restart the stub process: failed to share "
+          "CUDA memory pool.");
+#endif  // TRITON_ENABLE_GPU
     }
   } else {
     std::vector<std::unique_ptr<InferRequest>> infer_requests;

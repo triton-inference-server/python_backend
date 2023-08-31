@@ -207,7 +207,9 @@ struct UtilsMessagePayload {
 
 class Stub {
  public:
-  Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
+  Stub()
+      : device_id_(0), stub_to_parent_thread_(false),
+        parent_to_stub_thread_(false){};
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
@@ -350,7 +352,11 @@ class Stub {
   /// for provided device
   cudaStream_t GetProxyStream(const int& device_id);
 
+  /// Get the CUDA memory pool address from the parent process.
+  void GetCUDAMemoryPoolAddress(bi::managed_external_buffer::handle_t handle);
+
  private:
+  int32_t device_id_;
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
   bi::interprocess_mutex* parent_mutex_;

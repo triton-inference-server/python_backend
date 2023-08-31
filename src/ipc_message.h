@@ -41,6 +41,8 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_ExecuteResponse,
   PYTHONSTUB_InitializeRequest,
   PYTHONSTUB_InitializeResponse,
+  PYTHONSTUB_CUDAPoolInitializeRequest,
+  PYTHONSTUB_CUDAPoolInitializeResponse,
   PYTHONSTUB_FinalizeRequest,
   PYTHONSTUB_FinalizeResponse,
   PYTHONSTUB_LoadGPUBuffers,

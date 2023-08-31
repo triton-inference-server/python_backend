@@ -36,6 +36,7 @@ namespace triton { namespace backend { namespace python {
 SharedMemoryManager::SharedMemoryManager(
     const std::string& shm_region_name, size_t shm_size,
     size_t shm_growth_bytes, bool create)
+    : cuda_pool_address_(nullptr), triton_memory_manager_(nullptr)
 {
   shm_region_name_ = shm_region_name;
   create_ = create;
@@ -95,6 +96,7 @@ SharedMemoryManager::SharedMemoryManager(
 }
 
 SharedMemoryManager::SharedMemoryManager(const std::string& shm_region_name)
+    : cuda_pool_address_(nullptr), triton_memory_manager_(nullptr)
 {
   shm_region_name_ = shm_region_name;
   create_ = false;

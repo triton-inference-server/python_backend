@@ -151,6 +151,12 @@ class StubLauncher {
   TRITONSERVER_Error* ReceiveMessageFromStub(
       bi::managed_external_buffer::handle_t& message);
 
+#ifdef TRITON_ENABLE_GPU
+  // Share CUDA memory pool with stub process
+  TRITONSERVER_Error* ShareCUDAMemoryPool(
+      TRITONBACKEND_MemoryManager* triton_mem_manager);
+#endif  // TRITON_ENABLE_GPU
+
  private:
   pid_t parent_pid_;
   pid_t stub_pid_;

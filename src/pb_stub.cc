@@ -386,6 +386,51 @@ Stub::RunCommand()
       }
 
       break;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_CUDAPoolInitializeRequest: {
+      bool has_exception = false;
+      std::string error_string;
+
+      std::unique_ptr<IPCMessage> response_msg =
+          IPCMessage::Create(shm_pool_, false /* inline_response */);
+      response_msg->Command() = PYTHONSTUB_CUDAPoolInitializeResponse;
+      std::unique_ptr<PbString> error_string_shm;
+      AllocatedSharedMemory<InitializeResponseShm> response =
+          shm_pool_->Construct<InitializeResponseShm>();
+
+      ScopedDefer _([this, &response_msg] { SendIPCMessage(response_msg); });
+
+      response.data_->response_has_error = false;
+      response.data_->response_is_error_set = false;
+      response_msg->Args() = response.handle_;
+
+      try {
+        GetCUDAMemoryPoolAddress(ipc_message->Args());
+      }
+      catch (const PythonBackendException& pb_exception) {
+        has_exception = true;
+        error_string = pb_exception.what();
+      }
+
+      if (has_exception) {
+        // Do not delete the region. The region will be deleted by the parent
+        // process.
+        shm_pool_->SetDeleteRegion(false);
+        LOG_INFO
+            << "Failed to initialize CUDA shared memory pool in Python stub: "
+            << error_string;
+        response.data_->response_has_error = true;
+        response.data_->response_is_error_set = false;
+
+        LOG_IF_EXCEPTION(
+            error_string_shm = PbString::Create(shm_pool_, error_string));
+        if (error_string_shm != nullptr) {
+          response.data_->response_is_error_set = true;
+          response.data_->response_error = error_string_shm->ShmHandle();
+        }
+
+        return true;  // Terminate the stub process.
+      }
+    } break;
     default:
       break;
   }
@@ -536,6 +581,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   for (const auto& pair : map) {
     model_config_params[pair.first.c_str()] = pair.second;
   }
+
+  device_id_ = std::stoi(map["model_instance_device_id"]);
 
   LaunchStubToParentQueueMonitor();
   LaunchParentToStubQueueMonitor();
@@ -892,6 +939,18 @@ Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
+#ifdef TRITON_ENABLE_GPU
+  if (shm_pool_->CUDAPoolAddress() != nullptr) {
+    try {
+      CUDAHandler& cuda_api = CUDAHandler::getInstance();
+      cuda_api.CloseCudaHandle(device_id_, shm_pool_->CUDAPoolAddress());
+    }
+    catch (const PythonBackendException& pb_exception) {
+      std::cerr << "Error when closing CUDA handle: " << pb_exception.what();
+    }
+  }
+#endif
+
   {
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
@@ -1283,6 +1342,24 @@ Stub::GetProxyStream(const int& device_id)
     }
   }
   return dlpack_proxy_stream_pool_[device_id];
+#else
+  return nullptr;
+#endif
+}
+
+void
+Stub::GetCUDAMemoryPoolAddress(bi::managed_external_buffer::handle_t handle)
+{
+#ifdef TRITON_ENABLE_GPU
+  AllocatedSharedMemory<CUDAMemPoolMessage> cuda_handle_shm =
+      shm_pool_->Load<CUDAMemPoolMessage>(handle);
+  CUDAMemPoolMessage* cuda_handle_shm_ptr = cuda_handle_shm.data_.get();
+
+  CUDAHandler& cuda_api = CUDAHandler::getInstance();
+  void* cuda_pool_address;
+  cuda_api.OpenCudaHandle(
+      device_id_, &cuda_handle_shm_ptr->cuda_handle, &cuda_pool_address);
+  shm_pool_->SetCUDAPoolAddress(cuda_pool_address);
 #else
   return nullptr;
 #endif

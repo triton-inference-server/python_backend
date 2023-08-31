@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -42,13 +42,18 @@ namespace triton { namespace backend { namespace python {
 //
 struct MemoryShm {
   // If the memory type is a GPU pointer, the offset of the GPU pointer from the
-  // base address. For CPU memory type this field contains garbage data.
+  // base address. For CPU memory type this field contains garbage data. This
+  // field will only be used when the memory is not allocated from the CUDA
+  // shared memory pool.
   uint64_t gpu_pointer_offset;
+  bool use_cuda_shared_pool;
+  // The offset of the memory from the base address of the CUDA shared memory
+  // pool.
+  uint64_t cuda_pool_offset;
 
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
   uint64_t byte_size;
-  bool is_cuda_handle_set;
   uint64_t memory_release_id;
 };
 
@@ -57,9 +62,11 @@ class PbMemory {
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      uint64_t byte_size, char* data, bool copy_gpu = true);
+      uint64_t byte_size, char* data, bool copy_gpu = true,
+      bool write_back_data = false);
 
   static std::unique_ptr<PbMemory> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
@@ -68,6 +75,10 @@ class PbMemory {
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       std::unique_ptr<BackendMemory>&& backend_memory, bool copy_gpu = true);
+
+  // Copy the data from the CUDA shared memory pool to the output buffer
+  // provided by Triton
+  void WriteBackOutput(std::unique_ptr<SharedMemoryManager>& shm_pool);
 #endif
 
 #ifdef TRITON_ENABLE_GPU
@@ -83,6 +94,7 @@ class PbMemory {
       bi::managed_external_buffer::handle_t memory_handle,
       bool open_cuda_handle);
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle, char* data_shm,
       bool open_cuda_handle);
   static uint64_t ShmStructSize(
@@ -117,11 +129,17 @@ class PbMemory {
 
   void SetMemoryReleaseCallback(std::function<void(void)> release_callback);
 
+  bool UseCudaSharedPool() const
+  {
+    return memory_shm_ptr_->use_cuda_shared_pool;
+  }
+
   ~PbMemory();
 
  private:
   AllocatedSharedMemory<char> memory_shm_;
   MemoryShm* memory_shm_ptr_;
+  uint64_t cuda_pool_offset_;
 
 #ifndef TRITON_PB_STUB
   std::unique_ptr<BackendMemory> backend_memory_;
@@ -132,6 +150,10 @@ class PbMemory {
   // Refers to the pointer that can hold the data. For CPU pointers this will be
   // the same as memory_data_shm_ptr_.
   char* data_ptr_;
+
+  // Store the buffer provided by Triton. This is used to write back the data
+  // from the CUDA shared memory pool to the original buffer.
+  char* original_buffer_;
 
   bi::managed_external_buffer::handle_t memory_shm_handle_;
   bool opened_cuda_ipc_handle_;
@@ -150,9 +172,11 @@ class PbMemory {
 #endif
 
   static void FillShmData(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, void** backend_memory,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
-      bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
+      bi::managed_external_buffer::handle_t handle, bool copy_gpu = true,
+      bool write_back_data = false);
 
   PbMemory(
       AllocatedSharedMemory<char>& memory_shm, char* data,
