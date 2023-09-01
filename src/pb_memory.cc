@@ -96,11 +96,14 @@ void
 PbMemory::WriteBackOutput(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   if (original_buffer_) {
+    data_ptr_ =
+        (reinterpret_cast<char*>(shm_pool->CUDAPoolAddress()) +
+         memory_shm_ptr_->cuda_pool_offset);
+
     cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
     cudaError_t err;
     err = cudaMemcpy(
-        original_buffer_, backend_memory_->MemoryPtr(),
-        memory_shm_ptr_->byte_size, kind);
+        original_buffer_, data_ptr_, memory_shm_ptr_->byte_size, kind);
     if (err != cudaSuccess) {
       throw PythonBackendException(
           std::string(
