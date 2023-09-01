@@ -73,16 +73,6 @@ PbError::LoadFromSharedMemory(
       std::move(message_shm), std::move(error_shm), code, std::move(message)));
 }
 
-PbError::PbError(const std::string& message)
-    : code_(TRITONSERVER_ERROR_INTERNAL), message_(message)
-{
-}
-
-PbError::PbError(TRITONSERVER_Error_Code code, const std::string& message)
-    : code_(code), message_(message)
-{
-}
-
 PbError::PbError(
     std::shared_ptr<PbString>&& message_shm,
     AllocatedSharedMemory<PbErrorShm>&& error_shm, TRITONSERVER_Error_Code code,

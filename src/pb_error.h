@@ -40,8 +40,12 @@ struct PbErrorShm {
 
 class PbError {
  public:
-  PbError(const std::string& message);
-  PbError(TRITONSERVER_Error_Code code, const std::string& message);
+  PbError(
+      const std::string& message,
+      TRITONSERVER_Error_Code code = TRITONSERVER_ERROR_INTERNAL)
+      : code_(code), message_(message)
+  {
+  }
   DISALLOW_COPY_AND_ASSIGN(PbError);
 
   TRITONSERVER_Error_Code Code();

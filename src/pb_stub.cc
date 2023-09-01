@@ -1387,9 +1387,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       "ALREADY_EXISTS",
       [](py::object /* self */) { return TRITONSERVER_ERROR_ALREADY_EXISTS; });
   triton_error.def(
-      py::init([](const std::string& message, TRITONSERVER_Error_Code code) {
-        return std::make_shared<PbError>(code, message);
-      }),
+      py::init<const std::string&, TRITONSERVER_Error_Code>(),
       py::arg("message").none(false),
       py::arg("code").none(false) = TRITONSERVER_ERROR_INTERNAL);
   triton_error.def("code", &PbError::Code);
