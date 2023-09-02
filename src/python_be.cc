@@ -1456,7 +1456,7 @@ ModelInstanceState::ProcessRequests(
           false /* open_cuda_handle */);
       if (infer_response->HasError()) {
         TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
+            infer_response->Error()->Code(),
             infer_response->Error()->Message().c_str());
 
         LOG_IF_ERROR(

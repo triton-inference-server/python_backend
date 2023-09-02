@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,13 @@
 #include "pb_error.h"
 
 namespace triton { namespace backend { namespace python {
+
+TRITONSERVER_Error_Code
+PbError::Code()
+{
+  return code_;
+}
+
 const std::string&
 PbError::Message()
 {
@@ -43,7 +50,10 @@ void
 PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   message_shm_ = PbString::Create(shm_pool, message_);
-  shm_handle_ = message_shm_->ShmHandle();
+  error_shm_ = shm_pool->Construct<PbErrorShm>();
+  error_shm_.data_->code = code_;
+  error_shm_.data_->message_shm_handle = message_shm_->ShmHandle();
+  shm_handle_ = error_shm_.handle_;
 }
 
 std::shared_ptr<PbError>
@@ -51,14 +61,25 @@ PbError::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t shm_handle)
 {
-  std::unique_ptr<PbString> message_shm =
-      PbString::LoadFromSharedMemory(shm_pool, shm_handle);
-  return std::shared_ptr<PbError>(new PbError(message_shm));
+  AllocatedSharedMemory<PbErrorShm> error_shm =
+      shm_pool->Load<PbErrorShm>(shm_handle);
+  std::unique_ptr<PbString> message_shm = PbString::LoadFromSharedMemory(
+      shm_pool, error_shm.data_->message_shm_handle);
+
+  TRITONSERVER_Error_Code code = error_shm.data_->code;
+  std::string message = message_shm->String();
+
+  return std::shared_ptr<PbError>(new PbError(
+      std::move(message_shm), std::move(error_shm), code, std::move(message)));
 }
 
-PbError::PbError(std::unique_ptr<PbString>& message_shm)
+PbError::PbError(
+    std::shared_ptr<PbString>&& message_shm,
+    AllocatedSharedMemory<PbErrorShm>&& error_shm, TRITONSERVER_Error_Code code,
+    std::string&& message)
+    : message_shm_(std::move(message_shm)), error_shm_(std::move(error_shm)),
+      code_(code), message_(std::move(message))
 {
-  message_shm_ = std::move(message_shm);
-  message_ = message_shm_->String();
 }
+
 }}}  // namespace triton::backend::python

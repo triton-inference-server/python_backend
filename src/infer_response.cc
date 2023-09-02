@@ -243,8 +243,8 @@ InferResponse::Send(
   });
 
   if (HasError()) {
-    *response_error = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
+    *response_error =
+        TRITONSERVER_ErrorNew(Error()->Code(), Error()->Message().c_str());
     return;
   }
 
