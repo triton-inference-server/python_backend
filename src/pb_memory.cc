@@ -32,7 +32,8 @@ std::unique_ptr<PbMemory>
 PbMemory::Create(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-    uint64_t byte_size, char* data, bool copy_gpu, bool write_back_data)
+    uint64_t byte_size, char* data, bool copy_gpu, bool write_back_data,
+    bool copy_data)
 {
   size_t requested_byte_size = sizeof(MemoryShm);
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
@@ -49,7 +50,7 @@ PbMemory::Create(
   void* backend_memory;
   PbMemory::FillShmData(
       shm_pool, &backend_memory, memory_type, memory_type_id, byte_size, data,
-      memory_shm.data_.get(), memory_shm.handle_, copy_gpu, write_back_data);
+      memory_shm.data_.get(), memory_shm.handle_, copy_gpu, copy_data);
 
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     data = memory_shm.data_.get() + sizeof(MemoryShm);
@@ -93,7 +94,8 @@ PbMemory::Create(
 
 
 void
-PbMemory::WriteBackOutput(std::unique_ptr<SharedMemoryManager>& shm_pool)
+PbMemory::WriteBackOutput(
+    std::unique_ptr<SharedMemoryManager>& shm_pool, cudaStream_t cuda_stream)
 {
   if (original_buffer_) {
     data_ptr_ =
@@ -101,21 +103,13 @@ PbMemory::WriteBackOutput(std::unique_ptr<SharedMemoryManager>& shm_pool)
          memory_shm_ptr_->cuda_pool_offset);
 
     cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
-    cudaError_t err;
-    err = cudaMemcpy(
-        original_buffer_, data_ptr_, memory_shm_ptr_->byte_size, kind);
+    cudaError_t err = cudaMemcpyAsync(
+        original_buffer_, data_ptr_, memory_shm_ptr_->byte_size, kind,
+        cuda_stream);
     if (err != cudaSuccess) {
       throw PythonBackendException(
           std::string(
               "failed to copy data: " + std::string(cudaGetErrorString(err)))
-              .c_str());
-    }
-    err = cudaStreamSynchronize(0);
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          std::string(
-              "failed to synchronize the default CUDA stream. error: " +
-              std::string(cudaGetErrorString(err)))
               .c_str());
     }
   }
@@ -230,8 +224,7 @@ PbMemory::FillShmData(
     std::unique_ptr<SharedMemoryManager>& shm_pool, void** backend_memory,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
     uint64_t byte_size, char* data, char* data_shm,
-    bi::managed_external_buffer::handle_t handle, bool copy_gpu,
-    bool write_back_data)
+    bi::managed_external_buffer::handle_t handle, bool copy_gpu, bool copy_data)
 {
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
@@ -270,9 +263,10 @@ PbMemory::FillShmData(
               TRITONSERVER_LOG_WARN,
               (std::string(
                    "Failed to allocate memory from CUDA memory pool: ") +
-               TRITONSERVER_ErrorMessage(error))
+               TRITONSERVER_ErrorMessage(error) +
+               ". Switching back to CUDA IPC approach.")
                   .c_str());
-        } else {
+        } else if (copy_data) {
           // Copy the data to the new buffer in the CUDA pool.
           cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
           cudaError_t err;
@@ -294,11 +288,11 @@ PbMemory::FillShmData(
                     std::string(cudaGetErrorString(err)))
                     .c_str());
           }
-          use_cuda_shared_pool = true;
-          memory_shm_ptr->cuda_pool_offset =
-              (reinterpret_cast<BackendMemory*>(*backend_memory))->MemoryPtr() -
-              reinterpret_cast<char*>(shm_pool->CUDAPoolAddress());
         }
+        use_cuda_shared_pool = true;
+        memory_shm_ptr->cuda_pool_offset =
+            (reinterpret_cast<BackendMemory*>(*backend_memory))->MemoryPtr() -
+            reinterpret_cast<char*>(shm_pool->CUDAPoolAddress());
       }
 #endif  // Not TRITON_PB_STUB
     }

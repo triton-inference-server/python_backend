@@ -1565,6 +1565,7 @@ ModelInstanceState::ProcessRequests(
         requests, 0);
 
     bool cuda_copy = false;
+    bool write_back = false;
 
     uint32_t response_index = 0;
     for (auto& gpu_output_buffer : gpu_output_buffers) {
@@ -1587,12 +1588,13 @@ ModelInstanceState::ProcessRequests(
             pb_memory->UseCudaSharedPool()) {
           // Copy the data from the CUDA shared memory pool to the output buffer
           // provided by Triton
-          pb_memory->WriteBackOutput(Stub()->ShmPool());
+          pb_memory->WriteBackOutput(Stub()->ShmPool(), stream_);
+          write_back = true;
         }
       }
       response_index++;
 #ifdef TRITON_ENABLE_GPU
-      if (cuda_copy) {
+      if (cuda_copy || write_back) {
         cudaStreamSynchronize(stream_);
       }
 #endif  // TRITON_ENABLE_GPU

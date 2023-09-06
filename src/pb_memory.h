@@ -63,7 +63,7 @@ class PbMemory {
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, bool copy_gpu = true,
-      bool write_back_data = false);
+      bool write_back_data = false, bool copy_data = true);
 
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
@@ -77,8 +77,10 @@ class PbMemory {
       std::unique_ptr<BackendMemory>&& backend_memory, bool copy_gpu = true);
 
   // Copy the data from the CUDA shared memory pool to the output buffer
-  // provided by Triton
-  void WriteBackOutput(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  // provided by Triton. cudaMemcpyAsync is used, so the caller needs to
+  // synchronize the stream.
+  void WriteBackOutput(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, cudaStream_t cuda_stream);
 #endif
 
 #ifdef TRITON_ENABLE_GPU
@@ -176,7 +178,7 @@ class PbMemory {
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true,
-      bool write_back_data = false);
+      bool copy_data = true);
 
   PbMemory(
       AllocatedSharedMemory<char>& memory_shm, char* data,

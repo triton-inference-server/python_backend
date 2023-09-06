@@ -299,7 +299,8 @@ InferResponse::Send(
             output_buffer = PbMemory::Create(
                 shm_pool, actual_memory_type, actual_memory_type_id,
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
-                false /* copy_gpu */, true /* write_back_data */));
+                false /* copy_gpu */, true /* write_back_data */,
+                false /* copy_data */));
         output_buffer->SetCudaIpcHandle(cuda_ipc_mem_handle_p);
       } else {
         SET_ERROR_AND_RETURN_IF_EXCEPTION(
@@ -307,7 +308,8 @@ InferResponse::Send(
             output_buffer = PbMemory::Create(
                 shm_pool, actual_memory_type, actual_memory_type_id,
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
-                true /* copy_gpu */, true /* write_back_data */));
+                true /* copy_gpu */, true /* write_back_data */,
+                false /* copy_data */));
       }
       gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
