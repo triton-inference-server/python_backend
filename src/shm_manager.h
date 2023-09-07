@@ -171,6 +171,12 @@ class SharedMemoryManager {
 
   void* TritonMemoryManager() { return triton_memory_manager_; }
 
+  bool UseCudaSharedPool()
+  {
+    return (cuda_pool_address_ != nullptr) &&
+           (triton_memory_manager_ != nullptr);
+  }
+
   ~SharedMemoryManager() noexcept(false);
 
  private:

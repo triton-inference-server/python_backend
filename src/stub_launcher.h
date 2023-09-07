@@ -153,8 +153,7 @@ class StubLauncher {
 
 #ifdef TRITON_ENABLE_GPU
   // Share CUDA memory pool with stub process
-  TRITONSERVER_Error* ShareCUDAMemoryPool(
-      TRITONBACKEND_MemoryManager* triton_mem_manager);
+  void ShareCUDAMemoryPool(TRITONBACKEND_MemoryManager* triton_mem_manager);
 #endif  // TRITON_ENABLE_GPU
 
  private:

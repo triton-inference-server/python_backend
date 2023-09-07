@@ -1,4 +1,4 @@
-// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 
 #include "message_queue.h"
 #include "triton/backend/backend_common.h"
+#include "triton/backend/backend_memory.h"
 #include "triton/core/tritonserver.h"
 
 #ifdef TRITON_ENABLE_GPU
@@ -57,6 +58,17 @@ class GPUMemoryRecord : public MemoryRecord {
 
  private:
   void* ptr_;
+  std::function<void(void*)> release_callback_;
+};
+
+class BackendMemoryRecord : public MemoryRecord {
+ public:
+  BackendMemoryRecord(std::unique_ptr<BackendMemory> backend_memory);
+  const std::function<void(void*)>& ReleaseCallback() override;
+  void* MemoryId() override;
+
+ private:
+  std::unique_ptr<BackendMemory> backend_memory_;
   std::function<void(void*)> release_callback_;
 };
 #endif

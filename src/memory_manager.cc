@@ -1,4 +1,4 @@
-// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -56,6 +56,27 @@ GPUMemoryRecord::MemoryId()
 
 const std::function<void(void*)>&
 GPUMemoryRecord::ReleaseCallback()
+{
+  return release_callback_;
+}
+
+BackendMemoryRecord::BackendMemoryRecord(
+    std::unique_ptr<BackendMemory> backend_memory)
+    : backend_memory_(std::move(backend_memory))
+{
+  release_callback_ = [](void* ptr) {
+    // Do nothing. The backend_memory_ will be destroyed in the destructor.
+  };
+}
+
+void*
+BackendMemoryRecord::MemoryId()
+{
+  return reinterpret_cast<void*>(backend_memory_->MemoryPtr());
+}
+
+const std::function<void(void*)>&
+BackendMemoryRecord::ReleaseCallback()
 {
   return release_callback_;
 }

@@ -138,6 +138,13 @@ class PbMemory {
 
   ~PbMemory();
 
+#ifndef TRITON_PB_STUB
+  std::unique_ptr<BackendMemory> GetBackendMemory()
+  {
+    return std::move(backend_memory_);
+  };
+#endif
+
  private:
   AllocatedSharedMemory<char> memory_shm_;
   MemoryShm* memory_shm_ptr_;

@@ -397,6 +397,7 @@ Stub::RunCommand()
       AllocatedSharedMemory<InitializeResponseShm> response =
           shm_pool_->Construct<InitializeResponseShm>();
 
+      ScopedDefer finalize([this] { stub_message_queue_->Pop(); });
       ScopedDefer _([this, &response_msg] { SendIPCMessage(response_msg); });
 
       response.data_->response_has_error = false;
@@ -409,12 +410,10 @@ Stub::RunCommand()
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
         error_string = pb_exception.what();
+        shm_pool_->SetCUDAPoolAddress(nullptr);
       }
 
       if (has_exception) {
-        // Do not delete the region. The region will be deleted by the parent
-        // process.
-        shm_pool_->SetDeleteRegion(false);
         LOG_INFO
             << "Failed to initialize CUDA shared memory pool in Python stub: "
             << error_string;
@@ -427,8 +426,6 @@ Stub::RunCommand()
           response.data_->response_is_error_set = true;
           response.data_->response_error = error_string_shm->ShmHandle();
         }
-
-        return true;  // Terminate the stub process.
       }
     } break;
     default:
@@ -1360,8 +1357,6 @@ Stub::GetCUDAMemoryPoolAddress(bi::managed_external_buffer::handle_t handle)
   cuda_api.OpenCudaHandle(
       device_id_, &cuda_handle_shm_ptr->cuda_handle, &cuda_pool_address);
   shm_pool_->SetCUDAPoolAddress(cuda_pool_address);
-#else
-  return nullptr;
 #endif
 }
 

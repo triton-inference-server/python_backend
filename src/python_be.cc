@@ -411,7 +411,17 @@ ModelInstanceState::LaunchStubProcess()
   StartMonitor();
   RETURN_IF_ERROR(Stub()->Launch());
 #ifdef TRITON_ENABLE_GPU
-  Stub()->ShareCUDAMemoryPool(Model()->TritonMemoryManager());
+  try {
+    Stub()->ShareCUDAMemoryPool(Model()->TritonMemoryManager());
+  }
+  catch (const PythonBackendException& ex) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_WARN,
+        (std::string("Failed to utlize CUDA memory pool: ") + ex.what() +
+         ". Switching back to use CUDA IPC.")
+            .c_str());
+  }
+
 #endif  // TRITON_ENABLE_GPU
 
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
@@ -571,10 +581,34 @@ ModelInstanceState::GetInputTensor(
             Stub()->ShmPool(), true /* copy_gpu */));
       }
     } else {
+      // Try to use the cuda shared memory pool first.
       void* dev_ptr;
-      RETURN_IF_CUDA_ERROR(
-          cudaMalloc(&dev_ptr, input_byte_size), TRITONSERVER_ERROR_INTERNAL,
-          std::string("Failed to allocate CUDA memory"));
+      BackendMemory* backend_memory;
+      std::unique_ptr<BackendMemory> lbackend_memory;
+      bool use_cuda_shared_pool = false;
+      try {
+        THROW_IF_TRITON_ERROR(BackendMemory::Create(
+            reinterpret_cast<TRITONBACKEND_MemoryManager*>(
+                Stub()->ShmPool()->TritonMemoryManager()),
+            BackendMemory::AllocationType::GPU_POOL, src_memory_type_id,
+            input_byte_size, &backend_memory));
+
+        dev_ptr = backend_memory->MemoryPtr();
+        lbackend_memory.reset(backend_memory);
+        use_cuda_shared_pool = true;
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_WARN,
+            (std::string("Failed to allocate memory from CUDA memory pool: ") +
+             pb_exception.what() +
+             ". Using cudaMalloc to allocate memory for input tensor.")
+                .c_str());
+
+        RETURN_IF_CUDA_ERROR(
+            cudaMalloc(&dev_ptr, input_byte_size), TRITONSERVER_ERROR_INTERNAL,
+            std::string("Failed to allocate CUDA memory"));
+      }
 
       size_t byte_size = input_byte_size;
 
@@ -597,13 +631,24 @@ ModelInstanceState::GetInputTensor(
           const_cast<void*>(dev_ptr), input_byte_size,
           nullptr /* DLManagedTensor */);
 
+      if (use_cuda_shared_pool) {
+        input_tensor->SetMemory(std::move(
+            PbMemory::Create(Stub()->ShmPool(), std::move(lbackend_memory))));
+      }
+
       RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
           Stub()->ShmPool(), true /* copy_gpu */));
 
-      std::unique_ptr<MemoryRecord> gpu_memory_record =
-          std::make_unique<GPUMemoryRecord>(input_tensor->Memory()->DataPtr());
+      std::unique_ptr<MemoryRecord> memory_record;
+      if (use_cuda_shared_pool) {
+        memory_record = std::make_unique<BackendMemoryRecord>(
+            input_tensor->Memory()->GetBackendMemory());
+      } else {
+        memory_record = std::make_unique<GPUMemoryRecord>(
+            input_tensor->Memory()->DataPtr());
+      }
       uint64_t memory_release_id =
-          Stub()->GetMemoryManager()->AddRecord(std::move(gpu_memory_record));
+          Stub()->GetMemoryManager()->AddRecord(std::move(memory_record));
       input_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
     }
 #else
@@ -1646,14 +1691,22 @@ ModelInstanceState::PrepareResponseHandle(
 {
   (*infer_response)->SaveToSharedMemory(Stub()->ShmPool());
   for (auto& output_tensor : (*infer_response)->OutputTensors()) {
-    // For GPU tensors we need to store the memory release id in
-    // memory manager.
     if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
-      std::unique_ptr<MemoryRecord> gpu_memory_record =
-          std::make_unique<GPUMemoryRecord>(output_tensor->Memory()->DataPtr());
+      std::unique_ptr<MemoryRecord> memory_record;
+      if (output_tensor->Memory()->UseCudaSharedPool()) {
+        // Need to transfer the ownership of the BackendMemory to the
+        // MemoryManager so that the lifetime of the BackendMemory is managed.
+        memory_record = std::make_unique<BackendMemoryRecord>(
+            output_tensor->Memory()->GetBackendMemory());
+      } else {
+        // For GPU tensors we need to store the memory release id in
+        // memory manager.
+        memory_record = std::make_unique<GPUMemoryRecord>(
+            output_tensor->Memory()->DataPtr());
+      }
       uint64_t memory_release_id =
-          Stub()->GetMemoryManager()->AddRecord(std::move(gpu_memory_record));
+          Stub()->GetMemoryManager()->AddRecord(std::move(memory_record));
       output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
 #endif
     }
@@ -2277,12 +2330,17 @@ TRITONBACKEND_ModelInstanceExecute(
           "Failed to restart the stub process: failed to launch "
           "the stub process.");
 #ifdef TRITON_ENABLE_GPU
-      err = instance_state->Stub()->ShareCUDAMemoryPool(
-          instance_state->Model()->TritonMemoryManager());
-      LOG_IF_ERROR(
-          err,
-          "Failed to restart the stub process: failed to share "
-          "CUDA memory pool.");
+      try {
+        instance_state->Stub()->ShareCUDAMemoryPool(
+            instance_state->Model()->TritonMemoryManager());
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_ERROR,
+            (std::string("Failed to restart the stub process: ") +
+             pb_exception.what())
+                .c_str());
+      }
 #endif  // TRITON_ENABLE_GPU
     }
   } else {

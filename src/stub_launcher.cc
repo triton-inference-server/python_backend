@@ -602,89 +602,93 @@ StubLauncher::ReceiveMessageFromStub(
 }
 
 #ifdef TRITON_ENABLE_GPU
-TRITONSERVER_Error*
+void
 StubLauncher::ShareCUDAMemoryPool(
     TRITONBACKEND_MemoryManager* triton_mem_manager)
 {
-  // Create a dummy BackendMemory object to get the start address of the CUDA
-  // memory pool.
-  BackendMemory* backend_memory;
-  std::unique_ptr<BackendMemory> lbackend_memory;
+  ScopedDefer _([this] {
+    // Push a dummy message to the message queue so that the stub
+    // process is notified that it can release the object stored in
+    // shared memory.
+    stub_message_queue_->Push(DUMMY_MESSAGE);
+  });
 
-  TRITONSERVER_Error* error = BackendMemory::Create(
-      triton_mem_manager, BackendMemory::AllocationType::GPU_POOL, device_id_,
-      1 /* byte size*/, &backend_memory);
-  if (error != nullptr) {
-    LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(error));
-  }
-  lbackend_memory.reset(backend_memory);
+  try {
+    // Create a dummy BackendMemory object to get the start address of the CUDA
+    // memory pool.
+    BackendMemory* backend_memory;
+    std::unique_ptr<BackendMemory> lbackend_memory;
 
-  CUDAHandler& cuda_api = CUDAHandler::getInstance();
-  CUdeviceptr cuda_pool_address = 0;
-  cuda_api.PointerGetAttribute(
-      &cuda_pool_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
-      reinterpret_cast<CUdeviceptr>(lbackend_memory->MemoryPtr()));
+    THROW_IF_TRITON_ERROR(BackendMemory::Create(
+        triton_mem_manager, BackendMemory::AllocationType::GPU_POOL, device_id_,
+        1 /* byte size*/, &backend_memory));
+    lbackend_memory.reset(backend_memory);
 
-  shm_pool_->SetCUDAPoolAddress(reinterpret_cast<void*>(cuda_pool_address));
-  shm_pool_->SetTritonMemoryManager(
-      reinterpret_cast<void*>(triton_mem_manager));
+    CUDAHandler& cuda_api = CUDAHandler::getInstance();
+    CUdeviceptr cuda_pool_address = 0;
+    cuda_api.PointerGetAttribute(
+        &cuda_pool_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+        reinterpret_cast<CUdeviceptr>(lbackend_memory->MemoryPtr()));
 
-  // Get the memory handle from the CUDA memory pool.
-  AllocatedSharedMemory<CUDAMemPoolMessage> memory_data_shm =
-      shm_pool_->Construct<CUDAMemPoolMessage>();
-  CUDAMemPoolMessage* memory_data_ptr = memory_data_shm.data_.get();
-  {
-    ScopedSetDevice scoped_set_device(device_id_);
-    THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
-        reinterpret_cast<cudaIpcMemHandle_t*>(&memory_data_ptr->cuda_handle),
-        reinterpret_cast<char*>(shm_pool_->CUDAPoolAddress())));
-  }
+    shm_pool_->SetCUDAPoolAddress(reinterpret_cast<void*>(cuda_pool_address));
+    shm_pool_->SetTritonMemoryManager(
+        reinterpret_cast<void*>(triton_mem_manager));
 
-  // Share the CUDA memory pool with the stub process.
-  std::unique_ptr<IPCMessage> cuda_memory_pool_message =
-      IPCMessage::Create(shm_pool_, false /* inline_response */);
-  cuda_memory_pool_message->Command() = PYTHONSTUB_CUDAPoolInitializeRequest;
-  cuda_memory_pool_message->Args() = memory_data_shm.handle_;
+    // Get the memory handle from the CUDA memory pool.
+    AllocatedSharedMemory<CUDAMemPoolMessage> cuda_pool_message =
+        shm_pool_->Construct<CUDAMemPoolMessage>();
+    CUDAMemPoolMessage* cuda_pool_message_ptr = cuda_pool_message.data_.get();
+    {
+      ScopedSetDevice scoped_set_device(device_id_);
+      THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
+          reinterpret_cast<cudaIpcMemHandle_t*>(
+              &cuda_pool_message_ptr->cuda_handle),
+          reinterpret_cast<char*>(shm_pool_->CUDAPoolAddress())));
+    }
 
-  stub_message_queue_->Push(cuda_memory_pool_message->ShmHandle());
+    // Share the CUDA memory pool with the stub process.
+    std::unique_ptr<IPCMessage> cuda_memory_pool_message =
+        IPCMessage::Create(shm_pool_, false /* inline_response */);
+    cuda_memory_pool_message->Command() = PYTHONSTUB_CUDAPoolInitializeRequest;
+    cuda_memory_pool_message->Args() = cuda_pool_message.handle_;
 
-  bi::managed_external_buffer::handle_t message;
-  RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+    stub_message_queue_->Push(cuda_memory_pool_message->ShmHandle());
 
-  std::unique_ptr<IPCMessage> response_message =
-      IPCMessage::LoadFromSharedMemory(shm_pool_, message);
+    bi::managed_external_buffer::handle_t message;
+    THROW_IF_TRITON_ERROR(ReceiveMessageFromStub(message));
 
-  if (response_message->Command() != PYTHONSTUB_CUDAPoolInitializeResponse) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        (std::string(
-             "Received unexpected response from Python backend stub: ") +
-         model_instance_name_)
-            .c_str());
-  }
+    std::unique_ptr<IPCMessage> response_message =
+        IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
-  auto response =
-      std::move(
-          (shm_pool_->Load<InitializeResponseShm>(response_message->Args())))
-          .data_;
+    if (response_message->Command() != PYTHONSTUB_CUDAPoolInitializeResponse) {
+      throw PythonBackendException(
+          "Received unexpected response from Python backend stub: " +
+          model_name_);
+    }
 
-  if (response->response_has_error) {
-    if (response->response_is_error_set) {
-      std::unique_ptr<PbString> error_message =
-          PbString::LoadFromSharedMemory(shm_pool_, response->response_error);
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, error_message->String().c_str());
-    } else {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Error when sharing CUDA memory pool with stub process "
-                       "on model ") +
-           model_name_)
-              .c_str());
+    auto response =
+        std::move(
+            (shm_pool_->Load<InitializeResponseShm>(response_message->Args())))
+            .data_;
+
+    if (response->response_has_error) {
+      if (response->response_is_error_set) {
+        std::unique_ptr<PbString> error_message =
+            PbString::LoadFromSharedMemory(shm_pool_, response->response_error);
+        throw PythonBackendException(error_message->String());
+      } else {
+        throw PythonBackendException(
+            "Failed to share CUDA memory pool with stub process: " +
+            model_name_);
+      }
     }
   }
-
-  return nullptr;
+  catch (const PythonBackendException& pb_exception) {
+    shm_pool_->SetCUDAPoolAddress(nullptr);
+    throw PythonBackendException(
+        "Failed to share CUDA memory pool with stub process: " +
+        std::string(pb_exception.what()));
+  }
 }
 #endif  // TRITON_ENABLE_GPU
 }}};    // namespace triton::backend::python
