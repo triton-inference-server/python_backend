@@ -241,11 +241,11 @@ struct RequestBatch {
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
 };
 
+#ifdef TRITON_ENABLE_GPU
 struct CUDAMemPoolMessage {
   cudaIpcMemHandle_t cuda_handle;
 };
 
-#ifdef TRITON_ENABLE_GPU
 class CUDAHandler {
  public:
   static CUDAHandler& getInstance()
