@@ -96,10 +96,11 @@ PbMemory::Create(
 }
 
 void
-PbMemory::WriteBackOutput(
+PbMemory::WriteBackGPUOutput(
     std::unique_ptr<SharedMemoryManager>& shm_pool, cudaStream_t cuda_stream)
 {
   if (original_buffer_) {
+#ifdef TRITON_ENABLE_GPU
     data_ptr_ =
         (reinterpret_cast<char*>(shm_pool->CUDAPoolAddress()) +
          memory_shm_ptr_->cuda_pool_offset);
@@ -114,6 +115,7 @@ PbMemory::WriteBackOutput(
               "failed to copy data: " + std::string(cudaGetErrorString(err)))
               .c_str());
     }
+#endif
   }
 }
 #endif

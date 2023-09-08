@@ -79,7 +79,7 @@ class PbMemory {
   // Copy the data from the CUDA shared memory pool to the output buffer
   // provided by Triton. cudaMemcpyAsync is used, so the caller needs to
   // synchronize the stream.
-  void WriteBackOutput(
+  void WriteBackGPUOutput(
       std::unique_ptr<SharedMemoryManager>& shm_pool, cudaStream_t cuda_stream);
 #endif
 
