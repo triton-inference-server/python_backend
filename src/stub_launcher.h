@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include <unistd.h>
-
 #include <atomic>
 #include <boost/asio.hpp>
 #include <boost/asio/post.hpp>
@@ -152,9 +150,13 @@ class StubLauncher {
       bi::managed_external_buffer::handle_t& message);
 
  private:
+#ifdef _WIN32
+  PROCESS_INFORMATION parent_pid_;
+  PROCESS_INFORMATION stub_pid_;
+#else
   pid_t parent_pid_;
   pid_t stub_pid_;
-
+#endif
   bool is_initialized_;
   bool is_decoupled_;
   bool is_healthy_;

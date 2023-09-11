@@ -26,12 +26,16 @@
 
 #pragma once
 
-#include <pthread.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/vfs.h>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <array>
 #include <atomic>

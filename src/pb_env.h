@@ -30,6 +30,10 @@
 #include <mutex>
 #include <string>
 
+#ifdef WIN32
+#  undef  PATH_MAX
+#  define PATH_MAX MAX_PATH
+#endif
 namespace triton { namespace backend { namespace python {
 
 void ExtractTarFile(std::string& archive_path, std::string& dst_path);
