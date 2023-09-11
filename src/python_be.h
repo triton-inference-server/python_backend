@@ -26,17 +26,6 @@
 
 #pragma once
 
-#ifdef _WIN32
-#define NOMINMAX
-#include <windows.h>
-#else
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-
-#include <sys/stat.h>
-#include <sys/types.h>
-
 #include <array>
 #include <atomic>
 #include <boost/asio.hpp>
@@ -59,6 +48,8 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -87,6 +78,14 @@
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #define LOG_IF_EXCEPTION(X)                                     \
   do {                                                          \

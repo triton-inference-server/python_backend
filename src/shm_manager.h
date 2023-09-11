@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include <sys/wait.h>
-
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/detail/atomic.hpp>
 #include <boost/interprocess/managed_external_buffer.hpp>
