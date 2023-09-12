@@ -415,5 +415,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process a model control request
   void ProcessModelControlRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Attempt to share CUDA memory pool with the stub process
+  void ShareCUDAMemoryPool();
 };
 }}}  // namespace triton::backend::python

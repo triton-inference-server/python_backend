@@ -201,5 +201,9 @@ class StubLauncher {
       ipc_control_;
   bi::managed_external_buffer::handle_t ipc_control_handle_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
+#ifdef TRITON_ENABLE_GPU
+  std::mutex cuda_shm_pool_mutex_;
+  bool tried_sharing_cuda_pool_;
+#endif  // TRITON_ENABLE_GPU
 };
 }}}  // namespace triton::backend::python

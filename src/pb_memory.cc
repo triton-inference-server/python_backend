@@ -32,8 +32,7 @@ std::unique_ptr<PbMemory>
 PbMemory::Create(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-    uint64_t byte_size, char* data, bool copy_gpu, bool write_back_data,
-    bool copy_data)
+    uint64_t byte_size, char* data, bool copy_gpu, bool copy_data)
 {
   size_t requested_byte_size = sizeof(MemoryShm);
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
@@ -49,8 +48,9 @@ PbMemory::Create(
 
   void* backend_memory;
   PbMemory::FillShmData(
-      shm_pool, &backend_memory, memory_type, memory_type_id, byte_size, data,
-      memory_shm.data_.get(), memory_shm.handle_, copy_gpu, copy_data);
+      shm_pool->GetCUDAMemoryPoolManager(), &backend_memory, memory_type,
+      memory_type_id, byte_size, data, memory_shm.data_.get(),
+      memory_shm.handle_, copy_gpu, copy_data);
 
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     data = memory_shm.data_.get() + sizeof(MemoryShm);
@@ -65,10 +65,13 @@ PbMemory::Create(
     if (pb_memory->memory_shm_ptr_->use_cuda_shared_pool) {
       pb_memory->backend_memory_.reset(
           reinterpret_cast<BackendMemory*>(backend_memory));
-      if (write_back_data) {
-        // Store the original buffer so that we can write back to it later.
-        pb_memory->original_buffer_ = data;
-      }
+      // Store the original buffer so that we can write back to it later if
+      // needed.
+      pb_memory->original_buffer_ = data;
+      pb_memory->data_ptr_ =
+          (reinterpret_cast<char*>(
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
+           pb_memory->memory_shm_ptr_->cuda_pool_offset);
     }
 #endif
     pb_memory->memory_shm_ptr_->gpu_pointer_offset =
@@ -87,36 +90,12 @@ PbMemory::Create(
   std::unique_ptr<PbMemory> pb_memory = PbMemory::Create(
       shm_pool, backend_memory->MemoryType(), backend_memory->MemoryTypeId(),
       backend_memory->ByteSize(), backend_memory->MemoryPtr(), copy_gpu,
-      false /* write_back_data */, false /* copy_data*/);
+      false /* copy_data*/);
   if (!pb_memory->backend_memory_) {
     pb_memory->backend_memory_ = std::move(backend_memory);
   }
 
   return pb_memory;
-}
-
-void
-PbMemory::WriteBackGPUOutput(
-    std::unique_ptr<SharedMemoryManager>& shm_pool, cudaStream_t cuda_stream)
-{
-  if (original_buffer_) {
-#ifdef TRITON_ENABLE_GPU
-    data_ptr_ =
-        (reinterpret_cast<char*>(shm_pool->CUDAPoolAddress()) +
-         memory_shm_ptr_->cuda_pool_offset);
-
-    cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
-    cudaError_t err = cudaMemcpyAsync(
-        original_buffer_, data_ptr_, memory_shm_ptr_->byte_size, kind,
-        cuda_stream);
-    if (err != cudaSuccess) {
-      throw PythonBackendException(
-          std::string(
-              "failed to copy data: " + std::string(cudaGetErrorString(err)))
-              .c_str());
-    }
-#endif
-  }
 }
 #endif
 
@@ -129,8 +108,8 @@ PbMemory::Create(
 {
   void* backend_memory;
   PbMemory::FillShmData(
-      shm_pool, &backend_memory, memory_type, memory_type_id, byte_size, data,
-      data_shm, handle, copy_gpu);
+      shm_pool->GetCUDAMemoryPoolManager(), &backend_memory, memory_type,
+      memory_type_id, byte_size, data, data_shm, handle, copy_gpu);
 
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     data = data_shm + sizeof(MemoryShm);
@@ -225,7 +204,7 @@ PbMemory::CopyBuffer(
 
 void
 PbMemory::FillShmData(
-    std::unique_ptr<SharedMemoryManager>& shm_pool, void** backend_memory,
+    std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, void** backend_memory,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
     uint64_t byte_size, char* data, char* data_shm,
     bi::managed_external_buffer::handle_t handle, bool copy_gpu, bool copy_data)
@@ -245,7 +224,7 @@ PbMemory::FillShmData(
             reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm), data));
       }
 #ifndef TRITON_PB_STUB
-      if (shm_pool->UseCudaSharedPool()) {
+      if (cuda_pool->UseCudaSharedPool()) {
         // Check if the data is already in the pool by checking the base
         // address.
         CUDAHandler& cuda_api = CUDAHandler::getInstance();
@@ -253,16 +232,16 @@ PbMemory::FillShmData(
         cuda_api.PointerGetAttribute(
             &cuda_pool_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
             reinterpret_cast<CUdeviceptr>(data));
-        if (shm_pool->CUDAPoolAddress() ==
+        if (cuda_pool->CUDAPoolAddress() ==
             reinterpret_cast<void*>(cuda_pool_address)) {
           use_cuda_shared_pool = true;
           memory_shm_ptr->cuda_pool_offset =
-              data - reinterpret_cast<char*>(shm_pool->CUDAPoolAddress());
+              data - reinterpret_cast<char*>(cuda_pool->CUDAPoolAddress());
         } else {
           try {
             THROW_IF_TRITON_ERROR(BackendMemory::Create(
                 reinterpret_cast<TRITONBACKEND_MemoryManager*>(
-                    shm_pool->TritonMemoryManager()),
+                    cuda_pool->TritonMemoryManager()),
                 BackendMemory::AllocationType::GPU_POOL, memory_type_id,
                 byte_size, reinterpret_cast<BackendMemory**>(backend_memory)));
 
@@ -295,7 +274,7 @@ PbMemory::FillShmData(
             memory_shm_ptr->cuda_pool_offset =
                 (reinterpret_cast<BackendMemory*>(*backend_memory))
                     ->MemoryPtr() -
-                reinterpret_cast<char*>(shm_pool->CUDAPoolAddress());
+                reinterpret_cast<char*>(cuda_pool->CUDAPoolAddress());
           }
           catch (const PythonBackendException& pb_exception) {
             LOG_MESSAGE(
@@ -341,7 +320,8 @@ PbMemory::LoadFromSharedMemory(
       // When CUDA shared memory pool is used, the stub will retrieve the
       // data pointer using the offset.
       data_ptr =
-          (reinterpret_cast<char*>(shm_pool->CUDAPoolAddress()) +
+          (reinterpret_cast<char*>(
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
            memory_shm_ptr->cuda_pool_offset);
 #endif  // TRITON_PB_STUB
     } else {
@@ -391,7 +371,8 @@ PbMemory::LoadFromSharedMemory(
         // When CUDA shared memory pool is used, the stub will retrieve the
         // data pointer using the offset.
         data_ptr =
-            (reinterpret_cast<char*>(shm_pool->CUDAPoolAddress()) +
+            (reinterpret_cast<char*>(
+                 shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
              memory_shm_ptr->cuda_pool_offset);
 #endif  // TRITON_PB_STUB
       } else {

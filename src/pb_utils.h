@@ -242,8 +242,11 @@ struct RequestBatch {
 };
 
 #ifdef TRITON_ENABLE_GPU
-struct CUDAMemPoolMessage {
+struct CUDAMemPoolMessage : SendMessageBase {
   cudaIpcMemHandle_t cuda_handle;
+  bi::managed_external_buffer::handle_t error;
+  bool has_error;
+  bool is_error_set;
 };
 
 class CUDAHandler {
