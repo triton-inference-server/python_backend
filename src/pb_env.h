@@ -32,7 +32,7 @@
 
 #ifdef WIN32
 #include <windows.h>
-#undef  PATH_MAX
+#undef PATH_MAX
 #define PATH_MAX MAX_PATH
 #endif
 namespace triton { namespace backend { namespace python {

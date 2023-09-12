@@ -93,6 +93,9 @@ FetchContent_Declare(
   GIT_TAG "v0.8"
   GIT_SHALLOW ON
 )
+# Option must be set off so WIN32 build does not break
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+set(BUILD_MOCK OFF)
 FetchContent_MakeAvailable(dlpack)
 
 #

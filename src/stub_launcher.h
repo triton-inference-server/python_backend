@@ -149,8 +149,15 @@ class StubLauncher {
   TRITONSERVER_Error* ReceiveMessageFromStub(
       bi::managed_external_buffer::handle_t& message);
 
+  // Wait for stub process
+  void WaitForStubProcess();
+
+  // Initialize pid / process_information handlers
+  void InitializeProcessHandlers();
+
  private:
 #ifdef _WIN32
+  STARTUPINFO startup_info_;
   PROCESS_INFORMATION parent_pid_;
   PROCESS_INFORMATION stub_pid_;
 #else

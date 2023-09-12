@@ -31,21 +31,21 @@
 namespace triton { namespace backend { namespace python {
 
 StubLauncher::StubLauncher(const std::string stub_process_kind)
-    : parent_pid_(0), stub_pid_(0), is_initialized_(false),
-      stub_process_kind_(stub_process_kind), model_instance_name_(""),
-      device_id_(0), kind_("")
+    : is_initialized_(false), stub_process_kind_(stub_process_kind),
+      model_instance_name_(""), device_id_(0), kind_("")
 
 {
+  InitializeProcessHandlers();
 }
 
 StubLauncher::StubLauncher(
     const std::string stub_process_kind, const std::string model_instance_name,
     const int32_t device_id, const std::string kind)
-    : parent_pid_(0), stub_pid_(0), is_initialized_(false),
-      stub_process_kind_(stub_process_kind),
+    : is_initialized_(false), stub_process_kind_(stub_process_kind),
       model_instance_name_(model_instance_name), device_id_(device_id),
       kind_(kind)
 {
+  InitializeProcessHandlers();
 }
 
 TRITONSERVER_Error*
@@ -306,11 +306,10 @@ StubLauncher::Launch()
 
       // If the model is not initialized, wait for the stub process to exit.
       if (!is_initialized_) {
-        int status;
         stub_message_queue_.reset();
         parent_message_queue_.reset();
         memory_manager_.reset();
-        waitpid(stub_pid_, &status, 0);
+        WaitForStubProcess();
       }
     });
 
@@ -334,10 +333,7 @@ StubLauncher::Launch()
       }
       catch (const PythonBackendException& ex) {
         // Need to kill the stub process first
-        kill(stub_pid_, SIGKILL);
-        int status;
-        waitpid(stub_pid_, &status, 0);
-        stub_pid_ = 0;
+        KillStubProcess();
         throw BackendModelException(
             TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, ex.what()));
       }
@@ -514,11 +510,11 @@ StubLauncher::TerminateStub()
       force_kill = true;
     }
 
-    int status;
     if (force_kill) {
-      kill(stub_pid_, SIGKILL);
+      KillStubProcess();
+    } else {
+      WaitForStubProcess();
     }
-    waitpid(stub_pid_, &status, 0);
   }
 
   // First destroy the IPCControl. This makes sure that IPCControl is
@@ -539,10 +535,16 @@ StubLauncher::ClearQueues()
 void
 StubLauncher::KillStubProcess()
 {
+#ifdef _WIN32
+  uint32_t exit_code;
+  TerminateProcess(stub_pid_.hProcess, exit_code);
+  WaitForStubProcess();
+  CloseHandle(stub_pid_.hProcess);
+#else
   kill(stub_pid_, SIGKILL);
-  int status;
-  waitpid(stub_pid_, &status, 0);
+  WaitForStubProcess();
   stub_pid_ = 0;
+#endif
 }
 
 TRITONSERVER_Error*
@@ -597,5 +599,29 @@ StubLauncher::ReceiveMessageFromStub(
   }
 
   return nullptr;  // success
+}
+
+void
+StubLauncher::InitializeProcessHandlers()
+{
+#ifdef _WIN32
+  ZeroMemory(&startup_info_, sizeof(startup_info_));
+  startup_info_.cb = sizeof(startup_info_);
+  ZeroMemory(&stub_pid_, sizeof(stub_pid_));
+#else
+  parent_pid_ = 0;
+  stub_pid_ = 0;
+#endif
+}
+
+void
+StubLauncher::WaitForStubProcess()
+{
+#ifdef _WIN32
+  WaitForSingleObject(stub_pid_.hProcess, INFINITE);
+#else
+  int status;
+  waitpid(stub_pid_, &status, 0);
+#endif
 }
 }}};  // namespace triton::backend::python

@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <array>
 #include <atomic>
 #include <boost/asio.hpp>
@@ -48,8 +51,6 @@
 #include <regex>
 #include <sstream>
 #include <string>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <thread>
 #include <unordered_map>
 #include <vector>
