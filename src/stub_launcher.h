@@ -159,13 +159,15 @@ class StubLauncher {
   // Initialize pid / process_information handlers
   void InitializeOSDependentMembers();
 
+#ifndef _WIN32
   // Get Python environment for non-WIN32
   TRITONSERVER_Error* GetPythonEnvironment(ModelState* model_state);
+#endif
 
  private:
 #ifdef _WIN32
   STARTUPINFO startup_info_;
-  PROCESS_INFORMATION parent_pid_;
+  int parent_pid_;
   PROCESS_INFORMATION stub_pid_;
 #else
   pid_t parent_pid_;

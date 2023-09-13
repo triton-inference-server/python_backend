@@ -28,7 +28,6 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 
 #include <atomic>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
@@ -54,6 +53,12 @@
 #include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/common/nvtx.h"
+
+#ifdef _WIN32
+#include <signal.h>  // SIGINT & SIGTERM
+#else
+#include <sys/wait.h>
+#endif
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
@@ -1699,6 +1704,22 @@ ModelContext::StubSetup(py::module& sys)
 
 extern "C" {
 
+#ifdef _WIN32
+bool
+KillParentProcess(int parent_id)
+{
+  HANDLE parent = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+  unsigned int exit_code;
+  return (TerminateProcess(parent, exit_code) == 0);
+}
+#else
+bool
+KillParentProcess(pid_t parent_id)
+{
+  return (kill(parent_pid, 0) == -1);
+}
+#endif
+
 int
 main(int argc, char** argv)
 {
@@ -1756,8 +1777,11 @@ main(int argc, char** argv)
 
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
+#ifdef _WIN32
+  int parent_pid = std::stoi(argv[5]);
+#else
   pid_t parent_pid = std::stoi(argv[5]);
-
+#endif
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread =
       std::thread([&parent_pid, &background_thread_running, &stub, &logger] {
@@ -1776,7 +1800,7 @@ main(int argc, char** argv)
 
           stub->UpdateHealth();
 
-          if (kill(parent_pid, 0) != 0) {
+          if (KillParentProcess(parent_pid)) {
             // When unhealthy, we should stop attempting to send
             // messages to the backend ASAP.
             if (stub->StubToParentServiceActive()) {

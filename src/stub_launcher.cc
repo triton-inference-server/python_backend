@@ -28,6 +28,10 @@
 
 #include "python_be.h"
 
+#ifdef _WIN32
+#include <process.h>  // getpid()
+#endif
+
 namespace triton { namespace backend { namespace python {
 
 StubLauncher::StubLauncher(const std::string stub_process_kind)
@@ -102,6 +106,7 @@ StubLauncher::Initialize(ModelState* model_state)
   return nullptr;
 }
 
+#ifndef _WIN32
 TRITONSERVER_Error*
 StubLauncher::GetPythonEnvironment(ModelState* model_state)
 {
@@ -128,6 +133,7 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
   }
   return nullptr;
 }
+#endif
 
 TRITONSERVER_Error*
 StubLauncher::Setup()
@@ -204,6 +210,7 @@ StubLauncher::Setup()
 
   return nullptr;
 }
+
 #ifdef _WIN32
 TRITONSERVER_Error*
 StubLauncher::Launch()
@@ -223,7 +230,10 @@ StubLauncher::Launch()
   std::string model_python_backend_stub =
       std::string(model_repository_path_) + "\\triton_python_backend_stub";
 
-  if (FileExists(model_python_backend_stub)) {
+  // Check if file exists
+  // TODO: Integrate win32 and pb_env
+  struct stat buffer;
+  if (stat(model_python_backend_stub.c_str(), &buffer)) {
     python_backend_stub = model_python_backend_stub;
   }
 
@@ -605,7 +615,7 @@ StubLauncher::UpdateHealth()
 
 // Sleep 1 second so that the child process has a chance to change the
 // health variable
-#ifndef _WIN32
+#ifdef _WIN32
     Sleep(1);
 #else
     sleep(1);
@@ -665,7 +675,7 @@ void
 StubLauncher::KillStubProcess()
 {
 #ifdef _WIN32
-  uint32_t exit_code;
+  unsigned int exit_code;
   TerminateProcess(stub_pid_.hProcess, exit_code);
   CloseHandle(stub_pid_.hProcess);
   CloseHandle(stub_pid_.hThread);

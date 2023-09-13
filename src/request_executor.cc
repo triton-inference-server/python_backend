@@ -51,7 +51,7 @@ MemoryTypeToTritonMemoryType(
     case PreferredMemory::MemoryType::kCPU:
       *triton_memory_type = TRITONSERVER_MEMORY_CPU;
       break;
-    case PreferredMemory::MemoryType::kCPU:
+    case PreferredMemory::MemoryType::kGPU:
       *triton_memory_type = TRITONSERVER_MEMORY_GPU;
       break;
 

@@ -26,27 +26,7 @@
 
 #include "pb_utils.h"
 
-#include <archive.h>
-#include <archive_entry.h>
 #include <dlfcn.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-#include <cerrno>
-#include <cstring>
-#include <functional>
-#include <memory>
-#include <string>
-#include <unordered_map>
-
-#include "scoped_defer.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
