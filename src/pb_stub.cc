@@ -55,6 +55,7 @@
 #include "triton/common/nvtx.h"
 
 #ifdef _WIN32
+#include <windows.h>
 #include <signal.h>  // SIGINT & SIGTERM
 #else
 #include <sys/wait.h>
@@ -1708,7 +1709,7 @@ extern "C" {
 bool
 KillParentProcess(int parent_id)
 {
-  HANDLE parent = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+  HANDLE parent = OpenProcess(PROCESS_ALL_ACCESS, FALSE, parent_id);
   unsigned int exit_code;
   return (TerminateProcess(parent, exit_code) == 0);
 }

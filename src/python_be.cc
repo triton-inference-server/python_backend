@@ -365,11 +365,8 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));
 
     TRITONSERVER_InferenceTrace* triton_trace;
-    auto err = TRITONBACKEND_RequestTrace(request, &triton_trace);
-    if (err != nullptr) {
-      triton_trace = nullptr;
-      TRITONSERVER_ErrorDelete(err);
-    }
+    RETURN_IF_ERROR(TRITONBACKEND_RequestTrace(request, &triton_trace));
+
     InferenceTrace trace = InferenceTrace(triton_trace);
 
     std::unique_ptr<InferRequest> infer_request;
