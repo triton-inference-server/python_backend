@@ -181,7 +181,7 @@ class ModelContext {
   std::string python_backend_folder_;
   std::string platform_;
 
-  enum ModelType { DEFAULT, PLATFORM };
+  enum ModelType { kDefault, kPlatform };
   ModelType type_;
 };
 

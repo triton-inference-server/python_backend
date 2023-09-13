@@ -169,7 +169,7 @@ struct ResponseBatch : SendMessageBase {
 
 enum LogLevel { kInfo = 0, kWarning, kError, kVerbose };
 
-enum MetricKind { COUNTER, GAUGE };
+enum MetricKind { kCounter = 0, kGauge };
 
 struct LogSendMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t filename;

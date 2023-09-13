@@ -1401,8 +1401,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("preferred_device_id").none(false) = 0);
 
   py::enum_<PreferredMemory::MemoryType>(module, "MemoryType")
-      .value("TRITONSERVER_MEMORY_GPU", PreferredMemory::MemoryType::GPU)
-      .value("TRITONSERVER_MEMORY_CPU", PreferredMemory::MemoryType::CPU)
+      .value("TRITONSERVER_MEMORY_GPU", PreferredMemory::MemoryType::kGPU)
+      .value("TRITONSERVER_MEMORY_CPU", PreferredMemory::MemoryType::kCPU)
       .export_values();
 
   py::class_<InferenceTrace, std::shared_ptr<InferenceTrace>>(
@@ -1438,7 +1438,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("model_version").none(false) = -1,
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
-              PreferredMemory(PreferredMemory::DEFAULT, 0),
+              PreferredMemory(PreferredMemory::kDefault, 0),
           py::arg("trace").none(false) = InferenceTrace())
       .def(
           "inputs", &InferRequest::Inputs,
@@ -1568,8 +1568,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("value", &Metric::SendGetValueRequest);
 
   py::enum_<MetricKind>(module, "MetricKind")
-      .value("COUNTER", MetricKind::COUNTER)
-      .value("GAUGE", MetricKind::GAUGE)
+      .value("COUNTER", MetricKind::kCounter)
+      .value("GAUGE", MetricKind::kGauge)
       .export_values();
 
   py::class_<MetricFamily, std::shared_ptr<MetricFamily>>(
@@ -1581,8 +1581,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "Metric", &MetricFamily::CreateMetric,
           py::arg("labels").none(true) = py::none());
-  module.attr("MetricFamily").attr("COUNTER") = MetricKind::COUNTER;
-  module.attr("MetricFamily").attr("GAUGE") = MetricKind::GAUGE;
+  module.attr("MetricFamily").attr("COUNTER") = MetricKind::kCounter;
+  module.attr("MetricFamily").attr("GAUGE") = MetricKind::kGauge;
 
   module.def(
       "load_model", &LoadModel, py::arg("model_name").none(false),
@@ -1621,7 +1621,7 @@ ModelContext::Init(
     if (stat(platform_model_path.c_str(), &buffer) == 0) {
       // Use the Platform model for serving the model.
       python_model_found = true;
-      type_ = ModelType::PLATFORM;
+      type_ = ModelType::kPlatform;
       python_model_path_ = platform_model_path;
       // Trimming the model name from the model path, the platform model
       // will populate the expected default model file name into model_path_.
@@ -1638,7 +1638,7 @@ ModelContext::Init(
     struct stat buffer;
     if (stat(python_model_path_.c_str(), &buffer) == 0) {
       python_model_found = true;
-      type_ = ModelType::DEFAULT;
+      type_ = ModelType::kDefault;
     }
     // Initializing here for consistency with platform model case.
     model_dir_ = model_path.substr(0, model_path.find_last_of("\\/"));
@@ -1677,7 +1677,7 @@ ModelContext::StubSetup(py::module& sys)
   // returned by 'find_last_of'. Need to manually adjust the position.
   std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
 
-  if (type_ == ModelType::DEFAULT) {
+  if (type_ == ModelType::kDefault) {
     std::string model_path_parent =
         python_model_path_.substr(0, python_model_path_.find_last_of("/"));
     std::string model_path_parent_parent =

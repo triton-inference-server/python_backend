@@ -378,14 +378,14 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
+          PreferredMemory(PreferredMemory::kDefault, 0), trace);
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, 0 /* response_factory_address */,
           reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
+          PreferredMemory(PreferredMemory::kDefault, 0), trace);
     }
 
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
