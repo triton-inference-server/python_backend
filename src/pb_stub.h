@@ -80,17 +80,17 @@ namespace triton { namespace backend { namespace python {
   } while (false)
 
 /// Macros that use current filename and line number.
-#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::INFO)
-#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::WARNING)
-#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::ERROR)
-#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::VERBOSE)
+#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::kInfo)
+#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::kWarning)
+#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::kError)
+#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::kVerbose)
 
 class Logger {
  public:
   Logger() { backend_logging_active_ = false; };
   ~Logger() { log_instance_.reset(); };
   /// Python client log function
-  static void Log(const std::string& message, LogLevel level = LogLevel::INFO);
+  static void Log(const std::string& message, LogLevel level = LogLevel::kInfo);
 
   /// Python client log info function
   static void LogInfo(const std::string& message);

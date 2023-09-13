@@ -1296,37 +1296,37 @@ Logger::Log(
 void
 Logger::LogInfo(const std::string& message)
 {
-  Logger::Log(message, LogLevel::INFO);
+  Logger::Log(message, LogLevel::kInfo);
 }
 
 void
 Logger::LogWarn(const std::string& message)
 {
-  Logger::Log(message, LogLevel::WARNING);
+  Logger::Log(message, LogLevel::kWarning);
 }
 
 void
 Logger::LogError(const std::string& message)
 {
-  Logger::Log(message, LogLevel::ERROR);
+  Logger::Log(message, LogLevel::kError);
 }
 
 void
 Logger::LogVerbose(const std::string& message)
 {
-  Logger::Log(message, LogLevel::VERBOSE);
+  Logger::Log(message, LogLevel::kVerbose);
 }
 
 const std::string
 Logger::LeadingLogChar(const LogLevel& level)
 {
   switch (level) {
-    case LogLevel::WARNING:
+    case LogLevel::kWarning:
       return "W";
-    case LogLevel::ERROR:
+    case LogLevel::kError:
       return "E";
-    case LogLevel::INFO:
-    case LogLevel::VERBOSE:
+    case LogLevel::kInfo:
+    case LogLevel::kVerbose:
     default:
       return "I";
   }
@@ -1549,14 +1549,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")
-      .value("INFO", LogLevel::INFO)
-      .value("WARNING", LogLevel::WARNING)
-      .value("ERROR", LogLevel::ERROR)
-      .value("VERBOSE", LogLevel::VERBOSE)
+      .value("INFO", LogLevel::kInfo)
+      .value("WARNING", LogLevel::kWarning)
+      .value("ERROR", LogLevel::kError)
+      .value("VERBOSE", LogLevel::kVerbose)
       .export_values();
   logger.def_static(
       "log", py::overload_cast<const std::string&, LogLevel>(&Logger::Log),
-      py::arg("message"), py::arg("level") = LogLevel::INFO);
+      py::arg("message"), py::arg("level") = LogLevel::kInfo);
   logger.def_static("log_info", &Logger::LogInfo, py::arg("message"));
   logger.def_static("log_warn", &Logger::LogWarn, py::arg("message"));
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));

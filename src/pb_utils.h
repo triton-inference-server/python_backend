@@ -167,7 +167,7 @@ struct ResponseBatch : SendMessageBase {
   uint32_t response_size;
 };
 
-enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
+enum LogLevel { kInfo = 0, kWarning, kError, kVerbose };
 
 enum MetricKind { COUNTER, GAUGE };
 

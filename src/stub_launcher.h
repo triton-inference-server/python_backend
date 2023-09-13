@@ -78,7 +78,11 @@ class StubLauncher {
   TRITONSERVER_Error* ModelInstanceStubProcess();
 
   // Stub PID
+#ifdef _WIN32
+  PROCESS_INFORMATION StubPid() { return stub_pid_; }
+#else
   pid_t StubPid() { return stub_pid_; }
+#endif
 
   // Health mutex
   bi::interprocess_mutex* HealthMutex() { return health_mutex_; }
@@ -153,7 +157,10 @@ class StubLauncher {
   void WaitForStubProcess();
 
   // Initialize pid / process_information handlers
-  void InitializeProcessHandlers();
+  void InitializeOSDependentMembers();
+
+  // Get Python environment for non-WIN32
+  TRITONSERVER_Error* GetPythonEnvironment(ModelState* model_state);
 
  private:
 #ifdef _WIN32
@@ -177,6 +184,7 @@ class StubLauncher {
   const int32_t device_id_;
   const std::string kind_;
   uint64_t model_version_;
+  std::string os_slash;
 
   std::string python_lib_;
   int64_t shm_default_byte_size_;

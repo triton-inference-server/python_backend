@@ -857,25 +857,25 @@ ModelInstanceState::ProcessLogRequest(
   LogLevel level = pb_log_message->Level();
 
   switch (level) {
-    case LogLevel::INFO: {
+    case LogLevel::kInfo: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_INFO, (filename.c_str()), line,
           (log_message.c_str()));
       break;
     }
-    case LogLevel::WARNING: {
+    case LogLevel::kWarning: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_WARN, (filename.c_str()), line,
           (log_message.c_str()));
       break;
     }
-    case LogLevel::ERROR: {
+    case LogLevel::kError: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_ERROR, (filename.c_str()), line,
           (log_message.c_str()));
       break;
     }
-    case LogLevel::VERBOSE: {
+    case LogLevel::kVerbose: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_VERBOSE, (filename.c_str()), line,
           (log_message.c_str()));
@@ -2036,7 +2036,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
   backend_state->python_lib = location;
+#ifndef _WIN32
   backend_state->env_manager = std::make_unique<EnvironmentManager>();
+#endif
 
   RETURN_IF_ERROR(TRITONBACKEND_BackendSetState(
       backend, reinterpret_cast<void*>(backend_state.get())));

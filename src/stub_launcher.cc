@@ -35,7 +35,7 @@ StubLauncher::StubLauncher(const std::string stub_process_kind)
       model_instance_name_(""), device_id_(0), kind_("")
 
 {
-  InitializeProcessHandlers();
+  InitializeOSDependentMembers();
 }
 
 StubLauncher::StubLauncher(
@@ -45,7 +45,7 @@ StubLauncher::StubLauncher(
       model_instance_name_(model_instance_name), device_id_(device_id),
       kind_(kind)
 {
-  InitializeProcessHandlers();
+  InitializeOSDependentMembers();
 }
 
 TRITONSERVER_Error*
@@ -77,7 +77,7 @@ StubLauncher::Initialize(ModelState* model_state)
   model_version_ = model_state->Version();
 
   std::stringstream ss;
-  ss << model_repository_path_ << "/" << model_version_ << "/";
+  ss << model_repository_path_ << os_slash << model_version_ << os_slash;
   std::string artifact_name;
   RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
       "default_model_filename", &artifact_name));
@@ -90,33 +90,42 @@ StubLauncher::Initialize(ModelState* model_state)
 
   model_path_ = ss.str();
 
-  // Path to the extracted Python env
-  std::string python_execution_env = "";
+// Path to the extracted Python env
+#ifndef _WIN32
   if (python_execution_env_ != "") {
-    try {
-      python_execution_env =
-          model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
-              python_execution_env_);
-    }
-    catch (PythonBackendException& pb_exception) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-    }
-
-    path_to_activate_ = python_execution_env + "/bin/activate";
-    path_to_libpython_ = python_execution_env + "/lib";
-    if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          ("Path " + path_to_activate_ +
-           " does not exist. The Python environment should contain an "
-           "'activate' script.")
-              .c_str());
-    }
+    RETURN_IF_ERROR(GetPythonEnvironment(model_state));
   }
+#endif
 
   parent_pid_ = getpid();
 
+  return nullptr;
+}
+
+TRITONSERVER_Error*
+StubLauncher::GetPythonEnvironment(ModelState* model_state)
+{
+  std::string python_execution_env = "";
+  try {
+    python_execution_env =
+        model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
+            python_execution_env_);
+  }
+  catch (PythonBackendException& pb_exception) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+  }
+
+  path_to_activate_ = python_execution_env + "/bin/activate";
+  path_to_libpython_ = python_execution_env + "/lib";
+  if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("Path " + path_to_activate_ +
+         " does not exist. The Python environment should contain an "
+         "'activate' script.")
+            .c_str());
+  }
   return nullptr;
 }
 
@@ -195,7 +204,122 @@ StubLauncher::Setup()
 
   return nullptr;
 }
+#ifdef _WIN32
+TRITONSERVER_Error*
+StubLauncher::Launch()
+{
+  std::string stub_name;
+  if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
+    stub_name = model_name_;
+  } else {
+    stub_name = model_instance_name_;
+  }
 
+  // Default Python backend stub
+  std::string python_backend_stub =
+      python_lib_ + "\\triton_python_backend_stub";
+
+  // Path to alternative Python backend stub
+  std::string model_python_backend_stub =
+      std::string(model_repository_path_) + "\\triton_python_backend_stub";
+
+  if (FileExists(model_python_backend_stub)) {
+    python_backend_stub = model_python_backend_stub;
+  }
+
+  std::string launch_command;
+
+  std::stringstream ss;
+  ss << " exec " << python_backend_stub << " " << model_path_ << " "
+     << shm_region_name_ << " " << shm_default_byte_size_ << " "
+     << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_ << " "
+     << ipc_control_handle_ << " " << stub_name << " " << platform_;
+  launch_command = ss.str();
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("Starting Python backend stub: ") + launch_command).c_str());
+
+  int stub_status_code =
+      system((python_backend_stub + "> /dev/null 2>&1").c_str());
+
+  LPSTR launch_command_lpstr = const_cast<char*>(launch_command.c_str());
+  // Start the child process. Unlike fork(), the remainder of this
+  // function exists in the context of the parent, only.
+  if (!CreateProcess(
+          NULL,                  // No module name (use command line)
+          launch_command_lpstr,  // Command line
+          NULL,                  // Process handle not inheritable
+          NULL,                  // Thread handle not inheritable
+          FALSE,                 // Set handle inheritance to FALSE
+          0,                     // No creation flags
+          NULL,                  // Use parent's environment block
+          NULL,                  // Use parent's starting directory
+          &startup_info_,        // Pointer to STARTUPINFO structure
+          &stub_pid_)            // Pointer to PROCESS_INFORMATION structure
+  ) {
+    std::stringstream ss;
+    ss << "Failed to run python backend stub. Errno = " << errno << '\n'
+       << "Python backend stub path: " << python_backend_stub << '\n'
+       << "Shared Memory Region Name: " << shm_region_name_ << '\n'
+       << "Shared Memory Default Byte Size: " << shm_default_byte_size_ << '\n'
+       << "Shared Memory Growth Byte Size: " << shm_growth_byte_size_ << '\n';
+    // Print the error message directly because the underlying mutexes in
+    // LOG_MESSAGE() could be forked when it is locked by other thread(s).
+    std::cerr << '\n' << ss.str() << '\n';
+    _Exit(1);
+  }
+  ScopedDefer _([&] {
+    // Push a dummy message to the message queue so that the stub
+    // process is notified that it can release the object stored in
+    // shared memory.
+    stub_message_queue_->Push(DUMMY_MESSAGE);
+
+    // If the model is not initialized, wait for the stub process to exit.
+    if (!is_initialized_) {
+      stub_message_queue_.reset();
+      parent_message_queue_.reset();
+      memory_manager_.reset();
+      WaitForStubProcess();
+    }
+  });
+
+  // The stub process would send two messages to the parent process during the
+  // initialization.
+  // 1. When the stub process's health monitoring thread has started.
+  // 2. When the initialization is fully completed and the Python model is
+  // loaded.
+  //
+  // The reason it is broken into two steps is that creation of the health
+  // monitoring thread may take longer which can make the server process think
+  // that the stub process is unhealthy and return early. Waiting until the
+  // health thread is spawn would make sure would prevent this issue.
+  parent_message_queue_->Pop();
+
+  if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
+    try {
+      AutocompleteStubProcess();
+    }
+    catch (const PythonBackendException& ex) {
+      // Need to kill the stub process first
+      KillStubProcess();
+      throw BackendModelException(
+          TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, ex.what()));
+    }
+  } else if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
+    RETURN_IF_ERROR(ModelInstanceStubProcess());
+  } else {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("Unknown stub_process_kind: ") + stub_process_kind_)
+            .c_str());
+  }
+
+  is_initialized_ = true;
+
+  return nullptr;
+}
+#else
 TRITONSERVER_Error*
 StubLauncher::Launch()
 {
@@ -351,6 +475,7 @@ StubLauncher::Launch()
 
   return nullptr;
 }
+#endif
 
 void
 StubLauncher::AutocompleteStubProcess()
@@ -478,9 +603,13 @@ StubLauncher::UpdateHealth()
       ipc_control_->stub_health = false;
     }
 
-    // Sleep 1 second so that the child process has a chance to change the
-    // health variable
+// Sleep 1 second so that the child process has a chance to change the
+// health variable
+#ifndef _WIN32
+    Sleep(1);
+#else
     sleep(1);
+#endif
 
     {
       bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_);
@@ -538,8 +667,8 @@ StubLauncher::KillStubProcess()
 #ifdef _WIN32
   uint32_t exit_code;
   TerminateProcess(stub_pid_.hProcess, exit_code);
-  WaitForStubProcess();
   CloseHandle(stub_pid_.hProcess);
+  CloseHandle(stub_pid_.hThread);
 #else
   kill(stub_pid_, SIGKILL);
   WaitForStubProcess();
@@ -602,15 +731,17 @@ StubLauncher::ReceiveMessageFromStub(
 }
 
 void
-StubLauncher::InitializeProcessHandlers()
+StubLauncher::InitializeOSDependentMembers()
 {
 #ifdef _WIN32
   ZeroMemory(&startup_info_, sizeof(startup_info_));
   startup_info_.cb = sizeof(startup_info_);
   ZeroMemory(&stub_pid_, sizeof(stub_pid_));
+  os_slash = "\\";
 #else
   parent_pid_ = 0;
   stub_pid_ = 0;
+  os_slash = "/";
 #endif
 }
 
@@ -619,6 +750,8 @@ StubLauncher::WaitForStubProcess()
 {
 #ifdef _WIN32
   WaitForSingleObject(stub_pid_.hProcess, INFINITE);
+  CloseHandle(stub_pid_.hProcess);
+  CloseHandle(stub_pid_.hThread);
 #else
   int status;
   waitpid(stub_pid_, &status, 0);
