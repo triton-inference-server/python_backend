@@ -249,14 +249,21 @@ class ModelState : public BackendModel {
   // Auto-complete stub
   std::unique_ptr<StubLauncher>& Stub() { return auto_complete_stub_; }
 
+  bool EnabledCacheCleaning() { return enable_cache_cleaning_; }
+
  private:
   ModelState(TRITONBACKEND_Model* triton_model);
   BackendState* backend_state_;
+
+  // Parses and validates parameters in config
+  TRITONSERVER_Error* ParseParameters();
+
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
   bool decoupled_;
   std::string platform_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
+  bool enable_cache_cleaning_;
 };
 
 class ModelInstanceState : public BackendModelInstance {
@@ -285,6 +292,9 @@ class ModelInstanceState : public BackendModelInstance {
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
       ModelInstanceState** model_instance_state);
+
+  // Clear CUDA cache
+  void ClearCache();
 
   ~ModelInstanceState();
 

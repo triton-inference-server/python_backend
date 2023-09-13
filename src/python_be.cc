@@ -1664,6 +1664,15 @@ ModelInstanceState::SendBLSDecoupledResponse(
   }
 }
 
+ModelInstanceState::ClearCache()
+{
+#ifdef TRITON_ENABLE_GPU
+  if (Kind() == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
+#endif  // TRITON_ENABLE_GPU
+}
+
 ModelInstanceState::~ModelInstanceState()
 {
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
@@ -1684,6 +1693,7 @@ ModelInstanceState::~ModelInstanceState()
   Stub()->ClearQueues();
   received_message_.reset();
   Stub().reset();
+  ClearCache();
 }
 
 TRITONSERVER_Error*
@@ -1716,11 +1726,14 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
 
   RETURN_IF_ERROR((*state)->ValidateModelConfig());
 
+  RETURN_IF_ERROR((*state)->ParseParameters());
+
   return nullptr;  // success
 }
 
 ModelState::ModelState(TRITONBACKEND_Model* triton_model)
-    : BackendModel(triton_model, true /* allow_optional */)
+    : BackendModel(triton_model, true /* allow_optional */),
+    enable_cache_cleaning_(false)
 {
   TRITONBACKEND_Backend* backend;
   THROW_IF_BACKEND_MODEL_ERROR(
@@ -1857,6 +1870,34 @@ ModelState::ValidateModelConfig()
   return nullptr;
 }
 
+TRITONSERVER_Error*
+ModelState::ParseParameters()
+{
+  triton::common::TritonJson::Value params;
+  bool status = model_config_.Find("parameters", &params);
+  if (status) {
+    // If 'ENABLE_CACHE_CLEANING' is not present in 'parameters' then
+    // no update is made to 'enable_cache_cleaning_'.
+    err = ParseParameter(
+        params, "ENABLE_CACHE_CLEANING", &enable_cache_cleaning_);
+    if (err != nullptr) {
+      if (TRITONSERVER_ErrorCode(err) != TRITONSERVER_ERROR_NOT_FOUND) {
+        return err;
+      } else {
+        TRITONSERVER_ErrorDelete(err);
+      }
+    }
+
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO,
+        (std::string("Cache Cleaning is ") +
+         (enable_cache_cleaning_ ? "enabled" : "disabled") +
+         " for model instance '" + Name() + "'")
+            .c_str());
+  }
+
+  return nullptr;
+}
 
 extern "C" {
 
@@ -2243,6 +2284,10 @@ TRITONBACKEND_ModelInstanceExecute(
        instance_state->Name() + " released " + std::to_string(request_count) +
        " requests")
           .c_str());
+
+  if (model_state->EnabledCacheCleaning()) {
+    instance_state->ClearCache();
+  }
 
   return nullptr;
 }
