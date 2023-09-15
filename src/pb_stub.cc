@@ -55,8 +55,8 @@
 #include "triton/common/nvtx.h"
 
 #ifdef _WIN32
-#include <windows.h>
 #include <signal.h>  // SIGINT & SIGTERM
+#include <windows.h>
 #else
 #include <sys/wait.h>
 #endif
@@ -125,12 +125,13 @@ Stub::Instantiate(
         MessageQueue<uint64_t>::LoadFromSharedMemory(
             shm_pool_, ipc_control_->memory_manager_message_queue);
 
-    // If the Python model is using an execution environment, we need to
-    // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
-    // <Python Shared Lib>:$OLD_LD_LIBRARY_PATH). The <Python Shared Lib>
-    // section was added before launching the stub process and it may
-    // interfere with the shared library resolution of other executable and
-    // binaries.
+// If the Python model is using an execution environment, we need to
+// remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
+// <Python Shared Lib>:$OLD_LD_LIBRARY_PATH). The <Python Shared Lib>
+// section was added before launching the stub process and it may
+// interfere with the shared library resolution of other executable and
+// binaries.
+#ifndef _WIN32
     if (ipc_control_->uses_env) {
       char* ld_library_path = std::getenv("LD_LIBRARY_PATH");
 
@@ -158,6 +159,7 @@ Stub::Instantiate(
             "cannot be empty.");
       }
     }
+#endif
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << pb_exception.what() << std::endl;
@@ -1279,6 +1281,18 @@ Logger::Log(
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
+#ifdef _WIN32
+    SYSTEMTIME system_time;
+    GetSystemTime(&system_time);
+    stream_ << level_name_[std::min(level, (uint32_t)Level::kINFO)]
+            << std::setfill('0') << std::setw(2) << system_time.wMonth
+            << std::setw(2) << system_time.wDay << ' ' << std::setw(2)
+            << system_time.wHour << ':' << std::setw(2) << system_time.wMinute
+            << ':' << std::setw(2) << system_time.wSecond << '.' << std::setw(6)
+            << system_time.wMilliseconds * 1000 << ' '
+            << static_cast<uint32_t>(GetCurrentProcessId()) << ' ' << path
+            << ':' << line << "] ";
+#else
     std::stringstream ss;
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -1291,6 +1305,7 @@ Logger::Log(
        << std::setw(6) << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid())
        << ' ' << path << ':' << lineno << "] ";
     std::cerr << ss.str() << " " << message << std::endl;
+#endif
   } else {
     // Ensure we do not create a stub instance before it has initialized
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();

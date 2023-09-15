@@ -77,12 +77,8 @@ class StubLauncher {
   // Model instance stub process
   TRITONSERVER_Error* ModelInstanceStubProcess();
 
-  // Stub PID
-#ifdef _WIN32
-  PROCESS_INFORMATION StubPid() { return stub_pid_; }
-#else
-  pid_t StubPid() { return stub_pid_; }
-#endif
+  // Check if Stub PID is active
+  bool StubActive();
 
   // Health mutex
   bi::interprocess_mutex* HealthMutex() { return health_mutex_; }

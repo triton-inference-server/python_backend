@@ -29,7 +29,6 @@
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
 #endif  // TRITON_ENABLE_GPU
-#include <pthread.h>
 
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
@@ -273,6 +272,10 @@ class CUDAHandler {
       int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
       void** data_ptr);
   void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
+  void* LoadSharedObject(const char* filename);
+  void* LocateSymbol(const char* symbol);
+  std::string LocateSymbolError();
+  void CloseLibrary();
 
   /// Set the device only if the primary context has already been created for
   /// this device. Inspired from PyTorch's MaybeSetDevice.

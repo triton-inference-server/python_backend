@@ -603,6 +603,18 @@ StubLauncher::ModelInstanceStubProcess()
   return nullptr;
 }
 
+bool
+StubLauncher::StubActive()
+{
+#ifdef _WIN32
+  DWORD ec;
+  GetExitCodeProcess(pi.hProcess, &ec);
+  return (ec == STILL_ACTIVE);
+#else
+  return (stub_pid_ != 0);
+#endif
+}
+
 void
 StubLauncher::UpdateHealth()
 {

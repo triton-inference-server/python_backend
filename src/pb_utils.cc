@@ -26,7 +26,12 @@
 
 #include "pb_utils.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
+
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
@@ -39,41 +44,41 @@ namespace triton { namespace backend { namespace python {
 
 CUDAHandler::CUDAHandler()
 {
-  dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
+  dl_open_handle_ = LoadSharedObject("libcuda.so");
 
   // If libcuda.so is successfully opened, it must be able to find
   // "cuPointerGetAttribute", "cuGetErrorString", and
   // "cuDevicePrimaryCtxGetState" symbols.
   if (dl_open_handle_ != nullptr) {
-    void* cu_pointer_get_attribute_fn =
-        dlsym(dl_open_handle_, "cuPointerGetAttribute");
+    void* cu_pointer_get_attribute_fn = LocateSymbol("cuPointerGetAttribute");
     if (cu_pointer_get_attribute_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuPointerGetAttribute'. Error: ") +
+          std::string("Failed to locate 'cuPointerGetAttribute'. Error: ") +
           dlerror());
     }
     *((void**)&cu_pointer_get_attribute_fn_) = cu_pointer_get_attribute_fn;
 
-    void* cu_get_error_string_fn = dlsym(dl_open_handle_, "cuGetErrorString");
+    void* cu_get_error_string_fn = LocateSymbol("cuGetErrorString");
     if (cu_get_error_string_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuGetErrorString'. Error: ") +
+          std::string("Failed to locate 'cuGetErrorString'. Error: ") +
           dlerror());
     }
     *((void**)&cu_get_error_string_fn_) = cu_get_error_string_fn;
 
-    void* cu_init_fn = dlsym(dl_open_handle_, "cuInit");
+    void* cu_init_fn = LocateSymbol("cuInit");
     if (cu_init_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuInit'. Error: ") + dlerror());
+          std::string("Failed to locate 'cuInit'. Error: ") + dlerror());
     }
     *((void**)&cu_init_fn_) = cu_init_fn;
 
     void* cu_device_primary_ctx_get_state_fn =
-        dlsym(dl_open_handle_, "cuDevicePrimaryCtxGetState");
+        LocateSymbol("cuDevicePrimaryCtxGetState");
     if (cu_device_primary_ctx_get_state_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuDevicePrimaryCtxGetState'. Error: ") +
+          std::string(
+              "Failed to locate 'cuDevicePrimaryCtxGetState'. Error: ") +
           dlerror());
     }
     *((void**)&cu_device_primary_ctx_get_state_fn_) =
@@ -85,10 +90,7 @@ CUDAHandler::CUDAHandler()
       const char* error_string;
       (*cu_get_error_string_fn_)(cuda_err, &error_string);
       error_str_ = std::string("failed to call cuInit: ") + error_string;
-      int status = dlclose(dl_open_handle_);
-      if (status != 0) {
-        throw PythonBackendException("Failed to close the libcuda handle.");
-      }
+      CloseLibrary();
       dl_open_handle_ = nullptr;
     }
   }
@@ -195,12 +197,55 @@ CUDAHandler::MaybeSetDevice(int device)
 CUDAHandler::~CUDAHandler() noexcept(false)
 {
   if (dl_open_handle_ != nullptr) {
-    int status = dlclose(dl_open_handle_);
-    if (status != 0) {
-      throw PythonBackendException("Failed to close the libcuda handle.");
-    }
+    CloseLibrary();
   }
 }
+
+void*
+CUDAHandler::LoadSharedObject(const char* filename)
+{
+#ifdef _WIN32
+  return LoadLibraryA("nvcuda.dll");
+#else
+  return dlopen("libcuda.so", RTLD_LAZY);
+#endif
+}
+
+void*
+CUDAHandler::LocateSymbol(const char* symbol)
+{
+#ifdef _WIN32
+  return GetProcAddress(dl_open_handle_, symbol);
+#else
+  return dlsym(dl_open_handle_, symbol);
+#endif
+}
+
+
+std::string
+CUDAHandler::LocateSymbolError()
+{
+#ifdef _WIN32
+  return std::to_string(GetLastError());
+#else
+  return dlerror();
+#endif
+}
+
+void
+CUDAHandler::CloseLibrary()
+{
+  bool successful = true;
+#ifdef _WIN32
+  successful = (FreeLibrary(dl_open_handle_) != 0);
+#else
+  successful = (dlclose(dl_open_handle_) == 0);
+#endif
+  if (!successful) {
+    throw PythonBackendException("Failed to close the cuda library handle.");
+  }
+}
+
 
 ScopedSetDevice::ScopedSetDevice(int device)
 {

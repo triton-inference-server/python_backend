@@ -298,7 +298,8 @@ class ModelInstanceState : public BackendModelInstance {
   // Launch stub process.
   TRITONSERVER_Error* LaunchStubProcess();
 
-  TRITONSERVER_Error* SendMessageToStub(bi::managed_external_buffer::handle_t message);
+  TRITONSERVER_Error* SendMessageToStub(
+      bi::managed_external_buffer::handle_t message);
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
 
   // Checks whether the stub process is live
@@ -306,7 +307,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Get a message from the stub process
   void SendMessageAndReceiveResponse(
-      bi::managed_external_buffer::handle_t message, bi::managed_external_buffer::handle_t& response, bool& restart,
+      bi::managed_external_buffer::handle_t message,
+      bi::managed_external_buffer::handle_t& response, bool& restart,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
