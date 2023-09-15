@@ -54,7 +54,7 @@ CUDAHandler::CUDAHandler()
     if (cu_pointer_get_attribute_fn == nullptr) {
       throw PythonBackendException(
           std::string("Failed to locate 'cuPointerGetAttribute'. Error: ") +
-          dlerror());
+          LocateSymbolError());
     }
     *((void**)&cu_pointer_get_attribute_fn_) = cu_pointer_get_attribute_fn;
 
@@ -62,14 +62,14 @@ CUDAHandler::CUDAHandler()
     if (cu_get_error_string_fn == nullptr) {
       throw PythonBackendException(
           std::string("Failed to locate 'cuGetErrorString'. Error: ") +
-          dlerror());
+          LocateSymbolError());
     }
     *((void**)&cu_get_error_string_fn_) = cu_get_error_string_fn;
 
     void* cu_init_fn = LocateSymbol("cuInit");
     if (cu_init_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to locate 'cuInit'. Error: ") + dlerror());
+          std::string("Failed to locate 'cuInit'. Error: ") + LocateSymbolError());
     }
     *((void**)&cu_init_fn_) = cu_init_fn;
 
@@ -79,7 +79,7 @@ CUDAHandler::CUDAHandler()
       throw PythonBackendException(
           std::string(
               "Failed to locate 'cuDevicePrimaryCtxGetState'. Error: ") +
-          dlerror());
+          LocateSymbolError());
     }
     *((void**)&cu_device_primary_ctx_get_state_fn_) =
         cu_device_primary_ctx_get_state_fn;

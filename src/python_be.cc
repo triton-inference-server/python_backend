@@ -1327,7 +1327,7 @@ ModelInstanceState::ProcessRequests(
 
   // This means that the stub process has exited and Python
   // backend failed to restart the stub process.
-  if (Stub()->StubPid() == 0) {
+  if (!Stub()->StubActive()) {
     const char* error_message = "The stub process has exited unexpectedly.";
     RespondErrorToAllRequests(
         error_message, responses, requests, request_count);

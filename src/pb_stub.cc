@@ -1282,9 +1282,10 @@ Logger::Log(
       path = path.substr(pos + 1, std::string::npos);
     }
 #ifdef _WIN32
+    std::stringstream ss;
     SYSTEMTIME system_time;
     GetSystemTime(&system_time);
-    stream_ << level_name_[std::min(level, (uint32_t)Level::kINFO)]
+    ss << LeadingLogChar(level)
             << std::setfill('0') << std::setw(2) << system_time.wMonth
             << std::setw(2) << system_time.wDay << ' ' << std::setw(2)
             << system_time.wHour << ':' << std::setw(2) << system_time.wMinute

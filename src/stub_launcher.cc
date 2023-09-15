@@ -608,7 +608,7 @@ StubLauncher::StubActive()
 {
 #ifdef _WIN32
   DWORD ec;
-  GetExitCodeProcess(pi.hProcess, &ec);
+  GetExitCodeProcess(stub_pid_.hProcess, &ec);
   return (ec == STILL_ACTIVE);
 #else
   return (stub_pid_ != 0);
