@@ -1285,14 +1285,13 @@ Logger::Log(
     std::stringstream ss;
     SYSTEMTIME system_time;
     GetSystemTime(&system_time);
-    ss << LeadingLogChar(level)
-            << std::setfill('0') << std::setw(2) << system_time.wMonth
-            << std::setw(2) << system_time.wDay << ' ' << std::setw(2)
-            << system_time.wHour << ':' << std::setw(2) << system_time.wMinute
-            << ':' << std::setw(2) << system_time.wSecond << '.' << std::setw(6)
-            << system_time.wMilliseconds * 1000 << ' '
-            << static_cast<uint32_t>(GetCurrentProcessId()) << ' ' << path
-            << ':' << line << "] ";
+    ss << LeadingLogChar(level) << std::setfill('0') << std::setw(2)
+       << system_time.wMonth << std::setw(2) << system_time.wDay << ' '
+       << std::setw(2) << system_time.wHour << ':' << std::setw(2)
+       << system_time.wMinute << ':' << std::setw(2) << system_time.wSecond
+       << '.' << std::setw(6) << system_time.wMilliseconds * 1000 << ' '
+       << static_cast<uint32_t>(GetCurrentProcessId()) << ' ' << path << ':'
+       << lineno << "] ";
 #else
     std::stringstream ss;
     struct timeval tv;

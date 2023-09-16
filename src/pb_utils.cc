@@ -69,7 +69,8 @@ CUDAHandler::CUDAHandler()
     void* cu_init_fn = LocateSymbol("cuInit");
     if (cu_init_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to locate 'cuInit'. Error: ") + LocateSymbolError());
+          std::string("Failed to locate 'cuInit'. Error: ") +
+          LocateSymbolError());
     }
     *((void**)&cu_init_fn_) = cu_init_fn;
 
@@ -215,7 +216,7 @@ void*
 CUDAHandler::LocateSymbol(const char* symbol)
 {
 #ifdef _WIN32
-  return GetProcAddress(dl_open_handle_, symbol);
+  return GetProcAddress(static_cast<HMODULE>(dl_open_handle_), symbol);
 #else
   return dlsym(dl_open_handle_, symbol);
 #endif
@@ -237,7 +238,7 @@ CUDAHandler::CloseLibrary()
 {
   bool successful = true;
 #ifdef _WIN32
-  successful = (FreeLibrary(dl_open_handle_) != 0);
+  successful = (FreeLibrary(static_cast<HMODULE>(dl_open_handle_)) != 0);
 #else
   successful = (dlclose(dl_open_handle_) == 0);
 #endif

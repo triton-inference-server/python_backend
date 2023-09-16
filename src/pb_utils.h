@@ -245,11 +245,7 @@ class CUDAHandler {
 
  private:
   std::mutex mu_;
-#ifdef _WINT32
-  HMODULE dl_open_handle_ = nullptr;
-#else
   void* dl_open_handle_ = nullptr;
-#endif
   std::string error_str_;
   CUresult (*cu_pointer_get_attribute_fn_)(
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
