@@ -130,7 +130,7 @@ endif() # TRITON_ENABLE_NVTX
 
 find_package(ZLIB REQUIRED)
 
-if(not WIN32)
+if(NOT WIN32)
   find_package(Threads REQUIRED)
 endif()
 
