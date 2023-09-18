@@ -129,7 +129,10 @@ if(${TRITON_ENABLE_NVTX})
 endif() # TRITON_ENABLE_NVTX
 
 find_package(ZLIB REQUIRED)
-find_package(Threads REQUIRED)
+
+if(not WIN32)
+  find_package(Threads REQUIRED)
+endif()
 
 include_directories(${CMAKE_BINARY_DIR})
 configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
@@ -173,13 +176,13 @@ set(
   src/model_loader.cc
 )
 
-if (NOT WIN32)
+# Do not compile pb_env* files for 
+# windows. Needs to be integrated.
+if (WIN32)
   set(
     PYTHON_BACKEND_SRCS
     src/python_be.cc
     src/python_be.h
-    src/pb_env.cc
-    src/pb_env.h
     src/pb_metric_reporter.cc
     src/pb_metric_reporter.h
     src/memory_manager.cc
@@ -196,6 +199,8 @@ else()
     PYTHON_BACKEND_SRCS
     src/python_be.cc
     src/python_be.h
+    src/pb_env.cc
+    src/pb_env.h
     src/pb_metric_reporter.cc
     src/pb_metric_reporter.h
     src/memory_manager.cc
@@ -265,38 +270,70 @@ target_compile_options(
 )
 target_compile_definitions(triton-python-backend-stub PRIVATE TRITON_PB_STUB)
 
-target_link_libraries(
-  triton-python-backend
-  PRIVATE
+# For WIN32 do not link Threads and DL_LIBS
+if(WIN32)
+  target_link_libraries(
+    triton-python-backend
+    PRIVATE
+      dlpack
+      triton-backend-utils          # from repo-backend
+      -lrt                          # shared memory
+      triton-core-serverstub        # from repo-core
+      ZLIB::ZLIB
+      -larchive
+  )
+
+  target_link_libraries(
+    triton-python-backend-stub
+    PRIVATE
+    dlpack
+    triton-backend-utils           # from repo-backend
+    pybind11::embed
+    -lrt                           # shared memory
+    -larchive                      # libarchive
+  )
+else()
+  target_link_libraries(
+    triton-python-backend
+    PRIVATE
+      dlpack
+      Threads::Threads
+      triton-backend-utils          # from repo-backend
+      ${CMAKE_DL_LIBS}              # dlopen and dlclose
+      -lrt                          # shared memory
+      triton-core-serverstub        # from repo-core
+      ZLIB::ZLIB
+      -larchive
+  )
+
+  target_link_libraries(
+    triton-python-backend-stub
+    PRIVATE
     dlpack
     Threads::Threads
-    triton-backend-utils          # from repo-backend
-    ${CMAKE_DL_LIBS}              # dlopen and dlclose
-    -lrt                          # shared memory
-    triton-core-serverstub        # from repo-core
-    ZLIB::ZLIB
-    -larchive
-)
+    triton-backend-utils           # from repo-backend
+    ${CMAKE_DL_LIBS}               # dlopen and dlclose
+    pybind11::embed
+    -lrt                           # shared memory
+    -larchive                      # libarchive
+  )
+endif()
 
-target_link_libraries(
-  triton-python-backend-stub
-  PRIVATE
-   dlpack
-   Threads::Threads
-   triton-backend-utils           # from repo-backend
-   ${CMAKE_DL_LIBS}               # dlopen and dlclose
-   pybind11::embed
-   -lrt                           # shared memory
-   -larchive                      # libarchive
-)
-
-set_target_properties(
-  triton-python-backend PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-  OUTPUT_NAME triton_python
-  LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_python.ldscript
-  LINK_FLAGS "-Wl,--version-script libtriton_python.ldscript"
-)
+if(WIN32)
+  set_target_properties(
+    triton-python-backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME triton_python
+  )
+else()
+  set_target_properties(
+    triton-python-backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME triton_python
+    LINK_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libtriton_python.ldscript
+    LINK_FLAGS "-Wl,--version-script libtriton_python.ldscript"
+  )
+endif()
 
 add_subdirectory(./src/shm_monitor)
 
