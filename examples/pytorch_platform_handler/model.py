@@ -27,6 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import torch
+import torchvision
 
 
 class ResNet50(torch.nn.Module):
@@ -35,7 +36,7 @@ class ResNet50(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self._model = torch.hub.load(
-            "pytorch/vision",
+            "pytorch/vision:v" + torchvision.__version__.split("+")[0],
             "resnet50",
             weights="ResNet50_Weights.IMAGENET1K_V2",
             skip_validation=True,
