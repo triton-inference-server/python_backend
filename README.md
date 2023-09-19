@@ -485,6 +485,23 @@ class TritonPythonModel:
         return responses
 ```
 
+Starting from 23.09, `pb_utils.TritonError` may be constructed with an optional
+Triton error code on the second parameter. For example:
+
+```python
+pb_utils.TritonError("The file is not found", pb_utils.TritonError.NOT_FOUND)
+```
+
+If no code is specified, `pb_utils.TritonError.INTERNAL` will be used by default.
+
+Supported error codes:
+* `pb_utils.TritonError.UNKNOWN`
+* `pb_utils.TritonError.INTERNAL`
+* `pb_utils.TritonError.NOT_FOUND`
+* `pb_utils.TritonError.INVALID_ARG`
+* `pb_utils.TritonError.UNAVAILABLE`
+* `pb_utils.TritonError.UNSUPPORTED`
+* `pb_utils.TritonError.ALREADY_EXISTS`
 
 #### Decoupled mode
 
