@@ -488,7 +488,7 @@ class TritonPythonModel:
 Starting from 23.09, `pb_utils.TritonError` may be constructed with an optional
 Triton error code on the second parameter. For example:
 
-```
+```python
 pb_utils.TritonError("The file is not found", pb_utils.TritonError.NOT_FOUND)
 ```
 
