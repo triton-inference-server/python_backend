@@ -492,6 +492,8 @@ Triton error code on the second parameter. For example:
 pb_utils.TritonError("The file is not found", pb_utils.TritonError.NOT_FOUND)
 ```
 
+If no code is specified, `pb_utils.TritonError.INTERNAL` will be used by default.
+
 Supported error codes:
 * `pb_utils.TritonError.UNKNOWN`
 * `pb_utils.TritonError.INTERNAL`
