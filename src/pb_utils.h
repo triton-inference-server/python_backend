@@ -241,6 +241,13 @@ struct RequestBatch {
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
 };
 
+struct MemoryReleaseMessage {
+  std::mutex mu;
+  std::condition_variable cv;
+  uint64_t id;
+  bool waiting_on_stub;
+};
+
 #ifdef TRITON_ENABLE_GPU
 struct CUDAMemPoolMessage : SendMessageBase {
   cudaIpcMemHandle_t cuda_handle;

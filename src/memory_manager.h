@@ -31,6 +31,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "ipc_message.h"
 #include "message_queue.h"
 #include "triton/backend/backend_common.h"
 #include "triton/backend/backend_memory.h"
@@ -47,6 +48,7 @@ class MemoryRecord {
  public:
   virtual const std::function<void(void*)>& ReleaseCallback() = 0;
   virtual void* MemoryId() = 0;
+  virtual ~MemoryRecord() = default;
 };
 
 #ifdef TRITON_ENABLE_GPU
@@ -66,6 +68,11 @@ class BackendMemoryRecord : public MemoryRecord {
   BackendMemoryRecord(std::unique_ptr<BackendMemory> backend_memory);
   const std::function<void(void*)>& ReleaseCallback() override;
   void* MemoryId() override;
+  ~BackendMemoryRecord()
+  {
+    backend_memory_.reset();
+    std::cerr << "=== BackendMemoryRecord destructor called ===\n";
+  }
 
  private:
   std::unique_ptr<BackendMemory> backend_memory_;
@@ -80,7 +87,12 @@ class BackendMemoryRecord : public MemoryRecord {
 /// message queue asking the memory manager to deallocate the GPU tensor.
 class MemoryManager {
  public:
-  MemoryManager(std::unique_ptr<MessageQueue<intptr_t>>&& memory_message_queue);
+  // MemoryManager(std::unique_ptr<MessageQueue<intptr_t>>&&
+  // memory_message_queue);
+  MemoryManager(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&&
+          memory_message_queue);
   intptr_t AddRecord(std::unique_ptr<MemoryRecord>&& memory_record);
   TRITONSERVER_Error* ResetCounter();
   ~MemoryManager();
@@ -88,8 +100,11 @@ class MemoryManager {
  private:
   std::thread thread_;
   std::unordered_map<intptr_t, std::unique_ptr<MemoryRecord>> records_;
-  std::unique_ptr<MessageQueue<intptr_t>> message_queue_;
+  // std::unique_ptr<MessageQueue<intptr_t>> message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      message_queue_;
   void QueueMonitorThread();
   std::mutex mu_;
+  std::unique_ptr<SharedMemoryManager>& shm_pool_;
 };
 }}};  // namespace triton::backend::python

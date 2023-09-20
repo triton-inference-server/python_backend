@@ -172,18 +172,24 @@ StubLauncher::Setup()
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
 
-  std::unique_ptr<MessageQueue<intptr_t>> memory_manager_message_queue;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      memory_manager_message_queue;
+  // RETURN_IF_EXCEPTION(
+  //     memory_manager_message_queue =
+  //         MessageQueue<intptr_t>::Create(shm_pool_,
+  //         shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
       memory_manager_message_queue =
-          MessageQueue<intptr_t>::Create(shm_pool_, shm_message_queue_size_));
+          MessageQueue<bi::managed_external_buffer::handle_t>::Create(
+              shm_pool_, shm_message_queue_size_));
 
   memory_manager_message_queue->ResetSemaphores();
   ipc_control_->memory_manager_message_queue =
       memory_manager_message_queue->ShmHandle();
   ipc_control_->decoupled = is_decoupled_;
 
-  memory_manager_ =
-      std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
+  memory_manager_ = std::make_unique<MemoryManager>(
+      shm_pool_, std::move(memory_manager_message_queue));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
   ipc_control_->stub_to_parent_mq = stub_to_parent_mq_->ShmHandle();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();

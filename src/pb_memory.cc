@@ -124,6 +124,13 @@ PbMemory::Create(
     if (pb_memory->memory_shm_ptr_->use_cuda_shared_pool) {
       pb_memory->backend_memory_.reset(
           reinterpret_cast<BackendMemory*>(backend_memory));
+      // Store the original buffer so that we can write back to it later if
+      // needed.
+      pb_memory->original_buffer_ = data;
+      pb_memory->data_ptr_ =
+          (reinterpret_cast<char*>(
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
+           pb_memory->memory_shm_ptr_->cuda_pool_offset);
     }
 #endif
 

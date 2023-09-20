@@ -138,8 +138,9 @@ Stub::Instantiate(
         LoadFromSharedMemory(shm_pool_, ipc_control_->parent_to_stub_mq);
 
     memory_manager_message_queue_ =
-        MessageQueue<uint64_t>::LoadFromSharedMemory(
-            shm_pool_, ipc_control_->memory_manager_message_queue);
+        MessageQueue<bi::managed_external_buffer::handle_t>::
+            LoadFromSharedMemory(
+                shm_pool_, ipc_control_->memory_manager_message_queue);
 
     // If the Python model is using an execution environment, we need to
     // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
@@ -181,7 +182,7 @@ Stub::Instantiate(
   }
 }
 
-std::unique_ptr<MessageQueue<uint64_t>>&
+std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
 Stub::MemoryManagerQueue()
 {
   return memory_manager_message_queue_;
@@ -1331,7 +1332,31 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
               output_tensor->Memory()->MemoryReleaseId();
           output_tensor->Memory()->SetMemoryReleaseCallback(
               [this, memory_release_id]() {
-                this->MemoryManagerQueue()->Push(memory_release_id);
+                // this->MemoryManagerQueue()->Push(memory_release_id);
+                std::unique_ptr<IPCMessage> ipc_message = IPCMessage::Create(
+                    this->ShmPool(), true /* inline_response */);
+                AllocatedSharedMemory<MemoryReleaseMessage>
+                    memory_release_message =
+                        this->ShmPool()->Construct<MemoryReleaseMessage>();
+                MemoryReleaseMessage* memory_release_message_ptr =
+                    memory_release_message.data_.get();
+                memory_release_message_ptr->id = memory_release_id;
+                memory_release_message_ptr->waiting_on_stub = false;
+                ipc_message->Args() = memory_release_message.handle_;
+
+                {
+                  bi::scoped_lock<bi::interprocess_mutex> lock{
+                      *(ipc_message->ResponseMutex())};
+                  bool success = false;
+                  while (!success) {
+                    this->MemoryManagerQueue()->Push(
+                        ipc_message->ShmHandle(), 1000, success);
+                  }
+
+                  while (!memory_release_message_ptr->waiting_on_stub) {
+                    ipc_message->ResponseCondition()->wait(lock);
+                  }
+                }
               });
         }
       }

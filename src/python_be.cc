@@ -1728,17 +1728,22 @@ ModelInstanceState::PrepareResponseHandle(
     if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU
       std::unique_ptr<MemoryRecord> memory_record;
-      if (output_tensor->Memory()->UseCUDASharedPool()) {
-        // Need to transfer the ownership of the BackendMemory to the
-        // MemoryManager so that the lifetime of the BackendMemory is managed.
-        memory_record = std::make_unique<BackendMemoryRecord>(
-            output_tensor->Memory()->GetBackendMemory());
-      } else {
-        // For GPU tensors we need to store the memory release id in
-        // memory manager.
-        memory_record = std::make_unique<GPUMemoryRecord>(
-            output_tensor->Memory()->DataPtr());
-      }
+      // if (output_tensor->Memory()->UseCUDASharedPool()) {
+      //   // Need to transfer the ownership of the BackendMemory to the
+      //   // MemoryManager so that the lifetime of the BackendMemory is
+      //   managed. memory_record = std::make_unique<BackendMemoryRecord>(
+      //       output_tensor->Memory()->GetBackendMemory());
+      // } else {
+      //   // For GPU tensors we need to store the memory release id in
+      //   // memory manager.
+      //   memory_record = std::make_unique<GPUMemoryRecord>(
+      //       output_tensor->Memory()->DataPtr());
+      // }
+
+      // Need to transfer the ownership of the BackendMemory to the
+      // MemoryManager so that the lifetime of the BackendMemory is managed.
+      memory_record = std::make_unique<BackendMemoryRecord>(
+          output_tensor->Memory()->GetBackendMemory());
       uint64_t memory_release_id =
           Stub()->GetMemoryManager()->AddRecord(std::move(memory_record));
       output_tensor->Memory()->SetMemoryReleaseId(memory_release_id);

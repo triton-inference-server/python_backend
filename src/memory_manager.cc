@@ -83,7 +83,10 @@ BackendMemoryRecord::ReleaseCallback()
 #endif
 
 MemoryManager::MemoryManager(
-    std::unique_ptr<MessageQueue<intptr_t>>&& memory_message_queue)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&&
+        memory_message_queue)
+    : shm_pool_(shm_pool)
 {
   message_queue_ = std::move(memory_message_queue);
   thread_ = std::thread(&MemoryManager::QueueMonitorThread, this);
@@ -101,14 +104,52 @@ MemoryManager::AddRecord(std::unique_ptr<MemoryRecord>&& memory_record)
   return memory_record_id;
 }
 
+// void
+// MemoryManager::QueueMonitorThread()
+// {
+//   while (true) {
+//     intptr_t memory = message_queue_->Pop();
+//     if (memory == 0) {
+//       return;
+//     }
+
+//     {
+//       std::lock_guard<std::mutex> lock{mu_};
+//       auto it = records_.find(memory);
+//       if (it == records_.end()) {
+//         LOG_MESSAGE(
+//             TRITONSERVER_LOG_ERROR,
+//             "Unexpected memory index received for deallocation.");
+//         continue;
+//       }
+
+//       // Call the release callback.
+//       auto temp = it->second->MemoryId();
+//       it->second->ReleaseCallback()(it->second->MemoryId());
+//       records_.erase(it);
+//       std::cerr << "=== MemoryManager::QueueMonitorThread() erase " <<
+//       reinterpret_cast<intptr_t>(temp) << std::endl;
+//     }
+//   }
+// }
+
 void
 MemoryManager::QueueMonitorThread()
 {
   while (true) {
-    intptr_t memory = message_queue_->Pop();
-    if (memory == 0) {
+    bi::managed_external_buffer::handle_t handle = message_queue_->Pop();
+    if (handle == DUMMY_MESSAGE) {
       return;
     }
+    std::unique_ptr<IPCMessage> ipc_message =
+        IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
+
+    AllocatedSharedMemory<MemoryReleaseMessage> memory_release_message =
+        shm_pool_->Load<MemoryReleaseMessage>(ipc_message->Args());
+    MemoryReleaseMessage* memory_release_message_ptr =
+        memory_release_message.data_.get();
+
+    intptr_t memory = memory_release_message_ptr->id;
 
     {
       std::lock_guard<std::mutex> lock{mu_};
@@ -121,8 +162,19 @@ MemoryManager::QueueMonitorThread()
       }
 
       // Call the release callback.
+      auto temp = it->second->MemoryId();
       it->second->ReleaseCallback()(it->second->MemoryId());
+      it->second.reset();
       records_.erase(it);
+      std::cerr << "=== MemoryManager::QueueMonitorThread() erase "
+                << reinterpret_cast<intptr_t>(temp) << std::endl;
+      {
+        bi::scoped_lock<bi::interprocess_mutex> lock{
+            *(ipc_message->ResponseMutex())};
+        memory_release_message_ptr->waiting_on_stub = true;
+        ipc_message->ResponseCondition()->notify_all();
+        std::cerr << "=== after notify_all() " << std::endl;
+      }
     }
   }
 }

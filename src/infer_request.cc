@@ -598,8 +598,34 @@ InferRequest::Exec(const bool is_decoupled)
       if (!output_tensor->IsCPU()) {
         uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
-            [&memory_manager_message_queue, memory_release_id]() {
-              memory_manager_message_queue->Push(memory_release_id);
+            [&memory_manager_message_queue, memory_release_id, &shm_pool]() {
+              // memory_manager_message_queue->Push(memory_release_id);
+              // std::cerr << "=== STUB: Pushed memory release id: "
+              //           << memory_release_id << std::endl;
+              std::unique_ptr<IPCMessage> ipc_message =
+                  IPCMessage::Create(shm_pool, true /* inline_response */);
+              AllocatedSharedMemory<MemoryReleaseMessage>
+                  memory_release_message =
+                      shm_pool->Construct<MemoryReleaseMessage>();
+              MemoryReleaseMessage* memory_release_message_ptr =
+                  memory_release_message.data_.get();
+              memory_release_message_ptr->id = memory_release_id;
+              memory_release_message_ptr->waiting_on_stub = false;
+              ipc_message->Args() = memory_release_message.handle_;
+
+              {
+                bi::scoped_lock<bi::interprocess_mutex> lock{
+                    *(ipc_message->ResponseMutex())};
+                bool success = false;
+                while (!success) {
+                  memory_manager_message_queue->Push(
+                      ipc_message->ShmHandle(), 1000, success);
+                }
+
+                while (!memory_release_message_ptr->waiting_on_stub) {
+                  ipc_message->ResponseCondition()->wait(lock);
+                }
+              }
             });
       }
     }
