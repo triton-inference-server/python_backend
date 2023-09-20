@@ -1732,7 +1732,7 @@ KillParentProcess(int parent_id)
 bool
 KillParentProcess(pid_t parent_id)
 {
-  return (kill(parent_pid, 0) == -1);
+  return (kill(parent_id, 0) == -1);
 }
 #endif
 
