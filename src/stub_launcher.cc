@@ -33,11 +33,7 @@ namespace triton { namespace backend { namespace python {
 StubLauncher::StubLauncher(const std::string stub_process_kind)
     : parent_pid_(0), stub_pid_(0), is_initialized_(false),
       stub_process_kind_(stub_process_kind), model_instance_name_(""),
-      device_id_(0), kind_(""),
-#ifdef TRITON_ENABLE_GPU
-      tried_sharing_cuda_pool_(false)
-#endif  // TRITON_ENABLE_GPU
-
+      device_id_(0), kind_("")
 {
 }
 
@@ -47,10 +43,7 @@ StubLauncher::StubLauncher(
     : parent_pid_(0), stub_pid_(0), is_initialized_(false),
       stub_process_kind_(stub_process_kind),
       model_instance_name_(model_instance_name), device_id_(device_id),
-      kind_(kind),
-#ifdef TRITON_ENABLE_GPU
-      tried_sharing_cuda_pool_(false)
-#endif  // TRITON_ENABLE_GPU
+      kind_(kind)
 {
 }
 
@@ -616,10 +609,12 @@ StubLauncher::ReceiveMessageFromStub(
 #ifdef TRITON_ENABLE_GPU
 void
 StubLauncher::ShareCUDAMemoryPool(
-    TRITONBACKEND_MemoryManager* triton_mem_manager)
+    TRITONBACKEND_MemoryManager* triton_mem_manager, const int32_t device_id)
 {
   std::lock_guard<std::mutex> lock(cuda_shm_pool_mutex_);
-  if (tried_sharing_cuda_pool_) {
+  if ((tried_sharing_cuda_pool_map_.find(device_id) !=
+       tried_sharing_cuda_pool_map_.end()) &&
+      tried_sharing_cuda_pool_map_[device_id]) {
     return;
   }
 
@@ -635,7 +630,7 @@ StubLauncher::ShareCUDAMemoryPool(
     std::unique_ptr<BackendMemory> lbackend_memory;
 
     THROW_IF_TRITON_ERROR(BackendMemory::Create(
-        triton_mem_manager, BackendMemory::AllocationType::GPU_POOL, device_id_,
+        triton_mem_manager, BackendMemory::AllocationType::GPU_POOL, device_id,
         1 /* byte size*/, &backend_memory));
     lbackend_memory.reset(backend_memory);
 
@@ -646,7 +641,7 @@ StubLauncher::ShareCUDAMemoryPool(
         reinterpret_cast<CUdeviceptr>(lbackend_memory->MemoryPtr()));
 
     shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
-        reinterpret_cast<void*>(cuda_pool_address));
+        device_id, reinterpret_cast<void*>(cuda_pool_address));
     shm_pool_->GetCUDAMemoryPoolManager()->SetTritonMemoryManager(
         reinterpret_cast<void*>(triton_mem_manager));
 
@@ -655,17 +650,18 @@ StubLauncher::ShareCUDAMemoryPool(
         shm_pool_->Construct<CUDAMemPoolMessage>();
     cuda_pool_message_ptr = cuda_pool_message.data_.get();
     {
-      ScopedSetDevice scoped_set_device(device_id_);
+      ScopedSetDevice scoped_set_device(device_id);
       THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
           reinterpret_cast<cudaIpcMemHandle_t*>(
               &cuda_pool_message_ptr->cuda_handle),
-          reinterpret_cast<char*>(
-              shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddress())));
+          reinterpret_cast<char*>(shm_pool_->GetCUDAMemoryPoolManager()
+                                      ->CUDAPoolAddress(device_id))));
     }
 
     ipc_message->Command() = PYTHONSTUB_CUDAPoolInitializeRequest;
     ipc_message->Args() = cuda_pool_message.handle_;
 
+    cuda_pool_message_ptr->device_id = device_id;
     cuda_pool_message_ptr->has_error = false;
     cuda_pool_message_ptr->is_error_set = false;
     cuda_pool_message_ptr->waiting_on_stub = false;
@@ -693,7 +689,8 @@ StubLauncher::ShareCUDAMemoryPool(
     }
   }
   catch (const PythonBackendException& exception) {
-    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(nullptr);
+    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
+        device_id, nullptr);
     pb_exception = exception;
   }
 
@@ -704,7 +701,7 @@ StubLauncher::ShareCUDAMemoryPool(
     ipc_message->ResponseCondition()->notify_all();
   }
 
-  tried_sharing_cuda_pool_ = true;
+  tried_sharing_cuda_pool_map_[device_id] = true;
 
   if (pb_exception.what() != std::string{""}) {
     throw pb_exception;

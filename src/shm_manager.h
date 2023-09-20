@@ -34,6 +34,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
@@ -45,34 +46,26 @@ namespace bi = boost::interprocess;
 
 class CUDAMemoryPoolManager {
  public:
-  CUDAMemoryPoolManager()
-      : cuda_pool_address_(nullptr), triton_memory_manager_(nullptr)
-  {
-  }
+  CUDAMemoryPoolManager() : triton_memory_manager_(nullptr) {}
 
-  void SetCUDAPoolAddress(void* cuda_pool_address)
-  {
-    cuda_pool_address_ = cuda_pool_address;
-  }
+  void SetCUDAPoolAddress(const int32_t device_id, void* cuda_pool_address);
 
-  void* CUDAPoolAddress() { return cuda_pool_address_; }
+  void* CUDAPoolAddress(const int32_t device_id);
 
-  void SetTritonMemoryManager(void* triton_memory_manager)
-  {
-    triton_memory_manager_ = triton_memory_manager;
-  }
+  void SetTritonMemoryManager(void* triton_memory_manager);
 
-  void* TritonMemoryManager() { return triton_memory_manager_; }
+  void* TritonMemoryManager();
 
-  bool UseCudaSharedPool()
-  {
-    return (cuda_pool_address_ != nullptr) &&
-           (triton_memory_manager_ != nullptr);
-  }
+  bool UseCudaSharedPool(const int32_t device_id);
+
+  // Return cuda pool address map
+  std::unordered_map<int32_t, void*>& CUDAPoolAddressMap();
 
  private:
   // The base address of the Triton CUDA memory pool
-  void* cuda_pool_address_;
+  std::unordered_map<int32_t, void*> cuda_pool_address_map_;
+  // The mutex to protect the cuda_pool_address_map_
+  std::mutex mu_;
   // TRITONBACKEND_MemoryManager
   void* triton_memory_manager_;
 };

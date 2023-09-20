@@ -257,7 +257,7 @@ ResponseAlloc(
           lbackend_memory.reset(backend_memory);
 
           std::unique_ptr<PbMemory> pb_memory = PbMemory::Create(
-              shm_pool, std::move(lbackend_memory), false /* copy_gpu */);
+              shm_pool, std::move(lbackend_memory), true /* copy_gpu */);
           *buffer = pb_memory->DataPtr();
           *buffer_userp = reinterpret_cast<void*>(pb_memory.get());
           pb_memory.release();

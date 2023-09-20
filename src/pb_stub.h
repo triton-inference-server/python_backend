@@ -207,9 +207,7 @@ struct UtilsMessagePayload {
 
 class Stub {
  public:
-  Stub()
-      : device_id_(0), stub_to_parent_thread_(false),
-        parent_to_stub_thread_(false){};
+  Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
   static std::unique_ptr<Stub>& GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
@@ -361,7 +359,6 @@ class Stub {
   void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
  private:
-  int32_t device_id_;
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
   bi::interprocess_mutex* parent_mutex_;

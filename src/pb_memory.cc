@@ -70,7 +70,8 @@ PbMemory::Create(
       pb_memory->original_buffer_ = data;
       pb_memory->data_ptr_ =
           (reinterpret_cast<char*>(
-               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
+                   pb_memory->memory_shm_ptr_->memory_type_id)) +
            pb_memory->memory_shm_ptr_->cuda_pool_offset);
     }
 #endif
@@ -129,7 +130,8 @@ PbMemory::Create(
       pb_memory->original_buffer_ = data;
       pb_memory->data_ptr_ =
           (reinterpret_cast<char*>(
-               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
+                   pb_memory->memory_shm_ptr_->memory_type_id)) +
            pb_memory->memory_shm_ptr_->cuda_pool_offset);
     }
 #endif
@@ -231,7 +233,7 @@ PbMemory::FillShmData(
             reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm), data));
       }
 #ifndef TRITON_PB_STUB
-      if (cuda_pool->UseCudaSharedPool()) {
+      if (cuda_pool->UseCudaSharedPool(memory_type_id)) {
         // Check if the data is already in the pool by checking the base
         // address.
         CUDAHandler& cuda_api = CUDAHandler::getInstance();
@@ -239,11 +241,12 @@ PbMemory::FillShmData(
         cuda_api.PointerGetAttribute(
             &cuda_pool_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
             reinterpret_cast<CUdeviceptr>(data));
-        if (cuda_pool->CUDAPoolAddress() ==
+        if (cuda_pool->CUDAPoolAddress(memory_type_id) ==
             reinterpret_cast<void*>(cuda_pool_address)) {
           use_cuda_shared_pool = true;
           memory_shm_ptr->cuda_pool_offset =
-              data - reinterpret_cast<char*>(cuda_pool->CUDAPoolAddress());
+              data - reinterpret_cast<char*>(
+                         cuda_pool->CUDAPoolAddress(memory_type_id));
         } else {
           try {
             THROW_IF_TRITON_ERROR(BackendMemory::Create(
@@ -281,7 +284,8 @@ PbMemory::FillShmData(
             memory_shm_ptr->cuda_pool_offset =
                 (reinterpret_cast<BackendMemory*>(*backend_memory))
                     ->MemoryPtr() -
-                reinterpret_cast<char*>(cuda_pool->CUDAPoolAddress());
+                reinterpret_cast<char*>(
+                    cuda_pool->CUDAPoolAddress(memory_type_id));
           }
           catch (const PythonBackendException& pb_exception) {
             LOG_MESSAGE(
@@ -328,7 +332,8 @@ PbMemory::LoadFromSharedMemory(
       // data pointer using the offset.
       data_ptr =
           (reinterpret_cast<char*>(
-               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
+                   memory_shm_ptr->memory_type_id)) +
            memory_shm_ptr->cuda_pool_offset);
 #endif  // TRITON_PB_STUB
     } else {
@@ -379,7 +384,8 @@ PbMemory::LoadFromSharedMemory(
         // data pointer using the offset.
         data_ptr =
             (reinterpret_cast<char*>(
-                 shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress()) +
+                 shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
+                     memory_shm_ptr->memory_type_id)) +
              memory_shm_ptr->cuda_pool_offset);
 #endif  // TRITON_PB_STUB
       } else {

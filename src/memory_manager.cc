@@ -33,33 +33,6 @@ namespace triton { namespace backend { namespace python {
 
 
 #ifdef TRITON_ENABLE_GPU
-GPUMemoryRecord::GPUMemoryRecord(void* ptr)
-{
-  ptr_ = ptr;
-  release_callback_ = [](void* ptr) {
-    cudaError_t err = cudaFree(ptr);
-    if (err != cudaSuccess) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR,
-          (std::string("Failed to free the allocated cuda memory. error: ") +
-           cudaGetErrorString(err))
-              .c_str());
-    }
-  };
-}
-
-void*
-GPUMemoryRecord::MemoryId()
-{
-  return ptr_;
-}
-
-const std::function<void(void*)>&
-GPUMemoryRecord::ReleaseCallback()
-{
-  return release_callback_;
-}
-
 BackendMemoryRecord::BackendMemoryRecord(
     std::unique_ptr<BackendMemory> backend_memory)
     : backend_memory_(std::move(backend_memory))
@@ -104,35 +77,6 @@ MemoryManager::AddRecord(std::unique_ptr<MemoryRecord>&& memory_record)
   return memory_record_id;
 }
 
-// void
-// MemoryManager::QueueMonitorThread()
-// {
-//   while (true) {
-//     intptr_t memory = message_queue_->Pop();
-//     if (memory == 0) {
-//       return;
-//     }
-
-//     {
-//       std::lock_guard<std::mutex> lock{mu_};
-//       auto it = records_.find(memory);
-//       if (it == records_.end()) {
-//         LOG_MESSAGE(
-//             TRITONSERVER_LOG_ERROR,
-//             "Unexpected memory index received for deallocation.");
-//         continue;
-//       }
-
-//       // Call the release callback.
-//       auto temp = it->second->MemoryId();
-//       it->second->ReleaseCallback()(it->second->MemoryId());
-//       records_.erase(it);
-//       std::cerr << "=== MemoryManager::QueueMonitorThread() erase " <<
-//       reinterpret_cast<intptr_t>(temp) << std::endl;
-//     }
-//   }
-// }
-
 void
 MemoryManager::QueueMonitorThread()
 {
@@ -162,18 +106,14 @@ MemoryManager::QueueMonitorThread()
       }
 
       // Call the release callback.
-      auto temp = it->second->MemoryId();
       it->second->ReleaseCallback()(it->second->MemoryId());
       it->second.reset();
       records_.erase(it);
-      std::cerr << "=== MemoryManager::QueueMonitorThread() erase "
-                << reinterpret_cast<intptr_t>(temp) << std::endl;
       {
         bi::scoped_lock<bi::interprocess_mutex> lock{
             *(ipc_message->ResponseMutex())};
         memory_release_message_ptr->waiting_on_stub = true;
         ipc_message->ResponseCondition()->notify_all();
-        std::cerr << "=== after notify_all() " << std::endl;
       }
     }
   }

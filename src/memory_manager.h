@@ -52,27 +52,12 @@ class MemoryRecord {
 };
 
 #ifdef TRITON_ENABLE_GPU
-class GPUMemoryRecord : public MemoryRecord {
- public:
-  GPUMemoryRecord(void* ptr);
-  const std::function<void(void*)>& ReleaseCallback() override;
-  void* MemoryId() override;
-
- private:
-  void* ptr_;
-  std::function<void(void*)> release_callback_;
-};
-
 class BackendMemoryRecord : public MemoryRecord {
  public:
   BackendMemoryRecord(std::unique_ptr<BackendMemory> backend_memory);
   const std::function<void(void*)>& ReleaseCallback() override;
   void* MemoryId() override;
-  ~BackendMemoryRecord()
-  {
-    backend_memory_.reset();
-    std::cerr << "=== BackendMemoryRecord destructor called ===\n";
-  }
+  ~BackendMemoryRecord() { backend_memory_.reset(); }
 
  private:
   std::unique_ptr<BackendMemory> backend_memory_;

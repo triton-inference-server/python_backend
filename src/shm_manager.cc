@@ -33,6 +33,51 @@
 
 namespace triton { namespace backend { namespace python {
 
+void
+CUDAMemoryPoolManager::SetCUDAPoolAddress(
+    const int32_t device_id, void* cuda_pool_address)
+{
+  std::lock_guard<std::mutex> lock(mu_);
+  cuda_pool_address_map_[device_id] = cuda_pool_address;
+}
+
+void*
+CUDAMemoryPoolManager::CUDAPoolAddress(const int32_t device_id)
+{
+  if (cuda_pool_address_map_.find(device_id) != cuda_pool_address_map_.end()) {
+    return cuda_pool_address_map_[device_id];
+  } else {
+    return nullptr;
+  }
+}
+
+void
+CUDAMemoryPoolManager::SetTritonMemoryManager(void* triton_memory_manager)
+{
+  triton_memory_manager_ = triton_memory_manager;
+}
+
+void*
+CUDAMemoryPoolManager::TritonMemoryManager()
+{
+  return triton_memory_manager_;
+}
+
+bool
+CUDAMemoryPoolManager::UseCudaSharedPool(const int32_t device_id)
+{
+  return (cuda_pool_address_map_.find(device_id) !=
+          cuda_pool_address_map_.end()) &&
+         (cuda_pool_address_map_[device_id] != nullptr) &&
+         (triton_memory_manager_ != nullptr);
+}
+
+std::unordered_map<int32_t, void*>&
+CUDAMemoryPoolManager::CUDAPoolAddressMap()
+{
+  return cuda_pool_address_map_;
+}
+
 SharedMemoryManager::SharedMemoryManager(
     const std::string& shm_region_name, size_t shm_size,
     size_t shm_growth_bytes, bool create)

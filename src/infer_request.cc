@@ -599,9 +599,6 @@ InferRequest::Exec(const bool is_decoupled)
         uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
             [&memory_manager_message_queue, memory_release_id, &shm_pool]() {
-              // memory_manager_message_queue->Push(memory_release_id);
-              // std::cerr << "=== STUB: Pushed memory release id: "
-              //           << memory_release_id << std::endl;
               std::unique_ptr<IPCMessage> ipc_message =
                   IPCMessage::Create(shm_pool, true /* inline_response */);
               AllocatedSharedMemory<MemoryReleaseMessage>

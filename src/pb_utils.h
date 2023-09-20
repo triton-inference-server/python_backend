@@ -251,6 +251,7 @@ struct MemoryReleaseMessage {
 #ifdef TRITON_ENABLE_GPU
 struct CUDAMemPoolMessage : SendMessageBase {
   cudaIpcMemHandle_t cuda_handle;
+  int32_t device_id;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
   bool is_error_set;

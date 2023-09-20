@@ -538,8 +538,6 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_config_params[pair.first.c_str()] = pair.second;
   }
 
-  device_id_ = std::stoi(map["model_instance_device_id"]);
-
   LaunchStubToParentQueueMonitor();
   LaunchParentToStubQueueMonitor();
 
@@ -896,15 +894,17 @@ Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 Stub::~Stub()
 {
 #ifdef TRITON_ENABLE_GPU
-  if (shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddress() != nullptr) {
-    try {
-      CUDAHandler& cuda_api = CUDAHandler::getInstance();
-      cuda_api.CloseCudaHandle(
-          device_id_, shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddress());
+  try {
+    CUDAHandler& cuda_api = CUDAHandler::getInstance();
+    for (auto& m :
+         shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddressMap()) {
+      if (m.second != nullptr) {
+        cuda_api.CloseCudaHandle(m.first, m.second);
+      }
     }
-    catch (const PythonBackendException& pb_exception) {
-      std::cerr << "Error when closing CUDA handle: " << pb_exception.what();
-    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    std::cerr << "Error when closing CUDA handle: " << pb_exception.what();
   }
 #endif
 
@@ -1253,14 +1253,16 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
     CUDAHandler& cuda_api = CUDAHandler::getInstance();
     void* cuda_pool_address;
     cuda_api.OpenCudaHandle(
-        device_id_, &cuda_pool_message_ptr->cuda_handle, &cuda_pool_address);
+        cuda_pool_message_ptr->device_id, &cuda_pool_message_ptr->cuda_handle,
+        &cuda_pool_address);
     shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
-        cuda_pool_address);
+        cuda_pool_message_ptr->device_id, cuda_pool_address);
   }
   catch (const PythonBackendException& pb_exception) {
     has_exception = true;
     error_string = pb_exception.what();
-    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(nullptr);
+    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
+        cuda_pool_message_ptr->device_id, nullptr);
   }
 
   if (has_exception) {
