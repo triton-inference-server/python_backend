@@ -167,10 +167,6 @@ StubLauncher::Setup()
 
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       memory_manager_message_queue;
-  // RETURN_IF_EXCEPTION(
-  //     memory_manager_message_queue =
-  //         MessageQueue<intptr_t>::Create(shm_pool_,
-  //         shm_message_queue_size_));
   RETURN_IF_EXCEPTION(
       memory_manager_message_queue =
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(

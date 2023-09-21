@@ -379,7 +379,6 @@ class Stub {
       stub_to_parent_mq_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_to_stub_mq_;
-  // std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       memory_manager_message_queue_;
   bool initialized_;

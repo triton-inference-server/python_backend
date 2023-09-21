@@ -72,8 +72,6 @@ class BackendMemoryRecord : public MemoryRecord {
 /// message queue asking the memory manager to deallocate the GPU tensor.
 class MemoryManager {
  public:
-  // MemoryManager(std::unique_ptr<MessageQueue<intptr_t>>&&
-  // memory_message_queue);
   MemoryManager(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&&
@@ -85,7 +83,6 @@ class MemoryManager {
  private:
   std::thread thread_;
   std::unordered_map<intptr_t, std::unique_ptr<MemoryRecord>> records_;
-  // std::unique_ptr<MessageQueue<intptr_t>> message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       message_queue_;
   void QueueMonitorThread();

@@ -1612,7 +1612,7 @@ ModelInstanceState::ProcessRequests(
 
 #ifdef TRITON_ENABLE_GPU
     for (auto& output_tensor : infer_response->OutputTensors()) {
-      if ((output_tensor->MemoryType() == TRITONSERVER_MEMORY_GPU)) {
+      if (output_tensor->MemoryType() == TRITONSERVER_MEMORY_GPU) {
         // Attempt to use the cuda shared memory pool for GPU tensor.
         ShareCUDAMemoryPool(output_tensor->MemoryTypeId());
       }
