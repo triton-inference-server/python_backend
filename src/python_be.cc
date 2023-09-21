@@ -569,6 +569,26 @@ ModelInstanceState::GetInputTensor(
         RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
             Stub()->ShmPool(), true /* copy_gpu */));
       }
+      if (input_tensor->Memory()->UseCUDASharedPool() &&
+          (input_tensor->DataPtr() != buffer)) {
+        // If the data pointer of input tensor is not the same as the buffer, it
+        // means that we are able to use CUDA shared memory pool to transfer the
+        // tensor, and the data pointer has been updated to point to the CUDA
+        // pool. In this case, we need to copy the data from the original buffer
+        // to the newly allocated one.
+        bool cuda_used = false;
+        RETURN_IF_ERROR(CopyBuffer(
+            "Failed to copy the input tensor to buffer.",
+            TRITONSERVER_MEMORY_GPU, input_tensor->MemoryTypeId(),
+            TRITONSERVER_MEMORY_GPU, input_tensor->MemoryTypeId(),
+            input_tensor->ByteSize(), buffer, input_tensor->DataPtr(),
+            CudaStream(), &cuda_used));
+#ifdef TRITON_ENABLE_GPU
+        if (cuda_used) {
+          cudaStreamSynchronize(CudaStream());
+        }
+#endif  // TRITON_ENABLE_GPU
+      }
     } else {
       // Try to use the cuda shared memory pool first.
       void* dev_ptr;
@@ -630,13 +650,6 @@ ModelInstanceState::GetInputTensor(
 
       RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
           Stub()->ShmPool(), true /* copy_gpu */));
-
-      std::unique_ptr<MemoryRecord> memory_record;
-      memory_record = std::make_unique<BackendMemoryRecord>(
-          input_tensor->Memory()->GetBackendMemory());
-      uint64_t memory_release_id =
-          Stub()->GetMemoryManager()->AddRecord(std::move(memory_record));
-      input_tensor->Memory()->SetMemoryReleaseId(memory_release_id);
     }
 #else
     return TRITONSERVER_ErrorNew(
@@ -1231,14 +1244,30 @@ ModelInstanceState::ResponseSendDecoupled(
       bool cuda_copy = false;
       for (auto& output_buffer_pair : gpu_output_buffers) {
         auto& pb_memory = output_buffer_pair.first;
+        void* pointer = output_buffer_pair.second;
+        bool cuda_used;
 
         if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-          bool cuda_used;
-          void* pointer = output_buffer_pair.second;
-
           CopyBuffer(
               "Failed to copy the output tensor to buffer.",
               TRITONSERVER_MEMORY_CPU, 0, TRITONSERVER_MEMORY_CPU, 0,
+              pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
+              CudaStream(), &cuda_used);
+          cuda_copy |= cuda_used;
+        } else if (
+            (pb_memory->MemoryType() == TRITONSERVER_MEMORY_GPU) &&
+            pb_memory->UseCUDASharedPool() &&
+            (pb_memory->DataPtr() != pointer)) {
+          // If the data pointer from pb_memory is not the same as the pointer,
+          // it means that the Triton-provided buffer is not used during tensor
+          // transfer. Instead, an intermediate buffer that uses CUDA shared
+          // memory pool is used. In this case, the data pointer of pb_memory is
+          // updated to point to the CUDA pool, and we need to copy the data
+          // from the intermediate buffer back to the Triton-provided buffer.
+          CopyBuffer(
+              "Failed to copy the output tensor to buffer.",
+              TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
+              TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
               pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
               CudaStream(), &cuda_used);
           cuda_copy |= cuda_used;
@@ -1618,18 +1647,15 @@ ModelInstanceState::ProcessRequests(
         requests, 0);
 
     bool cuda_copy = false;
-#ifdef TRITON_ENABLE_GPU
-    bool write_back = false;
-#endif  // TRITON_ENABLE_GPU
 
     uint32_t response_index = 0;
     for (auto& gpu_output_buffer : gpu_output_buffers) {
       for (auto& buffer_memory_pair : gpu_output_buffer) {
         auto& pb_memory = buffer_memory_pair.first;
-        if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-          bool cuda_used = false;
-          void* pointer = buffer_memory_pair.second;
+        void* pointer = buffer_memory_pair.second;
+        bool cuda_used = false;
 
+        if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
           GUARDED_RESPOND_IF_ERROR(
               responses, response_index,
               CopyBuffer(
@@ -1639,29 +1665,29 @@ ModelInstanceState::ProcessRequests(
                   CudaStream(), &cuda_used));
           cuda_copy |= cuda_used;
         } else if (
-            pb_memory->MemoryType() == TRITONSERVER_MEMORY_GPU &&
-            pb_memory->UseCUDASharedPool()) {
-#ifdef TRITON_ENABLE_GPU
-          // Copy the data from the CUDA shared memory pool to the output buffer
-          // provided by Triton.
-          try {
-            THROW_IF_CUDA_ERROR(cudaMemcpyAsync(
-                pb_memory->OriginalBuffer(), pb_memory->DataPtr(),
-                pb_memory->ByteSize(), cudaMemcpyDeviceToDevice, stream_));
-          }
-          catch (const PythonBackendException& pb_exception) {
-            GUARDED_RESPOND_IF_EXCEPTION(
-                responses, response_index,
-                TRITONSERVER_ErrorNew(
-                    TRITONSERVER_ERROR_INTERNAL, pb_exception.what()));
-          }
-          write_back = true;
-#endif  // TRITON_ENABLE_GPU
+            (pb_memory->MemoryType() == TRITONSERVER_MEMORY_GPU) &&
+            pb_memory->UseCUDASharedPool() &&
+            (pb_memory->DataPtr() != pointer)) {
+          // If the data pointer from pb_memory is not the same as the pointer,
+          // it means that the Triton-provided buffer is not used during tensor
+          // transfer. Instead, an intermediate buffer that uses CUDA shared
+          // memory pool is used. In this case, the data pointer of pb_memory is
+          // updated to point to the CUDA pool, and we need to copy the data
+          // from the intermediate buffer back to the Triton-provided buffer.
+          GUARDED_RESPOND_IF_ERROR(
+              responses, response_index,
+              CopyBuffer(
+                  "Failed to copy the output tensor to buffer.",
+                  TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
+                  TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
+                  pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
+                  CudaStream(), &cuda_used));
+          cuda_copy |= cuda_used;
         }
       }
       response_index++;
 #ifdef TRITON_ENABLE_GPU
-      if (cuda_copy || write_back) {
+      if (cuda_copy) {
         cudaStreamSynchronize(stream_);
       }
 #endif  // TRITON_ENABLE_GPU
@@ -1721,6 +1747,7 @@ ModelInstanceState::PrepareResponseHandle(
 #endif  // TRITON_ENABLE_GPU
 
   (*infer_response)->SaveToSharedMemory(Stub()->ShmPool());
+
   for (auto& output_tensor : (*infer_response)->OutputTensors()) {
     if (!output_tensor->IsCPU()) {
 #ifdef TRITON_ENABLE_GPU

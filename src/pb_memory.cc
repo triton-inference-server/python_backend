@@ -32,7 +32,7 @@ std::unique_ptr<PbMemory>
 PbMemory::Create(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-    uint64_t byte_size, char* data, bool copy_gpu, bool copy_data)
+    uint64_t byte_size, char* data, bool copy_gpu)
 {
   size_t requested_byte_size = sizeof(MemoryShm);
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
@@ -50,7 +50,7 @@ PbMemory::Create(
   PbMemory::FillShmData(
       shm_pool->GetCUDAMemoryPoolManager(), &backend_memory, memory_type,
       memory_type_id, byte_size, data, memory_shm.data_.get(),
-      memory_shm.handle_, copy_gpu, copy_data);
+      memory_shm.handle_, copy_gpu);
 
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     data = memory_shm.data_.get() + sizeof(MemoryShm);
@@ -65,9 +65,6 @@ PbMemory::Create(
     if (pb_memory->memory_shm_ptr_->use_cuda_shared_pool) {
       pb_memory->backend_memory_.reset(
           reinterpret_cast<BackendMemory*>(backend_memory));
-      // Store the original buffer so that we can write back to it later if
-      // needed.
-      pb_memory->original_buffer_ = data;
       pb_memory->data_ptr_ =
           (reinterpret_cast<char*>(
                shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
@@ -90,9 +87,13 @@ PbMemory::Create(
 {
   std::unique_ptr<PbMemory> pb_memory = PbMemory::Create(
       shm_pool, backend_memory->MemoryType(), backend_memory->MemoryTypeId(),
-      backend_memory->ByteSize(), backend_memory->MemoryPtr(), copy_gpu,
-      false /* copy_data*/);
-  if (!pb_memory->backend_memory_) {
+      backend_memory->ByteSize(), backend_memory->MemoryPtr(), copy_gpu);
+
+  // If there is an updated backend_memory created during PbMemory creation, it
+  // means that we are able to allocate the memory from the CUDA shared memory
+  // pool and we don't need to keep the original backend_memory. Otherwise, we
+  // need to store the original backend_memory.
+  if (pb_memory->backend_memory_ == nullptr) {
     pb_memory->backend_memory_ = std::move(backend_memory);
   }
 
@@ -125,9 +126,6 @@ PbMemory::Create(
     if (pb_memory->memory_shm_ptr_->use_cuda_shared_pool) {
       pb_memory->backend_memory_.reset(
           reinterpret_cast<BackendMemory*>(backend_memory));
-      // Store the original buffer so that we can write back to it later if
-      // needed.
-      pb_memory->original_buffer_ = data;
       pb_memory->data_ptr_ =
           (reinterpret_cast<char*>(
                shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
@@ -216,7 +214,7 @@ PbMemory::FillShmData(
     std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, void** backend_memory,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
     uint64_t byte_size, char* data, char* data_shm,
-    bi::managed_external_buffer::handle_t handle, bool copy_gpu, bool copy_data)
+    bi::managed_external_buffer::handle_t handle, bool copy_gpu)
 {
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
@@ -255,31 +253,6 @@ PbMemory::FillShmData(
                 BackendMemory::AllocationType::GPU_POOL, memory_type_id,
                 byte_size, reinterpret_cast<BackendMemory**>(backend_memory)));
 
-            if (copy_data) {
-              // Copy the data to the new buffer in the CUDA pool.
-              cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
-              cudaError_t err;
-              err = cudaMemcpy(
-                  (reinterpret_cast<BackendMemory*>(*backend_memory))
-                      ->MemoryPtr(),
-                  data, byte_size, kind);
-              if (err != cudaSuccess) {
-                throw PythonBackendException(
-                    std::string(
-                        "failed to copy data: " +
-                        std::string(cudaGetErrorString(err)))
-                        .c_str());
-              }
-              err = cudaStreamSynchronize(0);
-              if (err != cudaSuccess) {
-                throw PythonBackendException(
-                    std::string(
-                        "failed to synchronize the default CUDA stream. "
-                        "error: " +
-                        std::string(cudaGetErrorString(err)))
-                        .c_str());
-              }
-            }
             use_cuda_shared_pool = true;
             memory_shm_ptr->cuda_pool_offset =
                 (reinterpret_cast<BackendMemory*>(*backend_memory))

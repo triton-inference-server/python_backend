@@ -62,8 +62,7 @@ class PbMemory {
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
-      uint64_t byte_size, char* data, bool copy_gpu = true,
-      bool copy_data = true);
+      uint64_t byte_size, char* data, bool copy_gpu = true);
 
   static std::unique_ptr<PbMemory> Create(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
@@ -130,8 +129,6 @@ class PbMemory {
     return memory_shm_ptr_->use_cuda_shared_pool;
   }
 
-  char* OriginalBuffer() const { return original_buffer_; }
-
   ~PbMemory();
 
 #ifndef TRITON_PB_STUB
@@ -156,10 +153,6 @@ class PbMemory {
   // the same as memory_data_shm_ptr_.
   char* data_ptr_;
 
-  // Store the buffer provided by Triton. This is used to write back the data
-  // from the CUDA shared memory pool to the original buffer.
-  char* original_buffer_;
-
   bi::managed_external_buffer::handle_t memory_shm_handle_;
   bool opened_cuda_ipc_handle_;
 
@@ -180,8 +173,7 @@ class PbMemory {
       std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, void** backend_memory,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
-      bi::managed_external_buffer::handle_t handle, bool copy_gpu = true,
-      bool copy_data = true);
+      bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
 
   PbMemory(
       AllocatedSharedMemory<char>& memory_shm, char* data,
