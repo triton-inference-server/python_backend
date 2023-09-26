@@ -95,20 +95,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(dlpack)
 
+set(BOOST_ENABLE_CMAKE ON)
+set(BOOST_INCLUDE_LIBRARIES stacktrace)
 #
 # Boost
 #
-ExternalProject_Add(
-  boostorg
-  URL https://boostorg.jfrog.io/artifactory/main/release/1.79.0/source/boost_1_79_0.tar.gz
-  URL_HASH SHA256=273f1be93238a068aba4f9735a4a2b003019af067b9c183ed227780b8f36062c
-  PREFIX "boost-src"
-  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    <SOURCE_DIR>/boost/ ${CMAKE_BINARY_DIR}/boost
-  INSTALL_COMMAND ""
-  BUILD_COMMAND ""
+FetchContent_Declare(
+  Boost
+  GIT_REPOSITORY https://github.com/boostorg/boost.git
+  GIT_TAG boost-1.81.0
+  GIT_SHALLOW ON
 )
-set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
+FetchContent_MakeAvailable(Boost)
 
 #
 # CUDA
@@ -124,6 +122,10 @@ endif() # TRITON_ENABLE_GPU
 if(${TRITON_ENABLE_NVTX})
   add_definitions(-DTRITON_ENABLE_NVTX=1)
 endif() # TRITON_ENABLE_NVTX
+
+add_definitions(-DBOOST_STACKTRACE_USE_ADDR2LINE=1)
+add_definitions(-DBOOST_STACKTRACE_USE_BACKTRACE=1)
+
 
 find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
@@ -220,8 +222,6 @@ add_executable(
   ${PYTHON_BACKEND_STUB_SRCS}
 )
 
-add_dependencies(triton-python-backend boostorg)
-add_dependencies(triton-python-backend-stub boostorg)
 
 set_property(TARGET triton-python-backend-stub PROPERTY OUTPUT_NAME triton_python_backend_stub)
 
@@ -255,6 +255,9 @@ target_link_libraries(
     triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
     -larchive
+    -ldl
+    Boost::stacktrace_backtrace
+    Boost::stacktrace_addr2line
 )
 
 target_link_libraries(
@@ -267,6 +270,9 @@ target_link_libraries(
    pybind11::embed
    -lrt                           # shared memory
    -larchive                      # libarchive
+   -ldl
+    Boost::stacktrace_backtrace
+    Boost::stacktrace_addr2line
 )
 
 set_target_properties(

@@ -48,10 +48,12 @@ SharedMemoryManager::SharedMemoryManager(
       shm_obj_ = std::make_unique<bi::shared_memory_object>(
           bi::create_only, shm_region_name.c_str(), bi::read_write);
       shm_obj_->truncate(shm_size);
+      shm_debug_info_.open("shm_allocations_debug");
     } else {
       // Open the existing region.
       shm_obj_ = std::make_unique<bi::shared_memory_object>(
           bi::open_only, shm_region_name.c_str(), bi::read_write);
+      shm_debug_info_.open("shm_allocations_debug_stub");
     }
 
     current_capacity_ = shm_size;
