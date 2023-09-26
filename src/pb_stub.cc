@@ -1544,7 +1544,12 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<ResponseIterator, std::shared_ptr<ResponseIterator>>(
       module, "ResponseIterator")
       .def(py::init<const std::shared_ptr<InferResponse>&>())
-      .def("__iter__", &ResponseIterator::Iter, py::keep_alive<0, 1>())
+      .def(
+          "__iter__",
+          [](ResponseIterator& it) -> ResponseIterator& {
+            it.Iter();
+            return it;
+          })
       .def("__next__", &ResponseIterator::Next);
 
   py::class_<Logger> logger(module, "Logger");

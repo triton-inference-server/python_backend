@@ -100,7 +100,7 @@ ResponseIterator::Next()
   }
 }
 
-py::iterator
+void
 ResponseIterator::Iter()
 {
   if (is_finished_) {
@@ -111,8 +111,6 @@ ResponseIterator::Iter()
       idx_ = 0;
     }
   }
-
-  return py::cast(*this);
 }
 
 void
