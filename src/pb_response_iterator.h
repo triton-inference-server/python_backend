@@ -38,7 +38,7 @@ class ResponseIterator {
   ~ResponseIterator();
 
   std::shared_ptr<InferResponse> Next();
-  py::iterator Iter();
+  void Iter();
   void EnqueueResponse(std::shared_ptr<InferResponse> infer_response);
   void* Id();
   void Clear();
