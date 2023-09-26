@@ -1364,6 +1364,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .value(
           "ALREADY_EXISTS",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_ALREADY_EXISTS)
+      .value("CANCELLED", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_CANCELLED)
       .export_values();
   triton_error.def_property_readonly_static(
       "UNKNOWN",
@@ -1386,6 +1387,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   triton_error.def_property_readonly_static(
       "ALREADY_EXISTS",
       [](py::object /* self */) { return TRITONSERVER_ERROR_ALREADY_EXISTS; });
+  triton_error.def_property_readonly_static(
+      "CANCELLED",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_CANCELLED; });
   triton_error.def(
       py::init<const std::string&, TRITONSERVER_Error_Code>(),
       py::arg("message").none(false),

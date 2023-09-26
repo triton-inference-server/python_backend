@@ -502,6 +502,7 @@ Supported error codes:
 * `pb_utils.TritonError.UNAVAILABLE`
 * `pb_utils.TritonError.UNSUPPORTED`
 * `pb_utils.TritonError.ALREADY_EXISTS`
+* `pb_utils.TritonError.CANCELLED` (since 23.10)
 
 #### Decoupled mode
 
