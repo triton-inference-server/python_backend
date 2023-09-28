@@ -46,6 +46,7 @@ any C++ code.
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
       - [Error Handling](#error-handling)
+      - [Request Cancellation](#request-cancellation)
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
         - [Known Issues](#known-issues)
@@ -503,6 +504,37 @@ Supported error codes:
 * `pb_utils.TritonError.UNSUPPORTED`
 * `pb_utils.TritonError.ALREADY_EXISTS`
 * `pb_utils.TritonError.CANCELLED` (since 23.10)
+
+#### Request Cancellation
+
+One or more requests may be cancelled during execution, for example, cancelled
+by the user. Starting from 23.10, `request.is_cancelled()` returns up-to-date
+`True` or `False` on whether the request is cancelled. If a request is
+cancelled, the model should respond `pb_utils.TritonError.CANCELLED` in place of
+the normal output tensors on the request. For example:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    ...
+
+    def execute(self, requests):
+        responses = []
+
+        for request in requests:
+            if request.is_cancelled():
+                responses.append(pb_utils.InferenceResponse(
+                    error=pb_utils.TritonError("Message", pb_utils.TritonError.CANCELLED)))
+            else:
+                ...
+
+        return responses
+```
+
+Although checking for request cancellation is optional, it is recommended to
+check for cancellation at strategic request execution stages that can early
+terminate the execution in the event of its response is no longer needed.
 
 #### Decoupled mode
 

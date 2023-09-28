@@ -400,6 +400,23 @@ InferRequest::DeleteResponseFactory()
 #endif
 
 #ifdef TRITON_PB_STUB
+bool
+InferRequest::IsCancelled()
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (!stub->StubToParentServiceActive()) {
+    LOG_ERROR << "Cannot communicate with parent service";
+    return false;
+  }
+  if (request_address_ == 0) {
+    LOG_ERROR << "Request address not provided (default initialized?)";
+    return false;
+  }
+  std::unique_ptr<PbCancel> pb_cancel(new PbCancel(request_address_));
+  stub->EnqueueIsCancelled(pb_cancel);
+  return pb_cancel->IsCancelled();
+}
+
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
 {

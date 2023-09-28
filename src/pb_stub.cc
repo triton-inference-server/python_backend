@@ -945,6 +945,9 @@ Stub::ServiceStubToParentRequests()
         SendLogMessage(utils_msg_payload);
       } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
         SendCleanupId(utils_msg_payload);
+      } else if (
+          utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
+        SendIsCancelled(utils_msg_payload);
       } else {
         std::cerr << "Error when sending message via stub_to_parent message "
                      "buffer - unknown command\n";
@@ -1026,6 +1029,45 @@ Stub::EnqueueCleanupId(void* id)
         std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
     EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
+}
+
+void
+Stub::EnqueueIsCancelled(const std::unique_ptr<PbCancel>& pb_cancel)
+{
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+      std::make_unique<UtilsMessagePayload>(
+          PYTHONSTUB_IsRequestCancelled,
+          reinterpret_cast<void*>(pb_cancel.get()));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
+}
+
+void
+Stub::SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
+{
+  PbCancel* pb_cancel =
+      reinterpret_cast<PbCancel*>(utils_msg_payload->utils_message_ptr);
+  pb_cancel->SaveToSharedMemory(shm_pool_);
+
+  IsCancelledMessage* message_payload = pb_cancel->ShmPayload();
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = utils_msg_payload->command_type;
+  ipc_message->Args() = pb_cancel->ShmHandle();
+
+  bool is_cancelled = false;
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lk(message_payload->mu);
+
+    SendIPCUtilsMessage(ipc_message);
+    while (!message_payload->waiting_on_stub) {
+      message_payload->cv.wait(lk);
+    }
+
+    is_cancelled = message_payload->is_cancelled;
+    message_payload->waiting_on_stub = false;
+    message_payload->cv.notify_all();
+  }
+  pb_cancel->ReportIsCancelled(is_cancelled);
 }
 
 bool
@@ -1505,7 +1547,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
-      .def("get_response_sender", &InferRequest::GetResponseSender);
+      .def("get_response_sender", &InferRequest::GetResponseSender)
+      .def("is_cancelled", &InferRequest::IsCancelled);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
