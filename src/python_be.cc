@@ -1733,7 +1733,12 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   python_execution_env_ = "";
   force_cpu_only_input_tensors_ = true;
   decoupled_ = false;
-  platform_ = "";
+  const char* execution_model_path = nullptr;
+  THROW_IF_BACKEND_MODEL_ERROR(
+      TRITONBACKEND_BackendModelLocation(triton_model, &execution_model_path));
+  if (execution_model_path != nullptr) {
+    py_backend_based_model_ = execution_model_path;
+  }
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
@@ -1771,14 +1776,6 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         if (error != nullptr) {
           throw BackendModelException(error);
         }
-      }
-    }
-
-    triton::common::TritonJson::Value platform;
-    if (model_config_.Find("platform", &platform)) {
-      auto error = platform.AsString(&platform_);
-      if (error != nullptr) {
-        throw BackendModelException(error);
       }
     }
 

@@ -62,9 +62,9 @@ StubLauncher::Initialize(ModelState* model_state)
   model_state->ModelConfig().Write(&model_config_buffer_);
   is_decoupled_ = model_state->IsDecoupled();
   model_repository_path_ = model_state->RepositoryPath();
-  platform_ = model_state->Platform();
-  if (platform_.empty()) {
-    platform_ = "NONE";
+  py_backend_based_model_ = model_state->PythonBackendBasedModel();
+  if (py_backend_based_model_.empty()) {
+    py_backend_based_model_ = "NONE";
   }
 
   // Atomically increase and read the stub process count to avoid shared memory
@@ -238,7 +238,8 @@ StubLauncher::Launch()
        << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
        << " " << shm_region_name_ << " " << shm_default_byte_size_ << " "
        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-       << " " << ipc_control_handle_ << " " << stub_name << " " << platform_;
+       << " " << ipc_control_handle_ << " " << stub_name << " "
+       << py_backend_based_model_;
     ipc_control_->uses_env = true;
     bash_argument = ss.str();
   } else {
@@ -246,7 +247,8 @@ StubLauncher::Launch()
     ss << " exec " << python_backend_stub << " " << model_path_ << " "
        << shm_region_name_ << " " << shm_default_byte_size_ << " "
        << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-       << " " << ipc_control_handle_ << " " << stub_name << " " << platform_;
+       << " " << ipc_control_handle_ << " " << stub_name << " "
+       << py_backend_based_model_;
     bash_argument = ss.str();
   }
   LOG_MESSAGE(
