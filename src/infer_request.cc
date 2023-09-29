@@ -408,10 +408,9 @@ InferRequest::IsCancelled()
     LOG_ERROR << "Cannot communicate with parent service";
     return false;
   }
-  std::unique_ptr<PbCancel> pb_cancel(
-      new PbCancel(response_factory_address_, request_address_));
-  stub->EnqueueIsCancelled(pb_cancel);
-  return pb_cancel->IsCancelled();
+  PbCancel pb_cancel(response_factory_address_, request_address_);
+  stub->EnqueueIsCancelled(&pb_cancel);
+  return pb_cancel.IsCancelled();
 }
 
 std::shared_ptr<ResponseSender>

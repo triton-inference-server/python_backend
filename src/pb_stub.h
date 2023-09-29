@@ -310,7 +310,7 @@ class Stub {
   void EnqueueCleanupId(void* id);
 
   /// Add request cancellation query to queue
-  void EnqueueIsCancelled(const std::unique_ptr<PbCancel>& pb_cancel);
+  void EnqueueIsCancelled(PbCancel* pb_cancel);
 
   /// Send request cancellation query to python backend
   void SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);

@@ -1032,12 +1032,11 @@ Stub::EnqueueCleanupId(void* id)
 }
 
 void
-Stub::EnqueueIsCancelled(const std::unique_ptr<PbCancel>& pb_cancel)
+Stub::EnqueueIsCancelled(PbCancel* pb_cancel)
 {
   std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
       std::make_unique<UtilsMessagePayload>(
-          PYTHONSTUB_IsRequestCancelled,
-          reinterpret_cast<void*>(pb_cancel.get()));
+          PYTHONSTUB_IsRequestCancelled, reinterpret_cast<void*>(pb_cancel));
   EnqueueUtilsMessage(std::move(utils_msg_payload));
 }
 
