@@ -35,6 +35,7 @@ PbCancel::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   new (&(cancel_shm_.data_->mu)) bi::interprocess_mutex;
   new (&(cancel_shm_.data_->cv)) bi::interprocess_condition;
   cancel_shm_.data_->waiting_on_stub = false;
+  cancel_shm_.data_->response_factory_address = response_factory_address_;
   cancel_shm_.data_->request_address = request_address_;
   cancel_shm_.data_->is_cancelled = is_cancelled_;
 }

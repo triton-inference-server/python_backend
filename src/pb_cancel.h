@@ -35,8 +35,9 @@ namespace triton { namespace backend { namespace python {
 
 class PbCancel {
  public:
-  PbCancel(intptr_t request_address)
-      : updated_(false), request_address_(request_address), is_cancelled_(false)
+  PbCancel(intptr_t response_factory_address, intptr_t request_address)
+      : updated_(false), response_factory_address_(response_factory_address),
+        request_address_(request_address), is_cancelled_(false)
   {
   }
   DISALLOW_COPY_AND_ASSIGN(PbCancel);
@@ -55,6 +56,7 @@ class PbCancel {
   std::condition_variable cv_;
   bool updated_;
 
+  intptr_t response_factory_address_;
   intptr_t request_address_;
   bool is_cancelled_;
 };

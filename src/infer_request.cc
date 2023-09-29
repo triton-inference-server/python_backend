@@ -408,11 +408,8 @@ InferRequest::IsCancelled()
     LOG_ERROR << "Cannot communicate with parent service";
     return false;
   }
-  if (request_address_ == 0) {
-    LOG_ERROR << "Request address not provided (default initialized?)";
-    return false;
-  }
-  std::unique_ptr<PbCancel> pb_cancel(new PbCancel(request_address_));
+  std::unique_ptr<PbCancel> pb_cancel(
+      new PbCancel(response_factory_address_, request_address_));
   stub->EnqueueIsCancelled(pb_cancel);
   return pb_cancel->IsCancelled();
 }

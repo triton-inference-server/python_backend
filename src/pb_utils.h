@@ -183,6 +183,7 @@ struct CleanupMessage : SendMessageBase {
 };
 
 struct IsCancelledMessage : SendMessageBase {
+  intptr_t response_factory_address;
   intptr_t request_address;
   bool is_cancelled;
 };

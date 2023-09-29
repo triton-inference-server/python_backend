@@ -934,9 +934,21 @@ ModelInstanceState::ProcessIsRequestCancelled(
   {
     bi::scoped_lock<bi::interprocess_mutex> lk{message_payload->mu};
 
-    TRITONBACKEND_Request* request = reinterpret_cast<TRITONBACKEND_Request*>(
-        message_payload->request_address);
-    TRITONBACKEND_RequestIsCancelled(request, &message_payload->is_cancelled);
+    if (message_payload->response_factory_address != 0) {
+      TRITONBACKEND_ResponseFactory* response_factory =
+          reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              message_payload->response_factory_address);
+      TRITONBACKEND_ResponseFactoryIsCancelled(
+          response_factory, &message_payload->is_cancelled);
+    } else if (message_payload->request_address != 0) {
+      TRITONBACKEND_Request* request = reinterpret_cast<TRITONBACKEND_Request*>(
+          message_payload->request_address);
+      TRITONBACKEND_RequestIsCancelled(request, &message_payload->is_cancelled);
+    } else {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR, "Cannot determine request cancellation");
+      message_payload->is_cancelled = false;
+    }
 
     message_payload->waiting_on_stub = true;
     message_payload->cv.notify_all();
