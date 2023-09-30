@@ -945,9 +945,7 @@ ModelInstanceState::ProcessIsRequestCancelled(
           message_payload->request_address);
       TRITONBACKEND_RequestIsCancelled(request, &message_payload->is_cancelled);
     } else {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR, "Cannot determine request cancellation");
-      message_payload->is_cancelled = false;
+      throw PythonBackendException("Cannot determine request cancellation");
     }
 
     message_payload->waiting_on_stub = true;
