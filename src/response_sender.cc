@@ -184,4 +184,18 @@ ResponseSender::Send(
     }
   }
 }
+
+bool
+ResponseSender::IsCancelled()
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (!stub->StubToParentServiceActive()) {
+    LOG_ERROR << "Cannot communicate with parent service";
+    return false;
+  }
+  PbCancel pb_cancel(response_factory_address_, request_address_);
+  stub->EnqueueIsCancelled(&pb_cancel);
+  return pb_cancel.IsCancelled();
+}
+
 }}}  // namespace triton::backend::python

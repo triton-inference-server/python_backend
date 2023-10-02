@@ -1585,7 +1585,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       module, "InferenceResponseSender")
       .def(
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
-          py::arg("flags") = 0);
+          py::arg("flags") = 0)
+      .def("is_cancelled", &ResponseSender::IsCancelled);
 
   py::class_<ResponseIterator, std::shared_ptr<ResponseIterator>>(
       module, "ResponseIterator")
