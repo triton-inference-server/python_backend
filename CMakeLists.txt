@@ -150,8 +150,6 @@ set(
   src/pb_error.h
   src/pb_log.cc
   src/pb_log.h
-  src/pb_cancel.cc
-  src/pb_cancel.h
   src/pb_memory.cc
   src/pb_memory.h
   src/pb_tensor.cc
@@ -210,6 +208,8 @@ set(
   src/pb_stub.cc
   src/pb_response_iterator.h
   src/pb_response_iterator.cc
+  src/pb_cancel.cc
+  src/pb_cancel.h
 )
 
 list(APPEND

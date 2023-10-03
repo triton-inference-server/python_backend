@@ -34,6 +34,7 @@
 #include "pb_tensor.h"
 
 #ifdef TRITON_PB_STUB
+#include "pb_cancel.h"
 #include "response_sender.h"
 #endif
 
@@ -108,6 +109,7 @@ class InferRequest {
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
   bool IsCancelled();
+  bool IsCancelledLastResponse();
 #endif
 
   /// Save an Inference Request to shared memory.
@@ -174,6 +176,7 @@ class InferRequest {
   std::unique_ptr<PbString> parameters_shm_;
 
 #ifdef TRITON_PB_STUB
+  std::shared_ptr<PbCancel> pb_cancel_;
   std::shared_ptr<ResponseSender> response_sender_;
 #endif
 };

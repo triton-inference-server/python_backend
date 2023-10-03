@@ -37,10 +37,11 @@ namespace triton { namespace backend { namespace python {
 
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false)
+      closed_(false), pb_cancel_(pb_cancel)
 {
 }
 
@@ -188,14 +189,11 @@ ResponseSender::Send(
 bool
 ResponseSender::IsCancelled()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  if (!stub->StubToParentServiceActive()) {
-    LOG_ERROR << "Cannot communicate with parent service";
-    return false;
+  bool is_cancelled = pb_cancel_->IsCancelled();
+  if (is_cancelled && !closed_) {
+    Send(nullptr, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
   }
-  PbCancel pb_cancel(response_factory_address_, request_address_);
-  stub->EnqueueIsCancelled(&pb_cancel);
-  return pb_cancel.IsCancelled();
+  return is_cancelled;
 }
 
 }}}  // namespace triton::backend::python

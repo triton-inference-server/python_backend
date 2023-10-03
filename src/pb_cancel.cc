@@ -26,6 +26,8 @@
 
 #include "pb_cancel.h"
 
+#include "pb_stub.h"
+
 namespace triton { namespace backend { namespace python {
 
 void
@@ -53,10 +55,30 @@ PbCancel::ShmPayload()
 }
 
 bool
+PbCancel::IsCancelledInternalFlag()
+{
+  return is_cancelled_;
+}
+
+bool
 PbCancel::IsCancelled()
 {
   std::unique_lock<std::mutex> lk(mu_);
-  cv_.wait(lk, [this] { return updated_; });
+  // The cancelled flag can only move from false to true, not the other way, so
+  // it is checked on each query until cancelled and then implicitly cached.
+  if (is_cancelled_) {
+    return is_cancelled_;
+  }
+  if (!updating_) {
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    if (!stub->StubToParentServiceActive()) {
+      LOG_ERROR << "Cannot communicate with parent service";
+      return false;
+    }
+    stub->EnqueueIsCancelled(this);
+    updating_ = true;
+  }
+  cv_.wait(lk, [this] { return !updating_; });
   return is_cancelled_;
 }
 
@@ -66,7 +88,7 @@ PbCancel::ReportIsCancelled(bool is_cancelled)
   {
     std::lock_guard<std::mutex> lk(mu_);
     is_cancelled_ = is_cancelled;
-    updated_ = true;
+    updating_ = false;
   }
   cv_.notify_all();
 }

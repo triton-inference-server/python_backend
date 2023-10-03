@@ -36,7 +36,7 @@ namespace triton { namespace backend { namespace python {
 class PbCancel {
  public:
   PbCancel(intptr_t response_factory_address, intptr_t request_address)
-      : updated_(false), response_factory_address_(response_factory_address),
+      : updating_(false), response_factory_address_(response_factory_address),
         request_address_(request_address), is_cancelled_(false)
   {
   }
@@ -46,6 +46,8 @@ class PbCancel {
   bi::managed_external_buffer::handle_t ShmHandle();
   IsCancelledMessage* ShmPayload();
 
+  bool IsCancelledInternalFlag();
+
   bool IsCancelled();
   void ReportIsCancelled(bool is_cancelled);
 
@@ -54,7 +56,7 @@ class PbCancel {
 
   std::mutex mu_;
   std::condition_variable cv_;
-  bool updated_;
+  bool updating_;
 
   intptr_t response_factory_address_;
   intptr_t request_address_;

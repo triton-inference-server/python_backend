@@ -71,9 +71,11 @@ InferRequest::InferRequest(
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -379,9 +381,11 @@ InferRequest::InferRequest(
   trace_ = infer_request_shm_ptr_->trace;
 
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -403,14 +407,13 @@ InferRequest::DeleteResponseFactory()
 bool
 InferRequest::IsCancelled()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  if (!stub->StubToParentServiceActive()) {
-    LOG_ERROR << "Cannot communicate with parent service";
-    return false;
-  }
-  PbCancel pb_cancel(response_factory_address_, request_address_);
-  stub->EnqueueIsCancelled(&pb_cancel);
-  return pb_cancel.IsCancelled();
+  return pb_cancel_->IsCancelled();
+}
+
+bool
+InferRequest::IsCancelledLastResponse()
+{
+  return pb_cancel_->IsCancelledInternalFlag();
 }
 
 std::shared_ptr<ResponseSender>
