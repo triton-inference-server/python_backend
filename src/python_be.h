@@ -218,6 +218,7 @@ struct BackendState {
   std::string shared_memory_region_prefix;
   int64_t thread_pool_size;
   std::unique_ptr<EnvironmentManager> env_manager;
+  std::string runtime_modeldir;
 };
 
 class ModelState : public BackendModel {
@@ -237,8 +238,8 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
-  // Returns the value in the `py_backend_based_model_` field
-  std::string PythonBackendBasedModel() { return py_backend_based_model_; }
+  // Returns the value in the `runtime_modeldir_` field
+  std::string RuntimeModelDir() { return runtime_modeldir_; }
 
   // Launch auto-complete stub process.
   TRITONSERVER_Error* LaunchAutoCompleteStubProcess();
@@ -255,7 +256,7 @@ class ModelState : public BackendModel {
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
   bool decoupled_;
-  std::string py_backend_based_model_;
+  std::string runtime_modeldir_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
 };
 
