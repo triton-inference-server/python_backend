@@ -1618,6 +1618,8 @@ ModelContext::Init(
 {
   type_ = ModelType::DEFAULT;
   if (runtime_modeldir != "DEFAULT") {
+    // For python based backends, existence of `model.py` in the corresponding
+    // backend folder happens on the core side, so we can omit this check here.
     python_model_path_ = runtime_modeldir + "/model.py";
     type_ = ModelType::BACKEND;
   } else {

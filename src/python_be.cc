@@ -1904,8 +1904,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   backend_state->number_of_instance_inits = 0;
   backend_state->thread_pool_size = 32;
   // Initialize shared memory region prefix to include backend's name
-  // to avoid collision between python backend and python backend based
-  // backends.
+  // to avoid collision between python backend and python-based backends.
   backend_state->shared_memory_region_prefix =
       "triton_" + name + "_backend_shm_region_";
   std::string default_backend_dir_string;
@@ -2068,9 +2067,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     // then we are using a python backend based backend and stub and utils are
     // stored in the default python backend location.
     if (!default_backend_dir_string.empty()) {
-      std::string default_python_backend_dir =
+      std::string backend_stub_path =
           default_backend_dir_string + "/python/triton_python_backend_stub";
-      if (!FileExists(default_python_backend_dir)) {
+      if (!FileExists(backend_stub_path)) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_NOT_FOUND,
             (std::string("triton_python_backend_stub") +

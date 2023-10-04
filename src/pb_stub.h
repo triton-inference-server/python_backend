@@ -181,6 +181,12 @@ class ModelContext {
   std::string python_backend_folder_;
   std::string runtime_modeldir_;
 
+  // Triton supports python-based backends,
+  // i.e. backends that provide common `model.py`, that can be re-used
+  // between different models. `ModelType` helps to differentiate
+  // between models running with c++ python backend (ModelType::DEFAULT)
+  // and models running with python-based backend (ModelType::BACKEND)
+  // at the time of ModelContext::StubSetup to properly set up paths.
   enum ModelType { DEFAULT, BACKEND };
   ModelType type_;
 };
