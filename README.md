@@ -508,10 +508,10 @@ Supported error codes:
 #### Request Cancellation Handling
 
 One or more requests may be cancelled by the client during execution. Starting
-from 23.10, `request.is_cancelled()` returns up-to-date `True` or `False` on
-whether the request is cancelled. If a request is cancelled, the model may
-respond with any dummy object in place of the normal output tensors on the
-request. For example:
+from 23.10, `request.is_cancelled()` returns whether the request is cancelled.
+
+If a request is cancelled, the model may respond with any dummy object in place
+of the normal output tensors on the request. For example:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -576,10 +576,9 @@ object, use InferenceResponseSender.send() to send response with the
 error back to the user.
 
 Starting from 23.10, request cancellation can be checked directly on the
-`InferenceResponseSender` object, for example `response_sender.is_cancelled()`,
-even after the request has gone out-of-scope. If
-`response_sender.is_cancelled()` returned `True`, the
-TRITONSERVER_RESPONSE_COMPLETE_FINAL flag is sent automatically.
+`InferenceResponseSender` object using `response_sender.is_cancelled()`. If
+`response_sender.is_cancelled()` returned `True`, then no further steps are
+needed to be performed on this object.
 
 ##### Use Cases
 
