@@ -575,7 +575,9 @@ object, use InferenceResponseSender.send() to send response with the
 error back to the user.
 
 Starting from 23.10, request cancellation can be checked directly on the
-`InferenceResponseSender` object using `response_sender.is_cancelled()`.
+`InferenceResponseSender` object using `response_sender.is_cancelled()`. Sending
+the TRITONSERVER_RESPONSE_COMPLETE_FINAL flag at the end of response is still
+needed even the request is cancelled.
 
 ##### Use Cases
 
