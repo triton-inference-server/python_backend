@@ -78,6 +78,8 @@ class PbMemory {
 
 #ifdef TRITON_ENABLE_GPU
   void SetCudaIpcHandle(cudaIpcMemHandle_t* cuda_ipc_handle);
+
+  void UpdateCUDAOffset(std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool);
 #endif
 
   // Copy the destination buffer to the source buffer.
@@ -132,6 +134,11 @@ class PbMemory {
   ~PbMemory();
 
 #ifndef TRITON_PB_STUB
+  void SetBackendMemory(std::unique_ptr<BackendMemory>&& backend_memory)
+  {
+    backend_memory_ = std::move(backend_memory);
+  };
+
   std::unique_ptr<BackendMemory> GetBackendMemory()
   {
     return std::move(backend_memory_);
@@ -141,7 +148,6 @@ class PbMemory {
  private:
   AllocatedSharedMemory<char> memory_shm_;
   MemoryShm* memory_shm_ptr_;
-  uint64_t cuda_pool_offset_;
 
 #ifndef TRITON_PB_STUB
   std::unique_ptr<BackendMemory> backend_memory_;
@@ -170,7 +176,7 @@ class PbMemory {
 #endif
 
   static void FillShmData(
-      std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, void** backend_memory,
+      std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);

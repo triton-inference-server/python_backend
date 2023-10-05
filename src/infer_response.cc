@@ -270,11 +270,12 @@ InferResponse::Send(
             static_cast<TRITONSERVER_DataType>(output_tensor->TritonDtype()),
             output_tensor->Dims().data(), output_tensor->Dims().size()));
 
-    void* buffer;
+    void* triton_output_buffer;
     SET_ERROR_AND_RETURN(
-        response_error, TRITONBACKEND_OutputBuffer(
-                            response_output, &buffer, output_tensor->ByteSize(),
-                            &actual_memory_type, &actual_memory_type_id));
+        response_error,
+        TRITONBACKEND_OutputBuffer(
+            response_output, &triton_output_buffer, output_tensor->ByteSize(),
+            &actual_memory_type, &actual_memory_type_id));
 
     bool cuda_used = false;
     TRITONSERVER_BufferAttributes* output_buffer_attributes;
@@ -286,6 +287,37 @@ InferResponse::Send(
     if (src_memory_type == TRITONSERVER_MEMORY_GPU &&
         actual_memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
+      // Check if the triton-provided output buffer is using CUDA shared memory
+      // pool. If not, try to allocate a new buffer from the pool.
+      void* buffer = triton_output_buffer;
+      BackendMemory* backend_memory;
+      std::unique_ptr<BackendMemory> lbackend_memory;
+      std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool =
+          shm_pool->GetCUDAMemoryPoolManager();
+      if (cuda_pool->UseCudaSharedPool(src_memory_type_id)) {
+        try {
+          if (!IsUsingCUDAPool(
+                  cuda_pool, actual_memory_type_id, triton_output_buffer)) {
+            THROW_IF_TRITON_ERROR(BackendMemory::Create(
+                reinterpret_cast<TRITONBACKEND_MemoryManager*>(
+                    shm_pool->GetCUDAMemoryPoolManager()
+                        ->TritonMemoryManager()),
+                BackendMemory::AllocationType::GPU_POOL, actual_memory_type_id,
+                output_tensor->ByteSize(), &backend_memory));
+            lbackend_memory.reset(backend_memory);
+            buffer = lbackend_memory->MemoryPtr();
+          }
+        }
+        catch (const PythonBackendException& pb_exception) {
+          LOG_MESSAGE(
+              TRITONSERVER_LOG_WARN,
+              (std::string("Failed to allocate memory from CUDA memory pool "
+                           "for output tensor: ") +
+               pb_exception.what() +
+               std::string(", will use CUDA IPC for GPU output transfer."))
+                  .c_str());
+        }
+      }
       cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
       SET_ERROR_AND_RETURN(
           response_error,
@@ -309,8 +341,13 @@ InferResponse::Send(
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
                 true /* copy_gpu */));
       }
+
+      if (lbackend_memory != nullptr) {
+        output_buffer->SetBackendMemory(std::move(lbackend_memory));
+      }
       gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
-      output_buffers.push_back({std::move(output_buffer), buffer});
+      output_buffers.push_back(
+          {std::move(output_buffer), triton_output_buffer});
 #endif
     }
 
@@ -325,7 +362,8 @@ InferResponse::Send(
               output_tensor->ByteSize(), nullptr /* data ptr */));
 
       gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
-      output_buffers.push_back({std::move(output_buffer), buffer});
+      output_buffers.push_back(
+          {std::move(output_buffer), triton_output_buffer});
     }
 
     if (src_memory_type != TRITONSERVER_MEMORY_GPU) {
@@ -334,8 +372,9 @@ InferResponse::Send(
           CopyBuffer(
               "Failed to copy the output tensor to buffer.", src_memory_type,
               src_memory_type_id, actual_memory_type, actual_memory_type_id,
-              output_tensor->ByteSize(), output_tensor->DataPtr(), buffer,
-              reinterpret_cast<cudaStream_t>(cuda_stream), &cuda_used));
+              output_tensor->ByteSize(), output_tensor->DataPtr(),
+              triton_output_buffer, reinterpret_cast<cudaStream_t>(cuda_stream),
+              &cuda_used));
     }
 
     cuda_copy |= cuda_used;

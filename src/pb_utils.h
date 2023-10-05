@@ -316,6 +316,11 @@ class ScopedSetDevice {
   int current_device_;
 };
 
+// Check if the data is allocated from the pool by the base address.
+bool IsUsingCUDAPool(
+    std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, int64_t memory_type_id,
+    void* data);
+
 #endif  // TRITON_ENABLE_GPU
 
 #ifndef TRITON_PB_STUB

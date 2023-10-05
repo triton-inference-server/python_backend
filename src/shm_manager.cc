@@ -47,7 +47,9 @@ CUDAMemoryPoolManager::CUDAPoolAddress(const int32_t device_id)
   if (cuda_pool_address_map_.find(device_id) != cuda_pool_address_map_.end()) {
     return cuda_pool_address_map_[device_id];
   } else {
-    return nullptr;
+    throw PythonBackendException(
+        "CUDA pool address for device " + std::to_string(device_id) +
+        " is not set.");
   }
 }
 
