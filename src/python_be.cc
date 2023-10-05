@@ -2044,7 +2044,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
   // are located under `location`.
   // DLIS-5596: Add forward slash to be platform agnostic
-  // (i.e., for Windows we need to use backward slash).
+  // (i.e. For Windows, we need to use backward slash).
   std::string default_python_backend_dir =
       default_backend_dir_string + "/python";
   std::string backend_stub_path =
