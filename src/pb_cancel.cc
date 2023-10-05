@@ -55,12 +55,6 @@ PbCancel::ShmPayload()
 }
 
 bool
-PbCancel::IsCancelledInternalFlag()
-{
-  return is_cancelled_;
-}
-
-bool
 PbCancel::IsCancelled()
 {
   std::unique_lock<std::mutex> lk(mu_);

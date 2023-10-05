@@ -109,7 +109,6 @@ class InferRequest {
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
   bool IsCancelled();
-  bool IsCancelledLastResponse();
 #endif
 
   /// Save an Inference Request to shared memory.

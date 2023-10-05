@@ -771,17 +771,10 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
           std::to_string(response_size) + "\n";
       throw PythonBackendException(err);
     }
-    for (size_t i = 0; i < response_size; i++) {
-      // If the model has checked for cancellation and the request is cancelled,
-      // replace returned type with a cancelled response.
-      if (py_request_list[i].cast<InferRequest*>()->IsCancelledLastResponse()) {
-        responses[i] = std::make_shared<InferResponse>(
-            std::vector<std::shared_ptr<PbTensor>>{},
-            std::make_shared<PbError>("", TRITONSERVER_ERROR_CANCELLED));
-      }
+    for (auto& response : responses) {
       // Check the return type of execute function.
-      else if (!py::isinstance<InferResponse>(responses[i])) {
-        std::string str = py::str(responses[i].get_type());
+      if (!py::isinstance<InferResponse>(response)) {
+        std::string str = py::str(response.get_type());
         throw PythonBackendException(
             std::string("Expected an 'InferenceResponse' object in the execute "
                         "function return list, found type '") +

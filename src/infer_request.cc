@@ -410,12 +410,6 @@ InferRequest::IsCancelled()
   return pb_cancel_->IsCancelled();
 }
 
-bool
-InferRequest::IsCancelledLastResponse()
-{
-  return pb_cancel_->IsCancelledInternalFlag();
-}
-
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
 {

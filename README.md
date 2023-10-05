@@ -508,10 +508,8 @@ Supported error codes:
 #### Request Cancellation Handling
 
 One or more requests may be cancelled by the client during execution. Starting
-from 23.10, `request.is_cancelled()` returns whether the request is cancelled.
-
-If a request is cancelled, the model may respond with any dummy object in place
-of the normal output tensors on the request. For example:
+from 23.10, `request.is_cancelled()` returns whether the request is cancelled or
+not. For example:
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -524,7 +522,8 @@ class TritonPythonModel:
 
         for request in requests:
             if request.is_cancelled():
-                responses.append(None)
+                responses.append(pb_utils.InferenceResponse(
+                    error=pb_utils.TritonError("Message", pb_utils.TritonError.CANCELLED)))
             else:
                 ...
 
@@ -599,8 +598,6 @@ The [decoupled examples](examples/decoupled/README.md) demonstrate
 full power of what can be achieved from decoupled API. Read
 [Decoupled Backends and Models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/decoupled_models.md)
 for more details on how to host a decoupled model.
-
-#####
 
 ##### Known Issues
 

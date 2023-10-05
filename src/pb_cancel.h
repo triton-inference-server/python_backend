@@ -46,8 +46,6 @@ class PbCancel {
   bi::managed_external_buffer::handle_t ShmHandle();
   IsCancelledMessage* ShmPayload();
 
-  bool IsCancelledInternalFlag();
-
   bool IsCancelled();
   void ReportIsCancelled(bool is_cancelled);
 
