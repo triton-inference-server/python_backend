@@ -189,11 +189,7 @@ ResponseSender::Send(
 bool
 ResponseSender::IsCancelled()
 {
-  bool is_cancelled = pb_cancel_->IsCancelled();
-  if (is_cancelled && !closed_) {
-    Send(nullptr, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
-  }
-  return is_cancelled;
+  return pb_cancel_->IsCancelled();
 }
 
 }}}  // namespace triton::backend::python
