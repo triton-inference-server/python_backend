@@ -65,7 +65,8 @@ FetchContent_Declare(
 )
 FetchContent_Declare(
   repo-core
-  GIT_REPOSITORY https://github.com/triton-inference-server/core.git
+  #GIT_REPOSITORY https://github.com/triton-inference-server/core.git
+  GIT_REPOSITORY oandreeva@172.17.0.1:/home/oandreeva/Code/core
   GIT_TAG ${TRITON_CORE_REPO_TAG}
 )
 FetchContent_Declare(
@@ -305,13 +306,6 @@ install(
     TritonPythonBackend::
   DESTINATION
     ${INSTALL_CONFIGDIR}
-)
-
-install(
-  DIRECTORY
-    src/resources/platform_handlers
-  DESTINATION
-    ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(
