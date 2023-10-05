@@ -625,33 +625,16 @@ ModelInstanceState::GetInputTensor(
       void* dev_ptr;
       BackendMemory* backend_memory;
       std::unique_ptr<BackendMemory> lbackend_memory;
-      try {
-        THROW_IF_TRITON_ERROR(BackendMemory::Create(
-            reinterpret_cast<TRITONBACKEND_MemoryManager*>(
-                Stub()
-                    ->ShmPool()
-                    ->GetCUDAMemoryPoolManager()
-                    ->TritonMemoryManager()),
-            BackendMemory::AllocationType::GPU_POOL, src_memory_type_id,
-            input_byte_size, &backend_memory));
-      }
-      catch (const PythonBackendException& pb_exception) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_WARN,
-            (std::string("Failed to allocate memory from CUDA memory pool: ") +
-             pb_exception.what() +
-             ". Using cudaMalloc to allocate memory for input tensor.")
-                .c_str());
+      RETURN_IF_ERROR(BackendMemory::Create(
+          reinterpret_cast<TRITONBACKEND_MemoryManager*>(
+              Stub()
+                  ->ShmPool()
+                  ->GetCUDAMemoryPoolManager()
+                  ->TritonMemoryManager()),
+          {BackendMemory::AllocationType::GPU_POOL,
+           BackendMemory::AllocationType::GPU},
+          src_memory_type_id, input_byte_size, &backend_memory));
 
-        RETURN_IF_ERROR(BackendMemory::Create(
-            reinterpret_cast<TRITONBACKEND_MemoryManager*>(
-                Stub()
-                    ->ShmPool()
-                    ->GetCUDAMemoryPoolManager()
-                    ->TritonMemoryManager()),
-            BackendMemory::AllocationType::GPU, src_memory_type_id,
-            input_byte_size, &backend_memory));
-      }
       dev_ptr = backend_memory->MemoryPtr();
       lbackend_memory.reset(backend_memory);
 
