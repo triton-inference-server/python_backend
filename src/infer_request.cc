@@ -71,9 +71,11 @@ InferRequest::InferRequest(
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -379,9 +381,11 @@ InferRequest::InferRequest(
   trace_ = infer_request_shm_ptr_->trace;
 
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -400,6 +404,12 @@ InferRequest::DeleteResponseFactory()
 #endif
 
 #ifdef TRITON_PB_STUB
+bool
+InferRequest::IsCancelled()
+{
+  return pb_cancel_->IsCancelled();
+}
+
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
 {

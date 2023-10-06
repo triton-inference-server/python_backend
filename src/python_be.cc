@@ -817,6 +817,10 @@ ModelInstanceState::StubToParentMQMonitor()
         ProcessBLSCleanupRequest(message);
         break;
       }
+      case PYTHONSTUB_IsRequestCancelled: {
+        ProcessIsRequestCancelled(message);
+        break;
+      }
       case PYTHONSTUB_MetricFamilyRequestNew:
       case PYTHONSTUB_MetricFamilyRequestDelete: {
         ProcessMetricFamilyRequest(message);
@@ -915,6 +919,40 @@ ModelInstanceState::ProcessBLSCleanupRequest(
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
     cleanup_message_ptr->waiting_on_stub = true;
     message->ResponseCondition()->notify_all();
+  }
+}
+
+void
+ModelInstanceState::ProcessIsRequestCancelled(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  AllocatedSharedMemory<IsCancelledMessage> message_shm =
+      Stub()->ShmPool()->Load<IsCancelledMessage>(message->Args());
+  IsCancelledMessage* message_payload =
+      reinterpret_cast<IsCancelledMessage*>(message_shm.data_.get());
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lk{message_payload->mu};
+
+    if (message_payload->response_factory_address != 0) {
+      TRITONBACKEND_ResponseFactory* response_factory =
+          reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              message_payload->response_factory_address);
+      TRITONBACKEND_ResponseFactoryIsCancelled(
+          response_factory, &message_payload->is_cancelled);
+    } else if (message_payload->request_address != 0) {
+      TRITONBACKEND_Request* request = reinterpret_cast<TRITONBACKEND_Request*>(
+          message_payload->request_address);
+      TRITONBACKEND_RequestIsCancelled(request, &message_payload->is_cancelled);
+    } else {
+      throw PythonBackendException("Cannot determine request cancellation");
+    }
+
+    message_payload->waiting_on_stub = true;
+    message_payload->cv.notify_all();
+    while (message_payload->waiting_on_stub) {
+      message_payload->cv.wait(lk);
+    }
   }
 }
 

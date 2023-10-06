@@ -1,4 +1,4 @@
-// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -37,10 +37,11 @@ namespace triton { namespace backend { namespace python {
 
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false)
+      closed_(false), pb_cancel_(pb_cancel)
 {
 }
 
@@ -184,4 +185,11 @@ ResponseSender::Send(
     }
   }
 }
+
+bool
+ResponseSender::IsCancelled()
+{
+  return pb_cancel_->IsCancelled();
+}
+
 }}}  // namespace triton::backend::python

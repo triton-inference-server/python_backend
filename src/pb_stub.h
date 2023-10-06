@@ -49,6 +49,7 @@
 #include "message_queue.h"
 #include "metric.h"
 #include "metric_family.h"
+#include "pb_cancel.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
@@ -307,6 +308,12 @@ class Stub {
 
   /// Add cleanup id to queue
   void EnqueueCleanupId(void* id);
+
+  /// Add request cancellation query to queue
+  void EnqueueIsCancelled(PbCancel* pb_cancel);
+
+  /// Send request cancellation query to python backend
+  void SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Is the stub initialized
   bool IsInitialized();
