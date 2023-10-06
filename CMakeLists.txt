@@ -208,6 +208,8 @@ set(
   src/pb_stub.cc
   src/pb_response_iterator.h
   src/pb_response_iterator.cc
+  src/pb_cancel.cc
+  src/pb_cancel.h
 )
 
 list(APPEND

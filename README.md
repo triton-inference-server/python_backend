@@ -46,6 +46,7 @@ any C++ code.
     - [`execute`](#execute)
       - [Default Mode](#default-mode)
       - [Error Handling](#error-handling)
+      - [Request Cancellation Handling](#request-cancellation-handling)
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
         - [Known Issues](#known-issues)
@@ -502,6 +503,36 @@ Supported error codes:
 * `pb_utils.TritonError.UNAVAILABLE`
 * `pb_utils.TritonError.UNSUPPORTED`
 * `pb_utils.TritonError.ALREADY_EXISTS`
+* `pb_utils.TritonError.CANCELLED` (since 23.10)
+
+#### Request Cancellation Handling
+
+One or more requests may be cancelled by the client during execution. Starting
+from 23.10, `request.is_cancelled()` returns whether the request is cancelled or
+not. For example:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    ...
+
+    def execute(self, requests):
+        responses = []
+
+        for request in requests:
+            if request.is_cancelled():
+                responses.append(pb_utils.InferenceResponse(
+                    error=pb_utils.TritonError("Message", pb_utils.TritonError.CANCELLED)))
+            else:
+                ...
+
+        return responses
+```
+
+Although checking for request cancellation is optional, it is recommended to
+check for cancellation at strategic request execution stages that can early
+terminate the execution in the event of its response is no longer needed.
 
 #### Decoupled mode
 
@@ -542,6 +573,11 @@ the `TritonError` object to set the error message for that specific
 request. After setting errors for an pb_utils.InferenceResponse
 object, use InferenceResponseSender.send() to send response with the
 error back to the user.
+
+Starting from 23.10, request cancellation can be checked directly on the
+`InferenceResponseSender` object using `response_sender.is_cancelled()`. Sending
+the TRITONSERVER_RESPONSE_COMPLETE_FINAL flag at the end of response is still
+needed even the request is cancelled.
 
 ##### Use Cases
 

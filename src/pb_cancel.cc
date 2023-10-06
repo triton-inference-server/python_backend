@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,28 +24,67 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-
-#include "infer_response.h"
 #include "pb_cancel.h"
-#include "shm_manager.h"
+
+#include "pb_stub.h"
 
 namespace triton { namespace backend { namespace python {
 
-class ResponseSender {
- public:
-  ResponseSender(
-      intptr_t request_address, intptr_t response_factory_address,
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      const std::shared_ptr<PbCancel>& pb_cancel);
-  void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
-  bool IsCancelled();
+void
+PbCancel::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+{
+  cancel_shm_ = shm_pool->Construct<IsCancelledMessage>();
+  new (&(cancel_shm_.data_->mu)) bi::interprocess_mutex;
+  new (&(cancel_shm_.data_->cv)) bi::interprocess_condition;
+  cancel_shm_.data_->waiting_on_stub = false;
+  cancel_shm_.data_->response_factory_address = response_factory_address_;
+  cancel_shm_.data_->request_address = request_address_;
+  cancel_shm_.data_->is_cancelled = is_cancelled_;
+}
 
- private:
-  intptr_t request_address_;
-  intptr_t response_factory_address_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
-  bool closed_;
-  std::shared_ptr<PbCancel> pb_cancel_;
-};
+bi::managed_external_buffer::handle_t
+PbCancel::ShmHandle()
+{
+  return cancel_shm_.handle_;
+}
+
+IsCancelledMessage*
+PbCancel::ShmPayload()
+{
+  return cancel_shm_.data_.get();
+}
+
+bool
+PbCancel::IsCancelled()
+{
+  std::unique_lock<std::mutex> lk(mu_);
+  // The cancelled flag can only move from false to true, not the other way, so
+  // it is checked on each query until cancelled and then implicitly cached.
+  if (is_cancelled_) {
+    return is_cancelled_;
+  }
+  if (!updating_) {
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    if (!stub->StubToParentServiceActive()) {
+      LOG_ERROR << "Cannot communicate with parent service";
+      return false;
+    }
+    stub->EnqueueIsCancelled(this);
+    updating_ = true;
+  }
+  cv_.wait(lk, [this] { return !updating_; });
+  return is_cancelled_;
+}
+
+void
+PbCancel::ReportIsCancelled(bool is_cancelled)
+{
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    is_cancelled_ = is_cancelled;
+    updating_ = false;
+  }
+  cv_.notify_all();
+}
+
 }}}  // namespace triton::backend::python

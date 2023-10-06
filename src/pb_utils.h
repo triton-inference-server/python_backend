@@ -182,6 +182,12 @@ struct CleanupMessage : SendMessageBase {
   void* id;
 };
 
+struct IsCancelledMessage : SendMessageBase {
+  intptr_t response_factory_address;
+  intptr_t request_address;
+  bool is_cancelled;
+};
+
 struct CustomMetricsMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t message;
   bool has_error;
