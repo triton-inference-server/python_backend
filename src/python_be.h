@@ -395,6 +395,9 @@ class ModelInstanceState : public BackendModelInstance {
   // Process the bls decoupled cleanup request
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
+  // Process request cancellation query
+  void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);
+
   // Process a message. The function 'request_handler' is invoked
   // to handle the request. T should be either 'MetricFamily', 'Metric' or
   // 'ModelLoader', and MessageType should be either 'MetricFamilyMessage',

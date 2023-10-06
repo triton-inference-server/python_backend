@@ -946,6 +946,9 @@ Stub::ServiceStubToParentRequests()
         SendLogMessage(utils_msg_payload);
       } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
         SendCleanupId(utils_msg_payload);
+      } else if (
+          utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
+        SendIsCancelled(utils_msg_payload);
       } else {
         std::cerr << "Error when sending message via stub_to_parent message "
                      "buffer - unknown command\n";
@@ -1027,6 +1030,44 @@ Stub::EnqueueCleanupId(void* id)
         std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
     EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
+}
+
+void
+Stub::EnqueueIsCancelled(PbCancel* pb_cancel)
+{
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+      std::make_unique<UtilsMessagePayload>(
+          PYTHONSTUB_IsRequestCancelled, reinterpret_cast<void*>(pb_cancel));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
+}
+
+void
+Stub::SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
+{
+  PbCancel* pb_cancel =
+      reinterpret_cast<PbCancel*>(utils_msg_payload->utils_message_ptr);
+  pb_cancel->SaveToSharedMemory(shm_pool_);
+
+  IsCancelledMessage* message_payload = pb_cancel->ShmPayload();
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = utils_msg_payload->command_type;
+  ipc_message->Args() = pb_cancel->ShmHandle();
+
+  bool is_cancelled = false;
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lk(message_payload->mu);
+
+    SendIPCUtilsMessage(ipc_message);
+    while (!message_payload->waiting_on_stub) {
+      message_payload->cv.wait(lk);
+    }
+
+    is_cancelled = message_payload->is_cancelled;
+    message_payload->waiting_on_stub = false;
+    message_payload->cv.notify_all();
+  }
+  pb_cancel->ReportIsCancelled(is_cancelled);
 }
 
 bool
@@ -1365,6 +1406,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .value(
           "ALREADY_EXISTS",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_ALREADY_EXISTS)
+      .value("CANCELLED", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_CANCELLED)
       .export_values();
   triton_error.def_property_readonly_static(
       "UNKNOWN",
@@ -1387,6 +1429,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   triton_error.def_property_readonly_static(
       "ALREADY_EXISTS",
       [](py::object /* self */) { return TRITONSERVER_ERROR_ALREADY_EXISTS; });
+  triton_error.def_property_readonly_static(
+      "CANCELLED",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_CANCELLED; });
   triton_error.def(
       py::init<const std::string&, TRITONSERVER_Error_Code>(),
       py::arg("message").none(false),
@@ -1502,7 +1547,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
-      .def("get_response_sender", &InferRequest::GetResponseSender);
+      .def("get_response_sender", &InferRequest::GetResponseSender)
+      .def("is_cancelled", &InferRequest::IsCancelled);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
@@ -1540,7 +1586,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       module, "InferenceResponseSender")
       .def(
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
-          py::arg("flags") = 0);
+          py::arg("flags") = 0)
+      .def("is_cancelled", &ResponseSender::IsCancelled);
 
   py::class_<ResponseIterator, std::shared_ptr<ResponseIterator>>(
       module, "ResponseIterator")
