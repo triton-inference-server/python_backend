@@ -74,7 +74,7 @@ ResponseSender::Send(
 
   AllocatedSharedMemory<ResponseSendMessage> response_send_message =
       shm_pool_->Construct<ResponseSendMessage>(
-          1 /* count */, true /* aligned */);
+          1 /* count */, true /* aligned */, "[ResponseSenderMessage]");
 
   if (infer_response) {
     infer_response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
@@ -134,12 +134,13 @@ ResponseSender::Send(
   if (has_gpu_output) {
     AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_handle =
         shm_pool_->Load<GPUBuffersShm>(
-            send_message_payload->gpu_buffers_handle);
+            send_message_payload->gpu_buffers_handle, false, "[GpuBufferShm]");
 
     AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
         gpu_buffers_handle_shm =
             shm_pool_->Load<bi::managed_external_buffer::handle_t>(
-                gpu_buffers_handle.data_->buffers);
+                gpu_buffers_handle.data_->buffers, false,
+                "[GpuBufferHandleShm]");
     uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
     if (gpu_tensors.size() != gpu_buffer_count) {
       LOG_ERROR

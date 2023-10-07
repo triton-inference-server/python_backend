@@ -282,7 +282,9 @@ ModelInstanceState::SaveRequestsToSharedMemory(
   RETURN_IF_EXCEPTION(
       request_batch = Stub()->ShmPool()->Construct<char>(
           sizeof(RequestBatch) +
-          request_count * sizeof(bi::managed_external_buffer::handle_t)));
+              request_count * sizeof(bi::managed_external_buffer::handle_t),
+          false /* aligned */, "[RequestBatch]"));
+
 
   RequestBatch* request_batch_shm_ptr =
       reinterpret_cast<RequestBatch*>(request_batch.data_.get());
@@ -629,8 +631,8 @@ ModelInstanceState::ExecuteBLSRequest(
     bls_response =
         IPCMessage::Create(Stub()->ShmPool(), false /* inline_response */);
 
-    AllocatedSharedMemory<char> request_batch =
-        Stub()->ShmPool()->Load<char>(ipc_message->Args());
+    AllocatedSharedMemory<char> request_batch = Stub()->ShmPool()->Load<char>(
+        ipc_message->Args(), false /* aligned */, "[RequestBatch]");
     RequestBatch* request_batch_shm_ptr =
         reinterpret_cast<RequestBatch*>(request_batch.data_.get());
 
@@ -850,7 +852,8 @@ ModelInstanceState::ProcessLogRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
   AllocatedSharedMemory<LogSendMessage> log_message_response =
-      Stub()->ShmPool()->Load<LogSendMessage>(message->Args());
+      Stub()->ShmPool()->Load<LogSendMessage>(
+          message->Args(), false, "[LogSendMessage]");
   std::unique_ptr<PbLog> pb_log_message =
       PbLogShm::LoadFromSharedMemory(Stub()->ShmPool(), message->Args());
 
@@ -904,7 +907,7 @@ ModelInstanceState::ProcessBLSCleanupRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
   AllocatedSharedMemory<char> cleanup_request_message =
-      Stub()->ShmPool()->Load<char>(message->Args());
+      Stub()->ShmPool()->Load<char>(message->Args(), false, "[CleanupMessage]");
   CleanupMessage* cleanup_message_ptr =
       reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
 
@@ -925,7 +928,8 @@ ModelInstanceState::ProcessMessage(
     std::function<void(std::unique_ptr<T>&, MessageType*)> request_handler)
 {
   AllocatedSharedMemory<MessageType> message =
-      Stub()->ShmPool()->Load<MessageType>(ipc_message->Args());
+      Stub()->ShmPool()->Load<MessageType>(
+          ipc_message->Args(), false, "[MessageType]");
   MessageType* message_ptr =
       reinterpret_cast<MessageType*>(message.data_.get());
   std::unique_ptr<PbString> pb_error_message;
@@ -1079,7 +1083,7 @@ ModelInstanceState::ResponseSendDecoupled(
 {
   AllocatedSharedMemory<ResponseSendMessage> send_message =
       Stub()->ShmPool()->Load<ResponseSendMessage>(
-          response_send_message->Args());
+          response_send_message->Args(), false, "[ResponseSenderMessage]");
 
   ResponseSendMessage* send_message_payload =
       reinterpret_cast<ResponseSendMessage*>(send_message.data_.get());
@@ -1212,9 +1216,14 @@ ModelInstanceState::ProcessRequestsDecoupled(
   AllocatedSharedMemory<char> request_batch;
   std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses;
 
+  std::stringstream ss;
+  ss << "[ProcessRequestsDecoupled] Saving request_batch to shared memory: "
+     << static_cast<void*>(&request_batch);
+  LOG_MESSAGE(TRITONSERVER_LOG_ERROR, ss.str().c_str());
   RETURN_IF_ERROR(SaveRequestsToSharedMemory(
       requests, request_count, pb_inference_requests, request_batch,
       responses));
+
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
@@ -1239,7 +1248,8 @@ ModelInstanceState::ProcessRequestsDecoupled(
   }
 
   AllocatedSharedMemory<ResponseBatch> response_batch =
-      Stub()->ShmPool()->Load<ResponseBatch>(received_message_->Args());
+      Stub()->ShmPool()->Load<ResponseBatch>(
+          received_message_->Args(), false, "[ResponseBatch]");
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
@@ -1403,7 +1413,8 @@ ModelInstanceState::ProcessRequests(
   AllocatedSharedMemory<char> response_batch;
   RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
       responses, request_count,
-      response_batch = Stub()->ShmPool()->Load<char>(ipc_message->Args()));
+      response_batch = Stub()->ShmPool()->Load<char>(
+          ipc_message->Args(), false, "[ResponseBatch]"));
 
   ResponseBatch* response_batch_shm_ptr =
       reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
@@ -1579,7 +1590,8 @@ ModelInstanceState::PrepareResponseBatch(
     bi::managed_external_buffer::handle_t** response_handle)
 {
   response_batch_shm = Stub()->ShmPool()->Construct<char>(
-      sizeof(ResponseBatch) + sizeof(bi::managed_external_buffer::handle_t));
+      sizeof(ResponseBatch) + sizeof(bi::managed_external_buffer::handle_t),
+      false /* aligned */, "[ResponseBatch]");
   *response_batch =
       reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
   (*ipc_message)->Args() = response_batch_shm.handle_;

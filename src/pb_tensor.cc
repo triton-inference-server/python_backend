@@ -531,7 +531,8 @@ PbTensor::SaveToSharedMemory(
       byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
                   PbString::ShmStructSize(name_);
     }
-    tensor_shm_ = shm_pool->Construct<char>(byte_size);
+    tensor_shm_ = shm_pool->Construct<char>(
+        byte_size, false /* aligned */, "[TensorShm]");
 
     tensor_shm_ptr_ = reinterpret_cast<TensorShm*>(tensor_shm_.data_.get());
     tensor_shm_ptr_->dtype = dtype_;
@@ -573,7 +574,8 @@ PbTensor::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t tensor_handle, bool open_cuda_handle)
 {
-  AllocatedSharedMemory<char> tensor_shm = shm_pool->Load<char>(tensor_handle);
+  AllocatedSharedMemory<char> tensor_shm =
+      shm_pool->Load<char>(tensor_handle, false, "[TensorShm]");
   TensorShm* tensor_shm_ptr =
       reinterpret_cast<TensorShm*>(tensor_shm.data_.get());
   size_t name_offset =

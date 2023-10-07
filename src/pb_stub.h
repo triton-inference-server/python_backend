@@ -380,7 +380,8 @@ template <typename MessageType>
 void
 Stub::PrepareMessage(AllocatedSharedMemory<MessageType>& msg_shm)
 {
-  msg_shm = shm_pool_->Construct<MessageType>();
+  msg_shm = shm_pool_->Construct<MessageType>(
+      1 /* count */, false /* aligned */, "[MessageType]");
   MessageType* msg = msg_shm.data_.get();
   new (&(msg->mu)) bi::interprocess_mutex;
   new (&(msg->cv)) bi::interprocess_condition;

@@ -34,11 +34,12 @@ PbMap::Create(
     std::unordered_map<std::string, std::string>& map)
 {
   std::vector<std::unique_ptr<PbString>> strings;
-  AllocatedSharedMemory<DictShm> dict_shm = shm_pool->Construct<DictShm>();
+  AllocatedSharedMemory<DictShm> dict_shm = shm_pool->Construct<DictShm>(
+      1 /* count */, false /* aligned */, "[DictShm]");
   dict_shm.data_->length = map.size();
 
-  AllocatedSharedMemory<PairShm> pair_shms =
-      shm_pool->Construct<PairShm>(map.size());
+  AllocatedSharedMemory<PairShm> pair_shms = shm_pool->Construct<PairShm>(
+      map.size(), false /* aligned */, "[PairShm]");
   dict_shm.data_->values = pair_shms.handle_;
 
   size_t i = 0;
@@ -74,9 +75,10 @@ PbMap::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
 {
-  AllocatedSharedMemory<DictShm> dict_shm = shm_pool->Load<DictShm>(handle);
+  AllocatedSharedMemory<DictShm> dict_shm =
+      shm_pool->Load<DictShm>(handle, false, "[DictShm]");
   AllocatedSharedMemory<PairShm> pair_shms =
-      shm_pool->Load<PairShm>(dict_shm.data_->values);
+      shm_pool->Load<PairShm>(dict_shm.data_->values, false, "[PairShm]");
 
   std::vector<std::unique_ptr<PbString>> pb_strings;
   std::unordered_map<std::string, std::string> map;

@@ -224,7 +224,8 @@ Stub::RunCommand()
       std::unique_ptr<PbString> error_string_shm;
       std::unique_ptr<PbString> auto_complete_config_shm;
       AllocatedSharedMemory<AutoCompleteResponseShm> auto_complete_response =
-          shm_pool_->Construct<AutoCompleteResponseShm>();
+          shm_pool_->Construct<AutoCompleteResponseShm>(
+              1 /* count */, false /* aligned */, "[AutoCompleteResponseShm]");
 
       ScopedDefer receive_autocomplete_finalize(
           [this] { stub_message_queue_->Pop(); });
@@ -287,7 +288,8 @@ Stub::RunCommand()
       initialize_response_msg->Command() = PYTHONSTUB_InitializeResponse;
       std::unique_ptr<PbString> error_string_shm;
       AllocatedSharedMemory<InitializeResponseShm> initialize_response =
-          shm_pool_->Construct<InitializeResponseShm>();
+          shm_pool_->Construct<InitializeResponseShm>(
+              1 /* count */, false /* aligned */, "[InitializeResponseShm]");
 
       // The initialization is done in three steps. First the main process sends
       // a message to the stub process asking to begin to initialize the Python
@@ -619,8 +621,10 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
       IPCMessage::Create(shm_pool_, false /* Inline response */);
   execute_response->Command() = PYTHONSTUB_ExecuteResponse;
 
+  // TODO: check out?
   AllocatedSharedMemory<ResponseBatch> response_batch =
-      shm_pool_->Construct<ResponseBatch>();
+      shm_pool_->Construct<ResponseBatch>(
+          1 /* count */, false /* aligned */, "[ResponseBatch]");
   ResponseBatch* response_batch_shm_ptr =
       reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
   execute_response->Args() = response_batch.handle_;
@@ -687,8 +691,9 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 
   AllocatedSharedMemory<char> response_batch = shm_pool_->Construct<char>(
       request_batch_shm_ptr->batch_size *
-          sizeof(bi::managed_external_buffer::handle_t) +
-      sizeof(ResponseBatch));
+              sizeof(bi::managed_external_buffer::handle_t) +
+          sizeof(ResponseBatch),
+      false /* aligned */, "[ResponseBatch]");
   ResponseBatch* response_batch_shm_ptr =
       reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
 
@@ -1001,7 +1006,8 @@ Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
   AllocatedSharedMemory<char> cleanup_request_message =
       shm_pool_->Construct<char>(
           sizeof(CleanupMessage) +
-          sizeof(bi::managed_external_buffer::handle_t));
+              sizeof(bi::managed_external_buffer::handle_t),
+          false /* aligned */, "[CleanupMessage]");
   CleanupMessage* cleanup_message_ptr =
       reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
   cleanup_message_ptr->id = id;

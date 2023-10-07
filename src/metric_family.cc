@@ -73,7 +73,8 @@ void
 MetricFamily::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<MetricFamilyShm> custom_metric_family_shm =
-      shm_pool->Construct<MetricFamilyShm>();
+      shm_pool->Construct<MetricFamilyShm>(
+          1 /* count */, false /* aligned */, "[MetricFamilyShm]");
 
   custom_metric_family_shm_ptr_ = custom_metric_family_shm.data_.get();
   std::unique_ptr<PbString> name_shm = PbString::Create(shm_pool, name_);
@@ -99,7 +100,7 @@ MetricFamily::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<MetricFamilyShm> custom_metric_family_shm =
-      shm_pool->Load<MetricFamilyShm>(handle);
+      shm_pool->Load<MetricFamilyShm>(handle, false, "[MetricFamilyShm]");
   MetricFamilyShm* custom_metric_family_shm_ptr =
       custom_metric_family_shm.data_.get();
   std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(

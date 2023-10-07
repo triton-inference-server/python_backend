@@ -178,12 +178,13 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<char> infer_request_shm = shm_pool->Construct<char>(
       sizeof(InferRequestShm) +
-      (RequestedOutputNames().size() *
-       sizeof(bi::managed_external_buffer::handle_t)) +
-      (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t)) +
-      PbString::ShmStructSize(ModelName()) +
-      PbString::ShmStructSize(RequestId()) +
-      PbString::ShmStructSize(Parameters()));
+          (RequestedOutputNames().size() *
+           sizeof(bi::managed_external_buffer::handle_t)) +
+          (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t)) +
+          PbString::ShmStructSize(ModelName()) +
+          PbString::ShmStructSize(RequestId()) +
+          PbString::ShmStructSize(Parameters()),
+      false /* aligned */, "[InferRequestShm]");
 
   infer_request_shm_ptr_ =
       reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
@@ -268,8 +269,8 @@ InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t request_handle, bool open_cuda_handle)
 {
-  AllocatedSharedMemory<char> infer_request_shm =
-      shm_pool->Load<char>(request_handle);
+  AllocatedSharedMemory<char> infer_request_shm = shm_pool->Load<char>(
+      request_handle, false /* aligned */, "[InferRequestShm]");
   InferRequestShm* infer_request_shm_ptr =
       reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
 
@@ -453,7 +454,8 @@ InferRequest::Exec(const bool is_decoupled)
     }
 
     request_batch = shm_pool->Construct<char>(
-        sizeof(RequestBatch) + sizeof(bi::managed_external_buffer::handle_t));
+        sizeof(RequestBatch) + sizeof(bi::managed_external_buffer::handle_t),
+        false /* aligned */, "[RequestBatch]");
 
     RequestBatch* request_batch_shm_ptr =
         reinterpret_cast<RequestBatch*>(request_batch.data_.get());
@@ -493,7 +495,8 @@ InferRequest::Exec(const bool is_decoupled)
     if (has_gpu_tensor) {
       AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_shm =
           shm_pool->Load<GPUBuffersShm>(
-              request_batch_shm_ptr->gpu_buffers_handle);
+              request_batch_shm_ptr->gpu_buffers_handle, false,
+              "[GpuBufferShm]");
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
           gpu_buffers_handle =
               shm_pool->Load<bi::managed_external_buffer::handle_t>(
@@ -544,7 +547,7 @@ InferRequest::Exec(const bool is_decoupled)
         shm_pool, ipc_message->ResponseHandle());
 
     AllocatedSharedMemory<char> response_batch_shm =
-        shm_pool->Load<char>(bls_response->Args());
+        shm_pool->Load<char>(bls_response->Args(), false, "[BlsResponseShm]");
     response_batch =
         reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
     response_handle = reinterpret_cast<bi::managed_external_buffer::handle_t*>(

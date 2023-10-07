@@ -145,7 +145,8 @@ StubLauncher::Setup()
   }
 
   AllocatedSharedMemory<IPCControlShm> current_ipc_control =
-      shm_pool_->Construct<IPCControlShm>();
+      shm_pool_->Construct<IPCControlShm>(
+          1 /* count */, false /* aligned */, "[IPCControlShm]");
   ipc_control_ = std::move(current_ipc_control.data_);
   ipc_control_handle_ = current_ipc_control.handle_;
 
@@ -384,7 +385,8 @@ StubLauncher::AutocompleteStubProcess()
 
   auto auto_complete_response =
       std::move((shm_pool_->Load<AutoCompleteResponseShm>(
-                    auto_complete_response_message->Args())))
+                    auto_complete_response_message->Args(), false,
+                    "[AutoCompleteResponseShm]")))
           .data_;
 
   if (auto_complete_response->response_has_error) {
@@ -450,10 +452,10 @@ StubLauncher::ModelInstanceStubProcess()
             .c_str());
   }
 
-  auto initialize_response =
-      std::move((shm_pool_->Load<InitializeResponseShm>(
-                    initialize_response_message->Args())))
-          .data_;
+  auto initialize_response = std::move((shm_pool_->Load<InitializeResponseShm>(
+                                           initialize_response_message->Args(),
+                                           false, "[InitializeResponseShm]")))
+                                 .data_;
 
   if (initialize_response->response_has_error) {
     if (initialize_response->response_is_error_set) {

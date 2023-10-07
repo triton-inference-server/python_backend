@@ -33,6 +33,7 @@
 #include <boost/interprocess/managed_external_buffer.hpp>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <type_traits>
 #include <typeinfo>
@@ -83,16 +84,17 @@ class SharedMemoryManager {
   SharedMemoryManager(const std::string& shm_region_name);
 
   template <typename T>
-  AllocatedSharedMemory<T> Construct(uint64_t count = 1, bool aligned = false)
+  AllocatedSharedMemory<T> Construct(
+      uint64_t count = 1, bool aligned = false, std::string msg = "")
   {
     T* obj = nullptr;
     AllocatedShmOwnership* shm_ownership_data = nullptr;
     bi::managed_external_buffer::handle_t handle = 0;
 
+    std::size_t requested_bytes = 0;
     {
       bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
-      std::size_t requested_bytes =
-          sizeof(T) * count + sizeof(AllocatedShmOwnership);
+      requested_bytes = sizeof(T) * count + sizeof(AllocatedShmOwnership);
       GrowIfNeeded(0);
 
       void* allocated_data;
@@ -118,17 +120,29 @@ class SharedMemoryManager {
           boost::stacktrace::to_string(boost::stacktrace::stacktrace());
       std::replace(stack_trace.begin(), stack_trace.end(), '\n', '|');
       std::replace(stack_trace.begin(), stack_trace.end(), ',', ' ');
-      shm_debug_info_ << handle << ",ALLOC"
-                      << "," << stack_trace << std::endl;
+      if (stack_trace.size() > 101) {
+        stack_trace = stack_trace.substr(0, 100) + "...";
+      }
+      shm_debug_info_ << handle << ",ALLOC," << msg << "," << stack_trace
+                      << std::endl;
       shm_debug_info_.flush();
     }
 
-    return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
+    return WrapObjectInUniquePtr(
+        obj, shm_ownership_data, handle, msg, requested_bytes);
+  }
+
+
+  std::map<std::string, size_t> ActiveRegions()
+  {
+    bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
+    return active_regions_;
   }
 
   template <typename T>
   AllocatedSharedMemory<T> Load(
-      bi::managed_external_buffer::handle_t handle, bool unsafe = false)
+      bi::managed_external_buffer::handle_t handle, bool unsafe = false,
+      std::string msg = "")
   {
     T* object_ptr;
     AllocatedShmOwnership* shm_ownership_data;
@@ -146,12 +160,13 @@ class SharedMemoryManager {
       }
     }
 
-    return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle);
+    return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle, msg);
   }
 
   size_t FreeMemory();
 
-  void Deallocate(bi::managed_external_buffer::handle_t handle)
+  void Deallocate(
+      bi::managed_external_buffer::handle_t handle, std::string msg = "")
   {
     bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
     GrowIfNeeded(0);
@@ -161,14 +176,19 @@ class SharedMemoryManager {
         boost::stacktrace::to_string(boost::stacktrace::stacktrace());
     std::replace(stack_trace.begin(), stack_trace.end(), '\n', '|');
     std::replace(stack_trace.begin(), stack_trace.end(), ',', ' ');
-    shm_debug_info_ << handle << ",DEALLOC"
-                    << "," << stack_trace << std::endl;
+    if (stack_trace.size() > 101) {
+      stack_trace = stack_trace.substr(0, 100) + "...";
+    }
+
+    shm_debug_info_ << handle << ",DEALLOC," << msg << "," << stack_trace
+                    << std::endl;
     shm_debug_info_.flush();
 
     managed_buffer_->deallocate(ptr);
   }
 
-  void DeallocateUnsafe(bi::managed_external_buffer::handle_t handle)
+  void DeallocateUnsafe(
+      bi::managed_external_buffer::handle_t handle, std::string msg = "")
   {
     void* ptr = managed_buffer_->get_address_from_handle(handle);
 
@@ -176,8 +196,11 @@ class SharedMemoryManager {
         boost::stacktrace::to_string(boost::stacktrace::stacktrace());
     std::replace(stack_trace.begin(), stack_trace.end(), '\n', '|');
     std::replace(stack_trace.begin(), stack_trace.end(), ',', ' ');
-    shm_debug_info_ << handle << ",DEALLOC"
-                    << "," << stack_trace << std::endl;
+    if (stack_trace.size() > 101) {
+      stack_trace = stack_trace.substr(0, 100) + "...";
+    }
+    shm_debug_info_ << handle << ",DEALLOC," << msg << "," << stack_trace
+                    << std::endl;
     shm_debug_info_.flush();
 
     managed_buffer_->deallocate(ptr);
@@ -203,15 +226,18 @@ class SharedMemoryManager {
   bool create_;
   bool delete_region_;
   std::ofstream shm_debug_info_;
+  // TODO: Can track ref count per address and assign names or something?
+  std::map<std::string, size_t> active_regions_;
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
       T* object, AllocatedShmOwnership* shm_ownership_data,
-      const bi::managed_external_buffer::handle_t& handle)
+      const bi::managed_external_buffer::handle_t& handle, std::string msg = "",
+      uint64_t size = 0)
   {
     // Custom deleter to conditionally deallocate the object
-    std::function<void(T*)> deleter = [this, handle,
-                                       shm_ownership_data](T* memory) {
+    std::function<void(T*)> deleter = [this, handle, shm_ownership_data, msg,
+                                       size](T* memory) {
       bool destroy = false;
       bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
       // Before using any shared memory function you need to make sure that you
@@ -223,8 +249,9 @@ class SharedMemoryManager {
       if (shm_ownership_data->ref_count_ == 0) {
         destroy = true;
       }
+
       if (destroy) {
-        DeallocateUnsafe(handle);
+        DeallocateUnsafe(handle, msg);
       }
     };
 

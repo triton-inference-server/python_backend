@@ -44,8 +44,8 @@ PbMemory::Create(
     requested_byte_size += byte_size;
   }
 
-  AllocatedSharedMemory<char> memory_shm =
-      shm_pool->Construct<char>(requested_byte_size);
+  AllocatedSharedMemory<char> memory_shm = shm_pool->Construct<char>(
+      requested_byte_size, false /* aligned */, "[PbMemoryShm]");
   PbMemory::FillShmData(
       memory_type, memory_type_id, byte_size, data, memory_shm.data_.get(),
       memory_shm.handle_, copy_gpu);
@@ -248,7 +248,8 @@ PbMemory::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle, bool open_cuda_handle)
 {
-  AllocatedSharedMemory<char> memory_shm = shm_pool->Load<char>(handle);
+  AllocatedSharedMemory<char> memory_shm =
+      shm_pool->Load<char>(handle, false, "[PbMemoryShm]");
   MemoryShm* memory_shm_ptr =
       reinterpret_cast<MemoryShm*>(memory_shm.data_.get());
   char* memory_data_shm = memory_shm.data_.get() + sizeof(MemoryShm);

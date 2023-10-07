@@ -52,7 +52,8 @@ void
 Metric::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<MetricShm> custom_metric_shm =
-      shm_pool->Construct<MetricShm>();
+      shm_pool->Construct<MetricShm>(
+          1 /* count */, false /* aligned */, "[MetricShm]");
   custom_metric_shm_ptr_ = custom_metric_shm.data_.get();
 
   std::unique_ptr<PbString> labels_shm = PbString::Create(shm_pool, labels_);
@@ -74,7 +75,7 @@ Metric::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<MetricShm> custom_metric_shm =
-      shm_pool->Load<MetricShm>(handle);
+      shm_pool->Load<MetricShm>(handle, false, "[MetricShm]");
   MetricShm* custom_metric_shm_ptr = custom_metric_shm.data_.get();
 
   std::unique_ptr<PbString> labels_shm = PbString::LoadFromSharedMemory(

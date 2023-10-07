@@ -50,7 +50,8 @@ void
 PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   message_shm_ = PbString::Create(shm_pool, message_);
-  error_shm_ = shm_pool->Construct<PbErrorShm>();
+  error_shm_ = shm_pool->Construct<PbErrorShm>(
+      1 /* count */, false /* aligned */, "[PbErrorShm]");
   error_shm_.data_->code = code_;
   error_shm_.data_->message_shm_handle = message_shm_->ShmHandle();
   shm_handle_ = error_shm_.handle_;
@@ -62,7 +63,7 @@ PbError::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t shm_handle)
 {
   AllocatedSharedMemory<PbErrorShm> error_shm =
-      shm_pool->Load<PbErrorShm>(shm_handle);
+      shm_pool->Load<PbErrorShm>(shm_handle, false, "[PbErrorShm]");
   std::unique_ptr<PbString> message_shm = PbString::LoadFromSharedMemory(
       shm_pool, error_shm.data_->message_shm_handle);
 

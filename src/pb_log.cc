@@ -76,7 +76,8 @@ PbLogShm::Create(
   std::unique_ptr<PbString> file_name = PbString::Create(shm_pool, filename);
   std::unique_ptr<PbString> log_message = PbString::Create(shm_pool, message);
   AllocatedSharedMemory<LogSendMessage> log_send_message =
-      shm_pool->Construct<LogSendMessage>();
+      shm_pool->Construct<LogSendMessage>(
+          1 /* count */, false /* aligned */, "[LogSendMessage]");
 
   LogSendMessage* send_message_payload = log_send_message.data_.get();
   new (&(send_message_payload->mu)) bi::interprocess_mutex;
@@ -94,7 +95,7 @@ PbLogShm::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<LogSendMessage> log_container_shm =
-      shm_pool->Load<LogSendMessage>(handle);
+      shm_pool->Load<LogSendMessage>(handle, false, "[LogSendMessage]");
   std::unique_ptr<PbString> pb_string_filename = PbString::LoadFromSharedMemory(
       shm_pool, log_container_shm.data_->filename);
   const std::string& filename = pb_string_filename->String();
