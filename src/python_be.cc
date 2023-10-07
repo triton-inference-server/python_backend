@@ -1771,11 +1771,12 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
   python_execution_env_ = "";
   force_cpu_only_input_tensors_ = true;
   decoupled_ = false;
-  platform_ = "";
 
   void* bstate;
   THROW_IF_BACKEND_MODEL_ERROR(TRITONBACKEND_BackendState(backend, &bstate));
   backend_state_ = reinterpret_cast<BackendState*>(bstate);
+
+  runtime_modeldir_ = backend_state_->runtime_modeldir;
   triton::common::TritonJson::Value params;
   common::TritonJson::Value model_config;
   if (model_config_.Find("parameters", &params)) {
@@ -1809,14 +1810,6 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         if (error != nullptr) {
           throw BackendModelException(error);
         }
-      }
-    }
-
-    triton::common::TritonJson::Value platform;
-    if (model_config_.Find("platform", &platform)) {
-      auto error = platform.AsString(&platform_);
-      if (error != nullptr) {
-        throw BackendModelException(error);
       }
     }
 
@@ -1948,8 +1941,11 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   backend_state->shm_message_queue_size = 1000;
   backend_state->number_of_instance_inits = 0;
   backend_state->thread_pool_size = 32;
+  // Initialize shared memory region prefix to include backend's name
+  // to avoid collision between python backend and python-based backends.
   backend_state->shared_memory_region_prefix =
-      "triton_python_backend_shm_region_";
+      "triton_" + name + "_backend_shm_region_";
+  std::string default_backend_dir_string;
 
   if (backend_config.Find("cmdline", &cmdline)) {
     triton::common::TritonJson::Value shm_growth_size;
@@ -2059,6 +2055,12 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
         return TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INVALID_ARG, ia.what());
       }
     }
+
+    triton::common::TritonJson::Value default_backend_dir;
+    if (cmdline.Find("backend-directory", &default_backend_dir)) {
+      RETURN_IF_ERROR(
+          default_backend_dir.AsString(&default_backend_dir_string));
+    }
   }
 
   LOG_MESSAGE(
@@ -2076,7 +2078,50 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   TRITONBACKEND_ArtifactType artifact_type;
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
-  backend_state->python_lib = location;
+
+  // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
+  // are located under `location`.
+  // DLIS-5596: Add forward slash to be platform agnostic
+  // (i.e. For Windows, we need to use backward slash).
+  std::string default_python_backend_dir =
+      default_backend_dir_string + "/python";
+  std::string backend_stub_path =
+      std::string(location) + "/triton_python_backend_stub";
+  std::string backend_utils =
+      std::string(location) + "/triton_python_backend_utils.py";
+  // Both, stub and utils should be in the same location
+  if (FileExists(backend_stub_path) && FileExists(backend_utils)) {
+    backend_state->python_lib = location;
+    // If `location` is default location of a python backend,
+    // then we are using default python backend.
+    if (default_python_backend_dir == std::string(location)) {
+      backend_state->runtime_modeldir = "";
+    } else {
+      // If `location` is not default location of a python backend,
+      // then we are using a python backend based backend and model.py stored
+      // in the received location.
+      backend_state->runtime_modeldir = location;
+    }
+  } else {
+    // If stub and utils are not found in received `location`,
+    // then we are using a python backend based backend and stub and utils are
+    // stored in the default python backend location.
+    if (!default_backend_dir_string.empty()) {
+      std::string backend_stub_path =
+          default_backend_dir_string + "/python/triton_python_backend_stub";
+      if (!FileExists(backend_stub_path)) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_NOT_FOUND,
+            (std::string("triton_python_backend_stub") +
+             " is not found. Searched paths: " + default_backend_dir_string +
+             "/python and" + std::string(location))
+                .c_str());
+      }
+    }
+    backend_state->runtime_modeldir = location;
+    backend_state->python_lib = default_backend_dir_string + "/python";
+  }
+
   backend_state->env_manager = std::make_unique<EnvironmentManager>();
 
   RETURN_IF_ERROR(TRITONBACKEND_BackendSetState(

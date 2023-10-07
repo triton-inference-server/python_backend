@@ -180,9 +180,15 @@ class ModelContext {
   std::string model_dir_;
   std::string model_version_;
   std::string python_backend_folder_;
-  std::string platform_;
+  std::string runtime_modeldir_;
 
-  enum ModelType { DEFAULT, PLATFORM };
+  // Triton supports python-based backends,
+  // i.e. backends that provide common `model.py`, that can be re-used
+  // between different models. `ModelType` helps to differentiate
+  // between models running with c++ python backend (ModelType::DEFAULT)
+  // and models running with python-based backend (ModelType::BACKEND)
+  // at the time of ModelContext::StubSetup to properly set up paths.
+  enum ModelType { DEFAULT, BACKEND };
   ModelType type_;
 };
 
@@ -210,7 +216,8 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       bi::managed_external_buffer::handle_t ipc_control_handle,
-      const std::string& model_instance_name, const std::string& platform);
+      const std::string& model_instance_name,
+      const std::string& runtime_modeldir);
 
   /// Get the health of the stub process.
   bool& Health();

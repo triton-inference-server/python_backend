@@ -310,13 +310,6 @@ install(
 )
 
 install(
-  DIRECTORY
-    src/resources/platform_handlers
-  DESTINATION
-    ${CMAKE_INSTALL_PREFIX}/backends/python
-)
-
-install(
   FILES
     src/resources/triton_python_backend_utils.py
   DESTINATION
