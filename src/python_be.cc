@@ -1705,12 +1705,13 @@ ModelInstanceState::~ModelInstanceState()
   if (Stub()->IsHealthy()) {
     if (model_state->IsDecoupled()) {
       // Wait for all the pending tasks to finish.
-      thread_pool_->join();
+      thread_pool_->wait();
       // Push a dummy message to signal the thread to terminate.
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
+    } else {
+      thread_pool_->wait();
     }
-    thread_pool_->wait();
   }
   // Terminate stub first to allow any last messages to be received by the back
   // end before deallocating the queue memory
