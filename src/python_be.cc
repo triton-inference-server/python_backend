@@ -777,9 +777,7 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
       std::packaged_task<void()> task([this, response_send_message] {
         ResponseSendDecoupled(response_send_message);
       });
-      std::future<void> future =
-          boost::asio::post(*thread_pool_, std::move(task));
-      futures_.emplace_back(std::move(future));
+      boost::asio::post(*thread_pool_, std::move(task));
     } else if (
         message->Command() == PYTHONSTUB_InferExecRequest ||
         message->Command() == PYTHONSTUB_InferStreamExecRequest) {
@@ -789,9 +787,7 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
             bls_execute,
             (bls_execute->Command() == PYTHONSTUB_InferStreamExecRequest));
       });
-      std::future<void> future =
-          boost::asio::post(*thread_pool_, std::move(task));
-      futures_.emplace_back(std::move(future));
+      boost::asio::post(*thread_pool_, std::move(task));
     }
   }
 }
@@ -1708,12 +1704,14 @@ ModelInstanceState::~ModelInstanceState()
   Stub()->UpdateHealth();
   if (Stub()->IsHealthy()) {
     if (model_state->IsDecoupled()) {
-      futures_.clear();
+      // Wait for all the pending tasks to finish.
+      thread_pool_->wait();
       // Push a dummy message to signal the thread to terminate.
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
+    } else {
+      thread_pool_->wait();
     }
-    thread_pool_->wait();
   }
   // Terminate stub first to allow any last messages to be received by the back
   // end before deallocating the queue memory
