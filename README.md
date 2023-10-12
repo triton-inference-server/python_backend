@@ -73,7 +73,6 @@ any C++ code.
   - [Input Tensor Device Placement](#input-tensor-device-placement)
 - [Frameworks](#frameworks)
   - [PyTorch](#pytorch)
-    - [PyTorch Platform \[Experimental\]](#pytorch-platform-experimental)
     - [PyTorch Determinism](#pytorch-determinism)
   - [TensorFlow](#tensorflow)
     - [TensorFlow Determinism](#tensorflow-determinism)
