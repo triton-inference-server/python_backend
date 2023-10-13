@@ -37,8 +37,14 @@
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
+#define BOOST_STACKTRACE_USE_ADDR2LINE 1
+
+#include <boost/stacktrace.hpp>
+#include <fstream>
+#include <sstream>
 
 #include "pb_exception.h"
+using namespace std;
 
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
@@ -108,6 +114,13 @@ class SharedMemoryManager {
 
       handle = managed_buffer_->get_handle_from_address(
           reinterpret_cast<void*>(shm_ownership_data));
+      std::string stack_trace =
+          boost::stacktrace::to_string(boost::stacktrace::stacktrace());
+      std::replace(stack_trace.begin(), stack_trace.end(), '\n', '|');
+      std::replace(stack_trace.begin(), stack_trace.end(), ',', ' ');
+      shm_debug_info_ << handle << ",ALLOC"
+                      << "," << stack_trace << std::endl;
+      shm_debug_info_.flush();
     }
 
     return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
@@ -143,12 +156,30 @@ class SharedMemoryManager {
     bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
     GrowIfNeeded(0);
     void* ptr = managed_buffer_->get_address_from_handle(handle);
+
+    std::string stack_trace =
+        boost::stacktrace::to_string(boost::stacktrace::stacktrace());
+    std::replace(stack_trace.begin(), stack_trace.end(), '\n', '|');
+    std::replace(stack_trace.begin(), stack_trace.end(), ',', ' ');
+    shm_debug_info_ << handle << ",DEALLOC"
+                    << "," << stack_trace << std::endl;
+    shm_debug_info_.flush();
+
     managed_buffer_->deallocate(ptr);
   }
 
   void DeallocateUnsafe(bi::managed_external_buffer::handle_t handle)
   {
     void* ptr = managed_buffer_->get_address_from_handle(handle);
+
+    std::string stack_trace =
+        boost::stacktrace::to_string(boost::stacktrace::stacktrace());
+    std::replace(stack_trace.begin(), stack_trace.end(), '\n', '|');
+    std::replace(stack_trace.begin(), stack_trace.end(), ',', ' ');
+    shm_debug_info_ << handle << ",DEALLOC"
+                    << "," << stack_trace << std::endl;
+    shm_debug_info_.flush();
+
     managed_buffer_->deallocate(ptr);
   }
 
@@ -171,6 +202,7 @@ class SharedMemoryManager {
   uint64_t* total_size_;
   bool create_;
   bool delete_region_;
+  std::ofstream shm_debug_info_;
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
