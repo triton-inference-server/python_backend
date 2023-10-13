@@ -34,17 +34,18 @@ IPCMessage::Create(
     const std::unique_ptr<SharedMemoryManager>& shm_pool, bool inline_response)
 {
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm =
-      shm_pool->Construct<IPCMessageShm>();
+      shm_pool->Construct<IPCMessageShm>(
+          1 /* count */, false /* aligned */, "[IPCMessageShm]");
 
   ipc_message_shm.data_->inline_response = inline_response;
   AllocatedSharedMemory<bi::interprocess_mutex> response_mutex_shm;
   AllocatedSharedMemory<bi::interprocess_condition> response_cond_shm;
   if (inline_response) {
     response_mutex_shm = std::move(shm_pool->Construct<bi::interprocess_mutex>(
-        1 /* count */, true /* aligned */));
+        1 /* count */, true /* aligned */, "[ResponseMutexShm]"));
     response_cond_shm =
         std::move(shm_pool->Construct<bi::interprocess_condition>(
-            1 /* count */, true /* aligned */));
+            1 /* count */, true /* aligned */, "[ResponseCondShm]"));
 
     ipc_message_shm.data_->response_mutex = response_mutex_shm.handle_;
     ipc_message_shm.data_->response_cond = response_cond_shm.handle_;
@@ -62,15 +63,16 @@ IPCMessage::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t message_handle)
 {
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm =
-      shm_pool->Load<IPCMessageShm>(message_handle);
+      shm_pool->Load<IPCMessageShm>(
+          message_handle, false /* unsafe */, "[IPCMessageShm]");
 
   AllocatedSharedMemory<bi::interprocess_mutex> response_mutex_shm;
   AllocatedSharedMemory<bi::interprocess_condition> response_cond_shm;
   if (ipc_message_shm.data_->inline_response) {
     response_mutex_shm = shm_pool->Load<bi::interprocess_mutex>(
-        ipc_message_shm.data_->response_mutex);
+        ipc_message_shm.data_->response_mutex, false, "[ResponseMutexShm]");
     response_cond_shm = shm_pool->Load<bi::interprocess_condition>(
-        ipc_message_shm.data_->response_cond);
+        ipc_message_shm.data_->response_cond, false, "[ResponseCondShm]");
   }
 
   return std::unique_ptr<IPCMessage>(

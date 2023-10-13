@@ -63,11 +63,13 @@ class MessageQueue {
       uint32_t message_queue_size)
   {
     AllocatedSharedMemory<MessageQueueShm> mq_shm =
-        shm_pool->Construct<MessageQueueShm>();
+        shm_pool->Construct<MessageQueueShm>(
+            1 /* count */, false /* aligned */, "[MessageQueueShm]");
     mq_shm.data_->size = message_queue_size;
 
-    AllocatedSharedMemory<T> mq_buffer_shm =
-        shm_pool->Construct<T>(message_queue_size /* count */);
+    AllocatedSharedMemory<T> mq_buffer_shm = shm_pool->Construct<T>(
+        message_queue_size /* count */, false /* aligned */,
+        "[MessageQueueBufferShm]");
     mq_shm.data_->buffer = mq_buffer_shm.handle_;
     mq_shm.data_->head = 0;
     mq_shm.data_->tail = 0;
@@ -87,9 +89,10 @@ class MessageQueue {
       bi::managed_external_buffer::handle_t message_queue_handle)
   {
     AllocatedSharedMemory<MessageQueueShm> mq_shm =
-        shm_pool->Load<MessageQueueShm>(message_queue_handle);
-    AllocatedSharedMemory<T> mq_shm_buffer =
-        shm_pool->Load<T>(mq_shm.data_->buffer);
+        shm_pool->Load<MessageQueueShm>(
+            message_queue_handle, false, "[MessageQueueShm]");
+    AllocatedSharedMemory<T> mq_shm_buffer = shm_pool->Load<T>(
+        mq_shm.data_->buffer, false, "[MessageQueueBufferShm]");
 
     return std::unique_ptr<MessageQueue<T>>(
         new MessageQueue(mq_shm, mq_shm_buffer));

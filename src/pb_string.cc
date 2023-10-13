@@ -32,12 +32,19 @@ std::unique_ptr<PbString>
 PbString::Create(
     std::unique_ptr<SharedMemoryManager>& shm_pool, const std::string& string)
 {
+  // TODO: Include actual string if needed. Take out for now.
+  // if (string.size() > 20) {
+  //  const auto msg = std::string("[PbStringShm:{truncated_config}");
+  //} else {
+  //  const auto msg = std::string("[PbStringShm:") + string + std::string("]");
+  //}
   AllocatedSharedMemory<StringShm> string_container_shm =
-      shm_pool->Construct<StringShm>();
+      shm_pool->Construct<StringShm>(
+          1 /* count */, false /* aligned */, "[PbStringShm]");
   string_container_shm.data_->length = string.size();
 
   AllocatedSharedMemory<char> string_shm =
-      shm_pool->Construct<char>(string.size());
+      shm_pool->Construct<char>(string.size(), false, "[PbStringChar]");
   std::memcpy(string_shm.data_.get(), string.data(), string.size());
   string_container_shm.data_->data = string_shm.handle_;
 
@@ -66,9 +73,9 @@ PbString::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<StringShm> string_container_shm =
-      shm_pool->Load<StringShm>(handle);
-  AllocatedSharedMemory<char> string_shm =
-      shm_pool->Load<char>(string_container_shm.data_->data);
+      shm_pool->Load<StringShm>(handle, false, "[PbStringShm]");
+  AllocatedSharedMemory<char> string_shm = shm_pool->Load<char>(
+      string_container_shm.data_->data, false, "[PbStringChar]");
 
   return std::unique_ptr<PbString>(
       new PbString(string_container_shm, string_shm));

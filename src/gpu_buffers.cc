@@ -61,7 +61,8 @@ GPUBuffersHelper::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
         "Complete has already been called. Complete should only be called "
         "once.");
   }
-  gpu_buffers_shm_ = shm_pool->Construct<GPUBuffersShm>();
+  gpu_buffers_shm_ = shm_pool->Construct<GPUBuffersShm>(
+      1 /* count */, false /* aligned */, "[GpuBufferShm]");
   if (!error_shm_) {
     buffers_handle_shm_ =
         shm_pool->Construct<bi::managed_external_buffer::handle_t>(

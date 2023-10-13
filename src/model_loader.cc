@@ -35,7 +35,8 @@ void
 ModelLoader::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
   AllocatedSharedMemory<ModelLoaderRequestShm> model_loader_req_shm =
-      shm_pool->Construct<ModelLoaderRequestShm>();
+      shm_pool->Construct<ModelLoaderRequestShm>(
+          1 /* count */, false /* aligned */, "[ModelLoadShm]");
   model_loader_req_shm_ptr_ = model_loader_req_shm.data_.get();
 
   std::unique_ptr<PbString> name_shm = PbString::Create(shm_pool, name_);
@@ -65,7 +66,7 @@ ModelLoader::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t handle)
 {
   AllocatedSharedMemory<ModelLoaderRequestShm> model_loader_req_shm =
-      shm_pool->Load<ModelLoaderRequestShm>(handle);
+      shm_pool->Load<ModelLoaderRequestShm>(handle, false, "[ModelLoadShm]");
   ModelLoaderRequestShm* model_loader_req_shm_ptr =
       model_loader_req_shm.data_.get();
 

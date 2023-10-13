@@ -70,11 +70,13 @@ InferResponse::SaveToSharedMemory(
 {
   size_t output_tensor_length = output_tensors_.size();
   if (HasError()) {
-    response_shm_ = shm_pool->Construct<char>(sizeof(ResponseShm));
+    response_shm_ = shm_pool->Construct<char>(
+        sizeof(ResponseShm), false /* aligned */, "[InferResponseShm]");
   } else {
     response_shm_ = shm_pool->Construct<char>(
-        sizeof(ResponseShm) +
-        output_tensor_length * sizeof(bi::managed_external_buffer::handle_t));
+        sizeof(ResponseShm) + output_tensor_length *
+                                  sizeof(bi::managed_external_buffer::handle_t),
+        false /* aligned */, "[InferResponseShm]");
   }
 
   ResponseShm* response_shm_ptr =
@@ -135,8 +137,8 @@ InferResponse::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t response_handle,
     bool open_cuda_handle)
 {
-  AllocatedSharedMemory<char> response_shm =
-      shm_pool->Load<char>(response_handle);
+  AllocatedSharedMemory<char> response_shm = shm_pool->Load<char>(
+      response_handle, false /* aligned */, "[InferResponseShm]");
   ResponseShm* response_shm_ptr =
       reinterpret_cast<ResponseShm*>(response_shm.data_.get());
   uint32_t requested_output_count = response_shm_ptr->outputs_size;
