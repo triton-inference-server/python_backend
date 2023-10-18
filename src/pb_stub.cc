@@ -1464,15 +1464,32 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const int64_t model_version, const uint32_t flags,
                       const int32_t timeout,
                       const PreferredMemory& preferred_memory,
-                      const InferenceTrace& trace) {
+                      const InferenceTrace& trace, const py::dict& parameters) {
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
-            // FIXME: InferenceRequest parameters are not supported in BLS now.
+            for (const auto& pair : parameters) {
+              if (!py::isinstance<py::str>(pair.first)) {
+                throw PythonBackendException(
+                    "Expect parameters keys to have type str, found type " +
+                    std::string(py::str(pair.first.get_type())));
+              }
+              if (!py::isinstance<py::bool_>(pair.second) &&
+                  !py::isinstance<py::int_>(pair.second) &&
+                  !py::isinstance<py::str>(pair.second)) {
+                throw PythonBackendException(
+                    "Expect parameters values to have type bool/int/str, found "
+                    "type " +
+                    std::string(py::str(pair.second.get_type())));
+              }
+            }
+            py::module_ py_json = py::module_::import("json");
+            std::string parameters_str =
+                py::str(py_json.attr("dumps")(parameters));
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, "" /*parameters*/, flags, timeout,
+                model_name, model_version, parameters_str, flags, timeout,
                 0 /*response_factory_address*/, 0 /*request_address*/,
                 preferred_memory, trace);
           }),
@@ -1485,7 +1502,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
               PreferredMemory(PreferredMemory::DEFAULT, 0),
-          py::arg("trace").none(false) = InferenceTrace())
+          py::arg("trace").none(false) = InferenceTrace(),
+          py::arg("parameters").none(false) = py::dict())
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
