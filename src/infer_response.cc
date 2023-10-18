@@ -249,6 +249,9 @@ InferResponse::Send(
   }
 
   bool cuda_copy = false;
+  // This variable is used to avoid printing the same message multiple times
+  // when the output tensor is failed to be allocated from the CUDA memory pool.
+  bool log_warning = true;
 
   for (auto& output_tensor : OutputTensors()) {
     // FIXME: for decoupled models we will skip the requested output names.
@@ -309,13 +312,16 @@ InferResponse::Send(
           }
         }
         catch (const PythonBackendException& pb_exception) {
-          LOG_MESSAGE(
-              TRITONSERVER_LOG_WARN,
-              (std::string("Failed to allocate memory from CUDA memory pool "
-                           "for output tensor: ") +
-               pb_exception.what() +
-               std::string(", will use CUDA IPC for GPU output transfer."))
-                  .c_str());
+          if (log_warning) {
+            LOG_MESSAGE(
+                TRITONSERVER_LOG_WARN,
+                (std::string("Failed to allocate memory from CUDA memory pool "
+                             "for output tensor: ") +
+                 pb_exception.what() +
+                 std::string(", will use CUDA IPC for GPU output transfer."))
+                    .c_str());
+          }
+          log_warning = false;
         }
       }
       cudaIpcMemHandle_t* cuda_ipc_mem_handle_p;
