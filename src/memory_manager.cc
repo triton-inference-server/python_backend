@@ -56,10 +56,7 @@ BackendMemoryRecord::ReleaseCallback()
 #endif
 
 MemoryManager::MemoryManager(
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
-    std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&&
-        memory_message_queue)
-    : shm_pool_(shm_pool)
+    std::unique_ptr<MessageQueue<intptr_t>>&& memory_message_queue)
 {
   message_queue_ = std::move(memory_message_queue);
   thread_ = std::thread(&MemoryManager::QueueMonitorThread, this);
@@ -81,19 +78,10 @@ void
 MemoryManager::QueueMonitorThread()
 {
   while (true) {
-    bi::managed_external_buffer::handle_t handle = message_queue_->Pop();
-    if (handle == DUMMY_MESSAGE) {
+    intptr_t memory = message_queue_->Pop();
+    if (memory == 0) {
       return;
     }
-    std::unique_ptr<IPCMessage> ipc_message =
-        IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
-
-    AllocatedSharedMemory<MemoryReleaseMessage> memory_release_message =
-        shm_pool_->Load<MemoryReleaseMessage>(ipc_message->Args());
-    MemoryReleaseMessage* memory_release_message_ptr =
-        memory_release_message.data_.get();
-
-    intptr_t memory = memory_release_message_ptr->id;
 
     {
       std::lock_guard<std::mutex> lock{mu_};
@@ -107,14 +95,8 @@ MemoryManager::QueueMonitorThread()
 
       // Call the release callback.
       it->second->ReleaseCallback()(it->second->MemoryId());
-      it->second.reset();
+      // it->second.reset();
       records_.erase(it);
-      {
-        bi::scoped_lock<bi::interprocess_mutex> lock{
-            *(ipc_message->ResponseMutex())};
-        memory_release_message_ptr->waiting_on_stub = true;
-        ipc_message->ResponseCondition()->notify_all();
-      }
     }
   }
 }

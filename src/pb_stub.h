@@ -266,8 +266,7 @@ class Stub {
   void ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr);
 
   /// Get the memory manager message queue
-  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
-  MemoryManagerQueue();
+  std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
   /// Get the shared memory pool
   std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
@@ -379,8 +378,7 @@ class Stub {
       stub_to_parent_mq_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_to_stub_mq_;
-  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
-      memory_manager_message_queue_;
+  std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   bool initialized_;
   bool finalizing_;
   static std::unique_ptr<Stub> stub_instance_;
