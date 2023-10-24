@@ -638,6 +638,13 @@ returns a JSON string where the keys are the keys of the parameters
 object and the values are the values for the parameters field. Note that
 you need to parse this string using `json.loads` to convert it to a dictionary.
 
+Starting from 23.11 release, parameters may be provided to the `InferenceRequest`
+object during construction. The parameters should be a dictionary of key value
+pairs, where keys are `str` and values are `bool`, `int` or `str`.
+```python
+request = pb_utils.InferenceRequest(parameters={"key": "value"}, ...)
+```
+
 You can read more about the inference request parameters in the [parameters
 extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
 documentation.
