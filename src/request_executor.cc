@@ -365,6 +365,36 @@ RequestExecutor::Infer(
           infer_request->Trace().triton_trace_, &trace));
     }
 
+    const std::string& param_str = infer_request->Parameters();
+    triton::common::TritonJson::Value param;
+    THROW_IF_TRITON_ERROR(param.Parse(param_str.c_str(), param_str.length()));
+    std::vector<std::string> param_keys;
+    THROW_IF_TRITON_ERROR(param.Members(&param_keys));
+    for (const auto& key : param_keys) {
+      triton::common::TritonJson::Value value;
+      if (!param.Find(key.c_str(), &value)) {
+        throw PythonBackendException("Unexpected missing key on parameters");
+      }
+      if (value.IsString()) {
+        std::string string_value;
+        THROW_IF_TRITON_ERROR(value.AsString(&string_value));
+        THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetStringParameter(
+            irequest, key.c_str(), string_value.c_str()));
+      } else if (value.IsInt()) {
+        int64_t int_value = 0;
+        THROW_IF_TRITON_ERROR(value.AsInt(&int_value));
+        THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetIntParameter(
+            irequest, key.c_str(), int_value));
+      } else if (value.IsBool()) {
+        bool bool_value = false;
+        THROW_IF_TRITON_ERROR(value.AsBool(&bool_value));
+        THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetBoolParameter(
+            irequest, key.c_str(), bool_value));
+      } else {
+        throw PythonBackendException("Unsupported value type on parameters");
+      }
+    }
+
     for (auto& infer_input : infer_request->Inputs()) {
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestAddInput(
           irequest, infer_input->Name().c_str(),
