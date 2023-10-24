@@ -249,9 +249,11 @@ InferResponse::Send(
   }
 
   bool cuda_copy = false;
+#ifdef TRITON_ENABLE_GPU
   // This variable is used to avoid printing the same message multiple times
   // when the output tensor is failed to be allocated from the CUDA memory pool.
   bool log_warning = true;
+#endif  // TRITON_ENABLE_GPU
 
   for (auto& output_tensor : OutputTensors()) {
     // FIXME: for decoupled models we will skip the requested output names.
