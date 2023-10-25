@@ -372,6 +372,10 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     }
     InferenceTrace trace = InferenceTrace(triton_trace);
 
+    uint64_t request_timeout = 0;
+    RETURN_IF_ERROR(
+        TRITONBACKEND_RequestTimeout(request, &request_timeout));
+
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
       TRITONBACKEND_ResponseFactory* factory_ptr;
@@ -379,14 +383,14 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
-          0 /* BLS request timeout*/, reinterpret_cast<intptr_t>(factory_ptr),
+          request_timeout, reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
-          0 /* BLS request timeout*/, 0 /* response_factory_address */,
+          request_timeout, 0 /* response_factory_address */,
           reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     }
