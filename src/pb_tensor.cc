@@ -555,7 +555,7 @@ PbTensor::SaveToSharedMemory(
 
     if (!pb_memory_) {
       pb_memory_ = PbMemory::Create(
-          memory_type_, memory_type_id_, byte_size_,
+          shm_pool, memory_type_, memory_type_id_, byte_size_,
           reinterpret_cast<char*>(memory_ptr_),
           reinterpret_cast<char*>(tensor_shm_ptr_) + pb_memory_offset,
           shm_handle_ + pb_memory_offset, copy_gpu);
@@ -585,7 +585,7 @@ PbTensor::LoadFromSharedMemory(
   if (tensor_shm_ptr->memory == 0) {
     std::size_t pb_memory_offset = name_offset + name_shm->Size();
     pb_memory = PbMemory::LoadFromSharedMemory(
-        pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
+        shm_pool, pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
         open_cuda_handle);
   } else {
     pb_memory = PbMemory::LoadFromSharedMemory(

@@ -99,8 +99,7 @@ class PbTensor {
       int64_t memory_type_id, void* memory_ptr, uint64_t byte_size,
       DLManagedTensor* dl_managed_tensor = nullptr);
 
-  /// This constructor is used when
-  /// loading the tensor from shared memory.
+  /// This constructor is used when loading the tensor from shared memory.
   /// \param tensor_shm The name of the tensor
   /// \param dims_shm Tensor dimensions
   /// \param pb_string Triton dtype

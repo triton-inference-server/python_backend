@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -42,13 +42,18 @@ namespace triton { namespace backend { namespace python {
 //
 struct MemoryShm {
   // If the memory type is a GPU pointer, the offset of the GPU pointer from the
-  // base address. For CPU memory type this field contains garbage data.
+  // base address. For CPU memory type this field contains garbage data. This
+  // field will only be used when the memory is not allocated from the CUDA
+  // shared memory pool.
   uint64_t gpu_pointer_offset;
+  bool use_cuda_shared_pool;
+  // The offset of the memory from the base address of the CUDA shared memory
+  // pool.
+  uint64_t cuda_pool_offset;
 
   TRITONSERVER_MemoryType memory_type;
   int64_t memory_type_id;
   uint64_t byte_size;
-  bool is_cuda_handle_set;
   uint64_t memory_release_id;
 };
 
@@ -60,6 +65,7 @@ class PbMemory {
       uint64_t byte_size, char* data, bool copy_gpu = true);
 
   static std::unique_ptr<PbMemory> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);
@@ -72,6 +78,8 @@ class PbMemory {
 
 #ifdef TRITON_ENABLE_GPU
   void SetCudaIpcHandle(cudaIpcMemHandle_t* cuda_ipc_handle);
+
+  void UpdateCUDAOffset(std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool);
 #endif
 
   // Copy the destination buffer to the source buffer.
@@ -83,6 +91,7 @@ class PbMemory {
       bi::managed_external_buffer::handle_t memory_handle,
       bool open_cuda_handle);
   static std::unique_ptr<PbMemory> LoadFromSharedMemory(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle, char* data_shm,
       bool open_cuda_handle);
   static uint64_t ShmStructSize(
@@ -117,7 +126,24 @@ class PbMemory {
 
   void SetMemoryReleaseCallback(std::function<void(void)> release_callback);
 
+  bool UseCUDASharedPool() const
+  {
+    return memory_shm_ptr_->use_cuda_shared_pool;
+  }
+
   ~PbMemory();
+
+#ifndef TRITON_PB_STUB
+  void SetBackendMemory(std::unique_ptr<BackendMemory>&& backend_memory)
+  {
+    backend_memory_ = std::move(backend_memory);
+  };
+
+  std::unique_ptr<BackendMemory> GetBackendMemory()
+  {
+    return std::move(backend_memory_);
+  };
+#endif
 
  private:
   AllocatedSharedMemory<char> memory_shm_;
@@ -150,6 +176,7 @@ class PbMemory {
 #endif
 
   static void FillShmData(
+      std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool,
       TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
       uint64_t byte_size, char* data, char* data_shm,
       bi::managed_external_buffer::handle_t handle, bool copy_gpu = true);

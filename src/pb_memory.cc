@@ -35,7 +35,6 @@ PbMemory::Create(
     uint64_t byte_size, char* data, bool copy_gpu)
 {
   size_t requested_byte_size = sizeof(MemoryShm);
-
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
     requested_byte_size += sizeof(cudaIpcMemHandle_t);
@@ -46,9 +45,10 @@ PbMemory::Create(
 
   AllocatedSharedMemory<char> memory_shm =
       shm_pool->Construct<char>(requested_byte_size);
+
   PbMemory::FillShmData(
-      memory_type, memory_type_id, byte_size, data, memory_shm.data_.get(),
-      memory_shm.handle_, copy_gpu);
+      shm_pool->GetCUDAMemoryPoolManager(), memory_type, memory_type_id,
+      byte_size, data, memory_shm.data_.get(), memory_shm.handle_, copy_gpu);
 
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     data = memory_shm.data_.get() + sizeof(MemoryShm);
@@ -83,12 +83,14 @@ PbMemory::Create(
 
 std::unique_ptr<PbMemory>
 PbMemory::Create(
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
     uint64_t byte_size, char* data, char* data_shm,
     bi::managed_external_buffer::handle_t handle, bool copy_gpu)
 {
   PbMemory::FillShmData(
-      memory_type, memory_type_id, byte_size, data, data_shm, handle, copy_gpu);
+      shm_pool->GetCUDAMemoryPoolManager(), memory_type, memory_type_id,
+      byte_size, data, data_shm, handle, copy_gpu);
 
   if (memory_type == TRITONSERVER_MEMORY_CPU) {
     data = data_shm + sizeof(MemoryShm);
@@ -176,14 +178,15 @@ PbMemory::CopyBuffer(
 
 void
 PbMemory::FillShmData(
+    std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool,
     TRITONSERVER_MemoryType memory_type, int64_t memory_type_id,
     uint64_t byte_size, char* data, char* data_shm,
     bi::managed_external_buffer::handle_t handle, bool copy_gpu)
 {
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
-  memory_shm_ptr->is_cuda_handle_set = copy_gpu;
   memory_shm_ptr->memory_release_id = 0;
+  bool use_cuda_shared_pool = false;
 
   if (memory_type == TRITONSERVER_MEMORY_GPU) {
 #ifdef TRITON_ENABLE_GPU
@@ -193,8 +196,15 @@ PbMemory::FillShmData(
         THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
             reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm), data));
       }
+      if (cuda_pool->UseCudaSharedPool(memory_type_id) &&
+          IsUsingCUDAPool(cuda_pool, memory_type_id, data)) {
+        use_cuda_shared_pool = true;
+        memory_shm_ptr->cuda_pool_offset =
+            data -
+            reinterpret_cast<char*>(cuda_pool->CUDAPoolAddress(memory_type_id));
+      }
     }
-#endif
+#endif  // TRITON_ENABLE_GPU
   } else {
     if (data != nullptr) {
       std::copy(data, data + byte_size, memory_data_shm);
@@ -204,10 +214,12 @@ PbMemory::FillShmData(
   memory_shm_ptr->byte_size = byte_size;
   memory_shm_ptr->memory_type_id = memory_type_id;
   memory_shm_ptr->memory_type = memory_type;
+  memory_shm_ptr->use_cuda_shared_pool = use_cuda_shared_pool;
 }
 
 std::unique_ptr<PbMemory>
 PbMemory::LoadFromSharedMemory(
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle, char* data_shm,
     bool open_cuda_handle)
 {
@@ -219,21 +231,32 @@ PbMemory::LoadFromSharedMemory(
   if (memory_shm_ptr->memory_type == TRITONSERVER_MEMORY_GPU &&
       open_cuda_handle) {
 #ifdef TRITON_ENABLE_GPU
-    cudaIpcMemHandle_t* cuda_handle =
-        reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm);
+    if (memory_shm_ptr->use_cuda_shared_pool) {
+      // When CUDA shared memory pool is used, the stub will retrieve the
+      // data pointer using the offset.
+      data_ptr =
+          (reinterpret_cast<char*>(
+               shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
+                   memory_shm_ptr->memory_type_id)) +
+           memory_shm_ptr->cuda_pool_offset);
+    } else {
+      cudaIpcMemHandle_t* cuda_handle =
+          reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm);
 
-    // The pointer opened by the cudaIpcOpenMemHandle will refer to the base
-    // address. We need to manually correct the offset.
-    void* data_ptr_base;
-    CUDAHandler& cuda_handler = CUDAHandler::getInstance();
-    cuda_handler.OpenCudaHandle(
-        memory_shm_ptr->memory_type_id, cuda_handle, &data_ptr_base);
+      // The pointer opened by the cudaIpcOpenMemHandle will refer to the base
+      // address. We need to manually correct the offset.
+      void* data_ptr_base;
+      CUDAHandler& cuda_handler = CUDAHandler::getInstance();
+      cuda_handler.OpenCudaHandle(
+          memory_shm_ptr->memory_type_id, cuda_handle, &data_ptr_base);
 
-    data_ptr =
-        (reinterpret_cast<char*>(data_ptr_base) +
-         memory_shm_ptr->gpu_pointer_offset);
-    opened_cuda_ipc_handle = true;
-#endif
+      data_ptr =
+          (reinterpret_cast<char*>(data_ptr_base) +
+           memory_shm_ptr->gpu_pointer_offset);
+      opened_cuda_ipc_handle = true;
+    }
+
+#endif  // TRITON_ENABLE_GPU
   } else {
     data_ptr = memory_data_shm;
   }
@@ -241,7 +264,6 @@ PbMemory::LoadFromSharedMemory(
       data_shm, data_ptr, handle,
       opened_cuda_ipc_handle /* opened_cuda_ipc_handle */));
 }
-
 
 std::unique_ptr<PbMemory>
 PbMemory::LoadFromSharedMemory(
@@ -258,21 +280,30 @@ PbMemory::LoadFromSharedMemory(
   if (memory_shm_ptr->memory_type == TRITONSERVER_MEMORY_GPU) {
     if (memory_shm_ptr->byte_size > 0 && open_cuda_handle) {
 #ifdef TRITON_ENABLE_GPU
-      cudaIpcMemHandle_t* cuda_handle =
-          reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm);
+      if (memory_shm_ptr->use_cuda_shared_pool) {
+        // When CUDA shared memory pool is used, the stub will retrieve the
+        // data pointer using the offset.
+        data_ptr =
+            (reinterpret_cast<char*>(
+                 shm_pool->GetCUDAMemoryPoolManager()->CUDAPoolAddress(
+                     memory_shm_ptr->memory_type_id)) +
+             memory_shm_ptr->cuda_pool_offset);
+      } else {
+        cudaIpcMemHandle_t* cuda_handle =
+            reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm);
 
-      // The pointer opened by the cudaIpcOpenMemHandle will refer to the base
-      // address. We need to manually correct the offset.
+        // The pointer opened by the cudaIpcOpenMemHandle will refer to the base
+        // address. We need to manually correct the offset.
+        void* data_ptr_base;
+        CUDAHandler& cuda_handler = CUDAHandler::getInstance();
+        cuda_handler.OpenCudaHandle(
+            memory_shm_ptr->memory_type_id, cuda_handle, &data_ptr_base);
 
-      void* data_ptr_base;
-      CUDAHandler& cuda_handler = CUDAHandler::getInstance();
-      cuda_handler.OpenCudaHandle(
-          memory_shm_ptr->memory_type_id, cuda_handle, &data_ptr_base);
-
-      data_ptr =
-          (reinterpret_cast<char*>(data_ptr_base) +
-           memory_shm_ptr->gpu_pointer_offset);
-      opened_cuda_ipc_handle = true;
+        data_ptr =
+            (reinterpret_cast<char*>(data_ptr_base) +
+             memory_shm_ptr->gpu_pointer_offset);
+        opened_cuda_ipc_handle = true;
+      }
 #endif
     }
   } else {
@@ -402,6 +433,18 @@ void
 PbMemory::SetCudaIpcHandle(cudaIpcMemHandle_t* cuda_ipc_handle)
 {
   *(reinterpret_cast<cudaIpcMemHandle_t*>(ShmData())) = *(cuda_ipc_handle);
+}
+
+void
+PbMemory::UpdateCUDAOffset(std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool)
+{
+  if (cuda_pool->UseCudaSharedPool(MemoryTypeId()) &&
+      IsUsingCUDAPool(cuda_pool, MemoryTypeId(), DataPtr())) {
+    memory_shm_ptr_->cuda_pool_offset =
+        DataPtr() -
+        reinterpret_cast<char*>(cuda_pool->CUDAPoolAddress(MemoryTypeId()));
+    memory_shm_ptr_->use_cuda_shared_pool = true;
+  }
 }
 #endif
 

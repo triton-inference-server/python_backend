@@ -892,6 +892,21 @@ Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
+#ifdef TRITON_ENABLE_GPU
+  try {
+    CUDAHandler& cuda_api = CUDAHandler::getInstance();
+    for (auto& m :
+         shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddressMap()) {
+      if (m.second != nullptr) {
+        cuda_api.CloseCudaHandle(m.first, m.second);
+      }
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    std::cerr << "Error when closing CUDA handle: " << pb_exception.what();
+  }
+#endif
+
   {
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
@@ -1125,86 +1140,18 @@ Stub::ParentToStubMQMonitor()
       break;
     }
 
-    std::unique_ptr<IPCMessage> ipc_message;
-    ResponseBatch* response_batch = nullptr;
-    bi::managed_external_buffer::handle_t* response_handle = nullptr;
-    std::unique_ptr<InferResponse> infer_response;
-    bool responses_is_set = false;
-    PythonBackendException pb_exception(std::string{});
+    std::unique_ptr<IPCMessage> ipc_message =
+        IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
 
-    try {
-      ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
-      AllocatedSharedMemory<char> response_batch_shm =
-          shm_pool_->Load<char>(ipc_message->Args());
-      response_batch =
-          reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
-      response_handle =
-          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-              response_batch_shm.data_.get() + sizeof(ResponseBatch));
-      responses_is_set = true;
-
-      if (response_batch->has_error) {
-        if (response_batch->is_error_set) {
-          std::unique_ptr<PbString> pb_string =
-              PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
-          infer_response = std::make_unique<InferResponse>(
-              std::vector<std::shared_ptr<PbTensor>>{},
-              std::make_shared<PbError>(pb_string->String()));
-        } else {
-          infer_response = std::make_unique<InferResponse>(
-              std::vector<std::shared_ptr<PbTensor>>{},
-              std::make_shared<PbError>(
-                  "An error occurred while performing BLS request."));
-        }
-      }
-
-      if (responses_is_set) {
-        infer_response = InferResponse::LoadFromSharedMemory(
-            shm_pool_, *response_handle, true /* open cuda handle */);
-
-        for (auto& output_tensor : infer_response->OutputTensors()) {
-          if (!output_tensor->IsCPU()) {
-            uint64_t memory_release_id =
-                output_tensor->Memory()->MemoryReleaseId();
-            output_tensor->Memory()->SetMemoryReleaseCallback(
-                [this, memory_release_id]() {
-                  this->MemoryManagerQueue()->Push(memory_release_id);
-                });
-          }
-        }
-      } else {
-        infer_response = std::make_unique<InferResponse>(
-            std::vector<std::shared_ptr<PbTensor>>{},
-            std::make_shared<PbError>(
-                "An error occurred while performing BLS request."));
-      }
-    }
-    catch (const PythonBackendException& pb_exception) {
-      infer_response = std::make_unique<InferResponse>(
-          std::vector<std::shared_ptr<PbTensor>>{},
-          std::make_shared<PbError>(pb_exception.what()));
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-      if (response_iterator_map_.find(infer_response->Id()) !=
-          response_iterator_map_.end()) {
-        response_iterator_map_[infer_response->Id()]->EnqueueResponse(
-            std::move(infer_response));
-      } else {
-        auto response_iterator =
-            std::make_shared<ResponseIterator>(std::move(infer_response));
-        response_iterator_map_.insert(
-            std::pair<void*, std::shared_ptr<ResponseIterator>>(
-                response_iterator->Id(), response_iterator));
-      }
-    }
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock{
-          *(ipc_message->ResponseMutex())};
-      response_batch->waiting_on_stub = true;
-      ipc_message->ResponseCondition()->notify_all();
+    switch (ipc_message->Command()) {
+      case PYTHONSTUB_CommandType::PYTHONSTUB_CUDAPoolInitializeRequest: {
+        GetCUDAMemoryPoolAddress(ipc_message);
+      } break;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecResponse: {
+        ProcessBLSResponseDecoupled(ipc_message);
+      } break;
+      default:
+        break;
     }
   }
 }
@@ -1286,6 +1233,144 @@ Stub::GetProxyStream(const int& device_id)
 #else
   return nullptr;
 #endif
+}
+
+void
+Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
+{
+#ifdef TRITON_ENABLE_GPU
+  bool has_exception = false;
+  std::string error_string;
+  std::unique_ptr<PbString> error_string_shm;
+
+  CUDAMemPoolMessage* cuda_pool_message_ptr = nullptr;
+  try {
+    AllocatedSharedMemory<CUDAMemPoolMessage> cuda_handle_shm =
+        shm_pool_->Load<CUDAMemPoolMessage>(ipc_message->Args());
+    cuda_pool_message_ptr = cuda_handle_shm.data_.get();
+
+    CUDAHandler& cuda_api = CUDAHandler::getInstance();
+    void* cuda_pool_address;
+    cuda_api.OpenCudaHandle(
+        cuda_pool_message_ptr->device_id, &cuda_pool_message_ptr->cuda_handle,
+        &cuda_pool_address);
+    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
+        cuda_pool_message_ptr->device_id, cuda_pool_address);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
+        cuda_pool_message_ptr->device_id, nullptr);
+  }
+
+  if (has_exception) {
+    LOG_INFO << "Failed to initialize CUDA shared memory pool in Python stub: "
+             << error_string;
+    cuda_pool_message_ptr->has_error = true;
+    cuda_pool_message_ptr->is_error_set = false;
+
+    LOG_IF_EXCEPTION(
+        error_string_shm = PbString::Create(shm_pool_, error_string));
+    if (error_string_shm != nullptr) {
+      cuda_pool_message_ptr->is_error_set = true;
+      cuda_pool_message_ptr->error = error_string_shm->ShmHandle();
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    cuda_pool_message_ptr->waiting_on_stub = true;
+    ipc_message->ResponseCondition()->notify_all();
+    while (cuda_pool_message_ptr->waiting_on_stub) {
+      ipc_message->ResponseCondition()->wait(lock);
+    }
+  }
+#endif
+}
+
+void
+Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  ResponseBatch* response_batch = nullptr;
+  bi::managed_external_buffer::handle_t* response_handle = nullptr;
+  std::unique_ptr<InferResponse> infer_response;
+  bool responses_is_set = false;
+  PythonBackendException pb_exception(std::string{});
+
+  try {
+    AllocatedSharedMemory<char> response_batch_shm =
+        shm_pool_->Load<char>(ipc_message->Args());
+    response_batch =
+        reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+    response_handle = reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+        response_batch_shm.data_.get() + sizeof(ResponseBatch));
+    responses_is_set = true;
+
+    if (response_batch->has_error) {
+      if (response_batch->is_error_set) {
+        std::unique_ptr<PbString> pb_string =
+            PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
+        infer_response = std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(pb_string->String()));
+      } else {
+        infer_response = std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(
+                "An error occurred while performing BLS request."));
+      }
+    }
+
+    if (responses_is_set) {
+      infer_response = InferResponse::LoadFromSharedMemory(
+          shm_pool_, *response_handle, true /* open cuda handle */);
+
+      for (auto& output_tensor : infer_response->OutputTensors()) {
+        if (!output_tensor->IsCPU()) {
+          uint64_t memory_release_id =
+              output_tensor->Memory()->MemoryReleaseId();
+          output_tensor->Memory()->SetMemoryReleaseCallback(
+              [this, memory_release_id]() {
+                this->MemoryManagerQueue()->Push(memory_release_id);
+              });
+        }
+      }
+    } else {
+      infer_response = std::make_unique<InferResponse>(
+          std::vector<std::shared_ptr<PbTensor>>{},
+          std::make_shared<PbError>(
+              "An error occurred while performing BLS request."));
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    infer_response = std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{},
+        std::make_shared<PbError>(pb_exception.what()));
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+    if (response_iterator_map_.find(infer_response->Id()) !=
+        response_iterator_map_.end()) {
+      response_iterator_map_[infer_response->Id()]->EnqueueResponse(
+          std::move(infer_response));
+    } else {
+      auto response_iterator =
+          std::make_shared<ResponseIterator>(std::move(infer_response));
+      response_iterator_map_.insert(
+          std::pair<void*, std::shared_ptr<ResponseIterator>>(
+              response_iterator->Id(), response_iterator));
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    response_batch->waiting_on_stub = true;
+    ipc_message->ResponseCondition()->notify_all();
+  }
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;

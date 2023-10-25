@@ -151,6 +151,12 @@ class StubLauncher {
   TRITONSERVER_Error* ReceiveMessageFromStub(
       bi::managed_external_buffer::handle_t& message);
 
+#ifdef TRITON_ENABLE_GPU
+  // Share CUDA memory pool with stub process
+  void ShareCUDAMemoryPool(
+      TRITONBACKEND_MemoryManager* triton_mem_manager, const int32_t device_id);
+#endif  // TRITON_ENABLE_GPU
+
  private:
   pid_t parent_pid_;
   pid_t stub_pid_;
@@ -196,5 +202,9 @@ class StubLauncher {
       ipc_control_;
   bi::managed_external_buffer::handle_t ipc_control_handle_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
+#ifdef TRITON_ENABLE_GPU
+  std::mutex cuda_shm_pool_mutex_;
+  std::unordered_map<int32_t, bool> tried_sharing_cuda_pool_map_;
+#endif  // TRITON_ENABLE_GPU
 };
 }}}  // namespace triton::backend::python

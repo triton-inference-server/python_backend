@@ -109,7 +109,6 @@ InferResponseComplete(
         std::string sname = cname;
         std::vector<int64_t> dims_vector{shape, shape + dim_count};
 
-        // userp is only set for the CPU tensors
         if (memory_type != TRITONSERVER_MEMORY_GPU) {
           if (byte_size != 0) {
             std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
@@ -129,10 +128,15 @@ InferResponseComplete(
                 nullptr /* DLManagedTensor */));
           }
         } else {
-          output_tensors.push_back(std::make_shared<PbTensor>(
+          std::shared_ptr<PbTensor> pb_tensor = std::make_shared<PbTensor>(
               sname, dims_vector, datatype, memory_type, memory_type_id,
               const_cast<void*>(base), byte_size,
-              nullptr /* DLManagedTensor */));
+              nullptr /* DLManagedTensor */);
+
+          std::unique_ptr<PbMemory> pb_memory(
+              reinterpret_cast<PbMemory*>(userp));
+          pb_tensor->SetMemory(std::move(pb_memory));
+          output_tensors.push_back(pb_tensor);
         }
       }
     }
@@ -241,24 +245,27 @@ ResponseAlloc(
       } break;
 #ifdef TRITON_ENABLE_GPU
       case TRITONSERVER_MEMORY_GPU: {
-        auto err = cudaSetDevice(*actual_memory_type_id);
-        if ((err != cudaSuccess) && (err != cudaErrorNoDevice) &&
-            (err != cudaErrorInsufficientDriver)) {
-          return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL,
-              std::string(
-                  "unable to set current CUDA device: " +
-                  std::string(cudaGetErrorString(err)))
-                  .c_str());
-        }
+        BackendMemory* backend_memory;
+        std::unique_ptr<BackendMemory> lbackend_memory;
+        try {
+          THROW_IF_TRITON_ERROR(BackendMemory::Create(
+              reinterpret_cast<TRITONBACKEND_MemoryManager*>(
+                  shm_pool->GetCUDAMemoryPoolManager()->TritonMemoryManager()),
+              {BackendMemory::AllocationType::GPU_POOL,
+               BackendMemory::AllocationType::GPU},
+              *actual_memory_type_id, byte_size, &backend_memory));
+          lbackend_memory.reset(backend_memory);
 
-        err = cudaMalloc(buffer, byte_size);
-        if (err != cudaSuccess) {
-          return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INTERNAL,
-              std::string(
-                  "cudaMalloc failed: " + std::string(cudaGetErrorString(err)))
-                  .c_str());
+          std::unique_ptr<PbMemory> pb_memory = PbMemory::Create(
+              shm_pool, std::move(lbackend_memory), true /* copy_gpu */);
+          *buffer = pb_memory->DataPtr();
+          *buffer_userp = reinterpret_cast<void*>(pb_memory.get());
+          pb_memory.release();
+        }
+        catch (const PythonBackendException& pb_exception) {
+          TRITONSERVER_Error* err =
+              CreateTritonErrorFromException(pb_exception);
+          return err;
         }
         break;
       }
