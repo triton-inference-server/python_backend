@@ -598,7 +598,7 @@ InferRequest::Exec(const bool is_decoupled)
       if (!output_tensor->IsCPU()) {
         uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
-            [&memory_manager_message_queue, memory_release_id]() {
+            [&memory_manager_message_queue, memory_release_id, &shm_pool]() {
               memory_manager_message_queue->Push(memory_release_id);
             });
       }

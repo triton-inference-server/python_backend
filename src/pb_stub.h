@@ -272,7 +272,11 @@ class Stub {
   std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
 
   void ProcessResponse(InferResponse* response);
+
+  void ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message);
+
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
+
   bool IsDecoupled();
   ~Stub();
 
@@ -349,6 +353,9 @@ class Stub {
   /// Helper function to retrieve a proxy stream for dlpack synchronization
   /// for provided device
   cudaStream_t GetProxyStream(const int& device_id);
+
+  /// Get the CUDA memory pool address from the parent process.
+  void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
  private:
   bi::interprocess_mutex* stub_mutex_;

@@ -34,6 +34,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
@@ -42,6 +43,32 @@
 
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
+
+class CUDAMemoryPoolManager {
+ public:
+  CUDAMemoryPoolManager() : triton_memory_manager_(nullptr) {}
+
+  void SetCUDAPoolAddress(const int32_t device_id, void* cuda_pool_address);
+
+  void* CUDAPoolAddress(const int32_t device_id);
+
+  void SetTritonMemoryManager(void* triton_memory_manager);
+
+  void* TritonMemoryManager();
+
+  bool UseCudaSharedPool(const int32_t device_id);
+
+  // Return cuda pool address map
+  std::unordered_map<int32_t, void*>& CUDAPoolAddressMap();
+
+ private:
+  // The base address of the Triton CUDA memory pool
+  std::unordered_map<int32_t, void*> cuda_pool_address_map_;
+  // The mutex to protect the cuda_pool_address_map_
+  std::mutex mu_;
+  // TRITONBACKEND_MemoryManager
+  void* triton_memory_manager_;
+};
 
 template <typename T>
 struct AllocatedSharedMemory {
@@ -157,6 +184,11 @@ class SharedMemoryManager {
 
   void SetDeleteRegion(bool delete_region);
 
+  std::unique_ptr<CUDAMemoryPoolManager>& GetCUDAMemoryPoolManager()
+  {
+    return cuda_memory_pool_manager_;
+  }
+
   ~SharedMemoryManager() noexcept(false);
 
  private:
@@ -171,6 +203,7 @@ class SharedMemoryManager {
   uint64_t* total_size_;
   bool create_;
   bool delete_region_;
+  std::unique_ptr<CUDAMemoryPoolManager> cuda_memory_pool_manager_;
 
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
