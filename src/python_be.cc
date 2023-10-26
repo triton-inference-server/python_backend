@@ -374,7 +374,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
 
     uint64_t request_timeout = 0;
     RETURN_IF_ERROR(
-        TRITONBACKEND_RequestTimeout(request, &request_timeout));
+        TRITONBACKEND_InferenceRequestTimeout(request, &request_timeout));
 
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
