@@ -38,6 +38,7 @@
 #include <type_traits>
 #include <typeinfo>
 #include <vector>
+#include <unordered_map>
 
 #include "pb_exception.h"
 
