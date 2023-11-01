@@ -37,8 +37,8 @@
 #include <mutex>
 #include <type_traits>
 #include <typeinfo>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "pb_exception.h"
 
