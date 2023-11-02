@@ -394,7 +394,7 @@ class ModelConfig:
                     + input["name"]
                     + "' in auto-complete-config function for model '"
                     + self._model_config["name"]
-                    + "' contains property other than 'name', 'data_type' and 'dims'."
+                    + "' contains property other than 'name', 'data_type', 'dims' and 'optional'."
                 )
 
         if "name" not in input:
