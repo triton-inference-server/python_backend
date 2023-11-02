@@ -249,7 +249,9 @@ class TritonPythonModel:
         inputs = [{
             'name': 'INPUT0',
             'data_type': 'TYPE_FP32',
-            'dims': [4]
+            'dims': [4],
+            # this parameter will set `INPUT0 as an optional input`
+            'optional': True
         }, {
             'name': 'INPUT1',
             'data_type': 'TYPE_FP32',
@@ -393,6 +395,23 @@ in absence of a configuration file. This function returns the
 function to gain read-only access to the `pb_utils.ModelConfig` object.
 The `pb_utils.ModelConfig` object being returned from here will be used as the
 final configuration for the model.
+
+In addition to minimal properties, you can also set [model_transaction_policy](
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-transaction-policy)
+through `auto_complete_config` using `set_model_transaction_policy`.
+For example,
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+    @staticmethod
+    def auto_complete_config(auto_complete_model_config):
+      ...
+      transaction_policy = {"decoupled": True}
+      auto_complete_model_config.set_model_transaction_policy(transaction_policy)
+      ...
+```
 
 Note: The Python interpreter used to invoke this function will be destroyed
 upon returning from this function and as a result none of the objects
