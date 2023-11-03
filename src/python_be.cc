@@ -1862,20 +1862,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
     RETURN_IF_ERROR((*state)->LaunchAutoCompleteStubProcess());
     (*state)->ModelConfig() = std::move((*state)->Stub()->AutoCompleteConfig());
     RETURN_IF_ERROR((*state)->SetModelConfig());
-
-    triton::common::TritonJson::Value model_transaction_policy;
-    bool is_decoupled = false;
-    if ((*state)->ModelConfig().Find(
-            "model_transaction_policy", &model_transaction_policy)) {
-      triton::common::TritonJson::Value decoupled;
-      if (model_transaction_policy.Find("decoupled", &decoupled)) {
-        auto error = decoupled.AsBool(&is_decoupled);
-        if (error != nullptr) {
-          throw BackendModelException(error);
-        }
-        (*state)->SetDecoupled(is_decoupled);
-      }
-    }
+    RETURN_IF_ERROR((*state)->PropagateAutoCompletedConfig());
 
     (*state)->Stub()->UpdateHealth();
     (*state)->Stub()->TerminateStub();
@@ -2015,6 +2002,28 @@ ModelState::ValidateModelConfig()
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       (std::string("model configuration:\n") + buffer.Contents()).c_str());
+
+  return nullptr;
+}
+
+TRITONSERVER_Error*
+ModelState::PropagateAutoCompletedConfig()
+{
+  // `Update model_transaction_policy` if setting was set
+  // with `set_model_transaction_policy`
+  triton::common::TritonJson::Value model_transaction_policy;
+  bool is_decoupled = false;
+  if (ModelConfig().Find(
+          "model_transaction_policy", &model_transaction_policy)) {
+    triton::common::TritonJson::Value decoupled;
+    if (model_transaction_policy.Find("decoupled", &decoupled)) {
+      auto error = decoupled.AsBool(&is_decoupled);
+      if (error != nullptr) {
+        throw BackendModelException(error);
+      }
+      SetDecoupled(is_decoupled);
+    }
+  }
 
   return nullptr;
 }

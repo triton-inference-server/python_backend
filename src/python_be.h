@@ -250,6 +250,10 @@ class ModelState : public BackendModel {
   // Validate Model Configuration
   TRITONSERVER_Error* ValidateModelConfig();
 
+  // Update values set during auto_complete to `ModelState`
+  // Currently only updates `decoupled_`
+  TRITONSERVER_Error* PropagateAutoCompletedConfig();
+
   // Auto-complete stub
   std::unique_ptr<StubLauncher>& Stub() { return auto_complete_stub_; }
 
