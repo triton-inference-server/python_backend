@@ -1862,7 +1862,6 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
     RETURN_IF_ERROR((*state)->LaunchAutoCompleteStubProcess());
     (*state)->ModelConfig() = std::move((*state)->Stub()->AutoCompleteConfig());
     RETURN_IF_ERROR((*state)->SetModelConfig());
-    RETURN_IF_ERROR((*state)->PropagateAutoCompletedConfig());
 
     (*state)->Stub()->UpdateHealth();
     (*state)->Stub()->TerminateStub();
@@ -2007,8 +2006,9 @@ ModelState::ValidateModelConfig()
 }
 
 TRITONSERVER_Error*
-ModelState::PropagateAutoCompletedConfig()
+ModelState::SetModelConfig()
 {
+  BackendModel::SetModelConfig();
   // `Update model_transaction_policy` if setting was set
   // with `set_model_transaction_policy`
   triton::common::TritonJson::Value model_transaction_policy;
