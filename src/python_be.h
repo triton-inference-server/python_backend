@@ -238,6 +238,9 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
+  // Set decoupled mode
+  void SetDecoupled(bool decoupled) { decoupled_ = decoupled; }
+
   // Returns the value in the `runtime_modeldir_` field
   std::string RuntimeModelDir() { return runtime_modeldir_; }
 

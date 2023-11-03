@@ -1863,6 +1863,20 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
     (*state)->ModelConfig() = std::move((*state)->Stub()->AutoCompleteConfig());
     RETURN_IF_ERROR((*state)->SetModelConfig());
 
+    triton::common::TritonJson::Value model_transaction_policy;
+    bool is_decoupled = false;
+    if ((*state)->ModelConfig().Find(
+            "model_transaction_policy", &model_transaction_policy)) {
+      triton::common::TritonJson::Value decoupled;
+      if (model_transaction_policy.Find("decoupled", &decoupled)) {
+        auto error = decoupled.AsBool(&is_decoupled);
+        if (error != nullptr) {
+          throw BackendModelException(error);
+        }
+        (*state)->SetDecoupled(is_decoupled);
+      }
+    }
+
     (*state)->Stub()->UpdateHealth();
     (*state)->Stub()->TerminateStub();
     (*state)->Stub()->ClearQueues();
