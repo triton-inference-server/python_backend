@@ -627,7 +627,8 @@ for more details on how to host a decoupled model.
 #### Request Rescheduling
 
 Starting from 23.11, Python backend supports request rescheduling. By calling
-the `set_release_flags` function on the request object, you can reschedule the
+the `set_release_flags` function on the request object with the flag
+`pb_utils.TRITONSERVER_REQUEST_RELEASE_RESCHEDULE`, you can reschedule the
 request for further execution in a future batch. This feature is useful for
 handling generative sequences.
 
