@@ -44,14 +44,13 @@ InferRequest::InferRequest(
     const std::string& model_name, const int64_t model_version,
     const std::string& parameters, const uint32_t flags, const int32_t timeout,
     const intptr_t response_factory_address, const intptr_t request_address,
-    const PreferredMemory& preferred_memory, const InferenceTrace& trace,
-    const uint32_t& request_release_flags)
+    const PreferredMemory& preferred_memory, const InferenceTrace& trace)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
       model_version_(model_version), parameters_(parameters), flags_(flags),
       timeout_(timeout), response_factory_address_(response_factory_address),
       request_address_(request_address), preferred_memory_(preferred_memory),
-      trace_(trace), request_release_flags_(request_release_flags)
+      trace_(trace), request_release_flags_(TRITONSERVER_REQUEST_RELEASE_ALL)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -74,7 +73,7 @@ InferRequest::InferRequest(
 #ifdef TRITON_PB_STUB
   pb_cancel_ =
       std::make_shared<PbCancel>(response_factory_address_, request_address_);
-  response_sender_ = std::make_shared<ResponseSender>(
+  response_sender_ = Stub::GetOrCreateInstance()->GetResponseSender(
       request_address_, response_factory_address_,
       Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
@@ -400,7 +399,7 @@ InferRequest::InferRequest(
 #ifdef TRITON_PB_STUB
   pb_cancel_ =
       std::make_shared<PbCancel>(response_factory_address_, request_address_);
-  response_sender_ = std::make_shared<ResponseSender>(
+  response_sender_ = Stub::GetOrCreateInstance()->GetResponseSender(
       request_address_, response_factory_address_,
       Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif

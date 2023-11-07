@@ -88,8 +88,7 @@ class InferRequest {
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
           PreferredMemory(PreferredMemory::DEFAULT, 0),
-      const InferenceTrace& trace = InferenceTrace(),
-      const uint32_t& request_release_flags = TRITONSERVER_REQUEST_RELEASE_ALL);
+      const InferenceTrace& trace = InferenceTrace());
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();

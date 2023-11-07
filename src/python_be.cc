@@ -396,16 +396,14 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::DEFAULT, 0), trace,
-          TRITONSERVER_REQUEST_RELEASE_ALL /* request release flags */);
+          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     } else {
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
           0 /* BLS request timeout*/, 0 /* response_factory_address */,
           reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::DEFAULT, 0), trace,
-          TRITONSERVER_REQUEST_RELEASE_ALL /* request release flags */);
+          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     }
 
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
@@ -1364,6 +1362,11 @@ ModelInstanceState::ProcessRequestsDecoupled(
           Stub()->ShmPool(), response_batch.data_->error);
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
+    }
+
+    // Reset the release flags for all the requests.
+    for (auto& infer_request : pb_infer_requests) {
+      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
     }
 
     return TRITONSERVER_ErrorNew(
@@ -2502,7 +2505,7 @@ TRITONBACKEND_ModelInstanceExecute(
           (std::string("Failed to release request: ") + pb_exception.what())
               .c_str());
       if (request_release_flags[r] == TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
-        // If error occurs during request reschedule, release the request with
+        // If error occurs during request rescheduling, release the request with
         // `TRITONSERVER_REQUEST_RELEASE_ALL` flag.
         LOG_IF_ERROR(
             TRITONBACKEND_RequestRelease(
