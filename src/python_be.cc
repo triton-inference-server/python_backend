@@ -2053,6 +2053,29 @@ ModelState::ValidateModelConfig()
   return nullptr;
 }
 
+TRITONSERVER_Error*
+ModelState::SetModelConfig()
+{
+  BackendModel::SetModelConfig();
+  // `Update model_transaction_policy` if setting was set
+  // with `set_model_transaction_policy`
+  triton::common::TritonJson::Value model_transaction_policy;
+  bool is_decoupled = false;
+  if (ModelConfig().Find(
+          "model_transaction_policy", &model_transaction_policy)) {
+    triton::common::TritonJson::Value decoupled;
+    if (model_transaction_policy.Find("decoupled", &decoupled)) {
+      auto error = decoupled.AsBool(&is_decoupled);
+      if (error != nullptr) {
+        throw BackendModelException(error);
+      }
+      SetDecoupled(is_decoupled);
+    }
+  }
+
+  return nullptr;
+}
+
 
 extern "C" {
 
