@@ -641,8 +641,9 @@ sequence_batching {
 }
 ```
 
-For non-decoupled models, a `None` object must be appended to the response list
-for the rescheduled request. For example:
+For non-decoupled models, there can only be one response for each request. Since
+the rescheduled request is the same as the original, you must append a `None`
+object to the response list for the rescheduled request. For example:
 
 ```python
 import triton_python_backend_utils as pb_utils
