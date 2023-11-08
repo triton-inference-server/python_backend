@@ -238,6 +238,9 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
+  // Set decoupled mode
+  void SetDecoupled(bool decoupled) { decoupled_ = decoupled; }
+
   // Returns the value in the `runtime_modeldir_` field
   std::string RuntimeModelDir() { return runtime_modeldir_; }
 
@@ -246,6 +249,10 @@ class ModelState : public BackendModel {
 
   // Validate Model Configuration
   TRITONSERVER_Error* ValidateModelConfig();
+
+  // Overrides `BackendModel::SetModelConfig` to also
+  // set `ModelState::decoupled_`
+  TRITONSERVER_Error* SetModelConfig();
 
   // Auto-complete stub
   std::unique_ptr<StubLauncher>& Stub() { return auto_complete_stub_; }
