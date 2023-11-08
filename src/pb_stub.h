@@ -357,13 +357,6 @@ class Stub {
   /// Get the CUDA memory pool address from the parent process.
   void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
-  /// Get the response sender associated with the request, or create a new one
-  /// if it does not exist in the map.
-  std::shared_ptr<ResponseSender> GetResponseSender(
-      intptr_t request_address, intptr_t response_factory_address,
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      const std::shared_ptr<PbCancel>& pb_cancel);
-
  private:
   bi::interprocess_mutex* stub_mutex_;
   bi::interprocess_condition* stub_cond_;
@@ -402,9 +395,6 @@ class Stub {
       response_iterator_map_;
   std::mutex dlpack_proxy_stream_pool_mu_;
   std::unordered_map<int, cudaStream_t> dlpack_proxy_stream_pool_;
-  std::mutex response_sender_map_mu_;
-  std::unordered_map<intptr_t, std::shared_ptr<ResponseSender>>
-      response_sender_map_;
 };
 
 template <typename MessageType>

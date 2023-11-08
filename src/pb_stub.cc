@@ -1386,26 +1386,6 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
   }
 }
 
-std::shared_ptr<ResponseSender>
-Stub::GetResponseSender(
-    intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
-    const std::shared_ptr<PbCancel>& pb_cancel)
-{
-  std::lock_guard<std::mutex> lock(response_sender_map_mu_);
-  if (response_sender_map_.find(request_address) !=
-      response_sender_map_.end()) {
-    return response_sender_map_[request_address];
-  } else {
-    auto response_sender = std::make_shared<ResponseSender>(
-        request_address, response_factory_address, shm_pool, pb_cancel);
-    response_sender_map_.insert(
-        std::pair<intptr_t, std::shared_ptr<ResponseSender>>(
-            request_address, response_sender));
-    return response_sender;
-  }
-}
-
 std::unique_ptr<Logger> Logger::log_instance_;
 
 std::unique_ptr<Logger>&
