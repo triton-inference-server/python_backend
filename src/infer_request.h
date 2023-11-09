@@ -73,6 +73,7 @@ struct InferRequestShm {
   int32_t timeout;
   PreferredMemory preferred_memory;
   InferenceTrace trace;
+  uint32_t request_release_flags;
 };
 
 class InferRequest {
@@ -104,6 +105,8 @@ class InferRequest {
   void SetIsDecoupled(const bool is_decoupled);
   PreferredMemory& GetPreferredMemory();
   InferenceTrace& Trace();
+  uint32_t ReleaseFlags();
+  void SetReleaseFlags(const uint32_t& flags);
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
@@ -161,6 +164,7 @@ class InferRequest {
   bool is_decoupled_;
   PreferredMemory preferred_memory_;
   InferenceTrace trace_;
+  uint32_t request_release_flags_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;

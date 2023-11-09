@@ -50,7 +50,7 @@ InferRequest::InferRequest(
       model_version_(model_version), parameters_(parameters), flags_(flags),
       timeout_(timeout), response_factory_address_(response_factory_address),
       request_address_(request_address), preferred_memory_(preferred_memory),
-      trace_(trace)
+      trace_(trace), request_release_flags_(TRITONSERVER_REQUEST_RELEASE_ALL)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -175,6 +175,20 @@ InferRequest::Trace()
   return trace_;
 }
 
+uint32_t
+InferRequest::ReleaseFlags()
+{
+  request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
+  return request_release_flags_;
+}
+
+void
+InferRequest::SetReleaseFlags(const uint32_t& flags)
+{
+  request_release_flags_ = flags;
+  infer_request_shm_ptr_->request_release_flags = request_release_flags_;
+}
+
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
@@ -201,6 +215,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->timeout = timeout_;
   infer_request_shm_ptr_->preferred_memory = preferred_memory_;
   infer_request_shm_ptr_->trace = trace_;
+  infer_request_shm_ptr_->request_release_flags = request_release_flags_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -379,6 +394,7 @@ InferRequest::InferRequest(
   timeout_ = infer_request_shm_ptr_->timeout;
   preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
   trace_ = infer_request_shm_ptr_->trace;
+  request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
 
 #ifdef TRITON_PB_STUB
   pb_cancel_ =

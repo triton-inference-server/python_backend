@@ -288,6 +288,9 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
   std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
   std::unique_ptr<RequestExecutor> request_executor_;
+  std::mutex response_factory_map_mutex_;
+  std::unordered_map<intptr_t, TRITONBACKEND_ResponseFactory*>
+      response_factory_map_;
 
  public:
   static TRITONSERVER_Error* Create(
@@ -338,6 +341,7 @@ class ModelInstanceState : public BackendModelInstance {
   // Process all the requests obtained from Triton.
   void ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
+      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
       bool& restart);
 
   // Process all the requests in the decoupled mode.
