@@ -1,4 +1,4 @@
-# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -606,3 +606,5 @@ class ModelConfig:
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2
 TRITONSERVER_RESPONSE_COMPLETE_FINAL = 1
+TRITONSERVER_REQUEST_RELEASE_ALL = 1
+TRITONSERVER_REQUEST_RELEASE_RESCHEDULE = 2
