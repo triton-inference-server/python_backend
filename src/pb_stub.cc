@@ -793,26 +793,39 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
           std::to_string(response_size) + "\n";
       throw PythonBackendException(err);
     }
-    for (auto& response : responses) {
+
+    for (size_t i = 0; i < response_size; i++) {
       // Check the return type of execute function.
-      if (!py::isinstance<InferResponse>(response)) {
-        std::string str = py::str(response.get_type());
-        throw PythonBackendException(
-            std::string("Expected an 'InferenceResponse' object in the execute "
-                        "function return list, found type '") +
-            str + "'.");
+      InferRequest* infer_request = py_request_list[i].cast<InferRequest*>();
+      if (infer_request->ReleaseFlags() ==
+          TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
+        if (!py::isinstance<py::none>(responses[i])) {
+          // When the request is rescheduled in non-decoupled model, the
+          // response must be None.
+          std::string str = py::str(responses[i].get_type());
+          throw PythonBackendException(
+              "Expected a None object in the execute function return list for "
+              "reschduled request, "
+              "found type '" +
+              str + "'.");
+        }
+      } else {
+        if (!py::isinstance<InferResponse>(responses[i])) {
+          std::string str = py::str(responses[i].get_type());
+          throw PythonBackendException(
+              std::string(
+                  "Expected an 'InferenceResponse' object in the execute "
+                  "function return list, found type '") +
+              str + "'.");
+        }
+        InferResponse* infer_response = responses[i].cast<InferResponse*>();
+        infer_response->PruneOutputTensors(
+            infer_request->RequestedOutputNames());
+        ProcessResponse(infer_response);
+        responses_shm_handle[i] = infer_response->ShmHandle();
       }
     }
     response_batch_shm_ptr->batch_size = response_size;
-
-    for (size_t i = 0; i < batch_size; i++) {
-      InferResponse* infer_response = responses[i].cast<InferResponse*>();
-      InferRequest* infer_request = py_request_list[i].cast<InferRequest*>();
-      infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
-
-      ProcessResponse(infer_response);
-      responses_shm_handle[i] = infer_response->ShmHandle();
-    }
   }
   catch (const PythonBackendException& pb_exception) {
     has_exception = true;
@@ -1675,7 +1688,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
       .def("get_response_sender", &InferRequest::GetResponseSender)
-      .def("is_cancelled", &InferRequest::IsCancelled);
+      .def("is_cancelled", &InferRequest::IsCancelled)
+      .def("set_release_flags", &InferRequest::SetReleaseFlags),
+      py::arg("flags").none(false);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
