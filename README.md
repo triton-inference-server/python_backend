@@ -630,14 +630,14 @@ Starting from 23.11, Python backend supports request rescheduling. By calling
 the `set_release_flags` function on the request object with the flag
 `pb_utils.TRITONSERVER_REQUEST_RELEASE_RESCHEDULE`, you can reschedule the
 request for further execution in a future batch. This feature is useful for
-handling generative sequences.
+handling iterative sequences.
 
-The model config must be configured to enable generative sequence batching in
+The model config must be configured to enable iterative sequence batching in
 order to use the request rescheduling API:
 
 ```
 sequence_batching {
-  generative_sequence : true
+  iterative_sequence : true
 }
 ```
 
