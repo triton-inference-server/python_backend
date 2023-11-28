@@ -50,6 +50,7 @@ any C++ code.
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
         - [Known Issues](#known-issues)
+      - [Request Rescheduling](#request-rescheduling)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
   - [Inference Request Parameters](#inference-request-parameters)
@@ -249,7 +250,9 @@ class TritonPythonModel:
         inputs = [{
             'name': 'INPUT0',
             'data_type': 'TYPE_FP32',
-            'dims': [4]
+            'dims': [4],
+            # this parameter will set `INPUT0 as an optional input`
+            'optional': True
         }, {
             'name': 'INPUT1',
             'data_type': 'TYPE_FP32',
@@ -393,6 +396,23 @@ in absence of a configuration file. This function returns the
 function to gain read-only access to the `pb_utils.ModelConfig` object.
 The `pb_utils.ModelConfig` object being returned from here will be used as the
 final configuration for the model.
+
+In addition to minimal properties, you can also set [model_transaction_policy](
+  https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#model-transaction-policy)
+through `auto_complete_config` using `set_model_transaction_policy`.
+For example,
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+    @staticmethod
+    def auto_complete_config(auto_complete_model_config):
+      ...
+      transaction_policy = {"decoupled": True}
+      auto_complete_model_config.set_model_transaction_policy(transaction_policy)
+      ...
+```
 
 Note: The Python interpreter used to invoke this function will be destroyed
 upon returning from this function and as a result none of the objects
@@ -603,6 +623,102 @@ for more details on how to host a decoupled model.
 ##### Known Issues
 
 * Currently, decoupled Python models can not make async infer requests.
+
+#### Request Rescheduling
+
+Starting from 23.11, Python backend supports request rescheduling. By calling
+the `set_release_flags` function on the request object with the flag
+`pb_utils.TRITONSERVER_REQUEST_RELEASE_RESCHEDULE`, you can reschedule the
+request for further execution in a future batch. This feature is useful for
+handling iterative sequences.
+
+The model config must be configured to enable iterative sequence batching in
+order to use the request rescheduling API:
+
+```
+sequence_batching {
+  iterative_sequence : true
+}
+```
+
+For non-decoupled models, there can only be one response for each request. Since
+the rescheduled request is the same as the original, you must append a `None`
+object to the response list for the rescheduled request. For example:
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    ...
+
+    def execute(self, requests):
+        responses = []
+
+        for request in requests:
+            # Explicitly reschedule the first request
+            if self.idx == 0:
+                request.set_release_flags(
+                    pb_utils.TRITONSERVER_REQUEST_RELEASE_RESCHEDULE
+                )
+                responses.append(None)
+                self.idx += 1
+            else:
+                responses.append(inference_response)
+
+        return responses
+```
+
+For decoupled models, it is required to reschedule a request *before* returning
+from the `execute` function.
+Below is an example of a decoupled model using request rescheduling. This model
+takes 1 input tensor, an INT32 [ 1 ] input named "IN", and produces an output
+tensor "OUT" with the same shape as the input tensor. The input value indicates
+the total number of responses to be generated and the output value indicates the
+number of remaining responses. For example, if the request input has value 2,
+the model will:
+  - Send a response with value 1.
+  - Release request with RESCHEDULE flag.
+  - When execute on the same request, send the last response with value 0.
+  - Release request with ALL flag.
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    ...
+
+    def execute(self, requests):
+        responses = []
+
+        for request in requests:
+            in_input = pb_utils.get_input_tensor_by_name(request, "IN").as_numpy()
+
+            if self.reset_flag:
+                self.remaining_response = in_input[0]
+                self.reset_flag = False
+
+            response_sender = request.get_response_sender()
+
+            self.remaining_response -= 1
+
+            out_output = pb_utils.Tensor(
+                "OUT", np.array([self.remaining_response], np.int32)
+            )
+            response = pb_utils.InferenceResponse(output_tensors=[out_output])
+
+            if self.remaining_response <= 0:
+                response_sender.send(
+                    response, flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL
+                )
+                self.reset_flag = True
+            else:
+                request.set_release_flags(
+                    pb_utils.TRITONSERVER_REQUEST_RELEASE_RESCHEDULE
+                )
+                response_sender.send(response)
+
+        return None
+```
 
 ### `finalize`
 

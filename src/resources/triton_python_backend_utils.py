@@ -1,4 +1,4 @@
-# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -381,12 +381,12 @@ class ModelConfig:
         Raises
         ------
         ValueError
-            If input contains property other than 'name', 'data_type'
-            and 'dims' or any of the properties are not set, or if an
-            input with the same name already exists in the configuration
-            but has different data_type or dims property
+            If input contains property other than 'name', 'data_type',
+            'dims', 'optional' or any of the non-optional properties
+            are not set, or if an input with the same name already exists
+            in the configuration but has different data_type or dims property
         """
-        valid_properties = ["name", "data_type", "dims"]
+        valid_properties = ["name", "data_type", "dims", "optional"]
         for current_property in input:
             if current_property not in valid_properties:
                 raise ValueError(
@@ -394,7 +394,7 @@ class ModelConfig:
                     + input["name"]
                     + "' in auto-complete-config function for model '"
                     + self._model_config["name"]
-                    + "' contains property other than 'name', 'data_type' and 'dims'."
+                    + "' contains property other than 'name', 'data_type', 'dims' and 'optional'."
                 )
 
         if "name" not in input:
@@ -447,9 +447,26 @@ class ModelConfig:
                         + " but the model configuration specifies dims "
                         + str(current_input["dims"])
                     )
+                elif (
+                    "optional" in current_input
+                    and "optional" in input
+                    and current_input["optional"] != input["optional"]
+                ):
+                    raise ValueError(
+                        "model '"
+                        + self._model_config["name"]
+                        + "', tensor '"
+                        + input["name"]
+                        + "': the model expects optional "
+                        + str(input["optional"])
+                        + " but the model configuration specifies optional "
+                        + str(current_input["optional"])
+                    )
                 else:
                     current_input["data_type"] = input["data_type"]
                     current_input["dims"] = input["dims"]
+                    if "optional" in input:
+                        current_input["optional"] = input["optional"]
                     return
 
         self._model_config["input"].append(input)
@@ -538,7 +555,56 @@ class ModelConfig:
 
         self._model_config["output"].append(output)
 
+    def set_model_transaction_policy(self, transaction_policy_dict):
+        """
+        Set model transaction policy for the model.
+        Parameters
+        ----------
+        transaction_policy_dict : dict
+            The dict, containing all properties to be set as a part
+            of `model_transaction_policy` field.
+        Raises
+        ------
+        ValueError
+            If transaction_policy_dict contains property other
+            than 'decoupled', or if `model_transaction_policy` already exists
+            in the configuration, but has different `decoupled` property.
+        """
+        valid_properties = ["decoupled"]
+        for current_property in transaction_policy_dict.keys():
+            if current_property not in valid_properties:
+                raise ValueError(
+                    "model transaction property in auto-complete-config "
+                    + "function for model '"
+                    + self._model_config["name"]
+                    + "' contains property other than 'decoupled'."
+                )
+
+        if "model_transaction_policy" not in self._model_config:
+            self._model_config["model_transaction_policy"] = {}
+
+        if "decoupled" in transaction_policy_dict.keys():
+            if (
+                "decoupled" in self._model_config["model_transaction_policy"]
+                and self._model_config["model_transaction_policy"]["decoupled"]
+                != transaction_policy_dict["decoupled"]
+            ):
+                raise ValueError(
+                    "trying to change decoupled property in auto-complete-config "
+                    + "for model '"
+                    + self._model_config["name"]
+                    + "', which is already set to '"
+                    + str(self._model_config["model_transaction_policy"]["decoupled"])
+                    + "'."
+                )
+
+            self._model_config["model_transaction_policy"][
+                "decoupled"
+            ] = transaction_policy_dict["decoupled"]
+
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_END = 2
 TRITONSERVER_RESPONSE_COMPLETE_FINAL = 1
+TRITONSERVER_REQUEST_RELEASE_ALL = 1
+TRITONSERVER_REQUEST_RELEASE_RESCHEDULE = 2

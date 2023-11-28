@@ -271,12 +271,12 @@ ModelInstanceState::IsStubProcessAlive()
 TRITONSERVER_Error*
 ModelInstanceState::SaveRequestsToSharedMemory(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
-    std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
+    std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
     AllocatedSharedMemory<char>& request_batch,
     std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses)
 {
   // Clear any existing items in the requests vector
-  pb_inference_requests.clear();
+  pb_infer_requests.clear();
 
   ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   RETURN_IF_EXCEPTION(
@@ -379,7 +379,22 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
       TRITONBACKEND_ResponseFactory* factory_ptr;
-      RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
+      // Reuse the response factory if there is already a response factory
+      // associated with the request
+      std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
+      {
+        if (response_factory_map_.find(reinterpret_cast<intptr_t>(request)) !=
+            response_factory_map_.end()) {
+          factory_ptr =
+              response_factory_map_[reinterpret_cast<intptr_t>(request)];
+        } else {
+          RETURN_IF_ERROR(
+              TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
+          response_factory_map_[reinterpret_cast<intptr_t>(request)] =
+              factory_ptr;
+        }
+      }
+
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
           model_state->Name(), model_state->Version(), parameters_string, flags,
@@ -397,7 +412,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
 
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
     requests_shm[r] = infer_request->ShmHandle();
-    pb_inference_requests.emplace_back(std::move(infer_request));
+    pb_infer_requests.emplace_back(std::move(infer_request));
   }
 
   return nullptr;  // success
@@ -1153,8 +1168,16 @@ ModelInstanceState::ResponseSendDecoupled(
       reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
           send_message_payload->response_factory_address);
   if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-    std::lock_guard<std::mutex> guard{closed_requests_mutex_};
-    closed_requests_.push_back(send_message_payload->request_address);
+    {
+      std::lock_guard<std::mutex> guard{closed_requests_mutex_};
+      closed_requests_.push_back(send_message_payload->request_address);
+    }
+
+    // Clean up the response factory map.
+    {
+      std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
+      response_factory_map_.erase(send_message_payload->request_address);
+    }
   }
 
   if (send_message_payload->response != 0) {
@@ -1279,7 +1302,7 @@ ModelInstanceState::ResponseSendDecoupled(
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequestsDecoupled(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
-    std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
+    std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
     PbMetricReporter& reporter)
 {
   NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
@@ -1305,8 +1328,7 @@ ModelInstanceState::ProcessRequestsDecoupled(
   std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses;
 
   RETURN_IF_ERROR(SaveRequestsToSharedMemory(
-      requests, request_count, pb_inference_requests, request_batch,
-      responses));
+      requests, request_count, pb_infer_requests, request_batch, responses));
 
   uint64_t compute_start_ns = 0;
   SET_TIMESTAMP(compute_start_ns);
@@ -1346,6 +1368,11 @@ ModelInstanceState::ProcessRequestsDecoupled(
           TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
     }
 
+    // Reset the release flags for all the requests.
+    for (auto& infer_request : pb_infer_requests) {
+      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+    }
+
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, "Failed to process the requests.");
   }
@@ -1356,6 +1383,7 @@ ModelInstanceState::ProcessRequestsDecoupled(
 void
 ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
+    std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
     bool& restart)
 {
   NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
@@ -1403,12 +1431,11 @@ ModelInstanceState::ProcessRequests(
 
   // Wait for all the pending BLS requests to be completed.
   ScopedDefer bls_defer([this] { WaitForBLSRequestsToFinish(); });
-  std::vector<std::unique_ptr<InferRequest>> pb_inference_requests;
   AllocatedSharedMemory<char> request_batch;
   RESPOND_ALL_AND_RETURN_IF_ERROR(
       responses, request_count,
       SaveRequestsToSharedMemory(
-          requests, request_count, pb_inference_requests, request_batch,
+          requests, request_count, pb_infer_requests, request_batch,
           responses));
 
   std::shared_ptr<IPCMessage> ipc_message =
@@ -1519,6 +1546,11 @@ ModelInstanceState::ProcessRequests(
       RespondErrorToAllRequests(
           error_message, responses, requests, request_count);
     }
+
+    // Reset the release flags for all the requests.
+    for (auto& infer_request : pb_infer_requests) {
+      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+    }
     return;
   }
 
@@ -1546,6 +1578,15 @@ ModelInstanceState::ProcessRequests(
     shm_responses.emplace_back(nullptr);
     std::unique_ptr<InferResponse>& infer_response = shm_responses.back();
     try {
+      if (pb_infer_requests[r]->ReleaseFlags() ==
+          TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
+        // For rescheduled requests, we do not need to send a response.
+        LOG_IF_ERROR(
+            TRITONBACKEND_ResponseDelete((*responses)[r]),
+            "failed to delete response");
+        (*responses)[r] = nullptr;
+        continue;
+      }
       infer_response = InferResponse::LoadFromSharedMemory(
           Stub()->ShmPool(), response_shm_handle[r],
           false /* open_cuda_handle */);
@@ -1561,6 +1602,9 @@ ModelInstanceState::ProcessRequests(
         TRITONSERVER_ErrorDelete(err);
         (*responses)[r] = nullptr;
 
+        // Reset the release flags for the request.
+        pb_infer_requests[r]->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+
         // If has_error is true, we do not look at the response tensors.
         continue;
       }
@@ -1574,6 +1618,10 @@ ModelInstanceState::ProcessRequests(
           "failed sending response");
       TRITONSERVER_ErrorDelete(err);
       (*responses)[r] = nullptr;
+
+      // Reset the release flags for the request.
+      pb_infer_requests[r]->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+
       continue;
     }
 
@@ -2009,6 +2057,29 @@ ModelState::ValidateModelConfig()
   return nullptr;
 }
 
+TRITONSERVER_Error*
+ModelState::SetModelConfig()
+{
+  BackendModel::SetModelConfig();
+  // `Update model_transaction_policy` if setting was set
+  // with `set_model_transaction_policy`
+  triton::common::TritonJson::Value model_transaction_policy;
+  bool is_decoupled = false;
+  if (ModelConfig().Find(
+          "model_transaction_policy", &model_transaction_policy)) {
+    triton::common::TritonJson::Value decoupled;
+    if (model_transaction_policy.Find("decoupled", &decoupled)) {
+      auto error = decoupled.AsBool(&is_decoupled);
+      if (error != nullptr) {
+        throw BackendModelException(error);
+      }
+      SetDecoupled(is_decoupled);
+    }
+  }
+
+  return nullptr;
+}
+
 
 extern "C" {
 
@@ -2366,8 +2437,10 @@ TRITONBACKEND_ModelInstanceExecute(
   bool restart = false;
   ModelState* model_state =
       reinterpret_cast<ModelState*>(instance_state->Model());
+  std::vector<std::unique_ptr<InferRequest>> infer_requests;
   if (!model_state->IsDecoupled()) {
-    instance_state->ProcessRequests(requests, request_count, restart);
+    instance_state->ProcessRequests(
+        requests, request_count, infer_requests, restart);
 
     if (restart) {
       LOG_MESSAGE(
@@ -2385,10 +2458,12 @@ TRITONBACKEND_ModelInstanceExecute(
           err,
           "Failed to restart the stub process: failed to launch "
           "the stub process.");
+      // Reset the release flags for all the requests.
+      for (auto& infer_request : infer_requests) {
+        infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+      }
     }
   } else {
-    std::vector<std::unique_ptr<InferRequest>> infer_requests;
-
     uint64_t exec_start_ns = 0;
     SET_TIMESTAMP(exec_start_ns);
 
@@ -2437,11 +2512,34 @@ TRITONBACKEND_ModelInstanceExecute(
     }
   }
 
+  // The InferRequest object might not be created if an error occurs. Explicitly
+  // update the release flags here based on the number of InferRequest objects.
+  std::vector<uint32_t> request_release_flags(
+      request_count, TRITONSERVER_REQUEST_RELEASE_ALL);
+  for (size_t i = 0; i < infer_requests.size(); ++i) {
+    request_release_flags[i] = infer_requests[i]->ReleaseFlags();
+  }
+
   for (uint32_t r = 0; r < request_count; ++r) {
     TRITONBACKEND_Request* request = requests[r];
-    LOG_IF_ERROR(
-        TRITONBACKEND_RequestRelease(request, TRITONSERVER_REQUEST_RELEASE_ALL),
-        "failed releasing request");
+    try {
+      THROW_IF_TRITON_ERROR(
+          TRITONBACKEND_RequestRelease(request, request_release_flags[r]));
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("Failed to release request: ") + pb_exception.what())
+              .c_str());
+      if (request_release_flags[r] == TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
+        // If error occurs during request rescheduling, release the request with
+        // `TRITONSERVER_REQUEST_RELEASE_ALL` flag.
+        LOG_IF_ERROR(
+            TRITONBACKEND_RequestRelease(
+                request, TRITONSERVER_REQUEST_RELEASE_ALL),
+            "Failed to release request.");
+      }
+    }
   }
 
   LOG_MESSAGE(
