@@ -372,7 +372,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     }
     InferenceTrace trace = InferenceTrace(triton_trace);
 
-    uint64_t request_timeout = 0;
+    uint64_t request_timeout;
     RETURN_IF_ERROR(TRITONBACKEND_InferenceRequestTimeoutMicroseconds(
         request, &request_timeout));
 
