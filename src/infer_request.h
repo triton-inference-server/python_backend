@@ -84,7 +84,7 @@ class InferRequest {
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
       const std::string& parameters, const uint32_t flags = 0,
-      const int32_t timeout = 0, const intptr_t response_factory_address = 0,
+      const uint64_t timeout = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
           PreferredMemory(PreferredMemory::DEFAULT, 0),
@@ -100,7 +100,7 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
-  int32_t Timeout();
+  uint64_t Timeout();
   bool IsDecoupled();
   void SetIsDecoupled(const bool is_decoupled);
   PreferredMemory& GetPreferredMemory();
@@ -158,7 +158,7 @@ class InferRequest {
   int64_t model_version_;
   std::string parameters_;
   uint32_t flags_;
-  int32_t timeout_;
+  uint64_t timeout_;
   intptr_t response_factory_address_;
   intptr_t request_address_;
   bool is_decoupled_;

@@ -1581,7 +1581,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
                       const int64_t model_version, const uint32_t flags,
-                      const int32_t timeout,
+                      const uint64_t timeout,
                       const PreferredMemory& preferred_memory,
                       const InferenceTrace& trace,
                       const py::object& parameters_) {
