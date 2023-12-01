@@ -70,7 +70,7 @@ struct InferRequestShm {
   intptr_t address;
   intptr_t response_factory_address;
   bool is_decoupled;
-  int32_t timeout;
+  uint64_t timeout;
   PreferredMemory preferred_memory;
   InferenceTrace trace;
   uint32_t request_release_flags;
