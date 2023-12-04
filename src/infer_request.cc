@@ -42,7 +42,7 @@ InferRequest::InferRequest(
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
-    const std::string& parameters, const uint32_t flags, const int32_t timeout,
+    const std::string& parameters, const uint32_t flags, const uint64_t timeout,
     const intptr_t response_factory_address, const intptr_t request_address,
     const PreferredMemory& preferred_memory, const InferenceTrace& trace)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
@@ -145,7 +145,7 @@ InferRequest::ShmHandle()
   return shm_handle_;
 }
 
-int32_t
+uint64_t
 InferRequest::Timeout()
 {
   return timeout_;
