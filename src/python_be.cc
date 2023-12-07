@@ -430,8 +430,22 @@ ModelInstanceState::LaunchStubProcess()
   StartMonitor();
   RETURN_IF_ERROR(Stub()->Launch());
 
-  thread_pool_ = std::make_unique<boost::asio::thread_pool>(
-      model_state->StateForBackend()->thread_pool_size);
+  // Use the default thread pool for BLS requests, and the decoupled response
+  // thread pool for decoupled responses to avoid deadlock between the stub and
+  // the parent process. Only use the default thread pool when there is only one
+  // thread in the thread pool.
+  int thread_pool_size = model_state->StateForBackend()->thread_pool_size;
+  if (thread_pool_size > 1) {
+    int default_thread_pool_size = static_cast<int>(
+        std::round(static_cast<double>(thread_pool_size) * 2.0 / 3.0));
+    thread_pool_ =
+        std::make_unique<boost::asio::thread_pool>(default_thread_pool_size);
+    decoupled_response_thread_pool_ =
+        std::make_unique<boost::asio::thread_pool>(
+            thread_pool_size - default_thread_pool_size);
+  } else {
+    thread_pool_ = std::make_unique<boost::asio::thread_pool>(thread_pool_size);
+  }
 
   if (model_state->IsDecoupled()) {
     decoupled_thread_ = true;
@@ -811,7 +825,12 @@ ModelInstanceState::DecoupledMessageQueueMonitor()
       std::packaged_task<void()> task([this, response_send_message] {
         ResponseSendDecoupled(response_send_message);
       });
-      boost::asio::post(*thread_pool_, std::move(task));
+      if (decoupled_response_thread_pool_ != nullptr) {
+        boost::asio::post(*decoupled_response_thread_pool_, std::move(task));
+      } else {
+        // If the thread pool only has one thread, use the default thread pool.
+        boost::asio::post(*thread_pool_, std::move(task));
+      }
     } else if (
         message->Command() == PYTHONSTUB_InferExecRequest ||
         message->Command() == PYTHONSTUB_InferStreamExecRequest) {
@@ -1877,11 +1896,17 @@ ModelInstanceState::~ModelInstanceState()
     if (model_state->IsDecoupled()) {
       // Wait for all the pending tasks to finish.
       thread_pool_->wait();
+      if (decoupled_response_thread_pool_ != nullptr) {
+        decoupled_response_thread_pool_->wait();
+      }
       // Push a dummy message to signal the thread to terminate.
       Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
       decoupled_monitor_.join();
     } else {
       thread_pool_->wait();
+      if (decoupled_response_thread_pool_ != nullptr) {
+        decoupled_response_thread_pool_->wait();
+      }
     }
   }
   // Terminate stub first to allow any last messages to be received by the back
