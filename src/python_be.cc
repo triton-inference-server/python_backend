@@ -928,16 +928,9 @@ ModelInstanceState::ProcessCleanupRequest(
       Stub()->ShmPool()->Load<char>(message->Args());
   CleanupMessage* cleanup_message_ptr =
       reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
-  intptr_t id = reinterpret_cast<intptr_t>(cleanup_message_ptr->id);
-  if (message->Command() == PYTHONSTUB_BLSDecoupledInferPayloadCleanup) {
-    // Remove the InferPayload object from the map.
-    infer_payload_.erase(id);
-  } else if (message->Command() == PYTHONSTUB_DecoupledResponseFactoryCleanup) {
-    // Delete response factory
-    std::unique_ptr<
-        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-        response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(id));
-  }
+
+  void* id = cleanup_message_ptr->id;
+  infer_payload_.erase(reinterpret_cast<intptr_t>(id));
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
