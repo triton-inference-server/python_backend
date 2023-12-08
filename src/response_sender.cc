@@ -114,6 +114,13 @@ ResponseSender::Send(
   });
 
   {
+    // Release the GIL before sending the message to the stub process. This
+    // avoids a potential deadlock situation in the parent process, where every
+    // thread in the thread pool is indirectly waiting for a function in the
+    // stub process that acquires the GIL. Meanwhile, the current thread, which
+    // holds the GIL, is also waiting for the parent side to have the next
+    // available thread to pick up the job during resource contention.
+    py::gil_scoped_release release;
     bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
     stub->SendIPCMessage(ipc_message);
     while (!send_message_payload->is_stub_turn) {

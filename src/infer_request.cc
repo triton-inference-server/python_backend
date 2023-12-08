@@ -465,7 +465,6 @@ InferRequest::Exec(const bool is_decoupled)
   });
 
   try {
-    py::gil_scoped_release release;
     ipc_message = IPCMessage::Create(shm_pool, true /* inline_response */);
     bool has_exception = false;
     PythonBackendException pb_exception(std::string{});
@@ -508,6 +507,13 @@ InferRequest::Exec(const bool is_decoupled)
 
     // Send the BLS request to the parent process and wait for the response.
     {
+      // Release the GIL before sending the message to the stub process. This
+      // avoids a potential deadlock situation in the parent process, where
+      // every thread in the thread pool is indirectly waiting for a function in
+      // the stub process that acquires the GIL. Meanwhile, the current thread,
+      // which holds the GIL, is also waiting for the parent side to have the
+      // next available thread to pick up the job during resource contention.
+      py::gil_scoped_release release;
       bi::scoped_lock<bi::interprocess_mutex> lock{
           *(ipc_message->ResponseMutex())};
       stub->SendIPCMessage(ipc_message);
