@@ -286,7 +286,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<IPCMessage> received_message_;
   std::vector<std::future<void>> futures_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
-  std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
+  std::unordered_map<intptr_t, std::shared_ptr<InferPayload>> infer_payload_;
   std::unique_ptr<RequestExecutor> request_executor_;
   std::mutex response_factory_map_mutex_;
   std::unordered_map<intptr_t, TRITONBACKEND_ResponseFactory*>

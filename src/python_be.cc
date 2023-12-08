@@ -752,7 +752,7 @@ ModelInstanceState::ExecuteBLSRequest(
         if (is_decoupled && (infer_response->Id() != nullptr)) {
           // Need to manage the lifetime of InferPayload object for bls
           // decoupled responses.
-          infer_payload_[reinterpret_cast<void*>(&infer_payload)] =
+          infer_payload_[reinterpret_cast<intptr_t>(infer_payload.get())] =
               infer_payload;
         }
 
@@ -943,7 +943,7 @@ ModelInstanceState::ProcessBLSCleanupRequest(
       reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
 
   void* id = cleanup_message_ptr->id;
-  infer_payload_.erase(id);
+  infer_payload_.erase(reinterpret_cast<intptr_t>(id));
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
