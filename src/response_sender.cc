@@ -50,6 +50,13 @@ void
 ResponseSender::Send(
     std::shared_ptr<InferResponse> infer_response, const uint32_t flags)
 {
+  // Release the GIL. This avoids a potential deadlock situation in the parent
+  // process, where every thread in the thread pool is indirectly waiting for a
+  // function in the stub process that acquires the GIL. Meanwhile, the current
+  // thread, which holds the GIL, is also waiting for the parent side to have
+  // the next available thread to pick up the job during resource contention.
+  py::gil_scoped_release release;
+
   if (closed_) {
     throw PythonBackendException(
         "Unable to send response. Response sender has been closed.");

@@ -442,6 +442,13 @@ InferRequest::GetResponseSender()
 std::shared_ptr<InferResponse>
 InferRequest::Exec(const bool is_decoupled)
 {
+  // Release the GIL. This avoids a potential deadlock situation in the parent
+  // process, where every thread in the thread pool is indirectly waiting for a
+  // function in the stub process that acquires the GIL. Meanwhile, the current
+  // thread, which holds the GIL, is also waiting for the parent side to have
+  // the next available thread to pick up the job during resource contention.
+  py::gil_scoped_release release;
+
   // BLS should not be used in "initialize" or "finalize" function.
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   if (!stub->IsInitialized() || stub->IsFinalizing()) {
@@ -465,7 +472,6 @@ InferRequest::Exec(const bool is_decoupled)
   });
 
   try {
-    py::gil_scoped_release release;
     ipc_message = IPCMessage::Create(shm_pool, true /* inline_response */);
     bool has_exception = false;
     PythonBackendException pb_exception(std::string{});
