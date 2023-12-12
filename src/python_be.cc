@@ -1361,10 +1361,6 @@ ModelInstanceState::ProcessRequestsDecoupled(
   reporter.SetBatchStatistics(request_count);
 
   if (response_batch.data_->has_error) {
-    for (auto& infer_request : pb_infer_requests) {
-      CleanupDecoupledRequests(infer_request);
-    }
-
     if (response_batch.data_->is_error_set) {
       auto error = PbString::LoadFromSharedMemory(
           Stub()->ShmPool(), response_batch.data_->error);
@@ -1874,11 +1870,20 @@ ModelInstanceState::CleanupDecoupledRequests(
 {
   // Reset the release flags for all the requests.
   infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+
   // Clean up the response factory map.
   {
     std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
     response_factory_map_.erase(
         reinterpret_cast<intptr_t>(infer_request->RequestAddress()));
+  }
+
+  // We should only delete the response factory for the requests that have
+  // not been closed.
+  if (!ExistsInClosedRequests(infer_request->RequestAddress())) {
+    LOG_IF_ERROR(
+        infer_request->DeleteResponseFactory(),
+        "Failed to delete the response factory.");
   }
 }
 
@@ -2512,15 +2517,8 @@ TRITONBACKEND_ModelInstanceExecute(
         }
       }
 
-      // We should only delete the response factory for the requests that have
-      // not been closed.
       for (auto& infer_request : infer_requests) {
-        if (!instance_state->ExistsInClosedRequests(
-                infer_request->RequestAddress())) {
-          LOG_IF_ERROR(
-              infer_request->DeleteResponseFactory(),
-              "Failed to delete the response factory.");
-        }
+        instance_state->CleanupDecoupledRequests(infer_request);
       }
     }
   }
