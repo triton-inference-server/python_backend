@@ -1361,16 +1361,22 @@ ModelInstanceState::ProcessRequestsDecoupled(
   reporter.SetBatchStatistics(request_count);
 
   if (response_batch.data_->has_error) {
+    for (auto& infer_request : pb_infer_requests) {
+      // Reset the release flags for all the requests.
+      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+      // Clean up the response factory map.
+      {
+        std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
+        response_factory_map_.erase(
+            reinterpret_cast<intptr_t>(infer_request->RequestAddress()));
+      }
+    }
+
     if (response_batch.data_->is_error_set) {
       auto error = PbString::LoadFromSharedMemory(
           Stub()->ShmPool(), response_batch.data_->error);
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
-    }
-
-    // Reset the release flags for all the requests.
-    for (auto& infer_request : pb_infer_requests) {
-      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
     }
 
     return TRITONSERVER_ErrorNew(
