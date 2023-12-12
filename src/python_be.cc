@@ -1362,14 +1362,7 @@ ModelInstanceState::ProcessRequestsDecoupled(
 
   if (response_batch.data_->has_error) {
     for (auto& infer_request : pb_infer_requests) {
-      // Reset the release flags for all the requests.
-      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
-      // Clean up the response factory map.
-      {
-        std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
-        response_factory_map_.erase(
-            reinterpret_cast<intptr_t>(infer_request->RequestAddress()));
-      }
+      CleanupDecoupledRequests(infer_request);
     }
 
     if (response_batch.data_->is_error_set) {
@@ -1873,6 +1866,20 @@ ModelInstanceState::ShareCUDAMemoryPool(const int32_t device_id)
             .c_str());
   }
 #endif  // TRITON_ENABLE_GPU
+}
+
+void
+ModelInstanceState::CleanupDecoupledRequests(
+    const std::unique_ptr<InferRequest>& infer_request)
+{
+  // Reset the release flags for all the requests.
+  infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+  // Clean up the response factory map.
+  {
+    std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
+    response_factory_map_.erase(
+        reinterpret_cast<intptr_t>(infer_request->RequestAddress()));
+  }
 }
 
 ModelInstanceState::~ModelInstanceState()
