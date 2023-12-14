@@ -315,10 +315,13 @@ class Stub {
       std::shared_ptr<InferResponse> infer_response);
 
   /// Send the id to the python backend for object cleanup
-  void SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
+  void SendCleanupId(
+      std::unique_ptr<UtilsMessagePayload>& utils_msg_payload,
+      const PYTHONSTUB_CommandType& command_type);
 
-  /// Add cleanup id to queue
-  void EnqueueCleanupId(void* id);
+  /// Add cleanup id to queue. This is used for cleaning up the infer_payload
+  /// and the response factory for BLS decoupled response.
+  void EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type);
 
   /// Add request cancellation query to queue
   void EnqueueIsCancelled(PbCancel* pb_cancel);
