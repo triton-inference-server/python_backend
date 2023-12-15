@@ -993,8 +993,12 @@ Stub::ServiceStubToParentRequests()
       stub_to_parent_buffer_.pop();
       if (utils_msg_payload->command_type == PYTHONSTUB_LogRequest) {
         SendLogMessage(utils_msg_payload);
-      } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
-        SendCleanupId(utils_msg_payload);
+      } else if (
+          (utils_msg_payload->command_type ==
+           PYTHONSTUB_BLSDecoupledInferPayloadCleanup) ||
+          (utils_msg_payload->command_type ==
+           PYTHONSTUB_BLSDecoupledResponseFactoryCleanup)) {
+        SendCleanupId(utils_msg_payload, utils_msg_payload->command_type);
       } else if (
           utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
         SendIsCancelled(utils_msg_payload);
@@ -1040,7 +1044,9 @@ Stub::SendLogMessage(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 }
 
 void
-Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
+Stub::SendCleanupId(
+    std::unique_ptr<UtilsMessagePayload>& utils_msg_payload,
+    const PYTHONSTUB_CommandType& command_type)
 {
   void* id = utils_msg_payload->utils_message_ptr;
   {
@@ -1050,7 +1056,7 @@ Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, true /* inline_response */);
-  ipc_message->Command() = PYTHONSTUB_CleanupRequest;
+  ipc_message->Command() = command_type;
   AllocatedSharedMemory<char> cleanup_request_message =
       shm_pool_->Construct<char>(
           sizeof(CleanupMessage) +
@@ -1072,11 +1078,11 @@ Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 }
 
 void
-Stub::EnqueueCleanupId(void* id)
+Stub::EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type)
 {
   if (id != nullptr) {
     std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
-        std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
+        std::make_unique<UtilsMessagePayload>(command_type, id);
     EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
 }

@@ -405,20 +405,6 @@ InferRequest::InferRequest(
 #endif
 }
 
-#ifndef TRITON_PB_STUB
-TRITONSERVER_Error*
-InferRequest::DeleteResponseFactory()
-{
-  TRITONBACKEND_ResponseFactory* response_factory =
-      reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-          response_factory_address_);
-  TRITONSERVER_Error* error =
-      TRITONBACKEND_ResponseFactoryDelete(response_factory);
-
-  return error;
-}
-#endif
-
 #ifdef TRITON_PB_STUB
 bool
 InferRequest::IsCancelled()
