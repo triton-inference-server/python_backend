@@ -38,6 +38,7 @@ class ResponseSender {
       intptr_t request_address, intptr_t response_factory_address,
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       const std::shared_ptr<PbCancel>& pb_cancel);
+  ~ResponseSender();
   void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
   bool IsCancelled();
 

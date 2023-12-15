@@ -137,10 +137,6 @@ class InferRequest {
   intptr_t RequestAddress();
   ~InferRequest() {}
 
-#ifndef TRITON_PB_STUB
-  TRITONSERVER_Error* DeleteResponseFactory();
-#endif
-
  private:
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,

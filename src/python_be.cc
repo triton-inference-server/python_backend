@@ -379,21 +379,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     std::unique_ptr<InferRequest> infer_request;
     if (model_state->IsDecoupled()) {
       TRITONBACKEND_ResponseFactory* factory_ptr;
-      // Reuse the response factory if there is already a response factory
-      // associated with the request
-      std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
-      {
-        if (response_factory_map_.find(reinterpret_cast<intptr_t>(request)) !=
-            response_factory_map_.end()) {
-          factory_ptr =
-              response_factory_map_[reinterpret_cast<intptr_t>(request)];
-        } else {
-          RETURN_IF_ERROR(
-              TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
-          response_factory_map_[reinterpret_cast<intptr_t>(request)] =
-              factory_ptr;
-        }
-      }
+      RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
 
       infer_request = std::make_unique<InferRequest>(
           id, correlation_id, pb_input_tensors, requested_output_names,
@@ -843,7 +829,8 @@ ModelInstanceState::StubToParentMQMonitor()
         ProcessLogRequest(message);
         break;
       }
-      case PYTHONSTUB_CleanupRequest: {
+      case PYTHONSTUB_BLSDecoupledInferPayloadCleanup:
+      case PYTHONSTUB_BLSDecoupledResponseFactoryCleanup: {
         ProcessBLSCleanupRequest(message);
         break;
       }
@@ -941,9 +928,17 @@ ModelInstanceState::ProcessBLSCleanupRequest(
       Stub()->ShmPool()->Load<char>(message->Args());
   CleanupMessage* cleanup_message_ptr =
       reinterpret_cast<CleanupMessage*>(cleanup_request_message.data_.get());
-
-  void* id = cleanup_message_ptr->id;
-  infer_payload_.erase(reinterpret_cast<intptr_t>(id));
+  intptr_t id = reinterpret_cast<intptr_t>(cleanup_message_ptr->id);
+  if (message->Command() == PYTHONSTUB_BLSDecoupledInferPayloadCleanup) {
+    // Remove the InferPayload object from the map.
+    infer_payload_.erase(id);
+  } else if (
+      message->Command() == PYTHONSTUB_BLSDecoupledResponseFactoryCleanup) {
+    // Delete response factory
+    std::unique_ptr<
+        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+        response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(id));
+  }
 
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
@@ -1172,12 +1167,6 @@ ModelInstanceState::ResponseSendDecoupled(
       std::lock_guard<std::mutex> guard{closed_requests_mutex_};
       closed_requests_.push_back(send_message_payload->request_address);
     }
-
-    // Clean up the response factory map.
-    {
-      std::lock_guard<std::mutex> guard{response_factory_map_mutex_};
-      response_factory_map_.erase(send_message_payload->request_address);
-    }
   }
 
   if (send_message_payload->response != 0) {
@@ -1195,14 +1184,7 @@ ModelInstanceState::ResponseSendDecoupled(
         error_message);
 
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers;
-    std::unique_ptr<
-        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-        response_factory_ptr;
     GPUBuffersHelper gpu_buffer_helper;
-    if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-      response_factory_ptr.reset(
-          reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
-    }
 
 #ifdef TRITON_ENABLE_GPU
     for (auto& output_tensor : infer_response->OutputTensors()) {
@@ -1289,13 +1271,6 @@ ModelInstanceState::ResponseSendDecoupled(
         response_factory, send_message_payload->flags);
     SetErrorForResponseSendMessage(
         send_message_payload, WrapTritonErrorInSharedPtr(error), error_message);
-
-    if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-      std::unique_ptr<
-          TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-          response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-              send_message_payload->response_factory_address));
-    }
   }
 }
 
@@ -1366,11 +1341,6 @@ ModelInstanceState::ProcessRequestsDecoupled(
           Stub()->ShmPool(), response_batch.data_->error);
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
-    }
-
-    // Reset the release flags for all the requests.
-    for (auto& infer_request : pb_infer_requests) {
-      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
     }
 
     return TRITONSERVER_ErrorNew(
@@ -2499,15 +2469,9 @@ TRITONBACKEND_ModelInstanceExecute(
         }
       }
 
-      // We should only delete the response factory for the requests that have
-      // not been closed.
       for (auto& infer_request : infer_requests) {
-        if (!instance_state->ExistsInClosedRequests(
-                infer_request->RequestAddress())) {
-          LOG_IF_ERROR(
-              infer_request->DeleteResponseFactory(),
-              "Failed to delete the response factory.");
-        }
+        // Reset the release flags for all the requests.
+        infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
       }
     }
   }
