@@ -830,8 +830,8 @@ ModelInstanceState::StubToParentMQMonitor()
         break;
       }
       case PYTHONSTUB_BLSDecoupledInferPayloadCleanup:
-      case PYTHONSTUB_BLSDecoupledResponseFactoryCleanup: {
-        ProcessBLSCleanupRequest(message);
+      case PYTHONSTUB_DecoupledResponseFactoryCleanup: {
+        ProcessCleanupRequest(message);
         break;
       }
       case PYTHONSTUB_IsRequestCancelled: {
@@ -921,7 +921,7 @@ ModelInstanceState::ProcessLogRequest(
 }
 
 void
-ModelInstanceState::ProcessBLSCleanupRequest(
+ModelInstanceState::ProcessCleanupRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
   AllocatedSharedMemory<char> cleanup_request_message =
@@ -932,8 +932,7 @@ ModelInstanceState::ProcessBLSCleanupRequest(
   if (message->Command() == PYTHONSTUB_BLSDecoupledInferPayloadCleanup) {
     // Remove the InferPayload object from the map.
     infer_payload_.erase(id);
-  } else if (
-      message->Command() == PYTHONSTUB_BLSDecoupledResponseFactoryCleanup) {
+  } else if (message->Command() == PYTHONSTUB_DecoupledResponseFactoryCleanup) {
     // Delete response factory
     std::unique_ptr<
         TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
