@@ -288,9 +288,6 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
   std::unordered_map<intptr_t, std::shared_ptr<InferPayload>> infer_payload_;
   std::unique_ptr<RequestExecutor> request_executor_;
-  std::mutex response_factory_map_mutex_;
-  std::unordered_map<intptr_t, TRITONBACKEND_ResponseFactory*>
-      response_factory_map_;
 
  public:
   static TRITONSERVER_Error* Create(
@@ -403,7 +400,8 @@ class ModelInstanceState : public BackendModelInstance {
       std::unique_ptr<InferResponse>* infer_response,
       bi::managed_external_buffer::handle_t* response_handle);
 
-  // Process the bls decoupled cleanup request
+  // Process the bls decoupled cleanup request for InferPayload and
+  // ResponseFactory
   void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process request cancellation query
