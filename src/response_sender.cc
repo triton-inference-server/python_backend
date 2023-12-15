@@ -50,7 +50,7 @@ ResponseSender::~ResponseSender()
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   stub->EnqueueCleanupId(
       reinterpret_cast<void*>(response_factory_address_),
-      PYTHONSTUB_DecoupledResponseFactoryCleanup);
+      PYTHONSTUB_BLSDecoupledResponseFactoryCleanup);
 }
 
 void

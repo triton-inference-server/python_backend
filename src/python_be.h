@@ -400,8 +400,9 @@ class ModelInstanceState : public BackendModelInstance {
       std::unique_ptr<InferResponse>* infer_response,
       bi::managed_external_buffer::handle_t* response_handle);
 
-  // Process the decoupled cleanup request for InferPayload and ResponseFactory
-  void ProcessCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+  // Process the bls decoupled cleanup request for InferPayload and
+  // ResponseFactory
+  void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process request cancellation query
   void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);

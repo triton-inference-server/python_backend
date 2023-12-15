@@ -997,7 +997,7 @@ Stub::ServiceStubToParentRequests()
           (utils_msg_payload->command_type ==
            PYTHONSTUB_BLSDecoupledInferPayloadCleanup) ||
           (utils_msg_payload->command_type ==
-           PYTHONSTUB_DecoupledResponseFactoryCleanup)) {
+           PYTHONSTUB_BLSDecoupledResponseFactoryCleanup)) {
         SendCleanupId(utils_msg_payload, utils_msg_payload->command_type);
       } else if (
           utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
