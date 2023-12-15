@@ -211,6 +211,10 @@ InferResponse::Send(
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
     const std::set<std::string>& requested_output_names)
 {
+#ifdef TRITON_ENABLE_GPU
+  static bool log_warning = true;
+#endif  // TRITON_ENABLE_GPU
+
   std::shared_ptr<TRITONSERVER_Error*> response_error =
       WrapTritonErrorInSharedPtr(nullptr);
   std::unique_ptr<ScopedDefer> response_error_handling;
@@ -249,11 +253,6 @@ InferResponse::Send(
   }
 
   bool cuda_copy = false;
-#ifdef TRITON_ENABLE_GPU
-  // This variable is used to avoid printing the same message multiple times
-  // when the output tensor is failed to be allocated from the CUDA memory pool.
-  bool log_warning = true;
-#endif  // TRITON_ENABLE_GPU
 
   for (auto& output_tensor : OutputTensors()) {
     // FIXME: for decoupled models we will skip the requested output names.
