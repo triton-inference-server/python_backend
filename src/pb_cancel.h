@@ -26,33 +26,39 @@
 
 #pragma once
 
-#include <queue>
+#include <condition_variable>
+#include <mutex>
 
-#include "infer_response.h"
+#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 
-class ResponseIterator {
+class PbCancel {
  public:
-  ResponseIterator(const std::shared_ptr<InferResponse>& response);
-  ~ResponseIterator();
+  PbCancel(intptr_t response_factory_address, intptr_t request_address)
+      : updating_(false), response_factory_address_(response_factory_address),
+        request_address_(request_address), is_cancelled_(false)
+  {
+  }
+  DISALLOW_COPY_AND_ASSIGN(PbCancel);
 
-  std::shared_ptr<InferResponse> Next();
-  void Iter();
-  void EnqueueResponse(std::shared_ptr<InferResponse> infer_response);
-  void* Id();
-  void Clear();
-  std::vector<std::shared_ptr<InferResponse>> GetExistingResponses();
+  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  bi::managed_external_buffer::handle_t ShmHandle();
+  IsCancelledMessage* ShmPayload();
+
+  bool IsCancelled();
+  void ReportIsCancelled(bool is_cancelled);
 
  private:
-  std::vector<std::shared_ptr<InferResponse>> responses_;
-  std::queue<std::shared_ptr<InferResponse>> response_buffer_;
+  AllocatedSharedMemory<IsCancelledMessage> cancel_shm_;
+
   std::mutex mu_;
   std::condition_variable cv_;
-  void* id_;
-  bool is_finished_;
-  bool is_cleared_;
-  size_t idx_;
+  bool updating_;
+
+  intptr_t response_factory_address_;
+  intptr_t request_address_;
+  bool is_cancelled_;
 };
 
-}}}  // namespace triton::backend::python
+}}};  // namespace triton::backend::python

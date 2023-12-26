@@ -41,18 +41,21 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_ExecuteResponse,
   PYTHONSTUB_InitializeRequest,
   PYTHONSTUB_InitializeResponse,
+  PYTHONSTUB_CUDAPoolInitializeRequest,
   PYTHONSTUB_FinalizeRequest,
   PYTHONSTUB_FinalizeResponse,
   PYTHONSTUB_LoadGPUBuffers,
   PYTHONSTUB_InferExecRequest,
   PYTHONSTUB_InferStreamExecRequest,
   PYTHONSTUB_InferExecResponse,
+  PYTHONSTUB_InferStreamExecResponse,
   PYTHONSTUB_ResponseSend,
   PYTHONSTUB_ResponseClose,
   PYTHONSTUB_AutoCompleteRequest,
   PYTHONSTUB_AutoCompleteResponse,
   PYTHONSTUB_LogRequest,
-  PYTHONSTUB_CleanupRequest,
+  PYTHONSTUB_BLSDecoupledInferPayloadCleanup,
+  PYTHONSTUB_DecoupledResponseFactoryCleanup,
   PYTHONSTUB_MetricFamilyRequestNew,
   PYTHONSTUB_MetricFamilyRequestDelete,
   PYTHONSTUB_MetricRequestNew,
@@ -62,7 +65,8 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_MetricRequestSet,
   PYTHONSTUB_LoadModelRequest,
   PYTHONSTUB_UnloadModelRequest,
-  PYTHONSTUB_ModelReadinessRequest
+  PYTHONSTUB_ModelReadinessRequest,
+  PYTHONSTUB_IsRequestCancelled
 } PYTHONSTUB_CommandType;
 
 ///

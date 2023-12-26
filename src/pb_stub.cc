@@ -82,15 +82,37 @@ SignalHandler(int signum)
   // Skip the SIGINT and SIGTERM
 }
 
+template <typename PYTYPE>
+PYTYPE
+PyDefaultArgumentToMutableType(const py::object& argument)
+{
+  // The default argument on Python functions always reference the same copy,
+  // meaning if the default argument is changed by the function, then it is
+  // changed for all subsequent calls to the function. Thus, default arguments
+  // should be limited to basic types (i.e. None). This helper function returns
+  // an empty expected type, if the argument is None (i.e. default initialized).
+  // If the argument is neither None nor expected type, an exception is thrown.
+  if (py::isinstance<py::none>(argument)) {
+    return PYTYPE();
+  }
+  if (py::isinstance<PYTYPE>(argument)) {
+    return argument;
+  }
+  throw PythonBackendException(
+      std::string("Expect ") + typeid(PYTYPE).name() + ", got " +
+      std::string(py::str(argument.get_type())));
+}
+
 void
 Stub::Instantiate(
     int64_t shm_growth_size, int64_t shm_default_size,
     const std::string& shm_region_name, const std::string& model_path,
     const std::string& model_version, const std::string& triton_install_path,
     bi::managed_external_buffer::handle_t ipc_control_handle,
-    const std::string& name, const std::string& platform)
+    const std::string& name, const std::string& python_runtime_model)
 {
-  model_context_.Init(model_path, platform, triton_install_path, model_version);
+  model_context_.Init(
+      model_path, python_runtime_model, triton_install_path, model_version);
   name_ = name;
   health_mutex_ = nullptr;
   initialized_ = false;
@@ -779,26 +801,39 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
           std::to_string(response_size) + "\n";
       throw PythonBackendException(err);
     }
-    for (auto& response : responses) {
+
+    for (size_t i = 0; i < response_size; i++) {
       // Check the return type of execute function.
-      if (!py::isinstance<InferResponse>(response)) {
-        std::string str = py::str(response.get_type());
-        throw PythonBackendException(
-            std::string("Expected an 'InferenceResponse' object in the execute "
-                        "function return list, found type '") +
-            str + "'.");
+      InferRequest* infer_request = py_request_list[i].cast<InferRequest*>();
+      if (infer_request->ReleaseFlags() ==
+          TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
+        if (!py::isinstance<py::none>(responses[i])) {
+          // When the request is rescheduled in non-decoupled model, the
+          // response must be None.
+          std::string str = py::str(responses[i].get_type());
+          throw PythonBackendException(
+              "Expected a None object in the execute function return list for "
+              "reschduled request, "
+              "found type '" +
+              str + "'.");
+        }
+      } else {
+        if (!py::isinstance<InferResponse>(responses[i])) {
+          std::string str = py::str(responses[i].get_type());
+          throw PythonBackendException(
+              std::string(
+                  "Expected an 'InferenceResponse' object in the execute "
+                  "function return list, found type '") +
+              str + "'.");
+        }
+        InferResponse* infer_response = responses[i].cast<InferResponse*>();
+        infer_response->PruneOutputTensors(
+            infer_request->RequestedOutputNames());
+        ProcessResponse(infer_response);
+        responses_shm_handle[i] = infer_response->ShmHandle();
       }
     }
     response_batch_shm_ptr->batch_size = response_size;
-
-    for (size_t i = 0; i < batch_size; i++) {
-      InferResponse* infer_response = responses[i].cast<InferResponse*>();
-      InferRequest* infer_request = py_request_list[i].cast<InferRequest*>();
-      infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
-
-      ProcessResponse(infer_response);
-      responses_shm_handle[i] = infer_response->ShmHandle();
-    }
   }
   catch (const PythonBackendException& pb_exception) {
     has_exception = true;
@@ -878,6 +913,21 @@ Stub::SendIPCUtilsMessage(std::unique_ptr<IPCMessage>& ipc_message)
 
 Stub::~Stub()
 {
+#ifdef TRITON_ENABLE_GPU
+  try {
+    CUDAHandler& cuda_api = CUDAHandler::getInstance();
+    for (auto& m :
+         shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddressMap()) {
+      if (m.second != nullptr) {
+        cuda_api.CloseCudaHandle(m.first, m.second);
+      }
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    std::cerr << "Error when closing CUDA handle: " << pb_exception.what();
+  }
+#endif
+
   {
     py::gil_scoped_acquire acquire;
     model_instance_ = py::none();
@@ -951,8 +1001,15 @@ Stub::ServiceStubToParentRequests()
       stub_to_parent_buffer_.pop();
       if (utils_msg_payload->command_type == PYTHONSTUB_LogRequest) {
         SendLogMessage(utils_msg_payload);
-      } else if (utils_msg_payload->command_type == PYTHONSTUB_CleanupRequest) {
-        SendCleanupId(utils_msg_payload);
+      } else if (
+          (utils_msg_payload->command_type ==
+           PYTHONSTUB_BLSDecoupledInferPayloadCleanup) ||
+          (utils_msg_payload->command_type ==
+           PYTHONSTUB_DecoupledResponseFactoryCleanup)) {
+        SendCleanupId(utils_msg_payload, utils_msg_payload->command_type);
+      } else if (
+          utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
+        SendIsCancelled(utils_msg_payload);
       } else {
         std::cerr << "Error when sending message via stub_to_parent message "
                      "buffer - unknown command\n";
@@ -995,7 +1052,9 @@ Stub::SendLogMessage(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 }
 
 void
-Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
+Stub::SendCleanupId(
+    std::unique_ptr<UtilsMessagePayload>& utils_msg_payload,
+    const PYTHONSTUB_CommandType& command_type)
 {
   void* id = utils_msg_payload->utils_message_ptr;
   {
@@ -1005,7 +1064,7 @@ Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, true /* inline_response */);
-  ipc_message->Command() = PYTHONSTUB_CleanupRequest;
+  ipc_message->Command() = command_type;
   AllocatedSharedMemory<char> cleanup_request_message =
       shm_pool_->Construct<char>(
           sizeof(CleanupMessage) +
@@ -1027,13 +1086,51 @@ Stub::SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 }
 
 void
-Stub::EnqueueCleanupId(void* id)
+Stub::EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type)
 {
   if (id != nullptr) {
     std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
-        std::make_unique<UtilsMessagePayload>(PYTHONSTUB_CleanupRequest, id);
+        std::make_unique<UtilsMessagePayload>(command_type, id);
     EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
+}
+
+void
+Stub::EnqueueIsCancelled(PbCancel* pb_cancel)
+{
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+      std::make_unique<UtilsMessagePayload>(
+          PYTHONSTUB_IsRequestCancelled, reinterpret_cast<void*>(pb_cancel));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
+}
+
+void
+Stub::SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
+{
+  PbCancel* pb_cancel =
+      reinterpret_cast<PbCancel*>(utils_msg_payload->utils_message_ptr);
+  pb_cancel->SaveToSharedMemory(shm_pool_);
+
+  IsCancelledMessage* message_payload = pb_cancel->ShmPayload();
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = utils_msg_payload->command_type;
+  ipc_message->Args() = pb_cancel->ShmHandle();
+
+  bool is_cancelled = false;
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lk(message_payload->mu);
+
+    SendIPCUtilsMessage(ipc_message);
+    while (!message_payload->waiting_on_stub) {
+      message_payload->cv.wait(lk);
+    }
+
+    is_cancelled = message_payload->is_cancelled;
+    message_payload->waiting_on_stub = false;
+    message_payload->cv.notify_all();
+  }
+  pb_cancel->ReportIsCancelled(is_cancelled);
 }
 
 bool
@@ -1070,86 +1167,18 @@ Stub::ParentToStubMQMonitor()
       break;
     }
 
-    std::unique_ptr<IPCMessage> ipc_message;
-    ResponseBatch* response_batch = nullptr;
-    bi::managed_external_buffer::handle_t* response_handle = nullptr;
-    std::unique_ptr<InferResponse> infer_response;
-    bool responses_is_set = false;
-    PythonBackendException pb_exception(std::string{});
+    std::unique_ptr<IPCMessage> ipc_message =
+        IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
 
-    try {
-      ipc_message = IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
-      AllocatedSharedMemory<char> response_batch_shm =
-          shm_pool_->Load<char>(ipc_message->Args());
-      response_batch =
-          reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
-      response_handle =
-          reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-              response_batch_shm.data_.get() + sizeof(ResponseBatch));
-      responses_is_set = true;
-
-      if (response_batch->has_error) {
-        if (response_batch->is_error_set) {
-          std::unique_ptr<PbString> pb_string =
-              PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
-          infer_response = std::make_unique<InferResponse>(
-              std::vector<std::shared_ptr<PbTensor>>{},
-              std::make_shared<PbError>(pb_string->String()));
-        } else {
-          infer_response = std::make_unique<InferResponse>(
-              std::vector<std::shared_ptr<PbTensor>>{},
-              std::make_shared<PbError>(
-                  "An error occurred while performing BLS request."));
-        }
-      }
-
-      if (responses_is_set) {
-        infer_response = InferResponse::LoadFromSharedMemory(
-            shm_pool_, *response_handle, true /* open cuda handle */);
-
-        for (auto& output_tensor : infer_response->OutputTensors()) {
-          if (!output_tensor->IsCPU()) {
-            uint64_t memory_release_id =
-                output_tensor->Memory()->MemoryReleaseId();
-            output_tensor->Memory()->SetMemoryReleaseCallback(
-                [this, memory_release_id]() {
-                  this->MemoryManagerQueue()->Push(memory_release_id);
-                });
-          }
-        }
-      } else {
-        infer_response = std::make_unique<InferResponse>(
-            std::vector<std::shared_ptr<PbTensor>>{},
-            std::make_shared<PbError>(
-                "An error occurred while performing BLS request."));
-      }
-    }
-    catch (const PythonBackendException& pb_exception) {
-      infer_response = std::make_unique<InferResponse>(
-          std::vector<std::shared_ptr<PbTensor>>{},
-          std::make_shared<PbError>(pb_exception.what()));
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-      if (response_iterator_map_.find(infer_response->Id()) !=
-          response_iterator_map_.end()) {
-        response_iterator_map_[infer_response->Id()]->EnqueueResponse(
-            std::move(infer_response));
-      } else {
-        auto response_iterator =
-            std::make_shared<ResponseIterator>(std::move(infer_response));
-        response_iterator_map_.insert(
-            std::pair<void*, std::shared_ptr<ResponseIterator>>(
-                response_iterator->Id(), response_iterator));
-      }
-    }
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> lock{
-          *(ipc_message->ResponseMutex())};
-      response_batch->waiting_on_stub = true;
-      ipc_message->ResponseCondition()->notify_all();
+    switch (ipc_message->Command()) {
+      case PYTHONSTUB_CommandType::PYTHONSTUB_CUDAPoolInitializeRequest: {
+        GetCUDAMemoryPoolAddress(ipc_message);
+      } break;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecResponse: {
+        ProcessBLSResponseDecoupled(ipc_message);
+      } break;
+      default:
+        break;
     }
   }
 }
@@ -1231,6 +1260,144 @@ Stub::GetProxyStream(const int& device_id)
 #else
   return nullptr;
 #endif
+}
+
+void
+Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
+{
+#ifdef TRITON_ENABLE_GPU
+  bool has_exception = false;
+  std::string error_string;
+  std::unique_ptr<PbString> error_string_shm;
+
+  CUDAMemPoolMessage* cuda_pool_message_ptr = nullptr;
+  try {
+    AllocatedSharedMemory<CUDAMemPoolMessage> cuda_handle_shm =
+        shm_pool_->Load<CUDAMemPoolMessage>(ipc_message->Args());
+    cuda_pool_message_ptr = cuda_handle_shm.data_.get();
+
+    CUDAHandler& cuda_api = CUDAHandler::getInstance();
+    void* cuda_pool_address;
+    cuda_api.OpenCudaHandle(
+        cuda_pool_message_ptr->device_id, &cuda_pool_message_ptr->cuda_handle,
+        &cuda_pool_address);
+    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
+        cuda_pool_message_ptr->device_id, cuda_pool_address);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+    shm_pool_->GetCUDAMemoryPoolManager()->SetCUDAPoolAddress(
+        cuda_pool_message_ptr->device_id, nullptr);
+  }
+
+  if (has_exception) {
+    LOG_INFO << "Failed to initialize CUDA shared memory pool in Python stub: "
+             << error_string;
+    cuda_pool_message_ptr->has_error = true;
+    cuda_pool_message_ptr->is_error_set = false;
+
+    LOG_IF_EXCEPTION(
+        error_string_shm = PbString::Create(shm_pool_, error_string));
+    if (error_string_shm != nullptr) {
+      cuda_pool_message_ptr->is_error_set = true;
+      cuda_pool_message_ptr->error = error_string_shm->ShmHandle();
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    cuda_pool_message_ptr->waiting_on_stub = true;
+    ipc_message->ResponseCondition()->notify_all();
+    while (cuda_pool_message_ptr->waiting_on_stub) {
+      ipc_message->ResponseCondition()->wait(lock);
+    }
+  }
+#endif
+}
+
+void
+Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  ResponseBatch* response_batch = nullptr;
+  bi::managed_external_buffer::handle_t* response_handle = nullptr;
+  std::unique_ptr<InferResponse> infer_response;
+  bool responses_is_set = false;
+  PythonBackendException pb_exception(std::string{});
+
+  try {
+    AllocatedSharedMemory<char> response_batch_shm =
+        shm_pool_->Load<char>(ipc_message->Args());
+    response_batch =
+        reinterpret_cast<ResponseBatch*>(response_batch_shm.data_.get());
+    response_handle = reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+        response_batch_shm.data_.get() + sizeof(ResponseBatch));
+    responses_is_set = true;
+
+    if (response_batch->has_error) {
+      if (response_batch->is_error_set) {
+        std::unique_ptr<PbString> pb_string =
+            PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
+        infer_response = std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(pb_string->String()));
+      } else {
+        infer_response = std::make_unique<InferResponse>(
+            std::vector<std::shared_ptr<PbTensor>>{},
+            std::make_shared<PbError>(
+                "An error occurred while performing BLS request."));
+      }
+    }
+
+    if (responses_is_set) {
+      infer_response = InferResponse::LoadFromSharedMemory(
+          shm_pool_, *response_handle, true /* open cuda handle */);
+
+      for (auto& output_tensor : infer_response->OutputTensors()) {
+        if (!output_tensor->IsCPU()) {
+          uint64_t memory_release_id =
+              output_tensor->Memory()->MemoryReleaseId();
+          output_tensor->Memory()->SetMemoryReleaseCallback(
+              [this, memory_release_id]() {
+                this->MemoryManagerQueue()->Push(memory_release_id);
+              });
+        }
+      }
+    } else {
+      infer_response = std::make_unique<InferResponse>(
+          std::vector<std::shared_ptr<PbTensor>>{},
+          std::make_shared<PbError>(
+              "An error occurred while performing BLS request."));
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    infer_response = std::make_unique<InferResponse>(
+        std::vector<std::shared_ptr<PbTensor>>{},
+        std::make_shared<PbError>(pb_exception.what()));
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+    if (response_iterator_map_.find(infer_response->Id()) !=
+        response_iterator_map_.end()) {
+      response_iterator_map_[infer_response->Id()]->EnqueueResponse(
+          std::move(infer_response));
+    } else {
+      auto response_iterator =
+          std::make_shared<ResponseIterator>(std::move(infer_response));
+      response_iterator_map_.insert(
+          std::pair<void*, std::shared_ptr<ResponseIterator>>(
+              response_iterator->Id(), response_iterator));
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    response_batch->waiting_on_stub = true;
+    ipc_message->ResponseCondition()->notify_all();
+  }
 }
 
 std::unique_ptr<Logger> Logger::log_instance_;
@@ -1385,6 +1552,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .value(
           "ALREADY_EXISTS",
           TRITONSERVER_Error_Code::TRITONSERVER_ERROR_ALREADY_EXISTS)
+      .value("CANCELLED", TRITONSERVER_Error_Code::TRITONSERVER_ERROR_CANCELLED)
       .export_values();
   triton_error.def_property_readonly_static(
       "UNKNOWN",
@@ -1407,6 +1575,9 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   triton_error.def_property_readonly_static(
       "ALREADY_EXISTS",
       [](py::object /* self */) { return TRITONSERVER_ERROR_ALREADY_EXISTS; });
+  triton_error.def_property_readonly_static(
+      "CANCELLED",
+      [](py::object /* self */) { return TRITONSERVER_ERROR_CANCELLED; });
   triton_error.def(
       py::init<const std::string&, TRITONSERVER_Error_Code>(),
       py::arg("message").none(false),
@@ -1437,17 +1608,37 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
                       const int64_t model_version, const uint32_t flags,
-                      const int32_t timeout,
+                      const uint64_t timeout,
                       const PreferredMemory& preferred_memory,
-                      const InferenceTrace& trace) {
+                      const InferenceTrace& trace,
+                      const py::object& parameters_) {
+            py::dict parameters =
+                PyDefaultArgumentToMutableType<py::dict>(parameters_);
             std::set<std::string> requested_outputs;
             for (auto& requested_output_name : requested_output_names) {
               requested_outputs.emplace(requested_output_name);
             }
-            // FIXME: InferenceRequest parameters are not supported in BLS now.
+            for (const auto& pair : parameters) {
+              if (!py::isinstance<py::str>(pair.first)) {
+                throw PythonBackendException(
+                    "Expect parameters keys to have type str, found type " +
+                    std::string(py::str(pair.first.get_type())));
+              }
+              if (!py::isinstance<py::bool_>(pair.second) &&
+                  !py::isinstance<py::int_>(pair.second) &&
+                  !py::isinstance<py::str>(pair.second)) {
+                throw PythonBackendException(
+                    "Expect parameters values to have type bool/int/str, found "
+                    "type " +
+                    std::string(py::str(pair.second.get_type())));
+              }
+            }
+            py::module_ py_json = py::module_::import("json");
+            std::string parameters_str =
+                py::str(py_json.attr("dumps")(parameters));
             return std::make_shared<InferRequest>(
                 request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, "" /*parameters*/, flags, timeout,
+                model_name, model_version, parameters_str, flags, timeout,
                 0 /*response_factory_address*/, 0 /*request_address*/,
                 preferred_memory, trace);
           }),
@@ -1460,7 +1651,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
               PreferredMemory(PreferredMemory::kDefault, 0),
-          py::arg("trace").none(false) = InferenceTrace())
+          py::arg("trace").none(false) = InferenceTrace(),
+          py::arg("parameters").none(true) = py::none())
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
@@ -1522,7 +1714,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "requested_output_names", &InferRequest::RequestedOutputNames,
           py::return_value_policy::reference_internal)
-      .def("get_response_sender", &InferRequest::GetResponseSender);
+      .def("get_response_sender", &InferRequest::GetResponseSender)
+      .def("is_cancelled", &InferRequest::IsCancelled)
+      .def("set_release_flags", &InferRequest::SetReleaseFlags),
+      py::arg("flags").none(false);
 
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
@@ -1560,12 +1755,18 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       module, "InferenceResponseSender")
       .def(
           "send", &ResponseSender::Send, py::arg("response") = nullptr,
-          py::arg("flags") = 0);
+          py::arg("flags") = 0)
+      .def("is_cancelled", &ResponseSender::IsCancelled);
 
   py::class_<ResponseIterator, std::shared_ptr<ResponseIterator>>(
       module, "ResponseIterator")
       .def(py::init<const std::shared_ptr<InferResponse>&>())
-      .def("__iter__", &ResponseIterator::Iter, py::keep_alive<0, 1>())
+      .def(
+          "__iter__",
+          [](ResponseIterator& it) -> ResponseIterator& {
+            it.Iter();
+            return it;
+          })
       .def("__next__", &ResponseIterator::Next);
 
   py::class_<Logger> logger(module, "Logger");
@@ -1628,57 +1829,33 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
 void
 ModelContext::Init(
-    const std::string& model_path, const std::string& platform,
+    const std::string& model_path, const std::string& runtime_modeldir,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  bool python_model_found = false;
-  std::string platform_model_path;
-
-  if (platform != "NONE") {
-    platform_model_path =
-        triton_install_path + "/platform_handlers/" + platform + "/model.py";
-    // Check if model file exists in the path.
-    struct stat buffer;
-    if (stat(platform_model_path.c_str(), &buffer) == 0) {
-      // Use the Platform model for serving the model.
-      python_model_found = true;
-      type_ = ModelType::kPlatform;
-      python_model_path_ = platform_model_path;
-      // Trimming the model name from the model path, the platform model
-      // will populate the expected default model file name into model_path_.
-      model_dir_ = model_path.substr(0, model_path.find_last_of("\\/"));
-    } else {
-      LOG_WARN << "Unable to find model(handler) \'" << platform_model_path
-               << "\' for platform field \'" << platform << "\'";
-    }
-  }
-
-  if (!python_model_found) {
+  os_slash = "/";
+  #ifdef _WIN32
+  os_slash = "\\";
+  #endif
+  type_ = ModelType::kDefault;
+  if (runtime_modeldir != "DEFAULT") {
+    // For python based backends, existence of `model.py` in the corresponding
+    // backend folder happens on the core side, so we can omit this check here.
+    python_model_path_ = runtime_modeldir + os_slash + "model.py";
+    type_ = ModelType::kBackend;
+  } else {
     python_model_path_ = model_path;
     // Check if model file exists in this path.
     struct stat buffer;
-    if (stat(python_model_path_.c_str(), &buffer) == 0) {
-      python_model_found = true;
-      type_ = ModelType::kDefault;
-    }
-    // Initializing here for consistency with platform model case.
-    model_dir_ = model_path.substr(0, model_path.find_last_of("\\/"));
-  }
-
-  if (!python_model_found) {
-    if (platform != "NONE") {
-      throw PythonBackendException(
-          ("Python model file not found in neither \'" + platform_model_path +
-           "\' nor \'" + model_path + "\'"));
-    } else {
+    if (stat(python_model_path_.c_str(), &buffer) != 0) {
       throw PythonBackendException(
           ("Python model file not found in \'" + model_path + "\'"));
     }
   }
 
+  model_dir_ = model_path.substr(0, model_path.find_last_of("\\/"));
   python_backend_folder_ = triton_install_path;
   model_version_ = model_version;
-  platform_ = platform;
+  runtime_modeldir_ = runtime_modeldir;
 }
 
 void
@@ -1709,9 +1886,10 @@ ModelContext::StubSetup(py::module& sys)
     sys = py::module_::import(
         (std::string(model_version_) + "." + model_name_trimmed).c_str());
   } else {
-    std::string platform_model_dir(
-        python_backend_folder_ + "/platform_handlers/" + platform_ + "/");
-    sys.attr("path").attr("append")(platform_model_dir);
+    std::string model_path_parent =
+        python_model_path_.substr(0, python_model_path_.find_last_of("/"));
+    std::string backend_model_dir(model_path_parent);
+    sys.attr("path").attr("append")(backend_model_dir);
     sys.attr("path").attr("append")(python_backend_folder_);
     sys = py::module_::import(model_name_trimmed.c_str());
   }
@@ -1776,14 +1954,14 @@ main(int argc, char** argv)
   int64_t shm_growth_size = std::stol(argv[4]);
   std::string triton_install_path = argv[6];
   std::string name = argv[8];
-  std::string platform = argv[9];
+  std::string runtime_modeldir = argv[9];
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
         model_version, argv[6] /* triton install path */,
-        std::stoi(argv[7]) /* IPCControl handle */, name, platform);
+        std::stoi(argv[7]) /* IPCControl handle */, name, runtime_modeldir);
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();

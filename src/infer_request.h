@@ -34,6 +34,7 @@
 #include "pb_tensor.h"
 
 #ifdef TRITON_PB_STUB
+#include "pb_cancel.h"
 #include "response_sender.h"
 #endif
 
@@ -69,9 +70,10 @@ struct InferRequestShm {
   intptr_t address;
   intptr_t response_factory_address;
   bool is_decoupled;
-  int32_t timeout;
+  uint64_t timeout;
   PreferredMemory preferred_memory;
   InferenceTrace trace;
+  uint32_t request_release_flags;
 };
 
 class InferRequest {
@@ -82,7 +84,7 @@ class InferRequest {
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
       const std::string& parameters, const uint32_t flags = 0,
-      const int32_t timeout = 0, const intptr_t response_factory_address = 0,
+      const uint64_t timeout = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
           PreferredMemory(PreferredMemory::kDefault, 0),
@@ -98,15 +100,18 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
-  int32_t Timeout();
+  uint64_t Timeout();
   bool IsDecoupled();
   void SetIsDecoupled(const bool is_decoupled);
   PreferredMemory& GetPreferredMemory();
   InferenceTrace& Trace();
+  uint32_t ReleaseFlags();
+  void SetReleaseFlags(const uint32_t& flags);
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
+  bool IsCancelled();
 #endif
 
   /// Save an Inference Request to shared memory.
@@ -132,10 +137,6 @@ class InferRequest {
   intptr_t RequestAddress();
   ~InferRequest() {}
 
-#ifndef TRITON_PB_STUB
-  TRITONSERVER_Error* DeleteResponseFactory();
-#endif
-
  private:
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,
@@ -153,12 +154,13 @@ class InferRequest {
   int64_t model_version_;
   std::string parameters_;
   uint32_t flags_;
-  int32_t timeout_;
+  uint64_t timeout_;
   intptr_t response_factory_address_;
   intptr_t request_address_;
   bool is_decoupled_;
   PreferredMemory preferred_memory_;
   InferenceTrace trace_;
+  uint32_t request_release_flags_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;
@@ -173,6 +175,7 @@ class InferRequest {
   std::unique_ptr<PbString> parameters_shm_;
 
 #ifdef TRITON_PB_STUB
+  std::shared_ptr<PbCancel> pb_cancel_;
   std::shared_ptr<ResponseSender> response_sender_;
 #endif
 };

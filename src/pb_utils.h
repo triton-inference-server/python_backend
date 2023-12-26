@@ -181,6 +181,12 @@ struct CleanupMessage : SendMessageBase {
   void* id;
 };
 
+struct IsCancelledMessage : SendMessageBase {
+  intptr_t response_factory_address;
+  intptr_t request_address;
+  bool is_cancelled;
+};
+
 struct CustomMetricsMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t message;
   bool has_error;
@@ -234,7 +240,22 @@ struct RequestBatch {
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
 };
 
+struct MemoryReleaseMessage {
+  std::mutex mu;
+  std::condition_variable cv;
+  uint64_t id;
+  bool waiting_on_stub;
+};
+
 #ifdef TRITON_ENABLE_GPU
+struct CUDAMemPoolMessage : SendMessageBase {
+  cudaIpcMemHandle_t cuda_handle;
+  int32_t device_id;
+  bi::managed_external_buffer::handle_t error;
+  bool has_error;
+  bool is_error_set;
+};
+
 class CUDAHandler {
  public:
   static CUDAHandler& getInstance()
@@ -297,6 +318,11 @@ class ScopedSetDevice {
   int device_;
   int current_device_;
 };
+
+// Check if the data is allocated from the pool by the base address.
+bool IsUsingCUDAPool(
+    std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, int64_t memory_type_id,
+    void* data);
 
 #endif  // TRITON_ENABLE_GPU
 

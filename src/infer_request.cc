@@ -42,7 +42,7 @@ InferRequest::InferRequest(
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
-    const std::string& parameters, const uint32_t flags, const int32_t timeout,
+    const std::string& parameters, const uint32_t flags, const uint64_t timeout,
     const intptr_t response_factory_address, const intptr_t request_address,
     const PreferredMemory& preferred_memory, const InferenceTrace& trace)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
@@ -50,7 +50,7 @@ InferRequest::InferRequest(
       model_version_(model_version), parameters_(parameters), flags_(flags),
       timeout_(timeout), response_factory_address_(response_factory_address),
       request_address_(request_address), preferred_memory_(preferred_memory),
-      trace_(trace)
+      trace_(trace), request_release_flags_(TRITONSERVER_REQUEST_RELEASE_ALL)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -71,9 +71,11 @@ InferRequest::InferRequest(
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -143,7 +145,7 @@ InferRequest::ShmHandle()
   return shm_handle_;
 }
 
-int32_t
+uint64_t
 InferRequest::Timeout()
 {
   return timeout_;
@@ -173,6 +175,20 @@ InferRequest::Trace()
   return trace_;
 }
 
+uint32_t
+InferRequest::ReleaseFlags()
+{
+  request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
+  return request_release_flags_;
+}
+
+void
+InferRequest::SetReleaseFlags(const uint32_t& flags)
+{
+  request_release_flags_ = flags;
+  infer_request_shm_ptr_->request_release_flags = request_release_flags_;
+}
+
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
@@ -199,6 +215,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->timeout = timeout_;
   infer_request_shm_ptr_->preferred_memory = preferred_memory_;
   infer_request_shm_ptr_->trace = trace_;
+  infer_request_shm_ptr_->request_release_flags = request_release_flags_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -377,29 +394,24 @@ InferRequest::InferRequest(
   timeout_ = infer_request_shm_ptr_->timeout;
   preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
   trace_ = infer_request_shm_ptr_->trace;
+  request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
 
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
-
-#ifndef TRITON_PB_STUB
-TRITONSERVER_Error*
-InferRequest::DeleteResponseFactory()
-{
-  TRITONBACKEND_ResponseFactory* response_factory =
-      reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-          response_factory_address_);
-  TRITONSERVER_Error* error =
-      TRITONBACKEND_ResponseFactoryDelete(response_factory);
-
-  return error;
-}
-#endif
 
 #ifdef TRITON_PB_STUB
+bool
+InferRequest::IsCancelled()
+{
+  return pb_cancel_->IsCancelled();
+}
+
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
 {
@@ -416,6 +428,13 @@ InferRequest::GetResponseSender()
 std::shared_ptr<InferResponse>
 InferRequest::Exec(const bool is_decoupled)
 {
+  // Release the GIL. This avoids a potential deadlock situation in the parent
+  // process, where every thread in the thread pool is indirectly waiting for a
+  // function in the stub process that acquires the GIL. Meanwhile, the current
+  // thread, which holds the GIL, is also waiting for the parent side to have
+  // the next available thread to pick up the job during resource contention.
+  py::gil_scoped_release release;
+
   // BLS should not be used in "initialize" or "finalize" function.
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   if (!stub->IsInitialized() || stub->IsFinalizing()) {
@@ -439,7 +458,6 @@ InferRequest::Exec(const bool is_decoupled)
   });
 
   try {
-    py::gil_scoped_release release;
     ipc_message = IPCMessage::Create(shm_pool, true /* inline_response */);
     bool has_exception = false;
     PythonBackendException pb_exception(std::string{});
@@ -588,7 +606,7 @@ InferRequest::Exec(const bool is_decoupled)
       if (!output_tensor->IsCPU()) {
         uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
-            [&memory_manager_message_queue, memory_release_id]() {
+            [&memory_manager_message_queue, memory_release_id, &shm_pool]() {
               memory_manager_message_queue->Push(memory_release_id);
             });
       }

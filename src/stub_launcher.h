@@ -159,6 +159,11 @@ class StubLauncher {
   // Get Python environment for non-WIN32
   TRITONSERVER_Error* GetPythonEnvironment(ModelState* model_state);
 #endif
+#ifdef TRITON_ENABLE_GPU
+  // Share CUDA memory pool with stub process
+  void ShareCUDAMemoryPool(
+      TRITONBACKEND_MemoryManager* triton_mem_manager, const int32_t device_id);
+#endif  // TRITON_ENABLE_GPU
 
  private:
 #ifdef _WIN32
@@ -175,7 +180,7 @@ class StubLauncher {
   std::string shm_region_name_;
   std::string model_repository_path_;
   std::string model_path_;
-  std::string platform_;
+  std::string runtime_modeldir_;
   const std::string stub_process_kind_;
   std::string model_name_;
   const std::string model_instance_name_;
@@ -211,5 +216,9 @@ class StubLauncher {
       ipc_control_;
   bi::managed_external_buffer::handle_t ipc_control_handle_;
   std::unique_ptr<SharedMemoryManager> shm_pool_;
+#ifdef TRITON_ENABLE_GPU
+  std::mutex cuda_shm_pool_mutex_;
+  std::unordered_map<int32_t, bool> tried_sharing_cuda_pool_map_;
+#endif  // TRITON_ENABLE_GPU
 };
 }}}  // namespace triton::backend::python

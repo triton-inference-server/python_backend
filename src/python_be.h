@@ -225,6 +225,7 @@ struct BackendState {
 #ifndef _WIN32
   std::unique_ptr<EnvironmentManager> env_manager;
 #endif
+  std::string runtime_modeldir;
 };
 
 class ModelState : public BackendModel {
@@ -244,14 +245,21 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
-  // Returns the value in the platform field
-  std::string Platform() { return platform_; }
+  // Set decoupled mode
+  void SetDecoupled(bool decoupled) { decoupled_ = decoupled; }
+
+  // Returns the value in the `runtime_modeldir_` field
+  std::string RuntimeModelDir() { return runtime_modeldir_; }
 
   // Launch auto-complete stub process.
   TRITONSERVER_Error* LaunchAutoCompleteStubProcess();
 
   // Validate Model Configuration
   TRITONSERVER_Error* ValidateModelConfig();
+
+  // Overrides `BackendModel::SetModelConfig` to also
+  // set `ModelState::decoupled_`
+  TRITONSERVER_Error* SetModelConfig();
 
   // Auto-complete stub
   std::unique_ptr<StubLauncher>& Stub() { return auto_complete_stub_; }
@@ -262,7 +270,7 @@ class ModelState : public BackendModel {
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
   bool decoupled_;
-  std::string platform_;
+  std::string runtime_modeldir_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
 };
 
@@ -285,7 +293,7 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<IPCMessage> received_message_;
   std::vector<std::future<void>> futures_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
-  std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
+  std::unordered_map<intptr_t, std::shared_ptr<InferPayload>> infer_payload_;
   std::unique_ptr<RequestExecutor> request_executor_;
 
  public:
@@ -339,6 +347,7 @@ class ModelInstanceState : public BackendModelInstance {
   // Process all the requests obtained from Triton.
   void ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
+      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
       bool& restart);
 
   // Process all the requests in the decoupled mode.
@@ -400,8 +409,11 @@ class ModelInstanceState : public BackendModelInstance {
       std::unique_ptr<InferResponse>* infer_response,
       bi::managed_external_buffer::handle_t* response_handle);
 
-  // Process the bls decoupled cleanup request
-  void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+  // Process the decoupled cleanup request for InferPayload and ResponseFactory
+  void ProcessCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process request cancellation query
+  void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);
 
   // Process a message. The function 'request_handler' is invoked
   // to handle the request. T should be either 'MetricFamily', 'Metric' or
@@ -420,5 +432,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process a model control request
   void ProcessModelControlRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Attempt to share CUDA memory pool with the stub process
+  void ShareCUDAMemoryPool(const int32_t device_id);
 };
 }}}  // namespace triton::backend::python

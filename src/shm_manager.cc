@@ -33,6 +33,53 @@
 
 namespace triton { namespace backend { namespace python {
 
+void
+CUDAMemoryPoolManager::SetCUDAPoolAddress(
+    const int32_t device_id, void* cuda_pool_address)
+{
+  std::lock_guard<std::mutex> lock(mu_);
+  cuda_pool_address_map_[device_id] = cuda_pool_address;
+}
+
+void*
+CUDAMemoryPoolManager::CUDAPoolAddress(const int32_t device_id)
+{
+  if (cuda_pool_address_map_.find(device_id) != cuda_pool_address_map_.end()) {
+    return cuda_pool_address_map_[device_id];
+  } else {
+    throw PythonBackendException(
+        "CUDA pool address for device " + std::to_string(device_id) +
+        " is not set.");
+  }
+}
+
+void
+CUDAMemoryPoolManager::SetTritonMemoryManager(void* triton_memory_manager)
+{
+  triton_memory_manager_ = triton_memory_manager;
+}
+
+void*
+CUDAMemoryPoolManager::TritonMemoryManager()
+{
+  return triton_memory_manager_;
+}
+
+bool
+CUDAMemoryPoolManager::UseCudaSharedPool(const int32_t device_id)
+{
+  return (cuda_pool_address_map_.find(device_id) !=
+          cuda_pool_address_map_.end()) &&
+         (cuda_pool_address_map_[device_id] != nullptr) &&
+         (triton_memory_manager_ != nullptr);
+}
+
+std::unordered_map<int32_t, void*>&
+CUDAMemoryPoolManager::CUDAPoolAddressMap()
+{
+  return cuda_pool_address_map_;
+}
+
 SharedMemoryManager::SharedMemoryManager(
     const std::string& shm_region_name, size_t shm_size,
     size_t shm_growth_bytes, bool create)
@@ -40,6 +87,7 @@ SharedMemoryManager::SharedMemoryManager(
   shm_region_name_ = shm_region_name;
   create_ = create;
   shm_growth_bytes_ = shm_growth_bytes;
+  cuda_memory_pool_manager_ = std::make_unique<CUDAMemoryPoolManager>();
 
   try {
     if (create) {
@@ -99,6 +147,7 @@ SharedMemoryManager::SharedMemoryManager(const std::string& shm_region_name)
   shm_region_name_ = shm_region_name;
   create_ = false;
   shm_growth_bytes_ = 1024;
+  cuda_memory_pool_manager_ = std::make_unique<CUDAMemoryPoolManager>();
 
   shm_obj_ = std::make_unique<bi::shared_memory_object>(
       bi::open_only, shm_region_name.c_str(), bi::read_write);

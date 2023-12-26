@@ -36,6 +36,7 @@
 #include "message_queue.h"
 #include "metric.h"
 #include "metric_family.h"
+#include "pb_cancel.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
@@ -166,9 +167,15 @@ class ModelContext {
   std::string model_dir_;
   std::string model_version_;
   std::string python_backend_folder_;
-  std::string platform_;
+  std::string runtime_modeldir_;
 
-  enum ModelType { kDefault, kPlatform };
+  // Triton supports python-based backends,
+  // i.e. backends that provide common `model.py`, that can be re-used
+  // between different models. `ModelType` helps to differentiate
+  // between models running with c++ python backend (ModelType::kDefault)
+  // and models running with python-based backend (ModelType::kBackend)
+  // at the time of ModelContext::StubSetup to properly set up paths.
+  enum ModelType { kDefault, kBackend };
   ModelType type_;
 };
 
@@ -196,7 +203,8 @@ class Stub {
       const std::string& shm_region_name, const std::string& model_path,
       const std::string& model_version, const std::string& triton_install_path,
       bi::managed_external_buffer::handle_t ipc_control_handle,
-      const std::string& model_instance_name, const std::string& platform);
+      const std::string& model_instance_name,
+      const std::string& runtime_modeldir);
 
   /// Get the health of the stub process.
   bool& Health();
@@ -251,7 +259,11 @@ class Stub {
   std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
 
   void ProcessResponse(InferResponse* response);
+
+  void ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message);
+
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
+
   bool IsDecoupled();
   ~Stub();
 
@@ -290,10 +302,19 @@ class Stub {
       std::shared_ptr<InferResponse> infer_response);
 
   /// Send the id to the python backend for object cleanup
-  void SendCleanupId(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
+  void SendCleanupId(
+      std::unique_ptr<UtilsMessagePayload>& utils_msg_payload,
+      const PYTHONSTUB_CommandType& command_type);
 
-  /// Add cleanup id to queue
-  void EnqueueCleanupId(void* id);
+  /// Add cleanup id to queue. This is used for cleaning up the infer_payload
+  /// and the response factory for BLS decoupled response.
+  void EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type);
+
+  /// Add request cancellation query to queue
+  void EnqueueIsCancelled(PbCancel* pb_cancel);
+
+  /// Send request cancellation query to python backend
+  void SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Is the stub initialized
   bool IsInitialized();
@@ -322,6 +343,9 @@ class Stub {
   /// Helper function to retrieve a proxy stream for dlpack synchronization
   /// for provided device
   cudaStream_t GetProxyStream(const int& device_id);
+
+  /// Get the CUDA memory pool address from the parent process.
+  void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
  private:
   bi::interprocess_mutex* stub_mutex_;

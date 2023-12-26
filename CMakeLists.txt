@@ -234,6 +234,8 @@ set(
   src/pb_stub.cc
   src/pb_response_iterator.h
   src/pb_response_iterator.cc
+  src/pb_cancel.cc
+  src/pb_cancel.h
 )
 
 list(APPEND
@@ -363,13 +365,6 @@ install(
     TritonPythonBackend::
   DESTINATION
     ${INSTALL_CONFIGDIR}
-)
-
-install(
-  DIRECTORY
-    src/resources/platform_handlers
-  DESTINATION
-    ${CMAKE_INSTALL_PREFIX}/backends/python
 )
 
 install(

@@ -100,7 +100,7 @@ ResponseIterator::Next()
   }
 }
 
-py::iterator
+void
 ResponseIterator::Iter()
 {
   if (is_finished_) {
@@ -111,8 +111,6 @@ ResponseIterator::Iter()
       idx_ = 0;
     }
   }
-
-  return py::cast(*this);
 }
 
 void
@@ -135,7 +133,7 @@ void
 ResponseIterator::Clear()
 {
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  stub->EnqueueCleanupId(id_);
+  stub->EnqueueCleanupId(id_, PYTHONSTUB_BLSDecoupledInferPayloadCleanup);
   {
     std::lock_guard<std::mutex> lock{mu_};
     response_buffer_.push(DUMMY_MESSAGE);

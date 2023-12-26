@@ -1,4 +1,4 @@
-// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #pragma once
 
 #include "infer_response.h"
+#include "pb_cancel.h"
 #include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
@@ -35,13 +36,17 @@ class ResponseSender {
  public:
   ResponseSender(
       intptr_t request_address, intptr_t response_factory_address,
-      std::unique_ptr<SharedMemoryManager>& shm_pool);
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      const std::shared_ptr<PbCancel>& pb_cancel);
+  ~ResponseSender();
   void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
+  bool IsCancelled();
 
  private:
   intptr_t request_address_;
   intptr_t response_factory_address_;
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
   bool closed_;
+  std::shared_ptr<PbCancel> pb_cancel_;
 };
 }}}  // namespace triton::backend::python

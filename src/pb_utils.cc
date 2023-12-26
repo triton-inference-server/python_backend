@@ -265,7 +265,24 @@ ScopedSetDevice::~ScopedSetDevice()
     cuda_handler.MaybeSetDevice(current_device_);
   }
 }
-#endif
+
+bool
+IsUsingCUDAPool(
+    std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, int64_t memory_type_id,
+    void* data)
+{
+  CUDAHandler& cuda_api = CUDAHandler::getInstance();
+  CUdeviceptr cuda_pool_address = 0;
+  cuda_api.PointerGetAttribute(
+      &cuda_pool_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+      reinterpret_cast<CUdeviceptr>(data));
+
+  return (
+      cuda_pool->CUDAPoolAddress(memory_type_id) ==
+      reinterpret_cast<void*>(cuda_pool_address));
+}
+
+#endif  // TRITON_ENABLE_GPU
 
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*>
@@ -284,5 +301,5 @@ WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)
   *response_error = error;
   return response_error;
 }
-#endif
-}}}  // namespace triton::backend::python
+#endif  // NOT TRITON_PB_STUB
+}}}     // namespace triton::backend::python

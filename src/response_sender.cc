@@ -1,4 +1,4 @@
-// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -37,18 +37,33 @@ namespace triton { namespace backend { namespace python {
 
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false)
+      closed_(false), pb_cancel_(pb_cancel)
 {
 }
 
+ResponseSender::~ResponseSender()
+{
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  stub->EnqueueCleanupId(
+      reinterpret_cast<void*>(response_factory_address_),
+      PYTHONSTUB_DecoupledResponseFactoryCleanup);
+}
 
 void
 ResponseSender::Send(
     std::shared_ptr<InferResponse> infer_response, const uint32_t flags)
 {
+  // Release the GIL. This avoids a potential deadlock situation in the parent
+  // process, where every thread in the thread pool is indirectly waiting for a
+  // function in the stub process that acquires the GIL. Meanwhile, the current
+  // thread, which holds the GIL, is also waiting for the parent side to have
+  // the next available thread to pick up the job during resource contention.
+  py::gil_scoped_release release;
+
   if (closed_) {
     throw PythonBackendException(
         "Unable to send response. Response sender has been closed.");
@@ -184,4 +199,11 @@ ResponseSender::Send(
     }
   }
 }
+
+bool
+ResponseSender::IsCancelled()
+{
+  return pb_cancel_->IsCancelled();
+}
+
 }}}  // namespace triton::backend::python
