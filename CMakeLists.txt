@@ -238,18 +238,40 @@ add_library(
 )
 
 target_compile_features(triton-python-backend PRIVATE cxx_std_11)
-target_compile_options(
-  triton-python-backend PRIVATE
-  $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
-    -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
-)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  message("Using MSVC as compiler, default target on Windows 10. "
+    "If the target system is not Windows 10, please update _WIN32_WINNT "
+    "to corresponding value.")
+  target_compile_options(
+    triton-python-backend
+    PRIVATE
+      /W1 /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor
+  )
+else()
+  target_compile_options(
+    triton-python-backend PRIVATE
+    $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+      -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
+  )
+endif()
 
 target_compile_features(triton-python-backend-stub PRIVATE cxx_std_11)
-target_compile_options(
-  triton-python-backend-stub PRIVATE
-  $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
-  -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
-)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  message("Using MSVC as compiler, default target on Windows 10. "
+    "If the target system is not Windows 10, please update _WIN32_WINNT "
+    "to corresponding value.")
+  target_compile_options(
+    triton-python-backend-stub
+    PRIVATE
+      /W1 /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor
+  )
+else()
+  target_compile_options(
+    triton-python-backend-stub PRIVATE
+    $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
+    -fvisibility=hidden -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
+  )
+endif()
 target_compile_definitions(triton-python-backend-stub PRIVATE TRITON_PB_STUB)
 
 # For WIN32 do not link Threads and DL_LIBS
