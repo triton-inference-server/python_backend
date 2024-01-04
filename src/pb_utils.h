@@ -319,6 +319,10 @@ class ScopedSetDevice {
   int current_device_;
 };
 
+// Utility function to get the correct file separator depending on the OS.
+// Can likely be replaced with std::filesystem with the upgrade to C++17
+const std::string& FileSeparator();
+
 // Check if the data is allocated from the pool by the base address.
 bool IsUsingCUDAPool(
     std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, int64_t memory_type_id,

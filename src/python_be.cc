@@ -2237,10 +2237,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
 
-  std::string os_slash = "/";
-#ifdef _WIN32
-  os_slash = "\\"
-#endif
+  const std::string os_slash = FileSeparator();
   // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
   // are located under `location`.
   // DLIS-5596: Add forward slash to be platform agnostic
@@ -2269,8 +2266,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     // then we are using a python backend based backend and stub and utils are
     // stored in the default python backend location.
     if (!default_backend_dir_string.empty()) {
-      std::string backend_stub_path =
-          default_backend_dir_string +  os_slash + "python/triton_python_backend_stub";
+      std::string backend_stub_path = default_backend_dir_string + os_slash +
+                                      "python/triton_python_backend_stub";
       if (!FileExists(backend_stub_path)) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_NOT_FOUND,
@@ -2281,7 +2278,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       }
     }
     backend_state->runtime_modeldir = location;
-    backend_state->python_lib = default_backend_dir_string +  os_slash + "python";
+    backend_state->python_lib =
+        default_backend_dir_string + os_slash + "python";
   }
 
 #ifndef _WIN32

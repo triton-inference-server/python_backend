@@ -176,26 +176,7 @@ set(
   src/model_loader.cc
 )
 
-# Do not compile pb_env* files for
-# windows. Needs to be integrated.
-if (WIN32)
-  set(
-    PYTHON_BACKEND_SRCS
-    src/python_be.cc
-    src/python_be.h
-    src/pb_metric_reporter.cc
-    src/pb_metric_reporter.h
-    src/memory_manager.cc
-    src/memory_manager.h
-    src/request_executor.cc
-    src/request_executor.h
-    src/stub_launcher.h
-    src/stub_launcher.cc
-    src/infer_payload.h
-    src/infer_payload.cc
-  )
-else()
-  set(
+set(
     PYTHON_BACKEND_SRCS
     src/python_be.cc
     src/python_be.h
@@ -211,8 +192,7 @@ else()
     src/stub_launcher.cc
     src/infer_payload.h
     src/infer_payload.cc
-  )
-endif()
+)
 
 list(APPEND
   PYTHON_BACKEND_SRCS

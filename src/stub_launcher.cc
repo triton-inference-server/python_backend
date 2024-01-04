@@ -35,11 +35,10 @@
 namespace triton { namespace backend { namespace python {
 
 StubLauncher::StubLauncher(const std::string stub_process_kind)
-    : parent_pid_(0), stub_pid_(0), is_initialized_(false),
+    : parent_pid_(0), is_initialized_(false),
       stub_process_kind_(stub_process_kind), model_instance_name_(""),
       device_id_(0), kind_("")
 {
-  InitializeOSDependentMembers();
 }
 
 StubLauncher::StubLauncher(
@@ -49,7 +48,6 @@ StubLauncher::StubLauncher(
       model_instance_name_(model_instance_name), device_id_(device_id),
       kind_(kind)
 {
-  InitializeOSDependentMembers();
 }
 
 TRITONSERVER_Error*
@@ -70,6 +68,13 @@ StubLauncher::Initialize(ModelState* model_state)
   if (runtime_modeldir_.empty()) {
     runtime_modeldir_ = "DEFAULT";
   }
+#ifdef _WIN32
+  ZeroMemory(&startup_info_, sizeof(startup_info_));
+  startup_info_.cb = sizeof(startup_info_);
+  ZeroMemory(&stub_pid_, sizeof(stub_pid_));
+#else
+  stub_pid_ = 0;
+#endif
 
   // Atomically increase and read the stub process count to avoid shared memory
   // region name collision
@@ -81,6 +86,7 @@ StubLauncher::Initialize(ModelState* model_state)
   model_version_ = model_state->Version();
 
   std::stringstream ss;
+  const std::string os_slash = FileSeparator();
   ss << model_repository_path_ << os_slash << model_version_ << os_slash;
   std::string artifact_name;
   RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
@@ -243,15 +249,12 @@ StubLauncher::Launch()
   ss << " exec " << python_backend_stub << " " << model_path_ << " "
      << shm_region_name_ << " " << shm_default_byte_size_ << " "
      << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_ << " "
-     << ipc_control_handle_ << " " << stub_name << " " << platform_;
+     << ipc_control_handle_ << " " << stub_name << " " << runtime_modeldir_;
   launch_command = ss.str();
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       (std::string("Starting Python backend stub: ") + launch_command).c_str());
-
-  int stub_status_code =
-      system((python_backend_stub + "> /dev/null 2>&1").c_str());
 
   LPSTR launch_command_lpstr = const_cast<char*>(launch_command.c_str());
   // Start the child process. Unlike fork(), the remainder of this
@@ -346,7 +349,8 @@ StubLauncher::Launch()
   stub_args[3] = nullptr;  // Last argument must be nullptr
 
   // Default Python backend stub
-  std::string python_backend_stub = python_lib_ + "/triton_python_backend_stub";
+  std::string python_backend_stub =
+      python_lib_ + os_slash_ + "triton_python_backend_stub";
 
   // Path to alternative Python backend stub
   std::string model_python_backend_stub =
@@ -752,21 +756,6 @@ StubLauncher::ReceiveMessageFromStub(
   }
 
   return nullptr;  // success
-}
-
-void
-StubLauncher::InitializeOSDependentMembers()
-{
-#ifdef _WIN32
-  ZeroMemory(&startup_info_, sizeof(startup_info_));
-  startup_info_.cb = sizeof(startup_info_);
-  ZeroMemory(&stub_pid_, sizeof(stub_pid_));
-  os_slash = "\\";
-#else
-  parent_pid_ = 0;
-  stub_pid_ = 0;
-  os_slash = "/";
-#endif
 }
 
 void

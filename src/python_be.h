@@ -62,6 +62,7 @@
 #include "message_queue.h"
 #include "metric.h"
 #include "metric_family.h"
+#include "pb_env.h"
 #include "pb_map.h"
 #include "pb_metric_reporter.h"
 #include "pb_utils.h"
@@ -85,8 +86,6 @@
 #else
 #include <sys/wait.h>
 #include <unistd.h>
-
-#include "pb_env.h"
 #endif
 
 #define LOG_IF_EXCEPTION(X)                                     \

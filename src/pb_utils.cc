@@ -284,6 +284,17 @@ IsUsingCUDAPool(
 
 #endif  // TRITON_ENABLE_GPU
 
+const std::string&
+FileSeparator()
+{
+#ifdef _WIN32
+  static std::string file_separator = "\\";
+#else
+  static std::string file_separator = "/";
+#endif
+  return file_separator;
+}
+
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*>
 WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)

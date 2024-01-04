@@ -152,9 +152,6 @@ class StubLauncher {
   // Wait for stub process
   void WaitForStubProcess();
 
-  // Initialize pid / process_information handlers
-  void InitializeOSDependentMembers();
-
 #ifndef _WIN32
   // Get Python environment for non-WIN32
   TRITONSERVER_Error* GetPythonEnvironment(ModelState* model_state);
@@ -187,7 +184,6 @@ class StubLauncher {
   const int32_t device_id_;
   const std::string kind_;
   uint64_t model_version_;
-  std::string os_slash;
 
   std::string python_lib_;
   int64_t shm_default_byte_size_;

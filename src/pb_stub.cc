@@ -1832,10 +1832,7 @@ ModelContext::Init(
     const std::string& model_path, const std::string& runtime_modeldir,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  os_slash = "/";
-  #ifdef _WIN32
-  os_slash = "\\";
-  #endif
+  const std::string os_slash = FileSeparator();
   type_ = ModelType::kDefault;
   if (runtime_modeldir != "DEFAULT") {
     // For python based backends, existence of `model.py` in the corresponding
