@@ -2049,7 +2049,7 @@ ModelState::SetModelConfig()
 
 extern "C" {
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 {
   const char* cname;
@@ -2293,7 +2293,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 {
   LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "TRITONBACKEND_Finalize: Start");
@@ -2305,7 +2305,7 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
   return nullptr;  // success
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 {
   const char* cname;
@@ -2332,7 +2332,7 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
 {
   void* vstate;
@@ -2348,7 +2348,7 @@ TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
 {
   const char* cname;
@@ -2391,7 +2391,7 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceExecute(
     TRITONBACKEND_ModelInstance* instance, TRITONBACKEND_Request** requests,
     const uint32_t request_count)
@@ -2516,7 +2516,7 @@ TRITONBACKEND_ModelInstanceExecute(
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 {
   void* vstate;
@@ -2533,7 +2533,7 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_GetBackendAttribute(
     TRITONBACKEND_Backend* backend,
     TRITONBACKEND_BackendAttribute* backend_attributes)
