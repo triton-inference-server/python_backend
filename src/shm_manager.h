@@ -40,6 +40,14 @@
 #include <unordered_map>
 #include <vector>
 
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
+
 #include "pb_exception.h"
 
 namespace triton { namespace backend { namespace python {
@@ -105,7 +113,11 @@ class SharedMemoryManager {
   SharedMemoryManager(const std::string& shm_region_name);
 
   template <typename T>
-  AllocatedSharedMemory<T> Construct(uint64_t count = 1, bool aligned = false)
+  AllocatedSharedMemory<T> Construct(
+      uint64_t count = 1, bool aligned = false,
+      const char* debug_file = __builtin_FILE(),
+      int debug_line = __builtin_LINE(),
+      const char* debug_fn = __builtin_FUNCTION())
   {
     T* obj = nullptr;
     AllocatedShmOwnership* shm_ownership_data = nullptr;
@@ -136,14 +148,19 @@ class SharedMemoryManager {
 
       handle = managed_buffer_->get_handle_from_address(
           reinterpret_cast<void*>(shm_ownership_data));
+
+      LogShmDebugInfo(handle, "ALLOC", shm_ownership_data->ref_count_, debug_file, debug_line, debug_fn);
     }
 
-    return WrapObjectInUniquePtr(obj, shm_ownership_data, handle);
+    return WrapObjectInUniquePtr(obj, shm_ownership_data, handle, debug_file, debug_line, debug_fn);
   }
 
   template <typename T>
   AllocatedSharedMemory<T> Load(
-      bi::managed_external_buffer::handle_t handle, bool unsafe = false)
+      bi::managed_external_buffer::handle_t handle, bool unsafe = false,
+      const char* debug_file = __builtin_FILE(),
+      int debug_line = __builtin_LINE(),
+      const char* debug_fn = __builtin_FUNCTION())
   {
     T* object_ptr;
     AllocatedShmOwnership* shm_ownership_data;
@@ -159,9 +176,11 @@ class SharedMemoryManager {
       if (!unsafe) {
         shm_ownership_data->ref_count_ += 1;
       }
+
+      LogShmDebugInfo(handle, "LOAD", shm_ownership_data->ref_count_, debug_file, debug_line, debug_fn);
     }
 
-    return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle);
+    return WrapObjectInUniquePtr(object_ptr, shm_ownership_data, handle, debug_file, debug_line, debug_fn);
   }
 
   size_t FreeMemory();
@@ -206,14 +225,18 @@ class SharedMemoryManager {
   bool delete_region_;
   std::unique_ptr<CUDAMemoryPoolManager> cuda_memory_pool_manager_;
 
+  std::ofstream shm_debug_info_;
+
   template <typename T>
   AllocatedSharedMemory<T> WrapObjectInUniquePtr(
       T* object, AllocatedShmOwnership* shm_ownership_data,
-      const bi::managed_external_buffer::handle_t& handle)
+      const bi::managed_external_buffer::handle_t& handle,
+      const char* debug_file, int debug_line, const char* debug_fn)
   {
     // Custom deleter to conditionally deallocate the object
     std::function<void(T*)> deleter = [this, handle,
-                                       shm_ownership_data](T* memory) {
+                                       shm_ownership_data,
+                                       debug_file, debug_line, debug_fn](T* memory) {
       bool destroy = false;
       bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
       // Before using any shared memory function you need to make sure that you
@@ -227,6 +250,10 @@ class SharedMemoryManager {
       }
       if (destroy) {
         DeallocateUnsafe(handle);
+
+        LogShmDebugInfo(handle, "DEALLOC", 0, debug_file, debug_line, debug_fn);
+      } else {
+        LogShmDebugInfo(handle, "UNLOAD", shm_ownership_data->ref_count_, debug_file, debug_line, debug_fn);
       }
     };
 
@@ -245,6 +272,23 @@ class SharedMemoryManager {
     }
 
     return ptr;
+  }
+
+  void LogShmDebugInfo(
+      bi::managed_external_buffer::handle_t handle,
+      const std::string& action, uint32_t ref_count_after_action,
+      const char* file, int line, const char* fn)
+  {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm tm_time;
+    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
+    shm_debug_info_ << tm_time.tm_hour << ':' << std::setw(2) << tm_time.tm_min << ':'
+                    << std::setw(2) << tm_time.tm_sec << '.' << std::setw(6)
+                    << tv.tv_usec << ", ";
+    shm_debug_info_ << handle << ", " << action << ", " << ref_count_after_action << ", ";
+    shm_debug_info_ << file << ":" << line << ", " << fn << "\n";
+    shm_debug_info_.flush();
   }
 };
 }}}  // namespace triton::backend::python
