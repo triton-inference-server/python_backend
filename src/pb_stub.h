@@ -125,7 +125,8 @@ class LogMessage {
   LogMessage(const char* file, int line, LogLevel level) : level_(level)
   {
     std::string path(file);
-    size_t pos = path.rfind('/');
+    const std::string os_slash = FileSeparator();
+    size_t pos = path.rfind(os_slash);
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }

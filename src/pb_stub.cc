@@ -1444,7 +1444,8 @@ Logger::Log(
   // and pass messages to cerr
   if (!BackendLoggingActive()) {
     std::string path(filename);
-    size_t pos = path.rfind('/');
+    const std::string os_slash = FileSeparator();
+    size_t pos = path.rfind(os_slash);
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
@@ -1849,7 +1850,7 @@ ModelContext::Init(
     }
   }
 
-  model_dir_ = model_path.substr(0, model_path.find_last_of("\\/"));
+  model_dir_ = model_path.substr(0, model_path.find_last_of(os_slash));
   python_backend_folder_ = triton_install_path;
   model_version_ = model_version;
   runtime_modeldir_ = runtime_modeldir;
@@ -1858,8 +1859,9 @@ ModelContext::Init(
 void
 ModelContext::StubSetup(py::module& sys)
 {
+  const std::string os_slash = FileSeparator();
   std::string model_name =
-      python_model_path_.substr(python_model_path_.find_last_of("/") + 1);
+      python_model_path_.substr(python_model_path_.find_last_of(os_slash) + 1);
 
   // Model name without the .py extension
   auto dotpy_pos = model_name.find_last_of(".py");
@@ -1874,9 +1876,9 @@ ModelContext::StubSetup(py::module& sys)
 
   if (type_ == ModelType::kDefault) {
     std::string model_path_parent =
-        python_model_path_.substr(0, python_model_path_.find_last_of("/"));
+        python_model_path_.substr(0, python_model_path_.find_last_of(os_slash));
     std::string model_path_parent_parent =
-        model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+        model_path_parent.substr(0, model_path_parent.find_last_of(os_slash));
     sys.attr("path").attr("append")(model_path_parent);
     sys.attr("path").attr("append")(model_path_parent_parent);
     sys.attr("path").attr("append")(python_backend_folder_);
@@ -1884,7 +1886,7 @@ ModelContext::StubSetup(py::module& sys)
         (std::string(model_version_) + "." + model_name_trimmed).c_str());
   } else {
     std::string model_path_parent =
-        python_model_path_.substr(0, python_model_path_.find_last_of("/"));
+        python_model_path_.substr(0, python_model_path_.find_last_of(os_slash));
     std::string backend_model_dir(model_path_parent);
     sys.attr("path").attr("append")(backend_model_dir);
     sys.attr("path").attr("append")(python_backend_folder_);
@@ -1897,15 +1899,16 @@ extern "C" {
 
 #ifdef _WIN32
 bool
-KillParentProcess(int parent_id)
+ParentProcessActive(DWORD parent_id)
 {
   HANDLE parent = OpenProcess(PROCESS_ALL_ACCESS, FALSE, parent_id);
-  unsigned int exit_code;
-  return (TerminateProcess(parent, exit_code) == 0);
+  DWORD exit_code;
+  GetExitCodeProcess(parent, &exit_code);
+  return (exit_code == STILL_ACTIVE);
 }
 #else
 bool
-KillParentProcess(pid_t parent_id)
+ParentProcessActive(pid_t parent_id)
 {
   return (kill(parent_id, 0) == -1);
 }
@@ -1932,8 +1935,9 @@ main(int argc, char** argv)
 
   // Find the package name from model path.
   size_t prev = 0, pos = 0;
+  const std::string os_slash = FileSeparator();
   do {
-    pos = model_path.find("/", prev);
+    pos = model_path.find(os_slash, prev);
     if (pos == std::string::npos)
       pos = model_path.length();
     std::string token = model_path.substr(prev, pos - prev);
@@ -1969,7 +1973,7 @@ main(int argc, char** argv)
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
 #ifdef _WIN32
-  int parent_pid = std::stoi(argv[5]);
+  DWORD parent_pid = (DWORD)std::stoul(argv[5]);
 #else
   pid_t parent_pid = std::stoi(argv[5]);
 #endif
@@ -1991,7 +1995,7 @@ main(int argc, char** argv)
 
           stub->UpdateHealth();
 
-          if (KillParentProcess(parent_pid)) {
+          if (!ParentProcessActive(parent_pid)) {
             // When unhealthy, we should stop attempting to send
             // messages to the backend ASAP.
             if (stub->StubToParentServiceActive()) {

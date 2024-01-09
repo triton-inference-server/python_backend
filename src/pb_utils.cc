@@ -28,6 +28,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+
+#include <algorithm>
 #else
 #include <dlfcn.h>
 #endif
@@ -293,6 +295,23 @@ FileSeparator()
   static std::string file_separator = "/";
 #endif
   return file_separator;
+}
+
+void
+SanitizePath(std::string& path)
+{
+  std::replace(path.begin(), path.end(), '/', '\\');
+}
+
+const std::string&
+StubExecutableName()
+{
+#ifdef _WIN32
+  static std::string executable_name = "triton_python_backend_stub.exe";
+#else
+  static std::string executable_name = "triton_python_backend_stub";
+#endif
+  return executable_name;
 }
 
 #ifndef TRITON_PB_STUB

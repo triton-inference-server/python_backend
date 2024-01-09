@@ -2232,28 +2232,35 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
           .c_str());
 
   // Use BackendArtifacts to determine the location of Python files
-  const char* location;
+  const char* clocation;
   TRITONBACKEND_ArtifactType artifact_type;
   RETURN_IF_ERROR(
-      TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
+      TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &clocation));
 
   const std::string os_slash = FileSeparator();
+#ifdef _WIN32
+  const std::string stub_executable_name = "triton_python_backend_stub.exe";
+  std::string location(clocation);
+  SanitizePath(location);
+  SanitizePath(default_backend_dir_string);
+#else
+  const std::string stub_executable_name = "triton_python_backend_stub";
+#endif
   // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
   // are located under `location`.
   // DLIS-5596: Add forward slash to be platform agnostic
   // (i.e. For Windows, we need to use backward slash).
   std::string default_python_backend_dir =
       default_backend_dir_string + os_slash + "python";
-  std::string backend_stub_path =
-      std::string(location) + os_slash + "triton_python_backend_stub";
+  std::string backend_stub_path = location + os_slash + stub_executable_name;
   std::string backend_utils =
-      std::string(location) + os_slash + "triton_python_backend_utils.py";
+      location + os_slash + "triton_python_backend_utils.py";
   // Both, stub and utils should be in the same location
   if (FileExists(backend_stub_path) && FileExists(backend_utils)) {
     backend_state->python_lib = location;
     // If `location` is default location of a python backend,
     // then we are using default python backend.
-    if (default_python_backend_dir == std::string(location)) {
+    if (default_python_backend_dir == location) {
       backend_state->runtime_modeldir = "";
     } else {
       // If `location` is not default location of a python backend,
@@ -2267,13 +2274,13 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     // stored in the default python backend location.
     if (!default_backend_dir_string.empty()) {
       std::string backend_stub_path = default_backend_dir_string + os_slash +
-                                      "python/triton_python_backend_stub";
+                                      "python" + os_slash +
+                                      stub_executable_name;
       if (!FileExists(backend_stub_path)) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_NOT_FOUND,
-            (std::string("triton_python_backend_stub") +
-             " is not found. Searched paths: " + default_backend_dir_string +
-             os_slash + "python and" + std::string(location))
+            (stub_executable_name + " is not found. Searched paths: " +
+             default_backend_dir_string + os_slash + "python and " + location)
                 .c_str());
       }
     }

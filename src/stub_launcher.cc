@@ -217,6 +217,7 @@ StubLauncher::Setup()
   return nullptr;
 }
 
+// Merge into general function when working
 #ifdef _WIN32
 TRITONSERVER_Error*
 StubLauncher::Launch()
@@ -228,32 +229,48 @@ StubLauncher::Launch()
     stub_name = model_instance_name_;
   }
 
+  const std::string os_slash = FileSeparator();
+#ifdef _WIN32
+  const std::string stub_executable_name = "triton_python_backend_stub.exe";
+  SanitizePath(model_path_);
+  SanitizePath(model_repository_path_);
+#else
+  const std::string stub_executable_name = "triton_python_backend_stub";
+#endif
+
   // Default Python backend stub
   std::string python_backend_stub =
-      python_lib_ + "\\triton_python_backend_stub";
+      python_lib_ + os_slash + stub_executable_name;
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_INFO,
+      (std::string("Stub path ") + python_backend_stub).c_str());
 
   // Path to alternative Python backend stub
   std::string model_python_backend_stub =
-      std::string(model_repository_path_) + "\\triton_python_backend_stub";
+      std::string(model_repository_path_) + os_slash + stub_executable_name;
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_INFO,
+      (std::string("Alt path ") + python_backend_stub).c_str());
 
   // Check if file exists
   // TODO: Integrate win32 and pb_env
-  struct stat buffer;
-  if (stat(model_python_backend_stub.c_str(), &buffer)) {
+  if (FileExists(model_python_backend_stub)) {
     python_backend_stub = model_python_backend_stub;
   }
 
   std::string launch_command;
 
   std::stringstream ss;
-  ss << " exec " << python_backend_stub << " " << model_path_ << " "
-     << shm_region_name_ << " " << shm_default_byte_size_ << " "
-     << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_ << " "
-     << ipc_control_handle_ << " " << stub_name << " " << runtime_modeldir_;
+  ss << python_backend_stub << " " << model_path_ << " " << shm_region_name_
+     << " " << shm_default_byte_size_ << " " << shm_growth_byte_size_ << " "
+     << parent_pid_ << " " << python_lib_ << " " << ipc_control_handle_ << " "
+     << stub_name << " " << runtime_modeldir_;
   launch_command = ss.str();
 
   LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
+      TRITONSERVER_LOG_INFO,
       (std::string("Starting Python backend stub: ") + launch_command).c_str());
 
   LPSTR launch_command_lpstr = const_cast<char*>(launch_command.c_str());
@@ -692,11 +709,14 @@ StubLauncher::ClearQueues()
 void
 StubLauncher::KillStubProcess()
 {
+  std::cerr << __FILE__ << " " << __FUNCTION__ << " " << __LINE__ << '\n';
 #ifdef _WIN32
   unsigned int exit_code;
   TerminateProcess(stub_pid_.hProcess, exit_code);
   CloseHandle(stub_pid_.hProcess);
   CloseHandle(stub_pid_.hThread);
+  std::cerr << "Handles closed " << __FILE__ << " " << __FUNCTION__ << " "
+            << __LINE__ << '\n';
 #else
   kill(stub_pid_, SIGKILL);
   WaitForStubProcess();
@@ -761,10 +781,13 @@ StubLauncher::ReceiveMessageFromStub(
 void
 StubLauncher::WaitForStubProcess()
 {
+  std::cerr << __FILE__ << " " << __FUNCTION__ << " " << __LINE__ << '\n';
 #ifdef _WIN32
   WaitForSingleObject(stub_pid_.hProcess, INFINITE);
   CloseHandle(stub_pid_.hProcess);
   CloseHandle(stub_pid_.hThread);
+  std::cerr << "Done waiting for stub process " << __FILE__ << " " << __LINE__
+            << '\n';
 #else
   int status;
   waitpid(stub_pid_, &status, 0);

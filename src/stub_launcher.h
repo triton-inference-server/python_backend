@@ -165,7 +165,7 @@ class StubLauncher {
  private:
 #ifdef _WIN32
   STARTUPINFO startup_info_;
-  int parent_pid_;
+  DWORD parent_pid_;
   PROCESS_INFORMATION stub_pid_;
 #else
   pid_t parent_pid_;
