@@ -28,6 +28,9 @@ cmake_minimum_required(VERSION 3.17)
 
 project(tritonpythonbackend LANGUAGES C CXX)
 
+# Use C++17 standard as Triton's minimum required.
+set(TRITON_MIN_CXX_STANDARD 17 CACHE STRING "The minimum C++ standard which features are requested to build this target.")
+
 #
 # Options
 #
@@ -231,14 +234,14 @@ add_library(
   TritonPythonBackend::triton-python-backend ALIAS triton-python-backend
 )
 
-target_compile_features(triton-python-backend PRIVATE cxx_std_11)
+target_compile_features(triton-python-backend PRIVATE cxx_std_${TRITON_MIN_CXX_STANDARD})
 target_compile_options(
   triton-python-backend PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
     -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
 )
 
-target_compile_features(triton-python-backend-stub PRIVATE cxx_std_11)
+target_compile_features(triton-python-backend-stub PRIVATE cxx_std_${TRITON_MIN_CXX_STANDARD})
 target_compile_options(
   triton-python-backend-stub PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
