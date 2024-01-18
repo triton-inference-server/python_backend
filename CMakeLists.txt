@@ -119,7 +119,7 @@ set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
 if(${TRITON_ENABLE_GPU})
   find_package(CUDAToolkit REQUIRED)
   message(STATUS "Using CUDA ${CUDA_VERSION}")
-  set(CUDA_NVCC_FLAGS -std=c++11)
+  set(CUDA_NVCC_FLAGS -std=c++${TRITON_MIN_CXX_STANDARD})
 elseif()
   message(WARNING "TRITON_ENABLE_GPU is OFF, GPU Tensor support will be disabled")
 endif() # TRITON_ENABLE_GPU
