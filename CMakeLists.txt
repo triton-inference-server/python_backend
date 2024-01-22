@@ -28,6 +28,9 @@ cmake_minimum_required(VERSION 3.17)
 
 project(tritonpythonbackend LANGUAGES C CXX)
 
+# Use C++17 standard as Triton's minimum required.
+set(TRITON_MIN_CXX_STANDARD 17 CACHE STRING "The minimum C++ standard which features are requested to build this target.")
+
 #
 # Options
 #
@@ -119,7 +122,7 @@ set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
 if(${TRITON_ENABLE_GPU})
   find_package(CUDAToolkit REQUIRED)
   message(STATUS "Using CUDA ${CUDA_VERSION}")
-  set(CUDA_NVCC_FLAGS -std=c++11)
+  set(CUDA_NVCC_FLAGS -std=c++${TRITON_MIN_CXX_STANDARD})
 elseif()
   message(WARNING "TRITON_ENABLE_GPU is OFF, GPU Tensor support will be disabled")
 endif() # TRITON_ENABLE_GPU
@@ -237,7 +240,7 @@ add_library(
   TritonPythonBackend::triton-python-backend ALIAS triton-python-backend
 )
 
-target_compile_features(triton-python-backend PRIVATE cxx_std_11)
+target_compile_features(triton-python-backend PRIVATE cxx_std_${TRITON_MIN_CXX_STANDARD})
 target_compile_options(
   triton-python-backend PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
@@ -245,7 +248,7 @@ target_compile_options(
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor>
 )
 
-target_compile_features(triton-python-backend-stub PRIVATE cxx_std_11)
+target_compile_features(triton-python-backend-stub PRIVATE cxx_std_${TRITON_MIN_CXX_STANDARD})
 target_compile_options(
   triton-python-backend-stub PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:

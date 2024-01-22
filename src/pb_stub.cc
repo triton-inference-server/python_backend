@@ -380,6 +380,14 @@ Stub::RunCommand()
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
       ipc_message->Command() = PYTHONSTUB_FinalizeResponse;
+      // Clean up response_iterator_map_ before sending sending message back to
+      // the parent process to make sure that the clean up message can be
+      // processed before the message queue is destroyed.
+      {
+        std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
+        std::unordered_map<void*, std::shared_ptr<ResponseIterator>>().swap(
+            response_iterator_map_);
+      }
       SendIPCMessage(ipc_message);
       return true;  // Terminate the stub process
     case PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers:
@@ -1057,7 +1065,7 @@ Stub::SendCleanupId(
     const PYTHONSTUB_CommandType& command_type)
 {
   void* id = utils_msg_payload->utils_message_ptr;
-  {
+  if (command_type == PYTHONSTUB_BLSDecoupledInferPayloadCleanup) {
     std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
     response_iterator_map_.erase(id);
   }

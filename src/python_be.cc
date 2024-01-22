@@ -1325,6 +1325,7 @@ ModelInstanceState::ProcessRequestsDecoupled(
 
   AllocatedSharedMemory<ResponseBatch> response_batch =
       Stub()->ShmPool()->Load<ResponseBatch>(received_message_->Args());
+  received_message_.reset();
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
