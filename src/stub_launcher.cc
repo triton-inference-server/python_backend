@@ -26,6 +26,8 @@
 
 #include "stub_launcher.h"
 
+#include <filesystem>
+
 #include "python_be.h"
 
 #ifdef _WIN32
@@ -86,7 +88,7 @@ StubLauncher::Initialize(ModelState* model_state)
   model_version_ = model_state->Version();
 
   std::stringstream ss;
-  const std::string os_slash = FileSeparator();
+  const char os_slash = std::filesystem::path::preferred_separator;
   ss << model_repository_path_ << os_slash << model_version_ << os_slash;
   std::string artifact_name;
   RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
@@ -229,7 +231,7 @@ StubLauncher::Launch()
     stub_name = model_instance_name_;
   }
 
-  const std::string os_slash = FileSeparator();
+  const char os_slash = std::filesystem::path::preferred_separator;
 #ifdef _WIN32
   const std::string stub_executable_name = "triton_python_backend_stub.exe";
   SanitizePath(model_path_);
@@ -366,8 +368,7 @@ StubLauncher::Launch()
   stub_args[3] = nullptr;  // Last argument must be nullptr
 
   // Default Python backend stub
-  std::string python_backend_stub =
-      python_lib_ + os_slash_ + "triton_python_backend_stub";
+  std::string python_backend_stub = python_lib_ + "/triton_python_backend_stub";
 
   // Path to alternative Python backend stub
   std::string model_python_backend_stub =

@@ -25,6 +25,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "python_be.h"
 
+#include <filesystem>
+
 #include "gpu_buffers.h"
 #include "infer_payload.h"
 #include "model_loader.h"
@@ -2238,10 +2240,10 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   RETURN_IF_ERROR(
       TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &clocation));
 
-  const std::string os_slash = FileSeparator();
+  const char os_slash = std::filesystem::path::preferred_separator;
+  std::string location(clocation);
 #ifdef _WIN32
   const std::string stub_executable_name = "triton_python_backend_stub.exe";
-  std::string location(clocation);
   SanitizePath(location);
   SanitizePath(default_backend_dir_string);
 #else
@@ -2249,8 +2251,6 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 #endif
   // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
   // are located under `location`.
-  // DLIS-5596: Add forward slash to be platform agnostic
-  // (i.e. For Windows, we need to use backward slash).
   std::string default_python_backend_dir =
       default_backend_dir_string + os_slash + "python";
   std::string backend_stub_path = location + os_slash + stub_executable_name;

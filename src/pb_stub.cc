@@ -1452,8 +1452,7 @@ Logger::Log(
   // and pass messages to cerr
   if (!BackendLoggingActive()) {
     std::string path(filename);
-    const std::string os_slash = FileSeparator();
-    size_t pos = path.rfind(os_slash);
+    size_t pos = path.rfind(std::filesystem::path::preferred_separator);
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
@@ -1841,7 +1840,7 @@ ModelContext::Init(
     const std::string& model_path, const std::string& runtime_modeldir,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  const std::string os_slash = FileSeparator();
+  const char os_slash = std::filesystem::path::preferred_separator;
   type_ = ModelType::kDefault;
   if (runtime_modeldir != "DEFAULT") {
     // For python based backends, existence of `model.py` in the corresponding
@@ -1867,7 +1866,7 @@ ModelContext::Init(
 void
 ModelContext::StubSetup(py::module& sys)
 {
-  const std::string os_slash = FileSeparator();
+  const char os_slash = std::filesystem::path::preferred_separator;
   std::string model_name =
       python_model_path_.substr(python_model_path_.find_last_of(os_slash) + 1);
 
@@ -1943,7 +1942,7 @@ main(int argc, char** argv)
 
   // Find the package name from model path.
   size_t prev = 0, pos = 0;
-  const std::string os_slash = FileSeparator();
+  const char os_slash = std::filesystem::path::preferred_separator;
   do {
     pos = model_path.find(os_slash, prev);
     if (pos == std::string::npos)

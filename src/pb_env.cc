@@ -42,6 +42,26 @@
 
 namespace triton { namespace backend { namespace python {
 
+bool
+FileExists(std::string& path)
+{
+  struct stat buffer;
+  return stat(path.c_str(), &buffer) == 0;
+}
+
+void
+LastModifiedTime(const std::string& path, time_t* last_modified_time)
+{
+  struct stat result;
+  if (stat(path.c_str(), &result) == 0) {
+    *last_modified_time = result.st_mtime;
+  } else {
+    throw PythonBackendException(std::string(
+        "LastModifiedTime() failed as file \'" + path +
+        std::string("\' does not exists.")));
+  }
+}
+
 #ifndef _WIN32
 void
 CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
@@ -308,25 +328,5 @@ EnvironmentManager::~EnvironmentManager()
   RecursiveDirectoryDelete(base_path_);
 }
 #endif
-
-bool
-FileExists(std::string& path)
-{
-  struct stat buffer;
-  return stat(path.c_str(), &buffer) == 0;
-}
-
-void
-LastModifiedTime(const std::string& path, time_t* last_modified_time)
-{
-  struct stat result;
-  if (stat(path.c_str(), &result) == 0) {
-    *last_modified_time = result.st_mtime;
-  } else {
-    throw PythonBackendException(std::string(
-        "LastModifiedTime() failed as file \'" + path +
-        std::string("\' does not exists.")));
-  }
-}
 
 }}}  // namespace triton::backend::python

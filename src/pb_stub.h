@@ -30,6 +30,8 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
+#include <filesystem>
+
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
@@ -125,7 +127,7 @@ class LogMessage {
   LogMessage(const char* file, int line, LogLevel level) : level_(level)
   {
     std::string path(file);
-    const std::string os_slash = FileSeparator();
+    const char os_slash = std::filesystem::path::preferred_separator;
     size_t pos = path.rfind(os_slash);
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);

@@ -286,32 +286,14 @@ IsUsingCUDAPool(
 
 #endif  // TRITON_ENABLE_GPU
 
-const std::string&
-FileSeparator()
-{
-#ifdef _WIN32
-  static std::string file_separator = "\\";
-#else
-  static std::string file_separator = "/";
-#endif
-  return file_separator;
-}
-
+// FIXME: We should not need this function. However, some
+// paths are being retrieved from core that are not platform-
+// agnostic. DLIS-6078 has been created to track the effort
+// to clean up external modules and remove this function.
 void
 SanitizePath(std::string& path)
 {
   std::replace(path.begin(), path.end(), '/', '\\');
-}
-
-const std::string&
-StubExecutableName()
-{
-#ifdef _WIN32
-  static std::string executable_name = "triton_python_backend_stub.exe";
-#else
-  static std::string executable_name = "triton_python_backend_stub";
-#endif
-  return executable_name;
 }
 
 #ifndef TRITON_PB_STUB

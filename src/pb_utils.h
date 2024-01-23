@@ -321,9 +321,7 @@ class ScopedSetDevice {
 
 // Utility functions to get the correct file separator depending on the OS.
 // Can likely be replaced with std::filesystem with the upgrade to C++17
-const std::string& FileSeparator();
 void SanitizePath(std::string& path);
-const std::string& StubExecutableName();
 
 // Check if the data is allocated from the pool by the base address.
 bool IsUsingCUDAPool(
