@@ -357,9 +357,9 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     const char* id;
     RETURN_IF_ERROR(TRITONBACKEND_RequestId(request, &id));
 
-    uint64_t correlation_id;
+    std::string correlation_id;
     RETURN_IF_ERROR(
-        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
+        TRITONBACKEND_RequestCorrelationIdString(request, &correlation_id));
 
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));

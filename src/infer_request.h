@@ -62,7 +62,7 @@ struct InferenceTrace {
 // Inference Request
 //
 struct InferRequestShm {
-  uint64_t correlation_id;
+  std::string correlation_id;
   uint32_t input_count;
   uint32_t requested_output_count;
   int64_t model_version;
@@ -79,7 +79,7 @@ struct InferRequestShm {
 class InferRequest {
  public:
   InferRequest(
-      const std::string& request_id, uint64_t correlation_id,
+      const std::string& request_id, const std::string& correlation_id,
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
@@ -93,7 +93,7 @@ class InferRequest {
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   const std::string& Parameters();
-  uint64_t CorrelationId();
+  const std::string& CorrelationId();
   const std::string& ModelName();
   int64_t ModelVersion();
   uint32_t Flags();
@@ -147,7 +147,7 @@ class InferRequest {
       std::unique_ptr<PbString>& parameters_shm);
 
   std::string request_id_;
-  uint64_t correlation_id_;
+  std::string correlation_id_;
   std::vector<std::shared_ptr<PbTensor>> inputs_;
   std::set<std::string> requested_output_names_;
   std::string model_name_;
