@@ -1917,7 +1917,7 @@ ParentProcessActive(DWORD parent_id)
 bool
 ParentProcessActive(pid_t parent_id)
 {
-  return (kill(parent_id, 0) == -1);
+  return (kill(parent_id, 0) == 0);
 }
 #endif
 
