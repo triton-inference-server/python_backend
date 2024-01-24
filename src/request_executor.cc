@@ -355,7 +355,7 @@ RequestExecutor::Infer(
         irequest, infer_request->RequestId().c_str()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationIdString(
-        irequest, infer_request->CorrelationId()));
+        irequest, infer_request->CorrelationId().c_str()));
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
         irequest, infer_request->Flags()));
