@@ -41,6 +41,12 @@ option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
 option(TRITON_ENABLE_NVTX "Include nvtx markers collection in backend." OFF)
 
+# FIXME: CI needs to enable the GPU flag. Python for window currently does not
+# support GPU tensors. For simplicity, we will override this option here.
+if(WIN32)
+  set(TRITON_ENABLE_GPU OFF CACHE BOOL "GPU disabled" FORCE)
+endif()
+
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
 set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")

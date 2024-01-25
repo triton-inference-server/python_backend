@@ -319,16 +319,15 @@ class ScopedSetDevice {
   int current_device_;
 };
 
-// Utility functions to get the correct file separator depending on the OS.
-// Can likely be replaced with std::filesystem with the upgrade to C++17
-void SanitizePath(std::string& path);
-
 // Check if the data is allocated from the pool by the base address.
 bool IsUsingCUDAPool(
     std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, int64_t memory_type_id,
     void* data);
 
 #endif  // TRITON_ENABLE_GPU
+
+// FIXME: Delete when DLIS-6078 is complete.
+void SanitizePath(std::string& path);
 
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
