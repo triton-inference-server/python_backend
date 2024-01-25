@@ -62,7 +62,6 @@ struct InferenceTrace {
 // Inference Request
 //
 struct InferRequestShm {
-  std::string correlation_id;
   uint32_t input_count;
   uint32_t requested_output_count;
   int64_t model_version;
@@ -141,6 +140,7 @@ class InferRequest {
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,
       std::unique_ptr<PbString>& request_id_shm,
+      std::unique_ptr<PbString>& correlation_id_shm,
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
       std::vector<std::shared_ptr<PbTensor>>& input_tensors,
@@ -167,6 +167,7 @@ class InferRequest {
   InferRequestShm* infer_request_shm_ptr_;
 
   std::unique_ptr<PbString> request_id_shm_;
+  std::unique_ptr<PbString> correlation_id_shm_;
   std::vector<std::unique_ptr<PbString>> requested_output_names_shm_;
   std::unique_ptr<PbString> model_name_shm_;
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;

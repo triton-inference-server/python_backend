@@ -1590,7 +1590,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
-          py::init([](const std::string& request_id, std::string correlation_id,
+          py::init([](const std::string& request_id,
+                      const std::string& correlation_id,
                       const std::vector<std::shared_ptr<PbTensor>>& inputs,
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,

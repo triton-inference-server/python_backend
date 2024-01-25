@@ -199,11 +199,11 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
       (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t)) +
       PbString::ShmStructSize(ModelName()) +
       PbString::ShmStructSize(RequestId()) +
+      PbString::ShmStructSize(CorrelationId()) +
       PbString::ShmStructSize(Parameters()));
 
   infer_request_shm_ptr_ =
       reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
-  infer_request_shm_ptr_->correlation_id = CorrelationId();
   infer_request_shm_ptr_->input_count = Inputs().size();
   infer_request_shm_ptr_->model_version = model_version_;
   infer_request_shm_ptr_->requested_output_count =
@@ -264,8 +264,15 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
       reinterpret_cast<char*>(infer_request_shm_ptr_) + request_id_offset,
       infer_request_shm.handle_ + request_id_offset);
 
-  size_t parameters_offset =
+  size_t correlation_id_offset =
       request_id_offset + PbString::ShmStructSize(RequestId());
+  std::unique_ptr<PbString> correlation_id_shm = PbString::Create(
+      CorrelationId(),
+      reinterpret_cast<char*>(infer_request_shm_ptr_) + correlation_id_offset,
+      infer_request_shm.handle_ + correlation_id_offset);
+
+  size_t parameters_offset =
+      correlation_id_offset + PbString::ShmStructSize(CorrelationId());
   std::unique_ptr<PbString> parameters_shm = PbString::Create(
       Parameters(),
       reinterpret_cast<char*>(infer_request_shm_ptr_) + parameters_offset,
@@ -274,6 +281,7 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   // Save the references to shared memory.
   infer_request_shm_ = std::move(infer_request_shm);
   request_id_shm_ = std::move(request_id_shm);
+  correlation_id_shm_ = std::move(correlation_id_shm);
   model_name_shm_ = std::move(model_name_shm);
   parameters_shm_ = std::move(parameters_shm);
   shm_handle_ = infer_request_shm_.handle_;
@@ -336,25 +344,33 @@ InferRequest::LoadFromSharedMemory(
       request_handle + request_id_offset,
       reinterpret_cast<char*>(infer_request_shm_ptr) + request_id_offset);
 
-  size_t parameters_offset = request_id_offset + request_id_shm->Size();
-  std::unique_ptr<PbString> parameters_shm = PbString::LoadFromSharedMemory(
+  size_t correlation_id_offset = request_id_offset + request_id_shm->Size();
+  std::unique_ptr<PbString> correlation_id_shm = PbString::LoadFromSharedMemory(
       request_handle + request_id_offset,
+      reinterpret_cast<char*>(infer_request_shm_ptr) + correlation_id_offset);
+
+  size_t parameters_offset = correlation_id_offset + correlation_id_shm->Size();
+  std::unique_ptr<PbString> parameters_shm = PbString::LoadFromSharedMemory(
+      request_handle + correlation_id_offset,
       reinterpret_cast<char*>(infer_request_shm_ptr) + parameters_offset);
 
   return std::unique_ptr<InferRequest>(new InferRequest(
-      infer_request_shm, request_id_shm, requested_output_names_shm,
-      model_name_shm, input_tensors, parameters_shm));
+      infer_request_shm, request_id_shm, correlation_id_shm,
+      requested_output_names_shm, model_name_shm, input_tensors,
+      parameters_shm));
 }
 
 InferRequest::InferRequest(
     AllocatedSharedMemory<char>& infer_request_shm,
     std::unique_ptr<PbString>& request_id_shm,
+    std::unique_ptr<PbString>& correlation_id_shm,
     std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
     std::unique_ptr<PbString>& model_name_shm,
     std::vector<std::shared_ptr<PbTensor>>& input_tensors,
     std::unique_ptr<PbString>& parameters_shm)
     : infer_request_shm_(std::move(infer_request_shm)),
       request_id_shm_(std::move(request_id_shm)),
+      correlation_id_shm_(std::move(correlation_id_shm)),
       requested_output_names_shm_(std::move(requested_output_names_shm)),
       model_name_shm_(std::move(model_name_shm)),
       parameters_shm_(std::move(parameters_shm))
@@ -382,12 +398,12 @@ InferRequest::InferRequest(
   }
 
   request_id_ = request_id_shm_->String();
+  correlation_id_ = correlation_id_shm_->String();
   parameters_ = parameters_shm_->String();
   requested_output_names_ = std::move(requested_output_names);
   model_name_ = model_name_shm_->String();
   flags_ = infer_request_shm_ptr_->flags;
   model_version_ = infer_request_shm_ptr_->model_version;
-  correlation_id_ = infer_request_shm_ptr_->correlation_id;
   request_address_ = infer_request_shm_ptr_->address;
   response_factory_address_ = infer_request_shm_ptr_->response_factory_address;
   is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
