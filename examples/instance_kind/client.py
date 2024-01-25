@@ -101,9 +101,9 @@ if __name__ == "__main__":
     batch = np.asarray(utils.prepare_input_from_uri(args.image_url))
 
     input = httpclient.InferInput(input_name, batch.shape, "FP32")
-    output = httpclient.InferRequestedOutput(output_name)
+    output = httpclient.InferRequestedOutput(output_name, binary_data=False)
 
-    input.set_data_from_numpy(batch)
+    input.set_data_from_numpy(batch, binary_data=False)
     results = triton_client.infer(
         model_name=args.model_name, inputs=[input], outputs=[output]
     )
