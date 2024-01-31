@@ -62,6 +62,7 @@ struct InferenceTrace {
 // Inference Request
 //
 struct InferRequestShm {
+  uint64_t correlation_id;
   uint32_t input_count;
   uint32_t requested_output_count;
   int64_t model_version;
@@ -78,7 +79,8 @@ struct InferRequestShm {
 class InferRequest {
  public:
   InferRequest(
-      const std::string& request_id, const std::string& correlation_id,
+      const std::string& request_id, uint64_t correlation_id,
+      const std::string& correlation_id_string,
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
@@ -92,7 +94,8 @@ class InferRequest {
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   const std::string& Parameters();
-  const std::string& CorrelationId();
+  uint64_t CorrelationId();
+  const std::string& CorrelationIdString();
   const std::string& ModelName();
   int64_t ModelVersion();
   uint32_t Flags();
@@ -140,14 +143,15 @@ class InferRequest {
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,
       std::unique_ptr<PbString>& request_id_shm,
-      std::unique_ptr<PbString>& correlation_id_shm,
+      std::unique_ptr<PbString>& correlation_id_string_shm,
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
       std::vector<std::shared_ptr<PbTensor>>& input_tensors,
       std::unique_ptr<PbString>& parameters_shm);
 
   std::string request_id_;
-  std::string correlation_id_;
+  uint64_t correlation_id_;
+  std::string correlation_id_string_;
   std::vector<std::shared_ptr<PbTensor>> inputs_;
   std::set<std::string> requested_output_names_;
   std::string model_name_;
@@ -167,7 +171,7 @@ class InferRequest {
   InferRequestShm* infer_request_shm_ptr_;
 
   std::unique_ptr<PbString> request_id_shm_;
-  std::unique_ptr<PbString> correlation_id_shm_;
+  std::unique_ptr<PbString> correlation_id_string_shm_;
   std::vector<std::unique_ptr<PbString>> requested_output_names_shm_;
   std::unique_ptr<PbString> model_name_shm_;
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;

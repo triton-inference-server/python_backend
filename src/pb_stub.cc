@@ -1591,7 +1591,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       module, "InferenceRequest")
       .def(
           py::init([](const std::string& request_id,
-                      const std::string& correlation_id,
+                      const py::object& correlation_id,
                       const std::vector<std::shared_ptr<PbTensor>>& inputs,
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
@@ -1624,14 +1624,27 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             py::module_ py_json = py::module_::import("json");
             std::string parameters_str =
                 py::str(py_json.attr("dumps")(parameters));
+
+            uint64_t correlation_id_int = 0;
+            std::string correlation_id_str = "";
+
+            if (py::isinstance<py::int_>(correlation_id)) {
+              correlation_id_int = py::cast<uint64_t>(correlation_id);
+            } else if (py::isinstance<py::str>(correlation_id)) {
+              correlation_id_str = py::cast<std::string>(correlation_id);
+            } else {
+              throw PythonBackendException(
+                  "Correlation ID must be integer or string");
+            }
+
             return std::make_shared<InferRequest>(
-                request_id, correlation_id, inputs, requested_outputs,
-                model_name, model_version, parameters_str, flags, timeout,
-                0 /*response_factory_address*/, 0 /*request_address*/,
-                preferred_memory, trace);
+                request_id, correlation_id_int, correlation_id_str, inputs,
+                requested_outputs, model_name, model_version, parameters_str,
+                flags, timeout, 0 /*response_factory_address*/,
+                0 /*request_address*/, preferred_memory, trace);
           }),
           py::arg("request_id").none(false) = "",
-          py::arg("correlation_id").none(false) = "",
+          py::arg("correlation_id").none(false) = 0,
           py::arg("inputs").none(false),
           py::arg("requested_output_names").none(false),
           py::arg("model_name").none(false),
@@ -1646,6 +1659,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::return_value_policy::reference_internal)
       .def("request_id", &InferRequest::RequestId)
       .def("correlation_id", &InferRequest::CorrelationId)
+      .def("correlation_id_string", &InferRequest::CorrelationIdString)
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
       .def("timeout", &InferRequest::Timeout)

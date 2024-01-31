@@ -354,8 +354,13 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
 
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationIdString(
-        irequest, infer_request->CorrelationId().c_str()));
+    if (infer_request->CorrelationIdString().empty()) {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
+          irequest, infer_request->CorrelationId()));
+    } else {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationIdString(
+          irequest, infer_request->CorrelationIdString().c_str()));
+    }
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
         irequest, infer_request->Flags()));

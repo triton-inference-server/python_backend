@@ -357,9 +357,14 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     const char* id;
     RETURN_IF_ERROR(TRITONBACKEND_RequestId(request, &id));
 
-    const char* correlation_id;
-    RETURN_IF_ERROR(
-        TRITONBACKEND_RequestCorrelationIdString(request, &correlation_id));
+    uint64_t correlation_id;
+    const char* correlation_id_string;
+
+    auto error = TRITONBACKEND_RequestCorrelationId(request, &correlation_id);
+    if (error != nullptr) {
+      RETURN_IF_ERROR(TRITONBACKEND_RequestCorrelationIdString(
+          request, &correlation_id_string));
+    }
 
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));
@@ -382,17 +387,18 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
 
       infer_request = std::make_unique<InferRequest>(
-          id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), parameters_string, flags,
-          request_timeout, reinterpret_cast<intptr_t>(factory_ptr),
+          id, correlation_id, correlation_id_string, pb_input_tensors,
+          requested_output_names, model_state->Name(), model_state->Version(),
+          parameters_string, flags, request_timeout,
+          reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     } else {
       infer_request = std::make_unique<InferRequest>(
-          id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), parameters_string, flags,
-          request_timeout, 0 /* response_factory_address */,
-          reinterpret_cast<intptr_t>(request),
+          id, correlation_id, correlation_id_string, pb_input_tensors,
+          requested_output_names, model_state->Name(), model_state->Version(),
+          parameters_string, flags, request_timeout,
+          0 /* response_factory_address */, reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
     }
 
