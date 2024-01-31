@@ -358,14 +358,14 @@ InferRequest::LoadFromSharedMemory(
       request_id_offset + request_id_shm->Size();
   std::unique_ptr<PbString> correlation_id_string_shm =
       PbString::LoadFromSharedMemory(
-          request_handle + request_id_offset,
+          request_handle + correlation_id_string_offset,
           reinterpret_cast<char*>(infer_request_shm_ptr) +
               correlation_id_string_offset);
 
   size_t parameters_offset =
       correlation_id_string_offset + correlation_id_string_shm->Size();
   std::unique_ptr<PbString> parameters_shm = PbString::LoadFromSharedMemory(
-      request_handle + correlation_id_string_offset,
+      request_handle + parameters_offset,
       reinterpret_cast<char*>(infer_request_shm_ptr) + parameters_offset);
 
   return std::unique_ptr<InferRequest>(new InferRequest(
