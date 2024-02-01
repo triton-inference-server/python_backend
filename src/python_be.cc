@@ -340,6 +340,9 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       } else if (type == TRITONSERVER_PARAMETER_STRING) {
         std::string string = reinterpret_cast<const char*>(vvalue);
         RETURN_IF_ERROR(parameters_json.AddString(name, string));
+      } else if (type == TRITONSERVER_PARAMETER_DOUBLE) {
+        RETURN_IF_ERROR(parameters_json.AddDouble(
+            name, *(reinterpret_cast<const double*>(vvalue))));
       } else {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INVALID_ARG,
