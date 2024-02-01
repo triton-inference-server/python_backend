@@ -102,46 +102,24 @@ StubLauncher::Initialize(ModelState* model_state)
 
   model_path_ = ss.str();
 
-// Path to the extracted Python env
-#ifndef _WIN32
+  // FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+  // are supported.
   if (python_execution_env_ != "") {
+#ifndef _WIN32
     RETURN_IF_ERROR(GetPythonEnvironment(model_state));
-  }
+#else
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNSUPPORTED,
+        "Custom execution environments are not currently supported on "
+        "Windows.");
 #endif
+  }
+
 
   parent_pid_ = getpid();
 
   return nullptr;
 }
-
-#ifndef _WIN32
-TRITONSERVER_Error*
-StubLauncher::GetPythonEnvironment(ModelState* model_state)
-{
-  std::string python_execution_env = "";
-  try {
-    python_execution_env =
-        model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
-            python_execution_env_);
-  }
-  catch (PythonBackendException& pb_exception) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-  }
-
-  path_to_activate_ = python_execution_env + "/bin/activate";
-  path_to_libpython_ = python_execution_env + "/lib";
-  if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("Path " + path_to_activate_ +
-         " does not exist. The Python environment should contain an "
-         "'activate' script.")
-            .c_str());
-  }
-  return nullptr;
-}
-#endif
 
 TRITONSERVER_Error*
 StubLauncher::Setup()
@@ -219,7 +197,10 @@ StubLauncher::Setup()
   return nullptr;
 }
 
-// Merge into general function when working
+// FIXME: This should be merged with the Unix launch function once Windows
+// CI and functionality are demonstrably stable. The goal of keeping the
+// functions separate is to help debug Windows-specific issues without worrying
+// about the impact to our Unix builds.
 #ifdef _WIN32
 TRITONSERVER_Error*
 StubLauncher::Launch()
@@ -232,13 +213,10 @@ StubLauncher::Launch()
   }
 
   const char os_slash = std::filesystem::path::preferred_separator;
-#ifdef _WIN32
+
   const std::string stub_executable_name = "triton_python_backend_stub.exe";
   SanitizePath(model_path_);
   SanitizePath(model_repository_path_);
-#else
-  const std::string stub_executable_name = "triton_python_backend_stub";
-#endif
 
   // Default Python backend stub
   std::string python_backend_stub =
@@ -509,6 +487,33 @@ StubLauncher::Launch()
 
   return nullptr;
 }
+
+TRITONSERVER_Error*
+StubLauncher::GetPythonEnvironment(ModelState* model_state)
+{
+  std::string python_execution_env = "";
+  try {
+    python_execution_env =
+        model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
+            python_execution_env_);
+  }
+  catch (PythonBackendException& pb_exception) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+  }
+
+  path_to_activate_ = python_execution_env + "/bin/activate";
+  path_to_libpython_ = python_execution_env + "/lib";
+  if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        ("Path " + path_to_activate_ +
+         " does not exist. The Python environment should contain an "
+         "'activate' script.")
+            .c_str());
+  }
+  return nullptr;
+}
 #endif
 
 void
@@ -710,14 +715,11 @@ StubLauncher::ClearQueues()
 void
 StubLauncher::KillStubProcess()
 {
-  std::cerr << __FILE__ << " " << __FUNCTION__ << " " << __LINE__ << '\n';
 #ifdef _WIN32
   unsigned int exit_code;
   TerminateProcess(stub_pid_.hProcess, exit_code);
   CloseHandle(stub_pid_.hProcess);
   CloseHandle(stub_pid_.hThread);
-  std::cerr << "Handles closed " << __FILE__ << " " << __FUNCTION__ << " "
-            << __LINE__ << '\n';
 #else
   kill(stub_pid_, SIGKILL);
   WaitForStubProcess();

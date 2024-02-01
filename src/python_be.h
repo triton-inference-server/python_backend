@@ -221,6 +221,9 @@ struct BackendState {
   std::atomic<int> number_of_instance_inits;
   std::string shared_memory_region_prefix;
   int64_t thread_pool_size;
+
+// FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+// are supported.
 #ifndef _WIN32
   std::unique_ptr<EnvironmentManager> env_manager;
 #endif

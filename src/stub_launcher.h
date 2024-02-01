@@ -153,7 +153,8 @@ class StubLauncher {
   void WaitForStubProcess();
 
 #ifndef _WIN32
-  // Get Python environment for non-WIN32
+  // FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+  // are supported.
   TRITONSERVER_Error* GetPythonEnvironment(ModelState* model_state);
 #endif
 #ifdef TRITON_ENABLE_GPU

@@ -147,14 +147,14 @@ Stub::Instantiate(
         MessageQueue<uint64_t>::LoadFromSharedMemory(
             shm_pool_, ipc_control_->memory_manager_message_queue);
 
-// If the Python model is using an execution environment, we need to
-// remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
-// <Python Shared Lib>:$OLD_LD_LIBRARY_PATH). The <Python Shared Lib>
-// section was added before launching the stub process and it may
-// interfere with the shared library resolution of other executable and
-// binaries.
-#ifndef _WIN32
+    // If the Python model is using an execution environment, we need to
+    // remove the first part of the LD_LIBRARY_PATH before the colon (i.e.
+    // <Python Shared Lib>:$OLD_LD_LIBRARY_PATH). The <Python Shared Lib>
+    // section was added before launching the stub process and it may
+    // interfere with the shared library resolution of other executable and
+    // binaries.
     if (ipc_control_->uses_env) {
+#ifndef _WIN32
       char* ld_library_path = std::getenv("LD_LIBRARY_PATH");
 
       if (ld_library_path != nullptr) {
@@ -180,8 +180,12 @@ Stub::Instantiate(
             "When using an execution environment, LD_LIBRARY_PATH variable "
             "cannot be empty.");
       }
-    }
+#else
+      throw PythonBackendException(
+          "Custom execution environments are not currently supported on "
+          "Windows.");
 #endif
+    }
   }
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << pb_exception.what() << std::endl;
@@ -1901,9 +1905,6 @@ ModelContext::StubSetup(py::module& sys)
   }
 }
 
-
-extern "C" {
-
 #ifdef _WIN32
 bool
 ParentProcessActive(DWORD parent_id)
@@ -1920,6 +1921,8 @@ ParentProcessActive(pid_t parent_id)
   return (kill(parent_id, 0) == 0);
 }
 #endif
+
+extern "C" {
 
 int
 main(int argc, char** argv)

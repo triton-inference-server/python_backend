@@ -326,7 +326,8 @@ bool IsUsingCUDAPool(
 
 #endif  // TRITON_ENABLE_GPU
 
-// FIXME: Delete when DLIS-6078 is complete.
+// FIXME: [DLIS-6078]: We should not need this function. However, some paths are
+// being retrieved from core that are not platform-agnostic.
 void SanitizePath(std::string& path);
 
 #ifndef TRITON_PB_STUB

@@ -62,6 +62,8 @@ LastModifiedTime(const std::string& path, time_t* last_modified_time)
   }
 }
 
+// FIXME: [DLIS-5969]: Develop platforom-agnostic functions
+// to support custom python environments.
 #ifndef _WIN32
 void
 CopySingleArchiveEntry(archive* input_archive, archive* output_archive)

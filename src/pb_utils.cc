@@ -208,6 +208,8 @@ void*
 CUDAHandler::LoadSharedObject(const char* filename)
 {
 #ifdef _WIN32
+  // NOTE: 'nvcuda.dll' is a placeholder library. Apparently, this should be the
+  // equivalent library for Windows, but need to verify.
   return LoadLibraryA("nvcuda.dll");
 #else
   return dlopen("libcuda.so", RTLD_LAZY);
@@ -286,10 +288,8 @@ IsUsingCUDAPool(
 
 #endif  // TRITON_ENABLE_GPU
 
-// FIXME: We should not need this function. However, some
-// paths are being retrieved from core that are not platform-
-// agnostic. DLIS-6078 has been created to track the effort
-// to clean up external modules and remove this function.
+// FIXME: [DLIS-6078]: We should not need this function. However, some paths are
+// being retrieved from core that are not platform-agnostic.
 void
 SanitizePath(std::string& path)
 {

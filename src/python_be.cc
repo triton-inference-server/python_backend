@@ -366,8 +366,14 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));
 
+    // Do not return if error in this case, because Triton core
+    // will return an error if tracing is disabled (see PYBE PR#295).
     TRITONSERVER_InferenceTrace* triton_trace;
-    RETURN_IF_ERROR(TRITONBACKEND_RequestTrace(request, &triton_trace));
+    auto err = TRITONBACKEND_RequestTrace(request, &triton_trace);
+    if (err != nullptr) {
+      triton_trace = nullptr;
+      TRITONSERVER_ErrorDelete(err);
+    }
 
     InferenceTrace trace = InferenceTrace(triton_trace);
 
@@ -2289,7 +2295,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     backend_state->python_lib =
         default_backend_dir_string + os_slash + "python";
   }
-
+// FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+// are supported.
 #ifndef _WIN32
   backend_state->env_manager = std::make_unique<EnvironmentManager>();
 #endif
