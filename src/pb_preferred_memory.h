@@ -30,10 +30,10 @@ namespace triton { namespace backend { namespace python {
 
 class PreferredMemory {
  public:
-  enum MemoryType { GPU, CPU, DEFAULT };
+  enum MemoryType { kGPU, kCPU, kDefault };
 
   PreferredMemory()
-      : preferred_memory_type_(MemoryType::DEFAULT), preferred_device_id_(0)
+      : preferred_memory_type_(MemoryType::kDefault), preferred_device_id_(0)
   {
   }
 
