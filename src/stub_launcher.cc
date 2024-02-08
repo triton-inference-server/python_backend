@@ -784,13 +784,10 @@ StubLauncher::ReceiveMessageFromStub(
 void
 StubLauncher::WaitForStubProcess()
 {
-  std::cerr << __FILE__ << " " << __FUNCTION__ << " " << __LINE__ << '\n';
 #ifdef _WIN32
   WaitForSingleObject(stub_pid_.hProcess, INFINITE);
   CloseHandle(stub_pid_.hProcess);
   CloseHandle(stub_pid_.hThread);
-  std::cerr << "Done waiting for stub process " << __FILE__ << " " << __LINE__
-            << '\n';
 #else
   int status;
   waitpid(stub_pid_, &status, 0);
