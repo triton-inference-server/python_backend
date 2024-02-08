@@ -30,18 +30,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
-#include <boost/interprocess/sync/interprocess_condition.hpp>
-#include <boost/interprocess/sync/interprocess_mutex.hpp>
-#include <boost/interprocess/sync/scoped_lock.hpp>
-#include <condition_variable>
-#include <cstdlib>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <mutex>
-#include <queue>
-#include <thread>
-#include <unordered_map>
+#include <filesystem>
 
 #include "infer_request.h"
 #include "infer_response.h"
@@ -81,17 +70,17 @@ namespace triton { namespace backend { namespace python {
   } while (false)
 
 /// Macros that use current filename and line number.
-#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::INFO)
-#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::WARNING)
-#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::ERROR)
-#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::VERBOSE)
+#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::kInfo)
+#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::kWarning)
+#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::kError)
+#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::kVerbose)
 
 class Logger {
  public:
   Logger() { backend_logging_active_ = false; };
   ~Logger() { log_instance_.reset(); };
   /// Python client log function
-  static void Log(const std::string& message, LogLevel level = LogLevel::INFO);
+  static void Log(const std::string& message, LogLevel level = LogLevel::kInfo);
 
   /// Python client log info function
   static void LogInfo(const std::string& message);
@@ -138,7 +127,8 @@ class LogMessage {
   LogMessage(const char* file, int line, LogLevel level) : level_(level)
   {
     std::string path(file);
-    size_t pos = path.rfind('/');
+    const char os_slash = std::filesystem::path::preferred_separator;
+    size_t pos = path.rfind(os_slash);
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
@@ -185,10 +175,10 @@ class ModelContext {
   // Triton supports python-based backends,
   // i.e. backends that provide common `model.py`, that can be re-used
   // between different models. `ModelType` helps to differentiate
-  // between models running with c++ python backend (ModelType::DEFAULT)
-  // and models running with python-based backend (ModelType::BACKEND)
+  // between models running with c++ python backend (ModelType::kDefault)
+  // and models running with python-based backend (ModelType::kBackend)
   // at the time of ModelContext::StubSetup to properly set up paths.
-  enum ModelType { DEFAULT, BACKEND };
+  enum ModelType { kDefault, kBackend };
   ModelType type_;
 };
 

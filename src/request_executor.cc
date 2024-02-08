@@ -48,10 +48,10 @@ MemoryTypeToTritonMemoryType(
     const PreferredMemory::MemoryType& memory_type)
 {
   switch (memory_type) {
-    case PreferredMemory::MemoryType::CPU:
+    case PreferredMemory::MemoryType::kCPU:
       *triton_memory_type = TRITONSERVER_MEMORY_CPU;
       break;
-    case PreferredMemory::MemoryType::GPU:
+    case PreferredMemory::MemoryType::kGPU:
       *triton_memory_type = TRITONSERVER_MEMORY_GPU;
       break;
 
@@ -202,7 +202,7 @@ ResponseAlloc(
   ScopedDefer _([&shm_pool] { shm_pool.release(); });
 
   if (p->preferred_memory.PreferredMemoryType() ==
-      PreferredMemory::MemoryType::DEFAULT) {
+      PreferredMemory::MemoryType::kDefault) {
     *actual_memory_type = preferred_memory_type;
     *actual_memory_type_id = preferred_memory_type_id;
   } else {

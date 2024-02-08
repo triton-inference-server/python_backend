@@ -28,7 +28,6 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 
 #include <atomic>
 #include <boost/interprocess/sync/interprocess_condition.hpp>
@@ -54,6 +53,13 @@
 #include "scoped_defer.h"
 #include "shm_manager.h"
 #include "triton/common/nvtx.h"
+
+#ifdef _WIN32
+#include <signal.h>  // SIGINT & SIGTERM
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#endif
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda_runtime_api.h>
@@ -148,6 +154,7 @@ Stub::Instantiate(
     // interfere with the shared library resolution of other executable and
     // binaries.
     if (ipc_control_->uses_env) {
+#ifndef _WIN32
       char* ld_library_path = std::getenv("LD_LIBRARY_PATH");
 
       if (ld_library_path != nullptr) {
@@ -173,6 +180,11 @@ Stub::Instantiate(
             "When using an execution environment, LD_LIBRARY_PATH variable "
             "cannot be empty.");
       }
+#else
+      throw PythonBackendException(
+          "Custom execution environments are not currently supported on "
+          "Windows.");
+#endif
     }
   }
   catch (const PythonBackendException& pb_exception) {
@@ -1444,10 +1456,22 @@ Logger::Log(
   // and pass messages to cerr
   if (!BackendLoggingActive()) {
     std::string path(filename);
-    size_t pos = path.rfind('/');
+    size_t pos = path.rfind(std::filesystem::path::preferred_separator);
     if (pos != std::string::npos) {
       path = path.substr(pos + 1, std::string::npos);
     }
+#ifdef _WIN32
+    std::stringstream ss;
+    SYSTEMTIME system_time;
+    GetSystemTime(&system_time);
+    ss << LeadingLogChar(level) << std::setfill('0') << std::setw(2)
+       << system_time.wMonth << std::setw(2) << system_time.wDay << ' '
+       << std::setw(2) << system_time.wHour << ':' << std::setw(2)
+       << system_time.wMinute << ':' << std::setw(2) << system_time.wSecond
+       << '.' << std::setw(6) << system_time.wMilliseconds * 1000 << ' '
+       << static_cast<uint32_t>(GetCurrentProcessId()) << ' ' << path << ':'
+       << lineno << "] ";
+#else
     std::stringstream ss;
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -1460,6 +1484,7 @@ Logger::Log(
        << std::setw(6) << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid())
        << ' ' << path << ':' << lineno << "] ";
     std::cerr << ss.str() << " " << message << std::endl;
+#endif
   } else {
     // Ensure we do not create a stub instance before it has initialized
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
@@ -1471,37 +1496,37 @@ Logger::Log(
 void
 Logger::LogInfo(const std::string& message)
 {
-  Logger::Log(message, LogLevel::INFO);
+  Logger::Log(message, LogLevel::kInfo);
 }
 
 void
 Logger::LogWarn(const std::string& message)
 {
-  Logger::Log(message, LogLevel::WARNING);
+  Logger::Log(message, LogLevel::kWarning);
 }
 
 void
 Logger::LogError(const std::string& message)
 {
-  Logger::Log(message, LogLevel::ERROR);
+  Logger::Log(message, LogLevel::kError);
 }
 
 void
 Logger::LogVerbose(const std::string& message)
 {
-  Logger::Log(message, LogLevel::VERBOSE);
+  Logger::Log(message, LogLevel::kVerbose);
 }
 
 const std::string
 Logger::LeadingLogChar(const LogLevel& level)
 {
   switch (level) {
-    case LogLevel::WARNING:
+    case LogLevel::kWarning:
       return "W";
-    case LogLevel::ERROR:
+    case LogLevel::kError:
       return "E";
-    case LogLevel::INFO:
-    case LogLevel::VERBOSE:
+    case LogLevel::kInfo:
+    case LogLevel::kVerbose:
     default:
       return "I";
   }
@@ -1580,8 +1605,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("preferred_device_id").none(false) = 0);
 
   py::enum_<PreferredMemory::MemoryType>(module, "MemoryType")
-      .value("TRITONSERVER_MEMORY_GPU", PreferredMemory::MemoryType::GPU)
-      .value("TRITONSERVER_MEMORY_CPU", PreferredMemory::MemoryType::CPU)
+      .value("TRITONSERVER_MEMORY_GPU", PreferredMemory::MemoryType::kGPU)
+      .value("TRITONSERVER_MEMORY_CPU", PreferredMemory::MemoryType::kCPU)
       .export_values();
 
   py::class_<InferenceTrace, std::shared_ptr<InferenceTrace>>(
@@ -1637,7 +1662,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("model_version").none(false) = -1,
           py::arg("flags").none(false) = 0, py::arg("timeout").none(false) = 0,
           py::arg("preferred_memory").none(false) =
-              PreferredMemory(PreferredMemory::DEFAULT, 0),
+              PreferredMemory(PreferredMemory::kDefault, 0),
           py::arg("trace").none(false) = InferenceTrace(),
           py::arg("parameters").none(true) = py::none())
       .def(
@@ -1758,14 +1783,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")
-      .value("INFO", LogLevel::INFO)
-      .value("WARNING", LogLevel::WARNING)
-      .value("ERROR", LogLevel::ERROR)
-      .value("VERBOSE", LogLevel::VERBOSE)
+      .value("INFO", LogLevel::kInfo)
+      .value("WARNING", LogLevel::kWarning)
+      .value("ERROR", LogLevel::kError)
+      .value("VERBOSE", LogLevel::kVerbose)
       .export_values();
   logger.def_static(
       "log", py::overload_cast<const std::string&, LogLevel>(&Logger::Log),
-      py::arg("message"), py::arg("level") = LogLevel::INFO);
+      py::arg("message"), py::arg("level") = LogLevel::kInfo);
   logger.def_static("log_info", &Logger::LogInfo, py::arg("message"));
   logger.def_static("log_warn", &Logger::LogWarn, py::arg("message"));
   logger.def_static("log_error", &Logger::LogError, py::arg("message"));
@@ -1777,8 +1802,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("value", &Metric::SendGetValueRequest);
 
   py::enum_<MetricKind>(module, "MetricKind")
-      .value("COUNTER", MetricKind::COUNTER)
-      .value("GAUGE", MetricKind::GAUGE)
+      .value("COUNTER", MetricKind::kCounter)
+      .value("GAUGE", MetricKind::kGauge)
       .export_values();
 
   py::class_<MetricFamily, std::shared_ptr<MetricFamily>>(
@@ -1790,8 +1815,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "Metric", &MetricFamily::CreateMetric,
           py::arg("labels").none(true) = py::none());
-  module.attr("MetricFamily").attr("COUNTER") = MetricKind::COUNTER;
-  module.attr("MetricFamily").attr("GAUGE") = MetricKind::GAUGE;
+  module.attr("MetricFamily").attr("COUNTER") = MetricKind::kCounter;
+  module.attr("MetricFamily").attr("GAUGE") = MetricKind::kGauge;
 
   module.def(
       "load_model", &LoadModel, py::arg("model_name").none(false),
@@ -1819,12 +1844,13 @@ ModelContext::Init(
     const std::string& model_path, const std::string& runtime_modeldir,
     const std::string& triton_install_path, const std::string& model_version)
 {
-  type_ = ModelType::DEFAULT;
+  const char os_slash = std::filesystem::path::preferred_separator;
+  type_ = ModelType::kDefault;
   if (runtime_modeldir != "DEFAULT") {
     // For python based backends, existence of `model.py` in the corresponding
     // backend folder happens on the core side, so we can omit this check here.
-    python_model_path_ = runtime_modeldir + "/model.py";
-    type_ = ModelType::BACKEND;
+    python_model_path_ = runtime_modeldir + os_slash + "model.py";
+    type_ = ModelType::kBackend;
   } else {
     python_model_path_ = model_path;
     // Check if model file exists in this path.
@@ -1835,7 +1861,7 @@ ModelContext::Init(
     }
   }
 
-  model_dir_ = model_path.substr(0, model_path.find_last_of("\\/"));
+  model_dir_ = model_path.substr(0, model_path.find_last_of(os_slash));
   python_backend_folder_ = triton_install_path;
   model_version_ = model_version;
   runtime_modeldir_ = runtime_modeldir;
@@ -1844,8 +1870,9 @@ ModelContext::Init(
 void
 ModelContext::StubSetup(py::module& sys)
 {
+  const char os_slash = std::filesystem::path::preferred_separator;
   std::string model_name =
-      python_model_path_.substr(python_model_path_.find_last_of("/") + 1);
+      python_model_path_.substr(python_model_path_.find_last_of(os_slash) + 1);
 
   // Model name without the .py extension
   auto dotpy_pos = model_name.find_last_of(".py");
@@ -1858,11 +1885,11 @@ ModelContext::StubSetup(py::module& sys)
   // returned by 'find_last_of'. Need to manually adjust the position.
   std::string model_name_trimmed = model_name.substr(0, dotpy_pos - 2);
 
-  if (type_ == ModelType::DEFAULT) {
+  if (type_ == ModelType::kDefault) {
     std::string model_path_parent =
-        python_model_path_.substr(0, python_model_path_.find_last_of("/"));
+        python_model_path_.substr(0, python_model_path_.find_last_of(os_slash));
     std::string model_path_parent_parent =
-        model_path_parent.substr(0, model_path_parent.find_last_of("/"));
+        model_path_parent.substr(0, model_path_parent.find_last_of(os_slash));
     sys.attr("path").attr("append")(model_path_parent);
     sys.attr("path").attr("append")(model_path_parent_parent);
     sys.attr("path").attr("append")(python_backend_folder_);
@@ -1870,7 +1897,7 @@ ModelContext::StubSetup(py::module& sys)
         (std::string(model_version_) + "." + model_name_trimmed).c_str());
   } else {
     std::string model_path_parent =
-        python_model_path_.substr(0, python_model_path_.find_last_of("/"));
+        python_model_path_.substr(0, python_model_path_.find_last_of(os_slash));
     std::string backend_model_dir(model_path_parent);
     sys.attr("path").attr("append")(backend_model_dir);
     sys.attr("path").attr("append")(python_backend_folder_);
@@ -1878,6 +1905,22 @@ ModelContext::StubSetup(py::module& sys)
   }
 }
 
+#ifdef _WIN32
+bool
+ParentProcessActive(DWORD parent_id)
+{
+  HANDLE parent = OpenProcess(PROCESS_ALL_ACCESS, FALSE, parent_id);
+  DWORD exit_code;
+  GetExitCodeProcess(parent, &exit_code);
+  return (exit_code == STILL_ACTIVE);
+}
+#else
+bool
+ParentProcessActive(pid_t parent_id)
+{
+  return (kill(parent_id, 0) == 0);
+}
+#endif
 
 extern "C" {
 
@@ -1902,8 +1945,9 @@ main(int argc, char** argv)
 
   // Find the package name from model path.
   size_t prev = 0, pos = 0;
+  const char os_slash = std::filesystem::path::preferred_separator;
   do {
-    pos = model_path.find("/", prev);
+    pos = model_path.find(os_slash, prev);
     if (pos == std::string::npos)
       pos = model_path.length();
     std::string token = model_path.substr(prev, pos - prev);
@@ -1938,8 +1982,11 @@ main(int argc, char** argv)
 
   // Start the Python Interpreter
   py::scoped_interpreter guard{};
+#ifdef _WIN32
+  DWORD parent_pid = (DWORD)std::stoul(argv[5]);
+#else
   pid_t parent_pid = std::stoi(argv[5]);
-
+#endif
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread =
       std::thread([&parent_pid, &background_thread_running, &stub, &logger] {
@@ -1958,7 +2005,7 @@ main(int argc, char** argv)
 
           stub->UpdateHealth();
 
-          if (kill(parent_pid, 0) != 0) {
+          if (!ParentProcessActive(parent_pid)) {
             // When unhealthy, we should stop attempting to send
             // messages to the backend ASAP.
             if (stub->StubToParentServiceActive()) {

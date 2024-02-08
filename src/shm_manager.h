@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include <sys/wait.h>
-
 #include <boost/interprocess/allocators/allocator.hpp>
 #include <boost/interprocess/detail/atomic.hpp>
 #include <boost/interprocess/managed_external_buffer.hpp>
@@ -92,9 +90,9 @@ struct AllocatedSharedMemory {
 // info is placed in the beginning and the actual object is placed after that
 // (i.e. 4 plus the aligned address is not 16-bytes aligned). The aligned memory
 // is required by semaphore otherwise it may lead to SIGBUS error on ARM.
-struct AllocatedShmOwnership {
+struct alignas(16) AllocatedShmOwnership {
   uint32_t ref_count_;
-} __attribute__((aligned(16)));
+};
 
 class SharedMemoryManager {
  public:

@@ -29,7 +29,6 @@
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
 #endif  // TRITON_ENABLE_GPU
-#include <pthread.h>
 
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
@@ -167,9 +166,9 @@ struct ResponseBatch : SendMessageBase {
   uint32_t response_size;
 };
 
-enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
+enum LogLevel { kInfo = 0, kWarning, kError, kVerbose };
 
-enum MetricKind { COUNTER, GAUGE };
+enum MetricKind { kCounter = 0, kGauge };
 
 struct LogSendMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t filename;
@@ -294,6 +293,10 @@ class CUDAHandler {
       int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
       void** data_ptr);
   void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
+  void* LoadSharedObject(const char* filename);
+  void* LocateSymbol(const char* symbol);
+  std::string LocateSymbolError();
+  void CloseLibrary();
 
   /// Set the device only if the primary context has already been created for
   /// this device. Inspired from PyTorch's MaybeSetDevice.
@@ -322,6 +325,10 @@ bool IsUsingCUDAPool(
     void* data);
 
 #endif  // TRITON_ENABLE_GPU
+
+// FIXME: [DLIS-6078]: We should not need this function. However, some paths are
+// being retrieved from core that are not platform-agnostic.
+void SanitizePath(std::string& path);
 
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(

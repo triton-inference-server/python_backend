@@ -26,12 +26,8 @@
 
 #pragma once
 
-#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/vfs.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include <array>
 #include <atomic>
@@ -83,6 +79,14 @@
 #include "triton/common/triton_json.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #define LOG_IF_EXCEPTION(X)                                     \
   do {                                                          \
@@ -217,7 +221,12 @@ struct BackendState {
   std::atomic<int> number_of_instance_inits;
   std::string shared_memory_region_prefix;
   int64_t thread_pool_size;
+
+// FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+// are supported.
+#ifndef _WIN32
   std::unique_ptr<EnvironmentManager> env_manager;
+#endif
   std::string runtime_modeldir;
 };
 
@@ -299,7 +308,8 @@ class ModelInstanceState : public BackendModelInstance {
   // Launch stub process.
   TRITONSERVER_Error* LaunchStubProcess();
 
-  TRITONSERVER_Error* SendMessageToStub(off_t message);
+  TRITONSERVER_Error* SendMessageToStub(
+      bi::managed_external_buffer::handle_t message);
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
 
   // Checks whether the stub process is live
@@ -307,7 +317,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Get a message from the stub process
   void SendMessageAndReceiveResponse(
-      off_t message, off_t& response, bool& restart,
+      bi::managed_external_buffer::handle_t message,
+      bi::managed_external_buffer::handle_t& response, bool& restart,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 

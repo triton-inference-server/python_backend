@@ -30,6 +30,11 @@
 #include <mutex>
 #include <string>
 
+#ifdef WIN32
+#include <windows.h>
+#undef PATH_MAX
+#define PATH_MAX MAX_PATH
+#endif
 namespace triton { namespace backend { namespace python {
 
 void ExtractTarFile(std::string& archive_path, std::string& dst_path);
@@ -39,6 +44,7 @@ bool FileExists(std::string& path);
 //
 // A class that manages Python environments
 //
+#ifndef _WIN32
 class EnvironmentManager {
   std::map<std::string, std::pair<std::string, time_t>> env_map_;
   char base_path_[PATH_MAX + 1];
@@ -52,5 +58,6 @@ class EnvironmentManager {
   std::string ExtractIfNotExtracted(std::string env_path);
   ~EnvironmentManager();
 };
+#endif
 
 }}}  // namespace triton::backend::python

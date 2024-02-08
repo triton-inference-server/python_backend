@@ -26,9 +26,11 @@
 
 #include "pb_env.h"
 
+#ifndef _WIN32
 #include <archive.h>
 #include <archive_entry.h>
 #include <fts.h>
+#endif
 #include <sys/stat.h>
 
 #include <cstdlib>
@@ -40,6 +42,29 @@
 
 namespace triton { namespace backend { namespace python {
 
+bool
+FileExists(std::string& path)
+{
+  struct stat buffer;
+  return stat(path.c_str(), &buffer) == 0;
+}
+
+void
+LastModifiedTime(const std::string& path, time_t* last_modified_time)
+{
+  struct stat result;
+  if (stat(path.c_str(), &result) == 0) {
+    *last_modified_time = result.st_mtime;
+  } else {
+    throw PythonBackendException(std::string(
+        "LastModifiedTime() failed as file \'" + path +
+        std::string("\' does not exists.")));
+  }
+}
+
+// FIXME: [DLIS-5969]: Develop platforom-agnostic functions
+// to support custom python environments.
+#ifndef _WIN32
 void
 CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
 {
@@ -72,7 +97,6 @@ CopySingleArchiveEntry(archive* input_archive, archive* output_archive)
     }
   }
 }
-
 
 void
 ExtractTarFile(std::string& archive_path, std::string& dst_path)
@@ -152,27 +176,6 @@ ExtractTarFile(std::string& archive_path, std::string& dst_path)
             .c_str());
   }
 }
-
-bool
-FileExists(std::string& path)
-{
-  struct stat buffer;
-  return stat(path.c_str(), &buffer) == 0;
-}
-
-void
-LastModifiedTime(const std::string& path, time_t* last_modified_time)
-{
-  struct stat result;
-  if (stat(path.c_str(), &result) == 0) {
-    *last_modified_time = result.st_mtime;
-  } else {
-    throw PythonBackendException(std::string(
-        "LastModifiedTime() failed as file \'" + path +
-        std::string("\' does not exists.")));
-  }
-}
-
 
 void
 RecursiveDirectoryDelete(const char* dir)
@@ -326,5 +329,6 @@ EnvironmentManager::~EnvironmentManager()
 {
   RecursiveDirectoryDelete(base_path_);
 }
+#endif
 
 }}}  // namespace triton::backend::python

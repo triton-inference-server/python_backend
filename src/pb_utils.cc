@@ -26,27 +26,14 @@
 
 #include "pb_utils.h"
 
-#include <archive.h>
-#include <archive_entry.h>
+#ifdef _WIN32
+#include <windows.h>
+
+#include <algorithm>
+#else
 #include <dlfcn.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+#endif
 
-#include <cerrno>
-#include <cstring>
-#include <functional>
-#include <memory>
-#include <string>
-#include <unordered_map>
-
-#include "scoped_defer.h"
 
 #ifdef TRITON_ENABLE_GPU
 #include <cuda.h>
@@ -59,42 +46,43 @@ namespace triton { namespace backend { namespace python {
 
 CUDAHandler::CUDAHandler()
 {
-  dl_open_handle_ = dlopen("libcuda.so", RTLD_LAZY);
+  dl_open_handle_ = LoadSharedObject("libcuda.so");
 
   // If libcuda.so is successfully opened, it must be able to find
   // "cuPointerGetAttribute", "cuGetErrorString", and
   // "cuDevicePrimaryCtxGetState" symbols.
   if (dl_open_handle_ != nullptr) {
-    void* cu_pointer_get_attribute_fn =
-        dlsym(dl_open_handle_, "cuPointerGetAttribute");
+    void* cu_pointer_get_attribute_fn = LocateSymbol("cuPointerGetAttribute");
     if (cu_pointer_get_attribute_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuPointerGetAttribute'. Error: ") +
-          dlerror());
+          std::string("Failed to locate 'cuPointerGetAttribute'. Error: ") +
+          LocateSymbolError());
     }
     *((void**)&cu_pointer_get_attribute_fn_) = cu_pointer_get_attribute_fn;
 
-    void* cu_get_error_string_fn = dlsym(dl_open_handle_, "cuGetErrorString");
+    void* cu_get_error_string_fn = LocateSymbol("cuGetErrorString");
     if (cu_get_error_string_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuGetErrorString'. Error: ") +
-          dlerror());
+          std::string("Failed to locate 'cuGetErrorString'. Error: ") +
+          LocateSymbolError());
     }
     *((void**)&cu_get_error_string_fn_) = cu_get_error_string_fn;
 
-    void* cu_init_fn = dlsym(dl_open_handle_, "cuInit");
+    void* cu_init_fn = LocateSymbol("cuInit");
     if (cu_init_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuInit'. Error: ") + dlerror());
+          std::string("Failed to locate 'cuInit'. Error: ") +
+          LocateSymbolError());
     }
     *((void**)&cu_init_fn_) = cu_init_fn;
 
     void* cu_device_primary_ctx_get_state_fn =
-        dlsym(dl_open_handle_, "cuDevicePrimaryCtxGetState");
+        LocateSymbol("cuDevicePrimaryCtxGetState");
     if (cu_device_primary_ctx_get_state_fn == nullptr) {
       throw PythonBackendException(
-          std::string("Failed to dlsym 'cuDevicePrimaryCtxGetState'. Error: ") +
-          dlerror());
+          std::string(
+              "Failed to locate 'cuDevicePrimaryCtxGetState'. Error: ") +
+          LocateSymbolError());
     }
     *((void**)&cu_device_primary_ctx_get_state_fn_) =
         cu_device_primary_ctx_get_state_fn;
@@ -105,10 +93,7 @@ CUDAHandler::CUDAHandler()
       const char* error_string;
       (*cu_get_error_string_fn_)(cuda_err, &error_string);
       error_str_ = std::string("failed to call cuInit: ") + error_string;
-      int status = dlclose(dl_open_handle_);
-      if (status != 0) {
-        throw PythonBackendException("Failed to close the libcuda handle.");
-      }
+      CloseLibrary();
       dl_open_handle_ = nullptr;
     }
   }
@@ -215,12 +200,57 @@ CUDAHandler::MaybeSetDevice(int device)
 CUDAHandler::~CUDAHandler() noexcept(false)
 {
   if (dl_open_handle_ != nullptr) {
-    int status = dlclose(dl_open_handle_);
-    if (status != 0) {
-      throw PythonBackendException("Failed to close the libcuda handle.");
-    }
+    CloseLibrary();
   }
 }
+
+void*
+CUDAHandler::LoadSharedObject(const char* filename)
+{
+#ifdef _WIN32
+  // NOTE: 'nvcuda.dll' is a placeholder library. Apparently, this should be the
+  // equivalent library for Windows, but need to verify.
+  return LoadLibraryA("nvcuda.dll");
+#else
+  return dlopen("libcuda.so", RTLD_LAZY);
+#endif
+}
+
+void*
+CUDAHandler::LocateSymbol(const char* symbol)
+{
+#ifdef _WIN32
+  return GetProcAddress(static_cast<HMODULE>(dl_open_handle_), symbol);
+#else
+  return dlsym(dl_open_handle_, symbol);
+#endif
+}
+
+
+std::string
+CUDAHandler::LocateSymbolError()
+{
+#ifdef _WIN32
+  return std::to_string(GetLastError());
+#else
+  return dlerror();
+#endif
+}
+
+void
+CUDAHandler::CloseLibrary()
+{
+  bool successful = true;
+#ifdef _WIN32
+  successful = (FreeLibrary(static_cast<HMODULE>(dl_open_handle_)) != 0);
+#else
+  successful = (dlclose(dl_open_handle_) == 0);
+#endif
+  if (!successful) {
+    throw PythonBackendException("Failed to close the cuda library handle.");
+  }
+}
+
 
 ScopedSetDevice::ScopedSetDevice(int device)
 {
@@ -257,6 +287,14 @@ IsUsingCUDAPool(
 }
 
 #endif  // TRITON_ENABLE_GPU
+
+// FIXME: [DLIS-6078]: We should not need this function. However, some paths are
+// being retrieved from core that are not platform-agnostic.
+void
+SanitizePath(std::string& path)
+{
+  std::replace(path.begin(), path.end(), '/', '\\');
+}
 
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*>

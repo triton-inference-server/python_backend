@@ -201,9 +201,9 @@ TRITONSERVER_MetricKind
 MetricFamily::ToTritonServerMetricKind(const MetricKind& kind)
 {
   switch (kind) {
-    case COUNTER:
+    case kCounter:
       return TRITONSERVER_METRIC_KIND_COUNTER;
-    case GAUGE:
+    case kGauge:
       return TRITONSERVER_METRIC_KIND_GAUGE;
     default:
       throw PythonBackendException("Unknown metric kind");
