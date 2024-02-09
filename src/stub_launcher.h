@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include <unistd.h>
-
 #include <atomic>
 #include <boost/asio.hpp>
 #include <boost/asio/post.hpp>
@@ -79,8 +77,8 @@ class StubLauncher {
   // Model instance stub process
   TRITONSERVER_Error* ModelInstanceStubProcess();
 
-  // Stub PID
-  pid_t StubPid() { return stub_pid_; }
+  // Check if Stub PID is active
+  bool StubActive();
 
   // Health mutex
   bi::interprocess_mutex* HealthMutex() { return health_mutex_; }
@@ -151,6 +149,14 @@ class StubLauncher {
   TRITONSERVER_Error* ReceiveMessageFromStub(
       bi::managed_external_buffer::handle_t& message);
 
+  // Wait for stub process
+  void WaitForStubProcess();
+
+#ifndef _WIN32
+  // FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+  // are supported.
+  TRITONSERVER_Error* GetPythonEnvironment(ModelState* model_state);
+#endif
 #ifdef TRITON_ENABLE_GPU
   // Share CUDA memory pool with stub process
   void ShareCUDAMemoryPool(
@@ -158,9 +164,14 @@ class StubLauncher {
 #endif  // TRITON_ENABLE_GPU
 
  private:
+#ifdef _WIN32
+  STARTUPINFO startup_info_;
+  DWORD parent_pid_;
+  PROCESS_INFORMATION stub_pid_;
+#else
   pid_t parent_pid_;
   pid_t stub_pid_;
-
+#endif
   bool is_initialized_;
   bool is_decoupled_;
   bool is_healthy_;

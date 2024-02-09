@@ -88,7 +88,7 @@ class InferRequest {
       const uint64_t timeout = 0, const intptr_t response_factory_address = 0,
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
-          PreferredMemory(PreferredMemory::DEFAULT, 0),
+          PreferredMemory(PreferredMemory::kDefault, 0),
       const InferenceTrace& trace = InferenceTrace());
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();

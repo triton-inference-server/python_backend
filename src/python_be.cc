@@ -25,6 +25,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "python_be.h"
 
+#include <filesystem>
+
 #include "gpu_buffers.h"
 #include "infer_payload.h"
 #include "model_loader.h"
@@ -372,12 +374,15 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));
 
+    // Do not return if error in this case, because Triton core
+    // will return an error if tracing is disabled (see PYBE PR#295).
     TRITONSERVER_InferenceTrace* triton_trace;
     auto err = TRITONBACKEND_RequestTrace(request, &triton_trace);
     if (err != nullptr) {
       triton_trace = nullptr;
       TRITONSERVER_ErrorDelete(err);
     }
+
     InferenceTrace trace = InferenceTrace(triton_trace);
 
     uint64_t request_timeout;
@@ -395,14 +400,14 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           parameters_string, flags, request_timeout,
           reinterpret_cast<intptr_t>(factory_ptr),
           reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
+          PreferredMemory(PreferredMemory::kDefault, 0), trace);
     } else {
       infer_request = std::make_unique<InferRequest>(
-          id, correlation_id, correlation_id_string, pb_input_tensors,
-          requested_output_names, model_state->Name(), model_state->Version(),
-          parameters_string, flags, request_timeout,
-          0 /* response_factory_address */, reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::DEFAULT, 0), trace);
+          id, correlation_id, correlation_id_string, pb_input_tensors, requested_output_names,
+          model_state->Name(), model_state->Version(), parameters_string, flags,
+          request_timeout, 0 /* response_factory_address */,
+          reinterpret_cast<intptr_t>(request),
+          PreferredMemory(PreferredMemory::kDefault, 0), trace);
     }
 
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
@@ -890,25 +895,25 @@ ModelInstanceState::ProcessLogRequest(
   LogLevel level = pb_log_message->Level();
 
   switch (level) {
-    case LogLevel::INFO: {
+    case LogLevel::kInfo: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_INFO, (filename.c_str()), line,
           (log_message.c_str()));
       break;
     }
-    case LogLevel::WARNING: {
+    case LogLevel::kWarning: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_WARN, (filename.c_str()), line,
           (log_message.c_str()));
       break;
     }
-    case LogLevel::ERROR: {
+    case LogLevel::kError: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_ERROR, (filename.c_str()), line,
           (log_message.c_str()));
       break;
     }
-    case LogLevel::VERBOSE: {
+    case LogLevel::kVerbose: {
       TRITONSERVER_LogMessage(
           TRITONSERVER_LOG_VERBOSE, (filename.c_str()), line,
           (log_message.c_str()));
@@ -1428,7 +1433,7 @@ ModelInstanceState::ProcessRequests(
 
   // This means that the stub process has exited and Python
   // backend failed to restart the stub process.
-  if (Stub()->StubPid() == 0) {
+  if (!Stub()->StubActive()) {
     const char* error_message = "The stub process has exited unexpectedly.";
     RespondErrorToAllRequests(
         error_message, responses, requests, request_count);
@@ -2062,7 +2067,7 @@ ModelState::SetModelConfig()
 
 extern "C" {
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 {
   const char* cname;
@@ -2245,27 +2250,33 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
           .c_str());
 
   // Use BackendArtifacts to determine the location of Python files
-  const char* location;
+  const char* clocation;
   TRITONBACKEND_ArtifactType artifact_type;
   RETURN_IF_ERROR(
-      TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &location));
+      TRITONBACKEND_BackendArtifacts(backend, &artifact_type, &clocation));
 
+  const char os_slash = std::filesystem::path::preferred_separator;
+  std::string location(clocation);
+#ifdef _WIN32
+  const std::string stub_executable_name = "triton_python_backend_stub.exe";
+  SanitizePath(location);
+  SanitizePath(default_backend_dir_string);
+#else
+  const std::string stub_executable_name = "triton_python_backend_stub";
+#endif
   // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
   // are located under `location`.
-  // DLIS-5596: Add forward slash to be platform agnostic
-  // (i.e. For Windows, we need to use backward slash).
   std::string default_python_backend_dir =
-      default_backend_dir_string + "/python";
-  std::string backend_stub_path =
-      std::string(location) + "/triton_python_backend_stub";
+      default_backend_dir_string + os_slash + "python";
+  std::string backend_stub_path = location + os_slash + stub_executable_name;
   std::string backend_utils =
-      std::string(location) + "/triton_python_backend_utils.py";
+      location + os_slash + "triton_python_backend_utils.py";
   // Both, stub and utils should be in the same location
   if (FileExists(backend_stub_path) && FileExists(backend_utils)) {
     backend_state->python_lib = location;
     // If `location` is default location of a python backend,
     // then we are using default python backend.
-    if (default_python_backend_dir == std::string(location)) {
+    if (default_python_backend_dir == location) {
       backend_state->runtime_modeldir = "";
     } else {
       // If `location` is not default location of a python backend,
@@ -2278,22 +2289,26 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
     // then we are using a python backend based backend and stub and utils are
     // stored in the default python backend location.
     if (!default_backend_dir_string.empty()) {
-      std::string backend_stub_path =
-          default_backend_dir_string + "/python/triton_python_backend_stub";
+      std::string backend_stub_path = default_backend_dir_string + os_slash +
+                                      "python" + os_slash +
+                                      stub_executable_name;
       if (!FileExists(backend_stub_path)) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_NOT_FOUND,
-            (std::string("triton_python_backend_stub") +
-             " is not found. Searched paths: " + default_backend_dir_string +
-             "/python and" + std::string(location))
+            (stub_executable_name + " is not found. Searched paths: " +
+             default_backend_dir_string + os_slash + "python and " + location)
                 .c_str());
       }
     }
     backend_state->runtime_modeldir = location;
-    backend_state->python_lib = default_backend_dir_string + "/python";
+    backend_state->python_lib =
+        default_backend_dir_string + os_slash + "python";
   }
-
+// FIXME [DLIS-5969]: Enable for Windows when custom execution environments
+// are supported.
+#ifndef _WIN32
   backend_state->env_manager = std::make_unique<EnvironmentManager>();
+#endif
 
   RETURN_IF_ERROR(TRITONBACKEND_BackendSetState(
       backend, reinterpret_cast<void*>(backend_state.get())));
@@ -2302,7 +2317,7 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 {
   LOG_MESSAGE(TRITONSERVER_LOG_VERBOSE, "TRITONBACKEND_Finalize: Start");
@@ -2314,7 +2329,7 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
   return nullptr;  // success
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
 {
   const char* cname;
@@ -2341,7 +2356,7 @@ TRITONBACKEND_ModelInitialize(TRITONBACKEND_Model* model)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
 {
   void* vstate;
@@ -2357,7 +2372,7 @@ TRITONBACKEND_ModelFinalize(TRITONBACKEND_Model* model)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
 {
   const char* cname;
@@ -2400,7 +2415,7 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceExecute(
     TRITONBACKEND_ModelInstance* instance, TRITONBACKEND_Request** requests,
     const uint32_t request_count)
@@ -2525,7 +2540,7 @@ TRITONBACKEND_ModelInstanceExecute(
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 {
   void* vstate;
@@ -2542,7 +2557,7 @@ TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
   return nullptr;
 }
 
-TRITONSERVER_Error*
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_GetBackendAttribute(
     TRITONBACKEND_Backend* backend,
     TRITONBACKEND_BackendAttribute* backend_attributes)
