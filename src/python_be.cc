@@ -403,10 +403,10 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           PreferredMemory(PreferredMemory::kDefault, 0), trace);
     } else {
       infer_request = std::make_unique<InferRequest>(
-          id, correlation_id, correlation_id_string, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), parameters_string, flags,
-          request_timeout, 0 /* response_factory_address */,
-          reinterpret_cast<intptr_t>(request),
+          id, correlation_id, correlation_id_string, pb_input_tensors,
+          requested_output_names, model_state->Name(), model_state->Version(),
+          parameters_string, flags, request_timeout,
+          0 /* response_factory_address */, reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::kDefault, 0), trace);
     }
 
