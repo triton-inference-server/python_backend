@@ -286,6 +286,15 @@ IsUsingCUDAPool(
       reinterpret_cast<void*>(cuda_pool_address));
 }
 
+bool
+DeviceSupportsIPC(const int64_t device_id)
+{
+  int supports_ipc = 0;
+  THROW_IF_CUDA_ERROR(cudaDeviceGetAttribute(
+      &supports_ipc, cudaDevAttrIpcEventSupport, device_id));
+  return (supports_ipc == 1);
+}
+
 #endif  // TRITON_ENABLE_GPU
 
 // FIXME: [DLIS-6078]: We should not need this function. However, some paths are
