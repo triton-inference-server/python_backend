@@ -324,6 +324,7 @@ bool IsUsingCUDAPool(
     std::unique_ptr<CUDAMemoryPoolManager>& cuda_pool, int64_t memory_type_id,
     void* data);
 
+bool DeviceSupportsIPC(const int64_t device_id);
 #endif  // TRITON_ENABLE_GPU
 
 // FIXME: [DLIS-6078]: We should not need this function. However, some paths are

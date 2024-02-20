@@ -512,6 +512,25 @@ ModelInstanceState::GetInputTensor(
   cpu_only_tensors = true;
 #endif  // TRITON_ENABLE_GPU
 
+// For Windows, force CPU tensors if IPC is not supported on
+// the target GPU device
+#if defined(TRITON_ENABLE_GPU) && defined(_WIN32)
+  if (src_memory_type == TRITONSERVER_MEMORY_GPU) {
+    bool supports_ipc = DeviceSupportsIPC(src_memory_type_id);
+    if (!supports_ipc) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_WARN,
+          (std::string(
+               "GPU memory storage requested, but GPU device " +
+               std::to_string(src_memory_type_id) +
+               " does not support IPC, which is necessary to support GPU "
+               "tensors. Forcing CPU only input tensors.")
+               .c_str()));
+      cpu_only_tensors = true;
+    }
+  }
+#endif  // TRITON_ENABLE_GPU && _WIN32
+
   if (cpu_only_tensors || src_memory_type != TRITONSERVER_MEMORY_GPU) {
     input_tensor = std::make_shared<PbTensor>(
         std::string(input_name),
@@ -611,9 +630,7 @@ ModelInstanceState::GetInputTensor(
           &cuda_used));
 
       if (cuda_used) {
-#ifdef TRITON_ENABLE_GPU
         cudaStreamSynchronize(stream_);
-#endif
       }
 
       input_tensor = std::make_shared<PbTensor>(
