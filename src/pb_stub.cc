@@ -1683,8 +1683,22 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
-      .def("request_id", &InferRequest::RequestId)
-      .def("correlation_id", &InferRequest::CorrelationId)
+      .def("request_id", &InferRequest::RequestId) User
+      .def(
+          "correlation_id",
+          [](InferRequest& self) -> py::object {
+            if (self.CorrelationId().InSequence()) {
+              if (self.CorrelationId().Type() ==
+                  CorrelationIdDataType::STRING) {
+                return py::cast(self.CorrelationId().StringValue());
+              } else {
+                return py::cast(self.CorrelationId().UnsignedIntValue());
+              }
+            } else {
+              // Return 0 as the default value if correlation_id is not set
+              return py::cast(0);
+            }
+          })
       .def("flags", &InferRequest::Flags)
       .def("set_flags", &InferRequest::SetFlags)
       .def("timeout", &InferRequest::Timeout)
