@@ -1,5 +1,5 @@
 <!--
-# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -47,14 +47,14 @@ real deployment, the model should not allow the caller thread to return from
 1. Create the model repository:
 
 ```console
-$ mkdir -p models/repeat_int32/1
-$ mkdir -p models/square_int32/1
+mkdir -p models/repeat_int32/1
+mkdir -p models/square_int32/1
 
 # Copy the Python models
-$ cp examples/decoupled/repeat_model.py models/repeat_int32/1/model.py
-$ cp examples/decoupled/repeat_config.pbtxt models/repeat_int32/config.pbtxt
-$ cp examples/decoupled/square_model.py models/square_int32/1/model.py
-$ cp examples/decoupled/square_config.pbtxt models/square_int32/config.pbtxt
+cp examples/decoupled/repeat_model.py models/repeat_int32/1/model.py
+cp examples/decoupled/repeat_config.pbtxt models/repeat_int32/config.pbtxt
+cp examples/decoupled/square_model.py models/square_int32/1/model.py
+cp examples/decoupled/square_config.pbtxt models/square_int32/config.pbtxt
 ```
 
 2. Start the tritonserver:
