@@ -1683,7 +1683,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "inputs", &InferRequest::Inputs,
           py::return_value_policy::reference_internal)
-      .def("request_id", &InferRequest::RequestId) User
+      .def("request_id", &InferRequest::RequestId)
       .def(
           "correlation_id",
           [](InferRequest& self) -> py::object {
