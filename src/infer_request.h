@@ -29,6 +29,7 @@
 #include <future>
 #include <string>
 
+#include "correlation_id.h"
 #include "infer_response.h"
 #include "pb_preferred_memory.h"
 #include "pb_tensor.h"
@@ -62,7 +63,7 @@ struct InferenceTrace {
 // Inference Request
 //
 struct InferRequestShm {
-  uint64_t correlation_id;
+  bi::managed_external_buffer::handle_t correlation_id_shm_handle;
   uint32_t input_count;
   uint32_t requested_output_count;
   int64_t model_version;
@@ -74,12 +75,15 @@ struct InferRequestShm {
   PreferredMemory preferred_memory;
   InferenceTrace trace;
   uint32_t request_release_flags;
+  bi::managed_external_buffer::handle_t model_name_shm_handle;
+  bi::managed_external_buffer::handle_t request_id_shm_handle;
+  bi::managed_external_buffer::handle_t parameters_shm_handle;
 };
 
 class InferRequest {
  public:
   InferRequest(
-      const std::string& request_id, uint64_t correlation_id,
+      const std::string& request_id, const SequenceId& correlation_id,
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
@@ -93,7 +97,7 @@ class InferRequest {
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
   const std::string& Parameters();
-  uint64_t CorrelationId();
+  SequenceId& CorrelationId();
   const std::string& ModelName();
   int64_t ModelVersion();
   uint32_t Flags();
@@ -141,13 +145,14 @@ class InferRequest {
   InferRequest(
       AllocatedSharedMemory<char>& infer_request_shm,
       std::unique_ptr<PbString>& request_id_shm,
+      std::unique_ptr<SequenceId>& correlation_id,
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
       std::vector<std::shared_ptr<PbTensor>>& input_tensors,
       std::unique_ptr<PbString>& parameters_shm);
 
   std::string request_id_;
-  uint64_t correlation_id_;
+  SequenceId correlation_id_;
   std::vector<std::shared_ptr<PbTensor>> inputs_;
   std::set<std::string> requested_output_names_;
   std::string model_name_;
