@@ -28,6 +28,7 @@
 
 #include <future>
 
+#include "correlation_id.h"
 #include "pb_utils.h"
 #include "scoped_defer.h"
 #include "triton/backend/backend_common.h"
@@ -354,8 +355,13 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
 
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
-        irequest, infer_request->CorrelationId()));
+    if (infer_request->CorrelationId().Type() == CorrelationIdDataType::UINT64) {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
+          irequest, infer_request->CorrelationId().UnsignedIntValue()));
+    } else {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationIdString(
+          irequest, infer_request->CorrelationId().StringValue().c_str()));
+    }
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
         irequest, infer_request->Flags()));

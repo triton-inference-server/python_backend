@@ -27,6 +27,7 @@
 
 #include <filesystem>
 
+#include "correlation_id.h"
 #include "gpu_buffers.h"
 #include "infer_payload.h"
 #include "model_loader.h"
@@ -362,9 +363,19 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     const char* id;
     RETURN_IF_ERROR(TRITONBACKEND_RequestId(request, &id));
 
-    uint64_t correlation_id;
-    RETURN_IF_ERROR(
-        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
+    uint64_t correlation_id_uint = 0;
+    SequenceId correlation_id;
+
+    auto error =
+        TRITONBACKEND_RequestCorrelationId(request, &correlation_id_uint);
+    if (error != nullptr) {
+      const char* correlation_id_string = "";
+      RETURN_IF_ERROR(TRITONBACKEND_RequestCorrelationIdString(
+          request, &correlation_id_string));
+      correlation_id = SequenceId(std::string(correlation_id_string));
+    } else {
+      correlation_id = SequenceId(correlation_id_uint);
+    }
 
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));

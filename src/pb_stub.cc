@@ -42,6 +42,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "correlation_id.h"
 #include "model_loader.h"
 #include "pb_error.h"
 #include "pb_map.h"
@@ -1615,7 +1616,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
-          py::init([](const std::string& request_id, uint64_t correlation_id,
+          py::init([](const std::string& request_id,
+                      const py::object& correlation_id,
                       const std::vector<std::shared_ptr<PbTensor>>& inputs,
                       const std::vector<std::string>& requested_output_names,
                       const std::string& model_name,
@@ -1648,8 +1650,21 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             py::module_ py_json = py::module_::import("json");
             std::string parameters_str =
                 py::str(py_json.attr("dumps")(parameters));
+
+            SequenceId correlation_id_obj;
+            if (py::isinstance<py::int_>(correlation_id)) {
+              correlation_id_obj =
+                  SequenceId(py::cast<uint64_t>(correlation_id));
+            } else if (py::isinstance<py::str>(correlation_id)) {
+              correlation_id_obj =
+                  SequenceId(py::cast<std::string>(correlation_id));
+            } else {
+              throw PythonBackendException(
+                  "Correlation ID must be integer or string");
+            }
+
             return std::make_shared<InferRequest>(
-                request_id, correlation_id, inputs, requested_outputs,
+                request_id, correlation_id_obj, inputs, requested_outputs,
                 model_name, model_version, parameters_str, flags, timeout,
                 0 /*response_factory_address*/, 0 /*request_address*/,
                 preferred_memory, trace);

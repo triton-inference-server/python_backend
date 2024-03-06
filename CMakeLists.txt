@@ -148,6 +148,8 @@ configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
 set(
   COMMON_SRCS
+  src/correlation_id.cc
+  src/correlation_id.h
   src/infer_response.cc
   src/infer_response.h
   src/infer_request.cc
