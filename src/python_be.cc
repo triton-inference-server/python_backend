@@ -364,7 +364,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     RETURN_IF_ERROR(TRITONBACKEND_RequestId(request, &id));
 
     uint64_t correlation_id_uint = 0;
-    SequenceId correlation_id;
+    CorrelationId correlation_id;
 
     auto error =
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id_uint);
@@ -372,9 +372,9 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       const char* correlation_id_string = "";
       RETURN_IF_ERROR(TRITONBACKEND_RequestCorrelationIdString(
           request, &correlation_id_string));
-      correlation_id = SequenceId(std::string(correlation_id_string));
+      correlation_id = CorrelationId(std::string(correlation_id_string));
     } else {
-      correlation_id = SequenceId(correlation_id_uint);
+      correlation_id = CorrelationId(correlation_id_uint);
     }
 
     uint32_t flags;

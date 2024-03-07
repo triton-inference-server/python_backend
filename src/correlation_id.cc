@@ -28,87 +28,85 @@
 
 namespace triton { namespace backend { namespace python {
 
-SequenceId::SequenceId()
-    : sequence_label_(""), sequence_index_(0),
-      id_type_(CorrelationIdDataType::UINT64)
+CorrelationId::CorrelationId()
+    : id_string_(""), id_uint_(0), id_type_(CorrelationIdDataType::UINT64)
 {
 }
 
-SequenceId::SequenceId(const std::string& sequence_label)
-    : sequence_label_(sequence_label), sequence_index_(0),
+CorrelationId::CorrelationId(const std::string& id_string)
+    : id_string_(id_string), id_uint_(0),
       id_type_(CorrelationIdDataType::STRING)
 {
 }
 
-SequenceId::SequenceId(uint64_t sequence_index)
-    : sequence_label_(""), sequence_index_(sequence_index),
-      id_type_(CorrelationIdDataType::UINT64)
+CorrelationId::CorrelationId(uint64_t id_uint)
+    : id_string_(""), id_uint_(id_uint), id_type_(CorrelationIdDataType::UINT64)
 {
 }
 
-SequenceId::SequenceId(const SequenceId& rhs)
+CorrelationId::CorrelationId(const CorrelationId& rhs)
 {
-  sequence_index_ = rhs.sequence_index_;
+  id_uint_ = rhs.id_uint_;
   id_type_ = rhs.id_type_;
-  sequence_label_ = rhs.sequence_label_;
+  id_string_ = rhs.id_string_;
 }
 
-SequenceId&
-SequenceId::operator=(const SequenceId& rhs)
+CorrelationId&
+CorrelationId::operator=(const CorrelationId& rhs)
 {
-  sequence_index_ = rhs.sequence_index_;
+  id_uint_ = rhs.id_uint_;
   id_type_ = rhs.id_type_;
-  sequence_label_ = rhs.sequence_label_;
+  id_string_ = rhs.id_string_;
   return *this;
 }
 
 void
-SequenceId::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+CorrelationId::SaveToSharedMemory(
+    std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  AllocatedSharedMemory<SequenceIdShm> sequence_id_shm =
-      shm_pool->Construct<SequenceIdShm>();
-  sequence_id_shm_ptr_ = sequence_id_shm.data_.get();
+  AllocatedSharedMemory<CorrelationIdShm> correlation_id_shm =
+      shm_pool->Construct<CorrelationIdShm>();
+  correlation_id_shm_ptr_ = correlation_id_shm.data_.get();
 
-  std::unique_ptr<PbString> sequence_label_shm =
-      PbString::Create(shm_pool, sequence_label_);
+  std::unique_ptr<PbString> id_string_shm =
+      PbString::Create(shm_pool, id_string_);
 
-  sequence_id_shm_ptr_->sequence_index = sequence_index_;
-  sequence_id_shm_ptr_->sequence_label_shm_handle =
-      sequence_label_shm->ShmHandle();
-  sequence_id_shm_ptr_->id_type = id_type_;
+  correlation_id_shm_ptr_->id_uint = id_uint_;
+  correlation_id_shm_ptr_->id_string_shm_handle = id_string_shm->ShmHandle();
+  correlation_id_shm_ptr_->id_type = id_type_;
 
   // Save the references to shared memory.
-  sequence_id_shm_ = std::move(sequence_id_shm);
-  sequence_label_shm_ = std::move(sequence_label_shm);
-  shm_handle_ = sequence_id_shm_.handle_;
+  correlation_id_shm_ = std::move(correlation_id_shm);
+  id_string_shm_ = std::move(id_string_shm);
+  shm_handle_ = correlation_id_shm_.handle_;
 }
 
-std::unique_ptr<SequenceId>
-SequenceId::LoadFromSharedMemory(
+std::unique_ptr<CorrelationId>
+CorrelationId::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
     bi::managed_external_buffer::handle_t handle)
 {
-  AllocatedSharedMemory<SequenceIdShm> sequence_id_shm =
-      shm_pool->Load<SequenceIdShm>(handle);
-  SequenceIdShm* sequence_id_shm_ptr = sequence_id_shm.data_.get();
+  AllocatedSharedMemory<CorrelationIdShm> correlation_id_shm =
+      shm_pool->Load<CorrelationIdShm>(handle);
+  CorrelationIdShm* correlation_id_shm_ptr = correlation_id_shm.data_.get();
 
-  std::unique_ptr<PbString> sequence_label_shm = PbString::LoadFromSharedMemory(
-      shm_pool, sequence_id_shm_ptr->sequence_label_shm_handle);
+  std::unique_ptr<PbString> id_string_shm = PbString::LoadFromSharedMemory(
+      shm_pool, correlation_id_shm_ptr->id_string_shm_handle);
 
-  return std::unique_ptr<SequenceId>(
-      new SequenceId(sequence_id_shm, sequence_label_shm));
+  return std::unique_ptr<CorrelationId>(
+      new CorrelationId(correlation_id_shm, id_string_shm));
 }
 
-SequenceId::SequenceId(
-    AllocatedSharedMemory<SequenceIdShm>& sequence_id_shm,
-    std::unique_ptr<PbString>& sequence_label_shm)
-    : sequence_id_shm_(std::move(sequence_id_shm)),
-      sequence_label_shm_(std::move(sequence_label_shm))
+CorrelationId::CorrelationId(
+    AllocatedSharedMemory<CorrelationIdShm>& correlation_id_shm,
+    std::unique_ptr<PbString>& id_string_shm)
+    : correlation_id_shm_(std::move(correlation_id_shm)),
+      id_string_shm_(std::move(id_string_shm))
 {
-  sequence_id_shm_ptr_ = sequence_id_shm_.data_.get();
-  sequence_label_ = sequence_label_shm_->String();
-  sequence_index_ = sequence_id_shm_ptr_->sequence_index;
-  id_type_ = sequence_id_shm_ptr_->id_type;
+  correlation_id_shm_ptr_ = correlation_id_shm_.data_.get();
+  id_string_ = id_string_shm_->String();
+  id_uint_ = correlation_id_shm_ptr_->id_uint;
+  id_type_ = correlation_id_shm_ptr_->id_type;
 }
 
 }}};  // namespace triton::backend::python

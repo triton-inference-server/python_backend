@@ -1651,13 +1651,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             std::string parameters_str =
                 py::str(py_json.attr("dumps")(parameters));
 
-            SequenceId correlation_id_obj;
+            CorrelationId correlation_id_obj;
             if (py::isinstance<py::int_>(correlation_id)) {
               correlation_id_obj =
-                  SequenceId(py::cast<uint64_t>(correlation_id));
+                  CorrelationId(py::cast<uint64_t>(correlation_id));
             } else if (py::isinstance<py::str>(correlation_id)) {
               correlation_id_obj =
-                  SequenceId(py::cast<std::string>(correlation_id));
+                  CorrelationId(py::cast<std::string>(correlation_id));
             } else {
               throw PythonBackendException(
                   "Correlation ID must be integer or string");
@@ -1687,12 +1687,12 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "correlation_id",
           [](InferRequest& self) -> py::object {
-            if (self.CorrelationId().InSequence()) {
-              if (self.CorrelationId().Type() ==
+            if (self.GetCorrelationId().IsNotEmpty()) {
+              if (self.GetCorrelationId().Type() ==
                   CorrelationIdDataType::STRING) {
-                return py::cast(self.CorrelationId().StringValue());
+                return py::cast(self.GetCorrelationId().StringValue());
               } else {
-                return py::cast(self.CorrelationId().UnsignedIntValue());
+                return py::cast(self.GetCorrelationId().UnsignedIntValue());
               }
             } else {
               // Return 0 as the default value if correlation_id is not set

@@ -355,12 +355,13 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
 
-    if (infer_request->CorrelationId().Type() == CorrelationIdDataType::UINT64) {
+    if (infer_request->GetCorrelationId().Type() ==
+        CorrelationIdDataType::UINT64) {
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
-          irequest, infer_request->CorrelationId().UnsignedIntValue()));
+          irequest, infer_request->GetCorrelationId().UnsignedIntValue()));
     } else {
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationIdString(
-          irequest, infer_request->CorrelationId().StringValue().c_str()));
+          irequest, infer_request->GetCorrelationId().StringValue().c_str()));
     }
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(

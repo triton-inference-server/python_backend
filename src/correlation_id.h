@@ -35,62 +35,59 @@ namespace triton { namespace backend { namespace python {
 
 enum class CorrelationIdDataType { UINT64, STRING };
 
-struct SequenceIdShm {
-  bi::managed_external_buffer::handle_t sequence_label_shm_handle;
-  uint64_t sequence_index;
+struct CorrelationIdShm {
+  bi::managed_external_buffer::handle_t id_string_shm_handle;
+  uint64_t id_uint;
   CorrelationIdDataType id_type;
 };
 
-class SequenceId {
+class CorrelationId {
  public:
-  SequenceId();
-  SequenceId(const std::string& sequence_label);
-  SequenceId(uint64_t sequence_index);
-  SequenceId(const SequenceId& rhs);
-  SequenceId& operator=(const SequenceId& rhs);
+  CorrelationId();
+  CorrelationId(const std::string& id_string);
+  CorrelationId(uint64_t id_uint);
+  CorrelationId(const CorrelationId& rhs);
+  CorrelationId& operator=(const CorrelationId& rhs);
 
-  /// Save SequenceId object to shared memory.
-  /// \param shm_pool Shared memory pool to save the SequenceId object.
+  /// Save CorrelationId object to shared memory.
+  /// \param shm_pool Shared memory pool to save the CorrelationId object.
   void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
 
-  /// Create a SequenceId object from shared memory.
+  /// Create a CorrelationId object from shared memory.
   /// \param shm_pool Shared memory pool
-  /// \param handle Shared memory handle of the SequenceId.
-  /// \return Returns the SequenceId in the specified request_handle
+  /// \param handle Shared memory handle of the CorrelationId.
+  /// \return Returns the CorrelationId in the specified handle
   /// location.
-  static std::unique_ptr<SequenceId> LoadFromSharedMemory(
+  static std::unique_ptr<CorrelationId> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
 
-  // Functions that help determine exact type of sequence Id
+  // Functions that help determine exact type of Correlation Id
   CorrelationIdDataType Type() const { return id_type_; }
-  bool InSequence() const
-  {
-    return ((sequence_label_ != "") || (sequence_index_ != 0));
-  }
+  bool IsNotEmpty() const { return ((id_string_ != "") || (id_uint_ != 0)); }
 
-  // Get the value of the SequenceId based on the type
-  const std::string& StringValue() const { return sequence_label_; }
-  uint64_t UnsignedIntValue() const { return sequence_index_; }
+  // Get the value of the CorrelationId based on the type
+  const std::string& StringValue() const { return id_string_; }
+  uint64_t UnsignedIntValue() const { return id_uint_; }
 
   bi::managed_external_buffer::handle_t ShmHandle() { return shm_handle_; }
 
  private:
-  // The private constructor for creating a SequenceId object from shared
+  // The private constructor for creating a CorrelationId object from shared
   // memory.
-  SequenceId(
-      AllocatedSharedMemory<SequenceIdShm>& sequence_id_shm,
-      std::unique_ptr<PbString>& sequence_label_shm);
+  CorrelationId(
+      AllocatedSharedMemory<CorrelationIdShm>& correlation_id_shm,
+      std::unique_ptr<PbString>& id_string_shm);
 
-  std::string sequence_label_;
-  uint64_t sequence_index_;
+  std::string id_string_;
+  uint64_t id_uint_;
   CorrelationIdDataType id_type_;
 
   // Shared Memory Data Structures
-  AllocatedSharedMemory<SequenceIdShm> sequence_id_shm_;
-  SequenceIdShm* sequence_id_shm_ptr_;
+  AllocatedSharedMemory<CorrelationIdShm> correlation_id_shm_;
+  CorrelationIdShm* correlation_id_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
-  std::unique_ptr<PbString> sequence_label_shm_;
+  std::unique_ptr<PbString> id_string_shm_;
 };
 
 }}};  // namespace triton::backend::python

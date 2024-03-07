@@ -38,7 +38,7 @@
 namespace triton { namespace backend { namespace python {
 
 InferRequest::InferRequest(
-    const std::string& request_id, const SequenceId& correlation_id,
+    const std::string& request_id, const CorrelationId& correlation_id,
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
@@ -97,8 +97,8 @@ InferRequest::RequestId()
   return request_id_;
 }
 
-SequenceId&
-InferRequest::CorrelationId()
+CorrelationId&
+InferRequest::GetCorrelationId()
 {
   return correlation_id_;
 }
@@ -308,8 +308,8 @@ InferRequest::LoadFromSharedMemory(
     input_tensors.emplace_back(std::move(input_tensor));
   }
 
-  std::unique_ptr<SequenceId> correlation_id_shm =
-      SequenceId::LoadFromSharedMemory(
+  std::unique_ptr<CorrelationId> correlation_id_shm =
+      CorrelationId::LoadFromSharedMemory(
           shm_pool, infer_request_shm_ptr->correlation_id_shm_handle);
 
   std::unique_ptr<PbString> model_name_shm = PbString::LoadFromSharedMemory(
@@ -328,7 +328,7 @@ InferRequest::LoadFromSharedMemory(
 InferRequest::InferRequest(
     AllocatedSharedMemory<char>& infer_request_shm,
     std::unique_ptr<PbString>& request_id_shm,
-    std::unique_ptr<SequenceId>& correlation_id_shm,
+    std::unique_ptr<CorrelationId>& correlation_id_shm,
     std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
     std::unique_ptr<PbString>& model_name_shm,
     std::vector<std::shared_ptr<PbTensor>>& input_tensors,
@@ -376,9 +376,9 @@ InferRequest::InferRequest(
   request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
 
   if (correlation_id_shm->Type() == CorrelationIdDataType::UINT64) {
-    correlation_id_ = SequenceId(correlation_id_shm->UnsignedIntValue());
+    correlation_id_ = CorrelationId(correlation_id_shm->UnsignedIntValue());
   } else {
-    correlation_id_ = SequenceId(correlation_id_shm->StringValue());
+    correlation_id_ = CorrelationId(correlation_id_shm->StringValue());
   }
 
 #ifdef TRITON_PB_STUB
