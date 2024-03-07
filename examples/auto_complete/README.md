@@ -1,5 +1,5 @@
 <!--
-# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -59,12 +59,12 @@ respectively.
 1. Create the model repository:
 
 ```console
-$ mkdir -p models/nobatch_auto_complete/1/
-$ mkdir -p models/batch_auto_complete/1/
+mkdir -p models/nobatch_auto_complete/1/
+mkdir -p models/batch_auto_complete/1/
 
 # Copy the Python models
-$ cp examples/auto_complete/nobatch_model.py models/nobatch_auto_complete/1/model.py
-$ cp examples/auto_complete/batch_model.py models/batch_auto_complete/1/model.py
+cp examples/auto_complete/nobatch_model.py models/nobatch_auto_complete/1/model.py
+cp examples/auto_complete/batch_model.py models/batch_auto_complete/1/model.py
 ```
 **Note that we don't need a model configuration file since Triton will use the
 auto-complete model configuration provided in the Python model.**

@@ -1,5 +1,5 @@
 <!--
-# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -51,17 +51,17 @@ final outputs.
 1. Create the model repository:
 
 ```console
-$ mkdir -p models/add_sub/1
-$ mkdir -p models/bls_sync/1
-$ mkdir -p models/pytorch/1
+mkdir -p models/add_sub/1
+mkdir -p models/bls_sync/1
+mkdir -p models/pytorch/1
 
 # Copy the Python models
-$ cp examples/add_sub/model.py models/add_sub/1/
-$ cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
-$ cp examples/bls/sync_model.py models/bls_sync/1/model.py
-$ cp examples/bls/sync_config.pbtxt models/bls_sync/config.pbtxt
-$ cp examples/pytorch/model.py models/pytorch/1/
-$ cp examples/pytorch/config.pbtxt models/pytorch/
+cp examples/add_sub/model.py models/add_sub/1/
+cp examples/add_sub/config.pbtxt models/add_sub/config.pbtxt
+cp examples/bls/sync_model.py models/bls_sync/1/model.py
+cp examples/bls/sync_config.pbtxt models/bls_sync/config.pbtxt
+cp examples/pytorch/model.py models/pytorch/1/
+cp examples/pytorch/config.pbtxt models/pytorch/
 ```
 
 2. Start the tritonserver:
@@ -124,17 +124,17 @@ to construct the final inference response object using these tensors.
 1. Create the model repository:
 
 ```console
-$ mkdir -p models/add_sub/1
-$ mkdir -p models/bls_async/1
-$ mkdir -p models/pytorch/1
+mkdir -p models/add_sub/1
+mkdir -p models/bls_async/1
+mkdir -p models/pytorch/1
 
 # Copy the Python models
-$ cp examples/add_sub/model.py models/add_sub/1/
-$ cp examples/add_sub/config.pbtxt models/add_sub/
-$ cp examples/bls/async_model.py models/bls_async/1/model.py
-$ cp examples/bls/async_config.pbtxt models/bls_async/config.pbtxt
-$ cp examples/pytorch/model.py models/pytorch/1/
-$ cp examples/pytorch/config.pbtxt models/pytorch/
+cp examples/add_sub/model.py models/add_sub/1/
+cp examples/add_sub/config.pbtxt models/add_sub/
+cp examples/bls/async_model.py models/bls_async/1/model.py
+cp examples/bls/async_config.pbtxt models/bls_async/config.pbtxt
+cp examples/pytorch/model.py models/pytorch/1/
+cp examples/pytorch/config.pbtxt models/pytorch/
 ```
 
 2. Start the tritonserver:
