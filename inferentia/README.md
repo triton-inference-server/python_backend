@@ -60,18 +60,18 @@ or simply clone with https.
 Clone this repo with Github to home repo `/home/ubuntu`.
 
 ```
- $chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
- $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+ chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+ sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
 ```
 
 Then, start the Triton instance with:
 ```
- $docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
+ docker run --device /dev/neuron0 <more neuron devices> -v /home/ubuntu/python_backend:/home/ubuntu/python_backend -v /lib/udev:/mylib/udev --shm-size=1g --ulimit memlock=-1 -p 8000:8000 -p 8001:8001 -p 8002:8002 --ulimit stack=67108864 -ti nvcr.io/nvidia/tritonserver:<xx.yy>-py3
 ```
 Note 1: The user would need to list any neuron device to run during container initialization.
 For example, to use 4 neuron devices on an instance, the user would need to run with:
 ```
- $docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
+ docker run --device /dev/neuron0 --device /dev/neuron1 --device /dev/neuron2 --device /dev/neuron3 ...`
 ```
 Note 2: `/mylib/udev` is used for Neuron parameter passing.
 
@@ -81,7 +81,7 @@ Note 3: For Triton container version xx.yy, please refer to
 
 After starting the Triton container, go into the `python_backend` folder and run the setup script.
 ```
- $source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
+ source /home/ubuntu/python_backend/inferentia/scripts/setup.sh
 ```
 This script will:
 1. Install necessary dependencies
@@ -118,7 +118,7 @@ triton python model directory.
 An example invocation for the `gen_triton_model.py` for PyTorch model can look like:
 
 ```
- $python3 inferentia/scripts/gen_triton_model.py --model_type pytorch --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
+ python3 inferentia/scripts/gen_triton_model.py --model_type pytorch --triton_input INPUT__0,INT64,4x384 INPUT__1,INT64,4x384 INPUT__2,INT64,4x384 --triton_output OUTPUT__0,INT64,4x384 OUTPUT__1,INT64,4x384 --compiled_model /home/ubuntu/bert_large_mlperf_neuron_hack_bs1_dynamic.pt --neuron_core_range 0:3 --triton_model_dir bert-large-mlperf-bs1x4
 ```
 
 In order for the script to treat the compiled model as TorchScript
@@ -161,7 +161,7 @@ script to generate triton python model directory.
 An example invocation for the `gen_triton_model.py` for TensorFlow model can look like:
 
 ```
- $python3 gen_triton_model.py --model_type tensorflow --compiled_model /home/ubuntu/inferentia-poc-2.0/scripts-rn50-tf-native/resnet50_mlperf_opt_fp16_compiled_b5_nc1/1 --neuron_core_range 0:3  --triton_model_dir rn50-1neuroncores-bs1x1
+ python3 gen_triton_model.py --model_type tensorflow --compiled_model /home/ubuntu/inferentia-poc-2.0/scripts-rn50-tf-native/resnet50_mlperf_opt_fp16_compiled_b5_nc1/1 --neuron_core_range 0:3  --triton_model_dir rn50-1neuroncores-bs1x1
 ```
 
 NOTE: Unlike TorchScript model, TensorFlow SavedModel stores sufficient
@@ -215,7 +215,7 @@ a valid torchscript file or tensorflow savedmodel.
 Now, the server can be launched with the model as below:
 
 ```
- $tritonserver --model-repository <path_to_model_repository>
+ tritonserver --model-repository <path_to_model_repository>
 ```
 
 Note:
@@ -255,7 +255,7 @@ contains the necessary files to set up testing with a simple add_sub model. The 
 requires an instance with more than 8 inferentia cores to run, eg:`inf1.6xlarge`.
 start the test, run
 ```
- $source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
+ source <triton path>/python_backend/inferentia/qa/setup_test_enviroment_and_test.sh
 ```
 where `<triton path>` is usually `/home/ubuntu`/.
 This script will pull the [server repo](https://github.com/triton-inference-server/server)
@@ -265,7 +265,7 @@ Triton Server and Triton SDK.
 Note: If you would need to change some of the tests in the server repo,
 you would need to run
 ```
- $export TRITON_SERVER_REPO_TAG=<your branch name>
+ export TRITON_SERVER_REPO_TAG=<your branch name>
 ```
 before running the script.
 
@@ -273,8 +273,8 @@ before running the script.
 ## pytorch-neuronx and tensorflow-neuronx
 1. Similar to the steps for inf1, change the argument to the pre-container and on-container setup scripts to include the `-inf2` or `-trn1`flags e.g.,
 ```
- $chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
- $sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh -inf2
+ chmod 777 /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh
+ sudo /home/ubuntu/python_backend/inferentia/scripts/setup-pre-container.sh -inf2
 ```
 2. On the container, followed by the `docker run` command, you can pass similar argument to the setup.sh script
 For Pytorch:

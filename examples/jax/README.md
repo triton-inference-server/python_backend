@@ -1,5 +1,5 @@
 <!--
-# Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -42,9 +42,9 @@ First, download the [client.py](client.py), [config.pbtxt](config.pbtxt) and
 Next, at the directory where the three files located, create the model
 repository with the following commands:
 ```
-$ mkdir -p models/jax/1
-$ mv model.py models/jax/1
-$ mv config.pbtxt models/jax
+mkdir -p models/jax/1
+mv model.py models/jax/1
+mv config.pbtxt models/jax
 ```
 
 ## Pull the Triton Docker images
@@ -55,16 +55,16 @@ to the
 
 To pull the latest containers, run the following commands:
 ```
-$ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3
-$ docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
+docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3
+docker pull nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk
 ```
 See the installation steps above for the `<yy.mm>` version.
 
 At the time of writing, the latest version is `23.04`, which translates to the
 following commands:
 ```
-$ docker pull nvcr.io/nvidia/tritonserver:23.04-py3
-$ docker pull nvcr.io/nvidia/tritonserver:23.04-py3-sdk
+docker pull nvcr.io/nvidia/tritonserver:23.04-py3
+docker pull nvcr.io/nvidia/tritonserver:23.04-py3-sdk
 ```
 
 Be sure to replace the `<yy.mm>` with the version pulled for all the remaining
@@ -75,7 +75,7 @@ parts of this example.
 At the directory where we created the JAX models (at where the "models" folder
 is located), run the following command:
 ```
-$ docker run --gpus all -it --rm -p 8000:8000 -v `pwd`:/jax nvcr.io/nvidia/tritonserver:<yy.mm>-py3 /bin/bash
+docker run --gpus all -it --rm -p 8000:8000 -v `pwd`:/jax nvcr.io/nvidia/tritonserver:<yy.mm>-py3 /bin/bash
 ```
 
 Inside the container, we need to install JAX to run this example.
@@ -87,12 +87,12 @@ dependencies.
 
 To install for this example, run the following command:
 ```
-$ pip3 install --upgrade "jax[cuda12_local]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip3 install --upgrade "jax[cuda12_local]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 
 Finally, we need to start the Triton Server, run the following command:
 ```
-$ tritonserver --model-repository=/jax/models
+tritonserver --model-repository=/jax/models
 ```
 
 To leave the container for the next step, press: `CTRL + P + Q`.
@@ -101,7 +101,7 @@ To leave the container for the next step, press: `CTRL + P + Q`.
 
 At the directory where the client.py is located, run the following command:
 ```
-$ docker run --rm --net=host -v `pwd`:/jax nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk python3 /jax/client.py
+docker run --rm --net=host -v `pwd`:/jax nvcr.io/nvidia/tritonserver:<yy.mm>-py3-sdk python3 /jax/client.py
 ```
 
 A successful inference will print the following at the end:
