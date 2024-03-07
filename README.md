@@ -1125,6 +1125,7 @@ class TritonPythonModel:
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
       # model version, timeout and preferred_memory in addition to the
       # arguments described above.
+      # Note: Starting from the 24.03 release, the `correlation_id` parameter supports both string and unsigned integer values.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
@@ -1262,11 +1263,12 @@ class TritonPythonModel:
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
       # model version, timeout and preferred_memory in addition to the
       # arguments described above.
+      # Note: Starting from the 24.03 release, the `correlation_id` parameter supports both string and unsigned integer values.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
       #   requested_output_names=['REQUESTED_OUTPUT_1', 'REQUESTED_OUTPUT_2'],
       #   inputs=[<list of pb_utils.Tensor objects>],
-      #   request_id="1", correlation_id=4, model_version=1, flags=0, timeout=5,
+      #   request_id="1", correlation_id="ex-4", model_version=1, flags=0, timeout=5,
       #   preferred_memory=pb_utils.PreferredMemory(
       #     pb_utils.TRITONSERVER_MEMORY_GPU, # or pb_utils.TRITONSERVER_MEMORY_CPU
       #     0))
@@ -1448,6 +1450,8 @@ inference_request = pb_utils.InferenceRequest(model_name='model_name',
   request_id="1", correlation_id=4,
   flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
 ```
+
+Note: Starting from the 24.03 release, the `correlation_id` parameter supports both string and unsigned integer values.
 
 For indicating the ending of the sequence you can use the
 `pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END` flag. If the request is both
