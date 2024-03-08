@@ -1125,7 +1125,7 @@ class TritonPythonModel:
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
       # model version, timeout and preferred_memory in addition to the
       # arguments described above.
-      # Note: Starting from the 24.03 release, the `correlation_id` parameter 
+      # Note: Starting from the 24.03 release, the `correlation_id` parameter
       # supports both string and unsigned integer values.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
@@ -1264,7 +1264,7 @@ class TritonPythonModel:
       # `pb_utils.InferenceRequest` supports request_id, correlation_id,
       # model version, timeout and preferred_memory in addition to the
       # arguments described above.
-      # Note: Starting from the 24.03 release, the `correlation_id` parameter 
+      # Note: Starting from the 24.03 release, the `correlation_id` parameter
       # supports both string and unsigned integer values.
       # These arguments are optional. An example containing all the arguments:
       # inference_request = pb_utils.InferenceRequest(model_name='model_name',
