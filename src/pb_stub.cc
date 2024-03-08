@@ -1687,16 +1687,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def(
           "correlation_id",
           [](InferRequest& self) -> py::object {
-            if (self.GetCorrelationId().IsNotEmpty()) {
-              if (self.GetCorrelationId().Type() ==
-                  CorrelationIdDataType::STRING) {
-                return py::cast(self.GetCorrelationId().StringValue());
-              } else {
-                return py::cast(self.GetCorrelationId().UnsignedIntValue());
-              }
+            CorrelationId correlation_id = self.GetCorrelationId();
+            if (correlation_id.Type() == CorrelationIdDataType::STRING) {
+              return py::cast(correlation_id.StringValue());
             } else {
-              // Return 0 as the default value if correlation_id is not set
-              return py::cast(0);
+              return py::cast(correlation_id.UnsignedIntValue());
             }
           })
       .def("flags", &InferRequest::Flags)
