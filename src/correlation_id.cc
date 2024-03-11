@@ -104,6 +104,7 @@ CorrelationId::CorrelationId(
       id_string_shm_(std::move(id_string_shm))
 {
   correlation_id_shm_ptr_ = correlation_id_shm_.data_.get();
+  shm_handle_ = correlation_id_shm_.handle_;
   id_string_ = id_string_shm_->String();
   id_uint_ = correlation_id_shm_ptr_->id_uint;
   id_type_ = correlation_id_shm_ptr_->id_type;
