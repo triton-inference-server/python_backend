@@ -1,4 +1,4 @@
-// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 
 #include <filesystem>
 
+#include "correlation_id.h"
 #include "gpu_buffers.h"
 #include "infer_payload.h"
 #include "model_loader.h"
@@ -362,9 +363,19 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     const char* id;
     RETURN_IF_ERROR(TRITONBACKEND_RequestId(request, &id));
 
-    uint64_t correlation_id;
-    RETURN_IF_ERROR(
-        TRITONBACKEND_RequestCorrelationId(request, &correlation_id));
+    uint64_t correlation_id_uint = 0;
+    CorrelationId correlation_id;
+
+    auto error =
+        TRITONBACKEND_RequestCorrelationId(request, &correlation_id_uint);
+    if (error != nullptr) {
+      const char* correlation_id_string = "";
+      RETURN_IF_ERROR(TRITONBACKEND_RequestCorrelationIdString(
+          request, &correlation_id_string));
+      correlation_id = CorrelationId(std::string(correlation_id_string));
+    } else {
+      correlation_id = CorrelationId(correlation_id_uint);
+    }
 
     uint32_t flags;
     RETURN_IF_ERROR(TRITONBACKEND_RequestFlags(request, &flags));

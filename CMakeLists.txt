@@ -1,4 +1,4 @@
-# Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -149,6 +149,8 @@ configure_file(src/libtriton_python.ldscript libtriton_python.ldscript COPYONLY)
 
 set(
   COMMON_SRCS
+  src/correlation_id.cc
+  src/correlation_id.h
   src/infer_response.cc
   src/infer_response.h
   src/infer_request.cc
