@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include <future>
 
+#include "correlation_id.h"
 #include "pb_utils.h"
 #include "scoped_defer.h"
 #include "triton/backend/backend_common.h"
@@ -354,8 +355,14 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
 
-    THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
-        irequest, infer_request->CorrelationId()));
+    if (infer_request->GetCorrelationId().Type() ==
+        CorrelationIdDataType::UINT64) {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationId(
+          irequest, infer_request->GetCorrelationId().UnsignedIntValue()));
+    } else {
+      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetCorrelationIdString(
+          irequest, infer_request->GetCorrelationId().StringValue().c_str()));
+    }
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetFlags(
         irequest, infer_request->Flags()));
