@@ -51,6 +51,13 @@ CorrelationId::CorrelationId(const CorrelationId& rhs)
   id_string_ = rhs.id_string_;
 }
 
+CorrelationId::CorrelationId(std::unique_ptr<CorrelationId>& correlation_id_shm)
+{
+  id_uint_ = correlation_id_shm->id_uint_;
+  id_type_ = correlation_id_shm->id_type_;
+  id_string_ = correlation_id_shm->id_string_;
+}
+
 CorrelationId&
 CorrelationId::operator=(const CorrelationId& rhs)
 {

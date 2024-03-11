@@ -1453,8 +1453,6 @@ inference_request = pb_utils.InferenceRequest(model_name='model_name',
   flags=pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_START)
 ```
 
-Note: Starting from the 24.03 release, the `correlation_id` parameter supports both string and unsigned integer values.
-
 For indicating the ending of the sequence you can use the
 `pb_utils.TRITONSERVER_REQUEST_FLAG_SEQUENCE_END` flag. If the request is both
 starting and ending a sequence at the same time (i.e. the sequence has only a

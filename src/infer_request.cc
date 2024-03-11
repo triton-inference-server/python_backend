@@ -361,6 +361,7 @@ InferRequest::InferRequest(
     requested_output_names.emplace(pb_string->String());
   }
 
+  correlation_id_ = CorrelationId(correlation_id_shm);
   request_id_ = request_id_shm_->String();
   parameters_ = parameters_shm_->String();
   requested_output_names_ = std::move(requested_output_names);
@@ -374,12 +375,6 @@ InferRequest::InferRequest(
   preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
   trace_ = infer_request_shm_ptr_->trace;
   request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
-
-  if (correlation_id_shm->Type() == CorrelationIdDataType::UINT64) {
-    correlation_id_ = CorrelationId(correlation_id_shm->UnsignedIntValue());
-  } else {
-    correlation_id_ = CorrelationId(correlation_id_shm->StringValue());
-  }
 
 #ifdef TRITON_PB_STUB
   pb_cancel_ =

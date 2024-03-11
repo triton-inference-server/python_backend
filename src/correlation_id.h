@@ -47,6 +47,7 @@ class CorrelationId {
   CorrelationId(const std::string& id_string);
   CorrelationId(uint64_t id_uint);
   CorrelationId(const CorrelationId& rhs);
+  CorrelationId(std::unique_ptr<CorrelationId>& correlation_id_shm);
   CorrelationId& operator=(const CorrelationId& rhs);
 
   /// Save CorrelationId object to shared memory.
@@ -62,9 +63,8 @@ class CorrelationId {
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
 
-  // Functions that help determine exact type of Correlation Id
+  // Function that help determine exact type of Correlation Id
   CorrelationIdDataType Type() const { return id_type_; }
-  bool IsNotEmpty() const { return ((id_string_ != "") || (id_uint_ != 0)); }
 
   // Get the value of the CorrelationId based on the type
   const std::string& StringValue() const { return id_string_; }
