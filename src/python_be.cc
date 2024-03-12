@@ -369,6 +369,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     auto error =
         TRITONBACKEND_RequestCorrelationId(request, &correlation_id_uint);
     if (error != nullptr) {
+      TRITONSERVER_ErrorDelete(error);
       const char* correlation_id_string = "";
       RETURN_IF_ERROR(TRITONBACKEND_RequestCorrelationIdString(
           request, &correlation_id_string));
