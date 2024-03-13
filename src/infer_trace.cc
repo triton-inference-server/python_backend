@@ -52,7 +52,15 @@ InferenceTrace::SaveToSharedMemory(
   AllocatedSharedMemory<InferenceTraceShm> infer_trace_shm =
       shm_pool->Construct<InferenceTraceShm>();
   infer_trace_shm_ptr_ = infer_trace_shm.data_.get();
+
+  std::unique_ptr<PbString> trace_context_shm =
+      PbString::Create(shm_pool, trace_context_);
+
+  infer_trace_shm_ptr_->trace_context_shm_handle =
+      trace_context_shm->ShmHandle();
+
   // Save the references to shared memory.
+  trace_context_shm_ = std::move(trace_context_shm);
   infer_trace_shm_ = std::move(infer_trace_shm);
   shm_handle_ = infer_trace_shm_.handle_;
 }
@@ -64,17 +72,25 @@ InferenceTrace::LoadFromSharedMemory(
 {
   AllocatedSharedMemory<InferenceTraceShm> infer_trace_shm =
       shm_pool->Load<InferenceTraceShm>(handle);
+  InferenceTraceShm* infer_trace_shm_ptr = infer_trace_shm.data_.get();
 
-  return std::unique_ptr<InferenceTrace>(new InferenceTrace(infer_trace_shm));
+  std::unique_ptr<PbString> trace_context_shm = PbString::LoadFromSharedMemory(
+      shm_pool, infer_trace_shm_ptr->trace_context_shm_handle);
+
+  return std::unique_ptr<InferenceTrace>(
+      new InferenceTrace(infer_trace_shm, trace_context_shm));
 }
 
 InferenceTrace::InferenceTrace(
-    AllocatedSharedMemory<InferenceTraceShm>& infer_trace_shm)
-    : infer_trace_shm_(std::move(infer_trace_shm))
+    AllocatedSharedMemory<InferenceTraceShm>& infer_trace_shm,
+    std::unique_ptr<PbString>& trace_context_shm)
+    : infer_trace_shm_(std::move(infer_trace_shm)),
+      trace_context_shm_(std::move(trace_context_shm))
 {
   infer_trace_shm_ptr_ = infer_trace_shm_.data_.get();
   shm_handle_ = infer_trace_shm_.handle_;
   triton_trace_ = infer_trace_shm_ptr_->triton_trace;
+  trace_context_ = trace_context_shm_->String();
 }
 
 }}};  // namespace triton::backend::python

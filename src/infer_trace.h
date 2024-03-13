@@ -34,6 +34,7 @@
 namespace triton { namespace backend { namespace python {
 
 struct InferenceTraceShm {
+  bi::managed_external_buffer::handle_t trace_context_shm_handle;
   // The address of the 'TRITONSERVER_InferTrace' object.
   void* triton_trace;
 };
@@ -62,19 +63,26 @@ class InferenceTrace {
       bi::managed_external_buffer::handle_t handle);
 
   void* TritonTrace() { return triton_trace_; }
+  void SetContext(std::string trace_context) { trace_context_ = trace_context; }
+  const std::string& Context() const { return trace_context_; }
 
   bi::managed_external_buffer::handle_t ShmHandle() { return shm_handle_; }
 
  private:
   // The private constructor for creating a InferenceTrace object from shared
   // memory.
-  InferenceTrace(AllocatedSharedMemory<InferenceTraceShm>& infer_trace_shm);
+  InferenceTrace(
+      AllocatedSharedMemory<InferenceTraceShm>& infer_trace_shm,
+      std::unique_ptr<PbString>& trace_context_shm);
+
   void* triton_trace_;
+  std::string trace_context_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<InferenceTraceShm> infer_trace_shm_;
   InferenceTraceShm* infer_trace_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
+  std::unique_ptr<PbString> trace_context_shm_;
 };
 
 }}};  // namespace triton::backend::python
