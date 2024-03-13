@@ -390,7 +390,8 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       TRITONSERVER_ErrorDelete(err);
     }
 
-    InferenceTrace trace = InferenceTrace(triton_trace);
+    InferenceTrace trace =
+        InferenceTrace(reinterpret_cast<void*>(triton_trace));
 
     uint64_t request_timeout;
     RETURN_IF_ERROR(TRITONBACKEND_InferenceRequestTimeoutMicroseconds(
