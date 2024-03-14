@@ -59,12 +59,10 @@ IPCMessage::Create(
 std::unique_ptr<IPCMessage>
 IPCMessage::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t message_handle,
-    const char* debug_file, int debug_line, const char* debug_fn)
+    bi::managed_external_buffer::handle_t message_handle)
 {
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm =
-      shm_pool->Load<IPCMessageShm>(
-          message_handle, false, debug_file, debug_line, debug_fn);
+      shm_pool->Load<IPCMessageShm>(message_handle);
 
   AllocatedSharedMemory<bi::interprocess_mutex> response_mutex_shm;
   AllocatedSharedMemory<bi::interprocess_condition> response_cond_shm;

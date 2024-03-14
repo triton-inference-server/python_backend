@@ -98,10 +98,7 @@ class IPCMessage {
       bool inline_response);
   static std::unique_ptr<IPCMessage> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t message_handle,
-      const char* debug_file = __builtin_FILE(),
-      int debug_line = __builtin_LINE(),
-      const char* debug_fn = __builtin_FUNCTION());
+      bi::managed_external_buffer::handle_t message_handle);
 
   PYTHONSTUB_CommandType& Command();
   bool& InlineResponse();
