@@ -393,8 +393,10 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     const char* val = nullptr;
     if (triton_trace != nullptr) {
       err = TRITONSERVER_InferenceTraceContext(triton_trace, &val);
-      if (err != nullptr)
+      if (err != nullptr) {
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
         TRITONSERVER_ErrorDelete(err);
+      }
     }
     std::string context = (val != nullptr) ? std::string(val) : "";
 
