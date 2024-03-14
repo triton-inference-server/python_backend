@@ -31,18 +31,21 @@ namespace triton { namespace backend { namespace python {
 InferenceTrace::InferenceTrace(const InferenceTrace& rhs)
 {
   triton_trace_ = rhs.triton_trace_;
+  trace_context_ = rhs.trace_context_;
 }
 
 InferenceTrace&
 InferenceTrace::operator=(const InferenceTrace& rhs)
 {
   triton_trace_ = rhs.triton_trace_;
+  trace_context_ = rhs.trace_context_;
   return *this;
 }
 
 InferenceTrace::InferenceTrace(std::unique_ptr<InferenceTrace>& trace_shm)
 {
   triton_trace_ = trace_shm->triton_trace_;
+  trace_context_ = trace_shm->trace_context_;
 }
 
 void

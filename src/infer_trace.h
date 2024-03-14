@@ -44,8 +44,11 @@ struct InferenceTraceShm {
 //
 class InferenceTrace {
  public:
-  InferenceTrace(void* triton_trace) : triton_trace_(triton_trace) {}
-  InferenceTrace() : triton_trace_(nullptr) {}
+  InferenceTrace(void* triton_trace, const std::string& ctxt)
+      : triton_trace_(triton_trace), trace_context_(ctxt)
+  {
+  }
+  InferenceTrace() : triton_trace_(nullptr), trace_context_("") {}
   InferenceTrace(const InferenceTrace& rhs);
   InferenceTrace(std::unique_ptr<InferenceTrace>& trace_shm);
   InferenceTrace& operator=(const InferenceTrace& rhs);
@@ -63,7 +66,6 @@ class InferenceTrace {
       bi::managed_external_buffer::handle_t handle);
 
   void* TritonTrace() { return triton_trace_; }
-  void SetContext(std::string trace_context) { trace_context_ = trace_context; }
   const std::string& Context() const { return trace_context_; }
 
   bi::managed_external_buffer::handle_t ShmHandle() { return shm_handle_; }

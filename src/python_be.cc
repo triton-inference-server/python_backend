@@ -389,9 +389,16 @@ ModelInstanceState::SaveRequestsToSharedMemory(
       triton_trace = nullptr;
       TRITONSERVER_ErrorDelete(err);
     }
+    const char* val = nullptr;
+    if (triton_trace != nullptr) {
+      err = TRITONSERVER_InferenceTraceContext(triton_trace, &val);
+      if (err != nullptr)
+        TRITONSERVER_ErrorDelete(err);
+    }
+    std::string context = (val != nullptr) ? std::string(val) : "";
 
     InferenceTrace trace =
-        InferenceTrace(reinterpret_cast<void*>(triton_trace));
+        InferenceTrace(reinterpret_cast<void*>(triton_trace), context);
 
     uint64_t request_timeout;
     RETURN_IF_ERROR(TRITONBACKEND_InferenceRequestTimeoutMicroseconds(
@@ -416,7 +423,6 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::kDefault, 0), trace);
     }
-
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
     requests_shm[r] = infer_request->ShmHandle();
     pb_infer_requests.emplace_back(std::move(infer_request));
