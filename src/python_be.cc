@@ -387,6 +387,7 @@ ModelInstanceState::SaveRequestsToSharedMemory(
     auto err = TRITONBACKEND_RequestTrace(request, &triton_trace);
     if (err != nullptr) {
       triton_trace = nullptr;
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
       TRITONSERVER_ErrorDelete(err);
     }
     const char* val = nullptr;

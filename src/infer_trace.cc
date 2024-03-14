@@ -56,6 +56,8 @@ InferenceTrace::SaveToSharedMemory(
       shm_pool->Construct<InferenceTraceShm>();
   infer_trace_shm_ptr_ = infer_trace_shm.data_.get();
 
+  infer_trace_shm_ptr_->triton_trace = triton_trace_;
+
   std::unique_ptr<PbString> trace_context_shm =
       PbString::Create(shm_pool, trace_context_);
 
