@@ -155,6 +155,8 @@ set(
   src/infer_response.h
   src/infer_request.cc
   src/infer_request.h
+  src/infer_trace.cc
+  src/infer_trace.h
   src/message_queue.h
   src/ipc_message.cc
   src/ipc_message.h
