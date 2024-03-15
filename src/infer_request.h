@@ -30,6 +30,7 @@
 #include <string>
 
 #include "infer_response.h"
+#include "infer_trace.h"
 #include "pb_preferred_memory.h"
 #include "pb_tensor.h"
 
@@ -41,22 +42,6 @@
 namespace triton { namespace backend { namespace python {
 
 class Stub;
-
-//
-// Inference Trace
-//
-struct InferenceTrace {
-#ifndef TRITON_PB_STUB
-  TRITONSERVER_InferenceTrace* triton_trace_;
-  InferenceTrace(TRITONSERVER_InferenceTrace* triton_trace)
-      : triton_trace_(triton_trace)
-  {
-  }
-#else
-  void* triton_trace_;
-#endif
-  InferenceTrace() : triton_trace_(nullptr) {}
-};
 
 //
 // Inference Request
@@ -72,7 +57,7 @@ struct InferRequestShm {
   bool is_decoupled;
   uint64_t timeout;
   PreferredMemory preferred_memory;
-  InferenceTrace trace;
+  bi::managed_external_buffer::handle_t trace_shm_handle;
   uint32_t request_release_flags;
 };
 
@@ -104,7 +89,7 @@ class InferRequest {
   bool IsDecoupled();
   void SetIsDecoupled(const bool is_decoupled);
   PreferredMemory& GetPreferredMemory();
-  InferenceTrace& Trace();
+  InferenceTrace& GetTrace();
   uint32_t ReleaseFlags();
   void SetReleaseFlags(const uint32_t& flags);
 
@@ -144,7 +129,8 @@ class InferRequest {
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
       std::vector<std::shared_ptr<PbTensor>>& input_tensors,
-      std::unique_ptr<PbString>& parameters_shm);
+      std::unique_ptr<PbString>& parameters_shm,
+      std::unique_ptr<InferenceTrace>& infer_trace_shm);
 
   std::string request_id_;
   uint64_t correlation_id_;

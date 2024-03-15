@@ -1610,7 +1610,14 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .export_values();
 
   py::class_<InferenceTrace, std::shared_ptr<InferenceTrace>>(
-      module, "InferenceTrace");
+      module, "InferenceTrace")
+      .def("get_context", [](InferenceTrace& self) -> py::object {
+        auto context = self.Context();
+        if (context != "") {
+          return py::str(context);
+        }
+        return py::none();
+      });
 
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
@@ -1674,7 +1681,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("set_flags", &InferRequest::SetFlags)
       .def("timeout", &InferRequest::Timeout)
       .def("parameters", &InferRequest::Parameters)
-      .def("trace", &InferRequest::Trace)
+      .def("trace", &InferRequest::GetTrace)
       .def(
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,

@@ -371,14 +371,25 @@ ModelInstanceState::SaveRequestsToSharedMemory(
 
     // Do not return if error in this case, because Triton core
     // will return an error if tracing is disabled (see PYBE PR#295).
+    // For the same reason, we do not log the error message, otherwise
+    // when Triton is compiled without tracing, it'll constantly log
+    // this error.
     TRITONSERVER_InferenceTrace* triton_trace;
     auto err = TRITONBACKEND_RequestTrace(request, &triton_trace);
     if (err != nullptr) {
       triton_trace = nullptr;
       TRITONSERVER_ErrorDelete(err);
     }
+    const char* val = nullptr;
+    if (triton_trace != nullptr) {
+      LOG_IF_ERROR(
+          TRITONSERVER_InferenceTraceContext(triton_trace, &val),
+          "failed to retrieve trace context");
+    }
+    std::string context = (val != nullptr) ? std::string(val) : "";
 
-    InferenceTrace trace = InferenceTrace(triton_trace);
+    InferenceTrace trace =
+        InferenceTrace(reinterpret_cast<void*>(triton_trace), context);
 
     uint64_t request_timeout;
     RETURN_IF_ERROR(TRITONBACKEND_InferenceRequestTimeoutMicroseconds(
@@ -403,7 +414,6 @@ ModelInstanceState::SaveRequestsToSharedMemory(
           reinterpret_cast<intptr_t>(request),
           PreferredMemory(PreferredMemory::kDefault, 0), trace);
     }
-
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
     requests_shm[r] = infer_request->ShmHandle();
     pb_infer_requests.emplace_back(std::move(infer_request));

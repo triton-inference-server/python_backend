@@ -367,9 +367,11 @@ RequestExecutor::Infer(
         irequest, InferRequestComplete, nullptr /* request_release_userp */));
 
     TRITONSERVER_InferenceTrace* trace = nullptr;
-    if (infer_request->Trace().triton_trace_ != nullptr) {
+    if (infer_request->GetTrace().TritonTrace() != nullptr) {
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceTraceSpawnChildTrace(
-          infer_request->Trace().triton_trace_, &trace));
+          reinterpret_cast<TRITONSERVER_InferenceTrace*>(
+              infer_request->GetTrace().TritonTrace()),
+          &trace));
     }
 
     const std::string& param_str = infer_request->Parameters();
