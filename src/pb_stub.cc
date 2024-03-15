@@ -1612,16 +1612,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
 
   py::class_<InferenceTrace, std::shared_ptr<InferenceTrace>>(
       module, "InferenceTrace")
-      .def(
-          "get_context",
-          [](InferenceTrace& self, const std::string mode) -> py::object {
-            auto context = (mode == "opentelemetry") ? self.Context() : "";
-            if (context != "") {
-              return py::str(context);
-            }
-            return py::none();
-          },
-          py::arg("mode").none(false) = "triton");
+      .def("get_context", [](InferenceTrace& self) -> py::object {
+        auto context = self.Context();
+        if (context != "") {
+          return py::str(context);
+        }
+        return py::none();
+      });
 
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")

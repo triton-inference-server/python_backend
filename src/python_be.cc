@@ -383,20 +383,20 @@ ModelInstanceState::SaveRequestsToSharedMemory(
 
     // Do not return if error in this case, because Triton core
     // will return an error if tracing is disabled (see PYBE PR#295).
+    // For the same reason, we do not log the error message, otherwise
+    // when Triton is compiled without tracing, it'll constantly log
+    // this error.
     TRITONSERVER_InferenceTrace* triton_trace;
     auto err = TRITONBACKEND_RequestTrace(request, &triton_trace);
     if (err != nullptr) {
       triton_trace = nullptr;
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
       TRITONSERVER_ErrorDelete(err);
     }
     const char* val = nullptr;
     if (triton_trace != nullptr) {
-      err = TRITONSERVER_InferenceTraceContext(triton_trace, &val);
-      if (err != nullptr) {
-        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
-        TRITONSERVER_ErrorDelete(err);
-      }
+      LOG_IF_ERROR(
+          TRITONSERVER_InferenceTraceContext(triton_trace, &val),
+          "failed to retrieve trace context");
     }
     std::string context = (val != nullptr) ? std::string(val) : "";
 
