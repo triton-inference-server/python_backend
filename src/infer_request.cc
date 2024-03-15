@@ -170,7 +170,7 @@ InferRequest::GetPreferredMemory()
 }
 
 InferenceTrace&
-InferRequest::Trace()
+InferRequest::GetTrace()
 {
   return trace_;
 }
@@ -214,7 +214,6 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->is_decoupled = is_decoupled_;
   infer_request_shm_ptr_->timeout = timeout_;
   infer_request_shm_ptr_->preferred_memory = preferred_memory_;
-  infer_request_shm_ptr_->trace = trace_;
   infer_request_shm_ptr_->request_release_flags = request_release_flags_;
 
   output_names_handle_shm_ptr_ =
@@ -270,6 +269,9 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
       Parameters(),
       reinterpret_cast<char*>(infer_request_shm_ptr_) + parameters_offset,
       infer_request_shm.handle_ + parameters_offset);
+
+  trace_.SaveToSharedMemory(shm_pool);
+  infer_request_shm_ptr_->trace_shm_handle = trace_.ShmHandle();
 
   // Save the references to shared memory.
   infer_request_shm_ = std::move(infer_request_shm);
@@ -327,6 +329,10 @@ InferRequest::LoadFromSharedMemory(
       (infer_request_shm_ptr->input_count *
        sizeof(bi::managed_external_buffer::handle_t));
 
+  std::unique_ptr<InferenceTrace> infer_trace_shm =
+      InferenceTrace::LoadFromSharedMemory(
+          shm_pool, infer_request_shm_ptr->trace_shm_handle);
+
   std::unique_ptr<PbString> model_name_shm = PbString::LoadFromSharedMemory(
       request_handle + model_name_offset,
       reinterpret_cast<char*>(infer_request_shm_ptr) + model_name_offset);
@@ -343,7 +349,7 @@ InferRequest::LoadFromSharedMemory(
 
   return std::unique_ptr<InferRequest>(new InferRequest(
       infer_request_shm, request_id_shm, requested_output_names_shm,
-      model_name_shm, input_tensors, parameters_shm));
+      model_name_shm, input_tensors, parameters_shm, infer_trace_shm));
 }
 
 InferRequest::InferRequest(
@@ -352,7 +358,8 @@ InferRequest::InferRequest(
     std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
     std::unique_ptr<PbString>& model_name_shm,
     std::vector<std::shared_ptr<PbTensor>>& input_tensors,
-    std::unique_ptr<PbString>& parameters_shm)
+    std::unique_ptr<PbString>& parameters_shm,
+    std::unique_ptr<InferenceTrace>& infer_trace_shm)
     : infer_request_shm_(std::move(infer_request_shm)),
       request_id_shm_(std::move(request_id_shm)),
       requested_output_names_shm_(std::move(requested_output_names_shm)),
@@ -393,7 +400,7 @@ InferRequest::InferRequest(
   is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
   timeout_ = infer_request_shm_ptr_->timeout;
   preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
-  trace_ = infer_request_shm_ptr_->trace;
+  trace_ = InferenceTrace(infer_trace_shm);
   request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
 
 #ifdef TRITON_PB_STUB
