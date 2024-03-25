@@ -34,7 +34,7 @@ and the [Neuron Runtime](https://awsdocs-neuron.readthedocs-hosted.com/en/latest
 
 ## Table of Contents
 
-- [Using Triton with Inferentia](#using-triton-with-inferentia)
+- [Using Triton with Inferentia 1](#using-triton-with-inferentia-1)
   - [Table of Contents](#table-of-contents)
   - [Inferentia setup](#inferentia-setup)
   - [Setting up the Inferentia model](#setting-up-the-inferentia-model)
