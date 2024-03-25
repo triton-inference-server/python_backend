@@ -1685,7 +1685,7 @@ In order to use this model, you need to install PyTorch. We recommend using
 [PyTorch website](https://pytorch.org/get-started/locally/).
 Make sure that PyTorch is available in the same Python environment as other
 dependencies. Alternatively, you can create a
-[Python Execution Environment](#using-custom-python-execution-environments).
+[Python Execution Environment](#creating-custom-execution-environments).
 You can find the files for this example in [examples/pytorch](examples/pytorch).
 
 ## AddSub in JAX
