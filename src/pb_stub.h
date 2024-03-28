@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,6 +31,9 @@
 #include <pybind11/stl.h>
 
 #include <filesystem>
+#include <future>
+#include <memory>
+#include <unordered_set>
 
 #include "infer_request.h"
 #include "infer_response.h"
@@ -255,6 +258,10 @@ class Stub {
 
   void ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr);
 
+  py::object GetAsyncEventLoop();
+
+  py::object RunCoroutine(py::object coroutine);
+
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
@@ -363,6 +370,9 @@ class Stub {
   py::object model_instance_;
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
+  py::object async_event_loop_;
+  std::unordered_set<std::shared_ptr<std::future<void>>> async_event_futures_;
+  std::mutex async_event_futures_mu_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
