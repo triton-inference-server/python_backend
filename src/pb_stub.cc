@@ -884,7 +884,9 @@ Stub::GetAsyncEventLoop()
 {
   if (py::isinstance<py::none>(async_event_loop_)) {
     // Create the event loop if not already.
-    async_event_loop_ = py::module_::import("asyncio").attr("new_event_loop")();
+    py::module asyncio = py::module_::import("asyncio");
+    async_event_loop_ = asyncio.attr("new_event_loop")();
+    asyncio.attr("set_event_loop")(async_event_loop_);
     py::object py_thread =
         py::module_::import("threading")
             .attr("Thread")(
@@ -1802,11 +1804,6 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-            if (stub->IsDecoupled()) {
-              throw PythonBackendException(
-                  "Async BLS request execution is not support in the decoupled "
-                  "API.");
-            }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [&stub, infer_request, decoupled]() {
