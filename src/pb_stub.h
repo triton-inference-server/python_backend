@@ -33,7 +33,7 @@
 #include <filesystem>
 #include <future>
 #include <memory>
-#include <unordered_set>
+#include <vector>
 
 #include "infer_request.h"
 #include "infer_response.h"
@@ -371,7 +371,7 @@ class Stub {
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   py::object async_event_loop_;
-  std::unordered_set<std::shared_ptr<std::future<void>>> async_event_futures_;
+  std::vector<std::shared_ptr<std::future<void>>> done_async_event_futures_;
   std::mutex async_event_futures_mu_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       stub_message_queue_;

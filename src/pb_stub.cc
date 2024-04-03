@@ -904,33 +904,30 @@ Stub::RunCoroutine(py::object coroutine)
   py::object py_future = py::module_::import("asyncio").attr(
       "run_coroutine_threadsafe")(coroutine, loop);
 
-  {
-    std::lock_guard<std::mutex> lock(async_event_futures_mu_);
-
-    std::shared_ptr<std::future<void>> shared_future(new std::future<void>());
-    std::future<void> c_future = std::async(
-        std::launch::async, [this, shared_future, py_future]() mutable {
-          {
-            py::gil_scoped_acquire gil_acquire;
-            try {
-              py_future.attr("result")();
-            }
-            catch (const PythonBackendException& pb_exception) {
-              LOG_ERROR << pb_exception.what();
-            }
-            catch (const py::error_already_set& error) {
-              LOG_ERROR << error.what();
-            }
-            py_future = py::none();
+  std::shared_ptr<std::future<void>> shared_future(new std::future<void>());
+  std::future<void> c_future = std::async(
+      std::launch::async, [this, shared_future, py_future]() mutable {
+        {
+          py::gil_scoped_acquire gil_acquire;
+          try {
+            py_future.attr("result")();
           }
-          {
-            std::lock_guard<std::mutex> lock(async_event_futures_mu_);
-            async_event_futures_.erase(shared_future);
+          catch (const PythonBackendException& pb_exception) {
+            LOG_ERROR << pb_exception.what();
           }
-        });
-    *shared_future = std::move(c_future);
-    async_event_futures_.emplace(std::move(shared_future));
-  }
+          catch (const py::error_already_set& error) {
+            LOG_ERROR << error.what();
+          }
+          py_future = py::none();
+        }
+        std::vector<std::shared_ptr<std::future<void>>> empty;
+        {
+          std::lock_guard<std::mutex> lock(async_event_futures_mu_);
+          done_async_event_futures_.swap(empty);
+          done_async_event_futures_.emplace_back(std::move(shared_future));
+        }
+      });
+  *shared_future = std::move(c_future);
 
   return py::none();
 }
@@ -948,10 +945,6 @@ Stub::Finalize()
   finalizing_ = true;
   // Stop async event loop if created.
   if (!py::isinstance<py::none>(async_event_loop_)) {
-    if (!async_event_futures_.empty()) {
-      LOG_ERROR << "Finalizing stub with " << async_event_futures_.size()
-                << " ongoing coroutines";
-    }
     async_event_loop_.attr("stop")();
   }
   // Call finalize if exists.
@@ -1016,7 +1009,7 @@ Stub::~Stub()
 
   {
     py::gil_scoped_acquire acquire;
-    async_event_futures_.clear();
+    done_async_event_futures_.clear();
     async_event_loop_ = py::none();
     model_instance_ = py::none();
   }
