@@ -49,7 +49,7 @@ any C++ code.
       - [Request Cancellation Handling](#request-cancellation-handling)
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
-        - [Known Issues](#known-issues)
+        - [Async Execute](#async-execute)
       - [Request Rescheduling](#request-rescheduling)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
