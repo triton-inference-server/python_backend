@@ -624,8 +624,8 @@ for more details on how to host a decoupled model.
 
 Starting from 24.04, `async def execute(self, requests):` is supported for
 decoupled Python models. Its coroutine will be executed by an AsyncIO event loop
-shared with requests executing in a model instance. The next request for the
-model instance can start executing while the current request is waiting.
+shared with requests executing in the same model instance. The next request for
+the model instance can start executing while the current request is waiting.
 
 This is useful for minimizing the number of model instances for models that
 spend the majority of its time waiting, given requests can be executed
