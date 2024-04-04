@@ -620,9 +620,22 @@ full power of what can be achieved from decoupled API. Read
 [Decoupled Backends and Models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/decoupled_models.md)
 for more details on how to host a decoupled model.
 
-##### Known Issues
+##### Async Execute
 
-* Currently, decoupled Python models can not make async infer requests.
+Starting from 24.04, `async def execute(self, requests):` is supported for
+decoupled Python models. Its coroutine will be executed by an AsyncIO event loop
+shared with requests executing in a model instance. The next request for the
+model instance can start executing while the current request is waiting.
+
+This is useful for minimizing the number of model instances for models that
+spend the majority of its time waiting, given requests can be executed
+"concurrently" by AsyncIO. To take full advantage of the "concurrency", it is
+vital for the async execute function to not block the event loop from making
+progress while it is waiting, i.e. downloading over the network.
+
+Limitations:
+* The server/backend do not control how many requests can be executed
+"concurrently" by a model instance.
 
 #### Request Rescheduling
 
