@@ -633,7 +633,9 @@ spend the majority of its time waiting, given requests can be executed
 vital for the async execute function to not block the event loop from making
 progress while it is waiting, i.e. downloading over the network.
 
-Limitations:
+Notes:
+* The model should not modify the running event loop, as this might cause
+unexpected issues.
 * The server/backend do not control how many requests can be executed
 "concurrently" by a model instance.
 
