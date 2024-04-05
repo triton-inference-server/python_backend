@@ -314,4 +314,13 @@ WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)
   return response_error;
 }
 #endif  // NOT TRITON_PB_STUB
-}}}     // namespace triton::backend::python
+
+std::string
+GenerateUUID()
+{
+  static boost::uuids::random_generator generator;
+  boost::uuids::uuid uuid = generator();
+  return boost::uuids::to_string(uuid);
+}
+
+}}}  // namespace triton::backend::python
