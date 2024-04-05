@@ -371,7 +371,6 @@ class Stub {
   py::object serialize_bytes_;
   py::object async_event_loop_;
   std::shared_ptr<std::future<void>> prev_done_async_event_future_;
-  std::mutex async_event_future_mu_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>

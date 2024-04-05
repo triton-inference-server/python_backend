@@ -919,9 +919,6 @@ Stub::RunCoroutine(py::object coroutine)
             LOG_ERROR << error.what();
           }
           py_future = py::none();
-        }
-        {
-          std::lock_guard<std::mutex> lock(async_event_future_mu_);
           prev_done_async_event_future_.swap(shared_future);
         }
         shared_future.reset();
