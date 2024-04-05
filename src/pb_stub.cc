@@ -920,12 +920,11 @@ Stub::RunCoroutine(py::object coroutine)
           }
           py_future = py::none();
         }
-        std::vector<std::shared_ptr<std::future<void>>> empty;
         {
-          std::lock_guard<std::mutex> lock(async_event_futures_mu_);
-          done_async_event_futures_.swap(empty);
-          done_async_event_futures_.emplace_back(std::move(shared_future));
+          std::lock_guard<std::mutex> lock(async_event_future_mu_);
+          prev_done_async_event_future_.swap(shared_future);
         }
+        shared_future.reset();
       });
   *shared_future = std::move(c_future);
 
@@ -1007,9 +1006,9 @@ Stub::~Stub()
   }
 #endif
 
+  prev_done_async_event_future_.reset();
   {
     py::gil_scoped_acquire acquire;
-    done_async_event_futures_.clear();
     async_event_loop_ = py::none();
     model_instance_ = py::none();
   }
