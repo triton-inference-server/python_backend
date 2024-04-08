@@ -105,6 +105,30 @@ PyDefaultArgumentToMutableType(const py::object& argument)
 }
 
 void
+AsyncEventFutureDoneCallback(const py::object& py_future)
+{
+  // TODO: Why using `py_future.result()` with error hangs on exit?
+  try {
+    py::object exception = py_future.attr("exception")();
+    if (!py::isinstance<py::none>(exception)) {
+      std::string err_msg = "";
+      py::list traceback =
+          py::module_::import("traceback").attr("format_exception")(exception);
+      for (py::handle line : traceback) {
+        err_msg += py::str(line);
+      }
+      LOG_ERROR << err_msg;
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    LOG_ERROR << pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    LOG_ERROR << error.what();
+  }
+}
+
+void
 Stub::Instantiate(
     int64_t shm_growth_size, int64_t shm_default_size,
     const std::string& shm_region_name, const std::string& model_path,
@@ -897,35 +921,15 @@ Stub::GetAsyncEventLoop()
   return async_event_loop_;
 }
 
-py::object
+void
 Stub::RunCoroutine(py::object coroutine)
 {
   py::object loop = GetAsyncEventLoop();
   py::object py_future = py::module_::import("asyncio").attr(
       "run_coroutine_threadsafe")(coroutine, loop);
-
-  std::shared_ptr<std::future<void>> shared_future(new std::future<void>());
-  std::future<void> c_future = std::async(
-      std::launch::async, [this, shared_future, py_future]() mutable {
-        {
-          py::gil_scoped_acquire gil_acquire;
-          try {
-            py_future.attr("result")();
-          }
-          catch (const PythonBackendException& pb_exception) {
-            LOG_ERROR << pb_exception.what();
-          }
-          catch (const py::error_already_set& error) {
-            LOG_ERROR << error.what();
-          }
-          py_future = py::none();
-          prev_done_async_event_future_.swap(shared_future);
-        }
-        shared_future.reset();
-      });
-  *shared_future = std::move(c_future);
-
-  return py::none();
+  py_future.attr("add_done_callback")(
+      py::module_::import("c_python_backend_utils")
+          .attr("async_event_future_done_callback"));
 }
 
 void
@@ -1003,7 +1007,6 @@ Stub::~Stub()
   }
 #endif
 
-  prev_done_async_event_future_.reset();
   {
     py::gil_scoped_acquire acquire;
     async_event_loop_ = py::none();
@@ -1918,6 +1921,12 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   module.def(
       "is_model_ready", &IsModelReady, py::arg("model_name").none(false),
       py::arg("model_version").none(false) = "");
+
+  // This function is not part of the public API for Python backend. This is
+  // only used for internal callbacks.
+  module.def(
+      "async_event_future_done_callback", &AsyncEventFutureDoneCallback,
+      py::arg("py_future").none(false));
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.

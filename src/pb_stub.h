@@ -31,8 +31,6 @@
 #include <pybind11/stl.h>
 
 #include <filesystem>
-#include <future>
-#include <memory>
 
 #include "infer_request.h"
 #include "infer_response.h"
@@ -259,7 +257,7 @@ class Stub {
 
   py::object GetAsyncEventLoop();
 
-  py::object RunCoroutine(py::object coroutine);
+  void RunCoroutine(py::object coroutine);
 
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
@@ -370,7 +368,6 @@ class Stub {
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   py::object async_event_loop_;
-  std::shared_ptr<std::future<void>> prev_done_async_event_future_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
