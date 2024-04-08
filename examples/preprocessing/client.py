@@ -29,7 +29,7 @@ import json
 import sys
 
 import numpy as np
-import tritongrpcclient
+import tritonclient.grpc as tritongrpcclient
 
 
 def load_image(img_path: str):

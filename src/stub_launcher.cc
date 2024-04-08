@@ -78,12 +78,9 @@ StubLauncher::Initialize(ModelState* model_state)
   stub_pid_ = 0;
 #endif
 
-  // Atomically increase and read the stub process count to avoid shared memory
-  // region name collision
-  int num_init = ++model_state->StateForBackend()->number_of_instance_inits;
   shm_region_name_ =
       model_state->StateForBackend()->shared_memory_region_prefix +
-      std::to_string(num_init);
+      GenerateUUID();
 
   model_version_ = model_state->Version();
 
