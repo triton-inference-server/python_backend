@@ -32,6 +32,9 @@
 
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <climits>
 #include <memory>
 #include <mutex>
@@ -334,5 +337,7 @@ void SanitizePath(std::string& path);
 std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
     TRITONSERVER_Error* error);
 #endif
+
+std::string GenerateUUID();
 
 }}}  // namespace triton::backend::python
