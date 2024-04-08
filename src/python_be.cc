@@ -2131,7 +2131,6 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   backend_state->shm_growth_byte_size = 1 * 1024 * 1024;   // 1 MB
   backend_state->stub_timeout_seconds = 30;
   backend_state->shm_message_queue_size = 1000;
-  backend_state->number_of_instance_inits = 0;
   backend_state->thread_pool_size = 32;
   // Initialize shared memory region prefix to include backend's name
   // to avoid collision between python backend and python-based backends.
