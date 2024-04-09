@@ -768,6 +768,7 @@ ModelInstanceState::ExecuteBLSRequest(
         if (is_decoupled && (infer_response->Id() != nullptr)) {
           // Need to manage the lifetime of InferPayload object for bls
           // decoupled responses.
+          std::lock_guard<std::mutex> lock(infer_payload_mu_);
           infer_payload_[reinterpret_cast<intptr_t>(infer_payload.get())] =
               infer_payload;
         }
@@ -961,6 +962,7 @@ ModelInstanceState::ProcessCleanupRequest(
   intptr_t id = reinterpret_cast<intptr_t>(cleanup_message_ptr->id);
   if (message->Command() == PYTHONSTUB_BLSDecoupledInferPayloadCleanup) {
     // Remove the InferPayload object from the map.
+    std::lock_guard<std::mutex> lock(infer_payload_mu_);
     infer_payload_.erase(id);
   } else if (message->Command() == PYTHONSTUB_DecoupledResponseFactoryCleanup) {
     // Delete response factory
