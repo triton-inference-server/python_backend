@@ -112,8 +112,10 @@ AsyncEventFutureDoneCallback(const py::object& py_future)
     py::object exception = py_future.attr("exception")();
     if (!py::isinstance<py::none>(exception)) {
       std::string err_msg = "";
-      py::list traceback =
-          py::module_::import("traceback").attr("format_exception")(exception);
+      py::object traceback = py::module_::import("traceback")
+                                 .attr("TracebackException")
+                                 .attr("from_exception")(exception)
+                                 .attr("format")();
       for (py::handle line : traceback) {
         err_msg += py::str(line);
       }
