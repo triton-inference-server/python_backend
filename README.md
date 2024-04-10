@@ -629,15 +629,15 @@ the model instance can start executing while the current request is waiting.
 
 This is useful for minimizing the number of model instances for models that
 spend the majority of its time waiting, given requests can be executed
-"concurrently" by AsyncIO. To take full advantage of the "concurrency", it is
-vital for the async execute function to not block the event loop from making
-progress while it is waiting, i.e. downloading over the network.
+concurrently by AsyncIO. To take full advantage of the concurrency, it is vital
+for the async execute function to not block the event loop from making progress
+while it is waiting, i.e. downloading over the network.
 
 Notes:
 * The model should not modify the running event loop, as this might cause
 unexpected issues.
-* The server/backend do not control how many requests can be executed
-"concurrently" by a model instance.
+* The server/backend do not control how many requests are added to the event
+loop by a model instance.
 
 #### Request Rescheduling
 
