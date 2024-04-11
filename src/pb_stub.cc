@@ -105,6 +105,32 @@ PyDefaultArgumentToMutableType(const py::object& argument)
 }
 
 void
+AsyncEventFutureDoneCallback(const py::object& py_future)
+{
+  // TODO: Why using `py_future.result()` with error hangs on exit?
+  try {
+    py::object exception = py_future.attr("exception")();
+    if (!py::isinstance<py::none>(exception)) {
+      std::string err_msg = "";
+      py::object traceback = py::module_::import("traceback")
+                                 .attr("TracebackException")
+                                 .attr("from_exception")(exception)
+                                 .attr("format")();
+      for (py::handle line : traceback) {
+        err_msg += py::str(line);
+      }
+      LOG_ERROR << err_msg;
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    LOG_ERROR << pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    LOG_ERROR << error.what();
+  }
+}
+
+void
 Stub::Instantiate(
     int64_t shm_growth_size, int64_t shm_default_size,
     const std::string& shm_region_name, const std::string& model_path,
@@ -533,6 +559,8 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
       c_python_backend_utils.attr("InferenceResponse"));
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
+  async_event_loop_ = py::none();
+
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
@@ -690,11 +718,18 @@ Stub::ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr)
 
       py::object execute_return =
           model_instance_.attr("execute")(py_request_list);
-      if (!py::isinstance<py::none>(execute_return)) {
-        throw PythonBackendException(
-            "Python model '" + name_ +
-            "' is using the decoupled mode and the execute function must "
-            "return None.");
+      bool is_coroutine = py::module::import("asyncio")
+                              .attr("iscoroutine")(execute_return)
+                              .cast<bool>();
+      if (is_coroutine) {
+        RunCoroutine(execute_return);
+      } else {
+        if (!py::isinstance<py::none>(execute_return)) {
+          throw PythonBackendException(
+              "Python model '" + name_ +
+              "' is using the decoupled mode and the execute function must "
+              "return None.");
+        }
       }
     }
   }
@@ -870,6 +905,35 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   }
 }
 
+py::object
+Stub::GetAsyncEventLoop()
+{
+  if (py::isinstance<py::none>(async_event_loop_)) {
+    // Create the event loop if not already.
+    py::module asyncio = py::module_::import("asyncio");
+    async_event_loop_ = asyncio.attr("new_event_loop")();
+    asyncio.attr("set_event_loop")(async_event_loop_);
+    py::object py_thread =
+        py::module_::import("threading")
+            .attr("Thread")(
+                "target"_a = async_event_loop_.attr("run_forever"),
+                "daemon"_a = true);
+    py_thread.attr("start")();
+  }
+  return async_event_loop_;
+}
+
+void
+Stub::RunCoroutine(py::object coroutine)
+{
+  py::object loop = GetAsyncEventLoop();
+  py::object py_future = py::module_::import("asyncio").attr(
+      "run_coroutine_threadsafe")(coroutine, loop);
+  py_future.attr("add_done_callback")(
+      py::module_::import("c_python_backend_utils")
+          .attr("async_event_future_done_callback"));
+}
+
 void
 Stub::UpdateHealth()
 {
@@ -881,6 +945,10 @@ void
 Stub::Finalize()
 {
   finalizing_ = true;
+  // Stop async event loop if created.
+  if (!py::isinstance<py::none>(async_event_loop_)) {
+    async_event_loop_.attr("stop")();
+  }
   // Call finalize if exists.
   if (initialized_ && py::hasattr(model_instance_, "finalize")) {
     try {
@@ -943,6 +1011,7 @@ Stub::~Stub()
 
   {
     py::gil_scoped_acquire acquire;
+    async_event_loop_ = py::none();
     model_instance_ = py::none();
   }
   stub_instance_.reset();
@@ -1729,11 +1798,6 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
             std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-            if (stub->IsDecoupled()) {
-              throw PythonBackendException(
-                  "Async BLS request execution is not support in the decoupled "
-                  "API.");
-            }
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [&stub, infer_request, decoupled]() {
@@ -1859,6 +1923,12 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   module.def(
       "is_model_ready", &IsModelReady, py::arg("model_name").none(false),
       py::arg("model_version").none(false) = "");
+
+  // This function is not part of the public API for Python backend. This is
+  // only used for internal callbacks.
+  module.def(
+      "async_event_future_done_callback", &AsyncEventFutureDoneCallback,
+      py::arg("py_future").none(false));
 
   // This class is not part of the public API for Python backend. This is only
   // used for internal testing purposes.
