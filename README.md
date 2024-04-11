@@ -49,7 +49,7 @@ any C++ code.
       - [Request Cancellation Handling](#request-cancellation-handling)
       - [Decoupled mode](#decoupled-mode)
         - [Use Cases](#use-cases)
-        - [Known Issues](#known-issues)
+        - [Async Execute](#async-execute)
       - [Request Rescheduling](#request-rescheduling)
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
@@ -620,9 +620,24 @@ full power of what can be achieved from decoupled API. Read
 [Decoupled Backends and Models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/decoupled_models.md)
 for more details on how to host a decoupled model.
 
-##### Known Issues
+##### Async Execute
 
-* Currently, decoupled Python models can not make async infer requests.
+Starting from 24.04, `async def execute(self, requests):` is supported for
+decoupled Python models. Its coroutine will be executed by an AsyncIO event loop
+shared with requests executing in the same model instance. The next request for
+the model instance can start executing while the current request is waiting.
+
+This is useful for minimizing the number of model instances for models that
+spend the majority of its time waiting, given requests can be executed
+concurrently by AsyncIO. To take full advantage of the concurrency, it is vital
+for the async execute function to not block the event loop from making progress
+while it is waiting, i.e. downloading over the network.
+
+Notes:
+* The model should not modify the running event loop, as this might cause
+unexpected issues.
+* The server/backend do not control how many requests are added to the event
+loop by a model instance.
 
 #### Request Rescheduling
 
