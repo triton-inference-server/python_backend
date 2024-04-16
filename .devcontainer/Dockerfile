@@ -28,8 +28,12 @@ FROM gitlab-master.nvidia.com:5005/dl/dgx/tritonserver:master-py3-devel
 
 ARG USERNAME=triton-server
 
-RUN pip3 install transformers torch
+RUN apt-get update \
+    && apt-get install -y sudo
 
+# RUN pip3 install transformers torch
+
+# Create the user
 RUN apt-get update \
     && apt-get install -y sudo \
     && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
@@ -37,7 +41,8 @@ RUN apt-get update \
 
 RUN pip3 install pre-commit ipdb
 
+RUN mkhomedir_helper triton-server
+
 RUN apt-get install -y cmake rapidjson-dev
 
-RUN mkhomedir_helper triton-server
-USER $USERNAME
+USER ${USERNAME}
