@@ -945,17 +945,19 @@ void
 Stub::Finalize()
 {
   finalizing_ = true;
-  // Stop async event loop if created.
-  if (!py::isinstance<py::none>(async_event_loop_)) {
-    async_event_loop_.attr("stop")();
-  }
-  // Call finalize if exists.
-  if (initialized_ && py::hasattr(model_instance_, "finalize")) {
-    try {
-      model_instance_.attr("finalize")();
+  if (initialized_) {
+    // Stop async event loop if created.
+    if (!py::isinstance<py::none>(async_event_loop_)) {
+      async_event_loop_.attr("stop")();
     }
-    catch (const py::error_already_set& e) {
-      LOG_INFO << e.what();
+    // Call finalize if exists.
+    if (py::hasattr(model_instance_, "finalize")) {
+      try {
+        model_instance_.attr("finalize")();
+      }
+      catch (const py::error_already_set& e) {
+        LOG_INFO << e.what();
+      }
     }
   }
 #ifdef TRITON_ENABLE_GPU
