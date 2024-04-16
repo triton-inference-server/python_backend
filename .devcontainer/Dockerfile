@@ -24,7 +24,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-FROM gitlab-master.nvidia.com:5005/dl/dgx/tritonserver:master-py3-devel
+FROM nvcr.io/nvidia/tritonserver:24.03-py3
 
 ARG USERNAME=triton-server
 
