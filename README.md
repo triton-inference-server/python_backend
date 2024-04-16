@@ -1818,7 +1818,7 @@ and `devcontainer.json` file to help you develop the Python backend
 using
 [Visual Studio Code](https://code.visualstudio.com/docs/devcontainers/containers).
 
-In order to build the backend, you can the "Build Python Backend" task in the
+In order to build the backend, you can execute the "Build Python Backend" task in the
 [VSCode tasks](https://code.visualstudio.com/docs/editor/tasks). This will build
 the Python backend and install the artifacts in
 `/opt/tritonserver/backends/python`.
