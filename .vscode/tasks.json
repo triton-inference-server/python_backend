@@ -14,6 +14,7 @@
                 "-DTRITON_ENABLE_GPU:STRING=ON",
                 "-DTRITON_ENABLE_ENSEMBLE:STRING=ON",
                 "-DTRITON_ENABLE_NVTX:STRING=ON",
+                "-DCMAKE_INSTALL_PREFIX:STRING=${workspaceFolder}/build/install",
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE",
                 "-DCMAKE_BUILD_TYPE:STRING=Debug",
                 "-DCMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc",
@@ -58,12 +59,24 @@
             ]
         },
         {
+            "label": "Move",
+            "type": "shell",
+            "command": "sudo",
+            "args": [
+                "cp",
+                "-r",
+                "${workspaceFolder}/build/install/backends/python/*",
+                "/opt/tritonserver/backends/python"
+            ]
+        },
+        {
             "label": "Build Python",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "Configure",
                 "Build",
-                "Install"
+                "Install",
+                "Move"
             ],
             "group": {
                 "kind": "build",
