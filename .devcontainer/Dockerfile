@@ -31,7 +31,7 @@ ARG USERNAME=triton-server
 RUN apt-get update \
     && apt-get install -y sudo
 
-# RUN pip3 install transformers torch
+RUN pip3 install transformers torch
 
 # Create the user
 RUN apt-get update \

@@ -90,6 +90,7 @@ any C++ code.
   - [Custom Metrics](#custom-metrics-1)
 - [Running with Inferentia](#running-with-inferentia)
 - [Logging](#logging)
+- [Development with VSCode](#development-with-vscode)
 - [Reporting problems, asking questions](#reporting-problems-asking-questions)
 
 ## Quick Start
@@ -1810,6 +1811,16 @@ def initialize(self, args):
     # Should print {'custom_key': {'string_value': 'custom_value'}}
 ```
 
+# Development with VSCode
+
+The repository includes a `.devcontainer` folder that contains a `Dockerfile`
+and `devcontainer.json` file to help you develop the Python backend
+using Visual Studio Code.
+
+In order to build the backend, you can the "Build Python Backend" task in the
+[VSCode tasks](https://code.visualstudio.com/docs/editor/tasks). This will build
+the Python backend and install the artifacts in
+`/opt/tritonserver/backends/python`.
 
 
 # Reporting problems, asking questions
