@@ -2042,7 +2042,7 @@ ModelState::LaunchAutoCompleteStubProcess()
         std::string("unexpected nullptr in BackendModelException"));
     RETURN_IF_ERROR(ex.err_);
     return TRITONSERVER_ErrorNew(
-    TRITONSERVER_ERROR_INTERNAL, TRITONSERVER_ErrorMessage(ex.err_));    
+        TRITONSERVER_ERROR_INTERNAL, TRITONSERVER_ErrorMessage(ex.err_));
   }
 
   return nullptr;
