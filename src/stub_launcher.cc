@@ -442,7 +442,9 @@ StubLauncher::Launch()
         stub_message_queue_.reset();
         parent_message_queue_.reset();
         memory_manager_.reset();
-        WaitForStubProcess();
+        if (stub_pid_ != 0) {
+          WaitForStubProcess();
+        }
       }
     });
 
