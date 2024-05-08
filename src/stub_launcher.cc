@@ -442,11 +442,7 @@ StubLauncher::Launch()
         stub_message_queue_.reset();
         parent_message_queue_.reset();
         memory_manager_.reset();
-        if (stub_pid_ != 0) {
-          // Added this check to ensure server doesn't hang waiting after stub
-          // process has already be killed and cannot be waited on
-          WaitForStubProcess();
-        }
+        WaitForStubProcess();
       }
     });
 
@@ -791,7 +787,11 @@ StubLauncher::WaitForStubProcess()
   CloseHandle(stub_pid_.hThread);
 #else
   int status;
-  waitpid(stub_pid_, &status, 0);
+  if (stub_pid_ != 0) {
+    // Added this check to ensure server doesn't hang waiting after stub
+    // process has already be killed and cannot be waited on
+    waitpid(stub_pid_, &status, 0);
+  }
 #endif
 }
 
