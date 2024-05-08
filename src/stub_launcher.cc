@@ -443,6 +443,8 @@ StubLauncher::Launch()
         parent_message_queue_.reset();
         memory_manager_.reset();
         if (stub_pid_ != 0) {
+          // Added this check to ensure server doesnt hang waiting after stub
+          // process has already be killed and cannot be waited on
           WaitForStubProcess();
         }
       }
