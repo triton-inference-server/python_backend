@@ -1303,6 +1303,14 @@ ModelInstanceState::ResponseSendDecoupled(
     SetErrorForResponseSendMessage(
         send_message_payload, WrapTritonErrorInSharedPtr(error), error_message);
   }
+
+  if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    // Delete response factory
+    std::unique_ptr<
+        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+        response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+            send_message_payload->response_factory_address));
+  }
 }
 
 TRITONSERVER_Error*

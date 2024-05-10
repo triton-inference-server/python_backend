@@ -47,10 +47,11 @@ ResponseSender::ResponseSender(
 
 ResponseSender::~ResponseSender()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  stub->EnqueueCleanupId(
-      reinterpret_cast<void*>(response_factory_address_),
-      PYTHONSTUB_DecoupledResponseFactoryCleanup);
+  // std::cerr << "===== ResponseSender::~ResponseSender() =====" << std::endl;
+  // std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  // stub->EnqueueCleanupId(
+  //     reinterpret_cast<void*>(response_factory_address_),
+  //     PYTHONSTUB_DecoupledResponseFactoryCleanup);
 }
 
 void
