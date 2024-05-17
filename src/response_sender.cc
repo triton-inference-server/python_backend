@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -41,17 +41,18 @@ ResponseSender::ResponseSender(
     const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false), pb_cancel_(pb_cancel)
+      closed_(false), pb_cancel_(pb_cancel), is_response_factory_cleaned_(false)
 {
 }
 
 ResponseSender::~ResponseSender()
 {
-  // std::cerr << "===== ResponseSender::~ResponseSender() =====" << std::endl;
-  // std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  // stub->EnqueueCleanupId(
-  //     reinterpret_cast<void*>(response_factory_address_),
-  //     PYTHONSTUB_DecoupledResponseFactoryCleanup);
+  if (!is_response_factory_cleaned_) {
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    stub->EnqueueCleanupId(
+        reinterpret_cast<void*>(response_factory_address_),
+        PYTHONSTUB_DecoupledResponseFactoryCleanup);
+  }
 }
 
 void
@@ -188,6 +189,9 @@ ResponseSender::Send(
       }
     }
   }
+
+  is_response_factory_cleaned_ =
+      send_message_payload->is_response_factory_cleaned;
 
   if (send_message_payload->has_error) {
     if (send_message_payload->is_error_set) {

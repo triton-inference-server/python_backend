@@ -225,6 +225,7 @@ struct ResponseSenderBase {
   bi::managed_external_buffer::handle_t error;
   intptr_t request_address;
   intptr_t response_factory_address;
+  bool is_response_factory_cleaned;
 };
 
 struct ResponseSendMessage : ResponseSenderBase {

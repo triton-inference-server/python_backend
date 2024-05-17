@@ -1310,6 +1310,7 @@ ModelInstanceState::ResponseSendDecoupled(
         TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
         response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
             send_message_payload->response_factory_address));
+    send_message_payload->is_response_factory_cleaned = true;
   }
 }
 

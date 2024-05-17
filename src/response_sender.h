@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -46,7 +46,16 @@ class ResponseSender {
   intptr_t request_address_;
   intptr_t response_factory_address_;
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
+  // The flag to indicate if the response sender is closed. It is set to true
+  // once the TRITONSERVER_RESPONSE_COMPLETE_FINAL flag is set, meaning that the
+  // response_sender should not be used anymore. This flag is separate from the
+  // `is_response_factory_cleaned_` flag because errors might occur after
+  // complete_final flag is set but before the response_factory gets cleaned up.
   bool closed_;
   std::shared_ptr<PbCancel> pb_cancel_;
+  // The flag to indicate if the response_factory is already cleaned up in the
+  // python backend side. If not, the response_factory will be cleaned up in the
+  // destructor.
+  bool is_response_factory_cleaned_;
 };
 }}}  // namespace triton::backend::python
