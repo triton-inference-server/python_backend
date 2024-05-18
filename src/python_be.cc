@@ -1236,7 +1236,7 @@ ModelInstanceState::ProcessRequests(
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
   reporter.SetComputeEndNs(compute_end_ns);
-  reporter.SetBatchStatistics(request_count);
+  reporter.SetBatchStatistics(total_batch_size);
 
   if (response_batch.data_->has_error) {
     if (response_batch.data_->is_error_set) {
