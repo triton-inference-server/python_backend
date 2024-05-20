@@ -735,7 +735,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
             "Failed to process the request(s) for model '" + name_ +
             "', message: ") +
         error_string;
-    LOG_INFO << err_message.c_str();
+    LOG_ERROR << err_message.c_str();
     response_batch_shm_ptr->has_error = true;
     error_string_shm = PbString::Create(shm_pool_, error_string);
     response_batch_shm_ptr->error = error_string_shm->ShmHandle();
