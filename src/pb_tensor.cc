@@ -585,7 +585,7 @@ PbTensor::LoadFromSharedMemory(
   if (tensor_shm_ptr->memory == 0) {
     std::size_t pb_memory_offset = name_offset + name_shm->Size();
     pb_memory = PbMemory::LoadFromSharedMemory(
-        shm_pool, pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
+        shm_pool, tensor_handle + pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
         open_cuda_handle);
   } else {
     pb_memory = PbMemory::LoadFromSharedMemory(
