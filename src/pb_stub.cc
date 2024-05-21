@@ -737,7 +737,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         error_string;
     LOG_ERROR << err_message.c_str();
     response_batch_shm_ptr->has_error = true;
-    error_string_shm = PbString::Create(shm_pool_, error_string);
+    error_string_shm = PbString::Create(shm_pool_, err_message);
     response_batch_shm_ptr->error = error_string_shm->ShmHandle();
     response_batch_shm_ptr->is_error_set = true;
   }
