@@ -599,6 +599,11 @@ Starting from 23.10, request cancellation can be checked directly on the
 the TRITONSERVER_RESPONSE_COMPLETE_FINAL flag at the end of response is still
 needed even the request is cancelled.
 
+*Note:*: If `response_sender` is reused across multiple requests, the model must
+ensure that the `response_sender` is properly cleaned up when the
+`pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL` flag has not been sent for the
+request and the request is rescheduled or cancelled.
+
 ##### Use Cases
 
 The decoupled mode is powerful and supports various other use cases:
