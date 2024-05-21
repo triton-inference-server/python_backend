@@ -114,6 +114,7 @@ ResponseSender::Send(
   send_message_payload->has_error = false;
   send_message_payload->is_error_set = false;
   send_message_payload->flags = flags;
+  send_message_payload->is_response_factory_cleaned = false;
 
   std::unique_ptr<IPCMessage> ipc_message =
       IPCMessage::Create(shm_pool_, false /* inline_response */);
