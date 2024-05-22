@@ -153,124 +153,6 @@ ModelInstanceState::SetErrorForResponseSendMessage(
   }
 }
 
-void
-ModelInstanceState::SendMessageAndReceiveResponse(
-    bi::managed_external_buffer::handle_t message,
-    bi::managed_external_buffer::handle_t& response, bool& restart,
-    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-    TRITONBACKEND_Request** requests, const uint32_t request_count)
-{
-  auto error = SendMessageToStub(message);
-  if (error != nullptr) {
-    restart = true;
-    RespondErrorToAllRequests(
-        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
-
-    return;
-  }
-
-  bi::managed_external_buffer::handle_t response_message;
-  error = Stub()->ReceiveMessageFromStub(response_message);
-  if (error != nullptr) {
-    restart = true;
-    RespondErrorToAllRequests(
-        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
-
-    return;
-  }
-
-  response = response_message;
-}
-
-TRITONSERVER_Error*
-ModelInstanceState::SendMessageToStub(
-    bi::managed_external_buffer::handle_t message)
-{
-  bool success = false;
-  while (!success) {
-    uint64_t timeout_miliseconds = 1000;
-    {
-      boost::posix_time::ptime timeout =
-          boost::get_system_time() +
-          boost::posix_time::milliseconds(timeout_miliseconds);
-
-      bi::scoped_lock<bi::interprocess_mutex> lock(
-          *(Stub()->HealthMutex()), timeout);
-
-      // Check if lock has been acquired.
-      if (lock) {
-        Stub()->IpcControl()->stub_health = false;
-      } else {
-        // If it failed to obtain the lock, it means that the stub has been
-        // stuck or exited while holding the health mutex lock.
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
-      }
-    }
-
-    Stub()->StubMessageQueue()->Push(
-        message, timeout_miliseconds /* duration ms */, success);
-
-    if (!success && !IsStubProcessAlive()) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, "Stub process is not healthy.");
-    }
-  }
-
-  return nullptr;  // success
-}
-
-void
-ModelInstanceState::RespondErrorToAllRequests(
-    const char* message,
-    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-    TRITONBACKEND_Request** requests, const uint32_t request_count)
-{
-  for (uint32_t r = 0; r < request_count; ++r) {
-    if ((*responses)[r] == nullptr)
-      continue;
-
-    std::string err_message =
-        std::string(
-            "Failed to process the request(s) for model instance '" + Name() +
-            "', message: ") +
-        message;
-
-    TRITONSERVER_Error* err =
-        TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, err_message.c_str());
-    LOG_IF_ERROR(
-        TRITONBACKEND_ResponseSend(
-            (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-        "failed sending response");
-
-    (*responses)[r] = nullptr;
-    TRITONSERVER_ErrorDelete(err);
-  }
-}
-
-void
-ModelInstanceState::WaitForBLSRequestsToFinish()
-{
-  futures_.clear();
-}
-
-bool
-ModelInstanceState::IsStubProcessAlive()
-{
-  boost::posix_time::ptime timeout =
-      boost::get_system_time() + boost::posix_time::seconds(1);
-  bi::scoped_lock<bi::interprocess_mutex> lock(*Stub()->HealthMutex(), timeout);
-
-  // Check if lock has been acquired.
-  if (lock) {
-    return Stub()->IpcControl()->stub_health;
-  } else {
-    // If It failed to obtain the lock, it means that the stub has been
-    // stuck or exited while holding the health mutex lock.
-    return false;
-  }
-}
-
 TRITONSERVER_Error*
 ModelInstanceState::SaveRequestsToSharedMemory(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -408,24 +290,15 @@ ModelInstanceState::SaveRequestsToSharedMemory(
         request, &request_timeout));
 
     std::unique_ptr<InferRequest> infer_request;
-    if (model_state->IsDecoupled()) {
-      TRITONBACKEND_ResponseFactory* factory_ptr;
-      RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
+    TRITONBACKEND_ResponseFactory* factory_ptr;
+    RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
 
-      infer_request = std::make_unique<InferRequest>(
-          id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), parameters_string, flags,
-          request_timeout, reinterpret_cast<intptr_t>(factory_ptr),
-          reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::kDefault, 0), trace);
-    } else {
-      infer_request = std::make_unique<InferRequest>(
-          id, correlation_id, pb_input_tensors, requested_output_names,
-          model_state->Name(), model_state->Version(), parameters_string, flags,
-          request_timeout, 0 /* response_factory_address */,
-          reinterpret_cast<intptr_t>(request),
-          PreferredMemory(PreferredMemory::kDefault, 0), trace);
-    }
+    infer_request = std::make_unique<InferRequest>(
+        id, correlation_id, pb_input_tensors, requested_output_names,
+        model_state->Name(), model_state->Version(), parameters_string, flags,
+        request_timeout, reinterpret_cast<intptr_t>(factory_ptr),
+        reinterpret_cast<intptr_t>(request),
+        PreferredMemory(PreferredMemory::kDefault, 0), trace);
     RETURN_IF_EXCEPTION(infer_request->SaveToSharedMemory(Stub()->ShmPool()));
     requests_shm[r] = infer_request->ShmHandle();
     pb_infer_requests.emplace_back(std::move(infer_request));
@@ -449,11 +322,9 @@ ModelInstanceState::LaunchStubProcess()
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
-  if (model_state->IsDecoupled()) {
-    decoupled_thread_ = true;
-    decoupled_monitor_ =
-        std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
-  }
+  decoupled_thread_ = true;
+  decoupled_monitor_ =
+      std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
   request_executor_ = std::make_unique<RequestExecutor>(
       Stub()->ShmPool(), model_state->TritonServer());
 
@@ -1306,7 +1177,7 @@ ModelInstanceState::ResponseSendDecoupled(
 }
 
 TRITONSERVER_Error*
-ModelInstanceState::ProcessRequestsDecoupled(
+ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
     std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
     PbMetricReporter& reporter)
@@ -1380,364 +1251,6 @@ ModelInstanceState::ProcessRequestsDecoupled(
   }
 
   return nullptr;  // success
-}
-
-void
-ModelInstanceState::ProcessRequests(
-    TRITONBACKEND_Request** requests, const uint32_t request_count,
-    std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
-    bool& restart)
-{
-  NVTX_RANGE(nvtx_, "ProcessRequests " + Name());
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
-  std::string name = model_state->Name();
-
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      (std::string("model ") + model_state->Name() + ", instance " + Name() +
-       ", executing " + std::to_string(request_count) + " requests")
-          .c_str());
-
-  uint64_t exec_start_ns = 0;
-  SET_TIMESTAMP(exec_start_ns);
-
-  // We take the responsibility of the responses.
-  std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
-      new std::vector<TRITONBACKEND_Response*>());
-  responses->reserve(request_count);
-  PbMetricReporter reporter(
-      TritonModelInstance(), requests, request_count, responses);
-  reporter.SetExecStartNs(exec_start_ns);
-
-  for (size_t i = 0; i < request_count; i++) {
-    TRITONBACKEND_Response* response;
-    auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
-    if (err == nullptr) {
-      responses->emplace_back(response);
-    } else {
-      responses->emplace_back(nullptr);
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
-      TRITONSERVER_ErrorDelete(err);
-    }
-  }
-
-  size_t total_batch_size = 0;
-  RESPOND_ALL_AND_RETURN_IF_ERROR(
-      responses, request_count,
-      CheckIncomingRequests(requests, request_count, total_batch_size));
-
-  // No request to process
-  if (total_batch_size == 0) {
-    return;
-  }
-
-  // Wait for all the pending BLS requests to be completed.
-  ScopedDefer bls_defer([this] { WaitForBLSRequestsToFinish(); });
-  AllocatedSharedMemory<char> request_batch;
-  RESPOND_ALL_AND_RETURN_IF_ERROR(
-      responses, request_count,
-      SaveRequestsToSharedMemory(
-          requests, request_count, pb_infer_requests, request_batch,
-          responses));
-
-  std::shared_ptr<IPCMessage> ipc_message =
-      IPCMessage::Create(Stub()->ShmPool(), false /*inline_response*/);
-  ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
-  ipc_message->Args() = request_batch.handle_;
-
-  uint64_t compute_start_ns = 0;
-  SET_TIMESTAMP(compute_start_ns);
-  reporter.SetComputeStartNs(compute_start_ns);
-
-  // This means that the stub process has exited and Python
-  // backend failed to restart the stub process.
-  if (!Stub()->StubActive()) {
-    const char* error_message = "The stub process has exited unexpectedly.";
-    RespondErrorToAllRequests(
-        error_message, responses, requests, request_count);
-    return;
-  }
-
-  bi::managed_external_buffer::handle_t response_message;
-  {
-    NVTX_RANGE(nvtx_, "StubProcessing " + Name());
-    SendMessageAndReceiveResponse(
-        ipc_message->ShmHandle(), response_message, restart, responses,
-        requests, request_count);
-  }
-
-  ScopedDefer execute_finalize([this, &restart] {
-    // Push a dummy message to the message queue so that
-    // the stub process is notified that it can release
-    // the object stored in shared memory.
-    NVTX_RANGE(nvtx_, "RequestExecuteFinalize " + Name());
-    if (!restart)
-      // Push a dummy message to signal the thread to terminate.
-      Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
-  });
-  if (restart) {
-    return;
-  }
-
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      responses, request_count,
-      ipc_message = IPCMessage::LoadFromSharedMemory(
-          Stub()->ShmPool(), response_message));
-
-  // If the stub command is no longer PYTHONSTUB_InferExecRequest, it indicates
-  // that inference request execution has finished and there are no more BLS
-  // requests to execute. Otherwise, the Python backend will continuously
-  // execute BLS requests pushed to the message queue.
-  while (ipc_message->Command() ==
-             PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest ||
-         ipc_message->Command() ==
-             PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest) {
-    std::packaged_task<void()> task([this, ipc_message] {
-      ExecuteBLSRequest(
-          ipc_message,
-          (ipc_message->Command() ==
-           PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest));
-    });
-    std::future<void> future =
-        boost::asio::post(*thread_pool_, std::move(task));
-    futures_.emplace_back(std::move(future));
-
-    auto error = Stub()->ReceiveMessageFromStub(response_message);
-    if (error != nullptr) {
-      restart = true;
-      RespondErrorToAllRequests(
-          TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
-      return;
-    }
-
-    RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-        responses, request_count,
-        ipc_message = IPCMessage::LoadFromSharedMemory(
-            Stub()->ShmPool(), response_message));
-  }
-
-  uint64_t compute_end_ns = 0;
-  SET_TIMESTAMP(compute_end_ns);
-  reporter.SetComputeEndNs(compute_end_ns);
-
-  // Parsing the request response
-  AllocatedSharedMemory<char> response_batch;
-  RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-      responses, request_count,
-      response_batch = Stub()->ShmPool()->Load<char>(ipc_message->Args()));
-
-  ResponseBatch* response_batch_shm_ptr =
-      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
-
-  // If inference fails, release all the requests and send an error response.
-  // If inference fails at this stage, it usually indicates a bug in the model
-  // code
-  if (response_batch_shm_ptr->has_error) {
-    if (response_batch_shm_ptr->is_error_set) {
-      std::unique_ptr<PbString> error_message_shm;
-      RESPOND_ALL_AND_RETURN_IF_EXCEPTION(
-          responses, request_count,
-          error_message_shm = PbString::LoadFromSharedMemory(
-              Stub()->ShmPool(), response_batch_shm_ptr->error));
-      RespondErrorToAllRequests(
-          error_message_shm->String().c_str(), responses, requests,
-          request_count);
-    } else {
-      const char* error_message =
-          "Failed to fetch the error in response batch.";
-      RespondErrorToAllRequests(
-          error_message, responses, requests, request_count);
-    }
-
-    // Reset the release flags for all the requests.
-    for (auto& infer_request : pb_infer_requests) {
-      infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
-    }
-    return;
-  }
-
-  bi::managed_external_buffer::handle_t* response_shm_handle =
-      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-          response_batch.data_.get() + sizeof(ResponseBatch));
-
-  // If the output provided by the model is in GPU, we will pass the list of
-  // buffers provided by Triton to the stub process.
-  bool has_gpu_output = false;
-  std::vector<bool> requires_deferred_callback;
-
-  std::vector<std::unique_ptr<InferResponse>> shm_responses;
-  std::vector<std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>>
-      gpu_output_buffers(request_count);
-  GPUBuffersHelper gpu_buffer_helper;
-
-  for (uint32_t r = 0; r < request_count; ++r) {
-    NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
-    TRITONBACKEND_Response* response = (*responses)[r];
-    TRITONBACKEND_Request* request = requests[r];
-    uint32_t requested_output_count = 0;
-    requires_deferred_callback.push_back(false);
-
-    shm_responses.emplace_back(nullptr);
-    std::unique_ptr<InferResponse>& infer_response = shm_responses.back();
-    try {
-      if (pb_infer_requests[r]->ReleaseFlags() ==
-          TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
-        // For rescheduled requests, we do not need to send a response.
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseDelete((*responses)[r]),
-            "failed to delete response");
-        (*responses)[r] = nullptr;
-        continue;
-      }
-      infer_response = InferResponse::LoadFromSharedMemory(
-          Stub()->ShmPool(), response_shm_handle[r],
-          false /* open_cuda_handle */);
-      if (infer_response->HasError()) {
-        TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-            infer_response->Error()->Code(),
-            infer_response->Error()->Message().c_str());
-
-        LOG_IF_ERROR(
-            TRITONBACKEND_ResponseSend(
-                (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-            "failed sending response");
-        TRITONSERVER_ErrorDelete(err);
-        (*responses)[r] = nullptr;
-
-        // Reset the release flags for the request.
-        pb_infer_requests[r]->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
-
-        // If has_error is true, we do not look at the response tensors.
-        continue;
-      }
-    }
-    catch (const PythonBackendException& pb_exception) {
-      TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
-      LOG_IF_ERROR(
-          TRITONBACKEND_ResponseSend(
-              (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
-          "failed sending response");
-      TRITONSERVER_ErrorDelete(err);
-      (*responses)[r] = nullptr;
-
-      // Reset the release flags for the request.
-      pb_infer_requests[r]->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
-
-      continue;
-    }
-
-    GUARDED_RESPOND_IF_ERROR(
-        responses, r,
-        TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-
-    std::set<std::string> requested_output_names;
-    for (size_t j = 0; j < requested_output_count; ++j) {
-      const char* output_name;
-      GUARDED_RESPOND_IF_ERROR(
-          responses, r,
-          TRITONBACKEND_RequestOutputName(request, j, &output_name));
-      requested_output_names.insert(output_name);
-    }
-
-    bool require_deferred_callback = false;
-
-#ifdef TRITON_ENABLE_GPU
-    for (auto& output_tensor : infer_response->OutputTensors()) {
-      if (output_tensor->MemoryType() == TRITONSERVER_MEMORY_GPU) {
-        // Attempt to use the cuda shared memory pool for GPU tensor.
-        ShareCUDAMemoryPool(output_tensor->MemoryTypeId());
-      }
-    }
-#endif  // TRITON_ENABLE_GPU
-
-    gpu_output_buffers[r] =
-        std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>{};
-    infer_response->Send(
-        response, CudaStream(), require_deferred_callback,
-        TRITONSERVER_RESPONSE_COMPLETE_FINAL, Stub()->ShmPool(),
-        gpu_buffer_helper, gpu_output_buffers[r], requested_output_names);
-
-    requires_deferred_callback[r] = require_deferred_callback;
-
-    if (requires_deferred_callback[r]) {
-      has_gpu_output = true;
-    }
-  }
-
-  // Finalize the execute.
-  execute_finalize.Complete();
-
-  // If the output tensor is in GPU, there will be a second round trip
-  // required for filling the GPU buffers provided by the main process.
-  if (has_gpu_output) {
-    ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
-    gpu_buffer_helper.Complete(Stub()->ShmPool());
-    ipc_message->Args() = gpu_buffer_helper.ShmHandle();
-    SendMessageAndReceiveResponse(
-        ipc_message->ShmHandle(), response_message, restart, responses,
-        requests, 0);
-
-    bool cuda_copy = false;
-
-    uint32_t response_index = 0;
-    for (auto& gpu_output_buffer : gpu_output_buffers) {
-      for (auto& buffer_memory_pair : gpu_output_buffer) {
-        auto& pb_memory = buffer_memory_pair.first;
-        void* pointer = buffer_memory_pair.second;
-        bool cuda_used = false;
-
-        if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
-          GUARDED_RESPOND_IF_ERROR(
-              responses, response_index,
-              CopyBuffer(
-                  "Failed to copy the output tensor to buffer.",
-                  TRITONSERVER_MEMORY_CPU, 0, TRITONSERVER_MEMORY_CPU, 0,
-                  pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
-                  CudaStream(), &cuda_used));
-          cuda_copy |= cuda_used;
-        } else if (
-            (pb_memory->MemoryType() == TRITONSERVER_MEMORY_GPU) &&
-            pb_memory->UseCUDASharedPool() &&
-            (pb_memory->DataPtr() != pointer)) {
-          // If the data pointer from pb_memory is not the same as the pointer,
-          // it means that the Triton-provided buffer is not used during tensor
-          // transfer. Instead, an intermediate buffer that uses CUDA shared
-          // memory pool is used. In this case, we need to copy the data
-          // from the intermediate buffer back to the Triton-provided buffer.
-          GUARDED_RESPOND_IF_ERROR(
-              responses, response_index,
-              CopyBuffer(
-                  "Failed to copy the output tensor to buffer.",
-                  TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
-                  TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
-                  pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
-                  CudaStream(), &cuda_used));
-          cuda_copy |= cuda_used;
-        }
-      }
-      response_index++;
-#ifdef TRITON_ENABLE_GPU
-      if (cuda_copy) {
-        cudaStreamSynchronize(stream_);
-      }
-#endif  // TRITON_ENABLE_GPU
-    }
-  }
-
-  bls_defer.Complete();
-  for (uint32_t r = 0; r < request_count; ++r) {
-    if (requires_deferred_callback[r]) {
-      shm_responses[r]->DeferredSendCallback();
-    }
-  }
-
-  uint64_t exec_end_ns = 0;
-  SET_TIMESTAMP(exec_end_ns);
-  reporter.SetExecEndNs(exec_end_ns);
-  reporter.SetBatchStatistics(total_batch_size);
-
-  return;
 }
 
 void
@@ -1873,18 +1386,13 @@ ModelInstanceState::ShareCUDAMemoryPool(const int32_t device_id)
 
 ModelInstanceState::~ModelInstanceState()
 {
-  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
   Stub()->UpdateHealth();
   if (Stub()->IsHealthy()) {
-    if (model_state->IsDecoupled()) {
-      // Wait for all the pending tasks to finish.
-      thread_pool_->wait();
-      // Push a dummy message to signal the thread to terminate.
-      Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
-      decoupled_monitor_.join();
-    } else {
-      thread_pool_->wait();
-    }
+    // Wait for all the pending tasks to finish.
+    thread_pool_->wait();
+    // Push a dummy message to signal the thread to terminate.
+    Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
+    decoupled_monitor_.join();
   }
   // Terminate stub first to allow any last messages to be received by the back
   // end before deallocating the queue memory
@@ -2445,36 +1953,10 @@ TRITONBACKEND_ModelInstanceExecute(
 
   // If restart is equal to true, it indicates that the stub process is
   // unhealthy and needs a restart.
-  bool restart = false;
-  ModelState* model_state =
-      reinterpret_cast<ModelState*>(instance_state->Model());
-  std::vector<std::unique_ptr<InferRequest>> infer_requests;
-  if (!model_state->IsDecoupled()) {
-    instance_state->ProcessRequests(
-        requests, request_count, infer_requests, restart);
+  // TODO: Implement restart on decoupled
 
-    if (restart) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_ERROR,
-          "Stub process is unhealthy and it will be restarted.");
-      instance_state->TerminateMonitor();
-      instance_state->Stub()->KillStubProcess();
-      TRITONSERVER_Error* err = instance_state->Stub()->Setup();
-      if (err == nullptr) {
-        instance_state->StartMonitor();
-      }
-      LOG_IF_ERROR(err, "Failed to restart the stub process.");
-      err = instance_state->Stub()->Launch();
-      LOG_IF_ERROR(
-          err,
-          "Failed to restart the stub process: failed to launch "
-          "the stub process.");
-      // Reset the release flags for all the requests.
-      for (auto& infer_request : infer_requests) {
-        infer_request->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
-      }
-    }
-  } else {
+  std::vector<std::unique_ptr<InferRequest>> infer_requests;
+  {
     uint64_t exec_start_ns = 0;
     SET_TIMESTAMP(exec_start_ns);
 
@@ -2483,7 +1965,7 @@ TRITONBACKEND_ModelInstanceExecute(
         nullptr);
     reporter.SetExecStartNs(exec_start_ns);
 
-    error = instance_state->ProcessRequestsDecoupled(
+    error = instance_state->ProcessRequests(
         requests, request_count, infer_requests, reporter);
 
     uint64_t exec_end_ns = 0;

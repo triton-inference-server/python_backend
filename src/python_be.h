@@ -309,25 +309,7 @@ class ModelInstanceState : public BackendModelInstance {
   // Launch stub process.
   TRITONSERVER_Error* LaunchStubProcess();
 
-  TRITONSERVER_Error* SendMessageToStub(
-      bi::managed_external_buffer::handle_t message);
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
-
-  // Checks whether the stub process is live
-  bool IsStubProcessAlive();
-
-  // Get a message from the stub process
-  void SendMessageAndReceiveResponse(
-      bi::managed_external_buffer::handle_t message,
-      bi::managed_external_buffer::handle_t& response, bool& restart,
-      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-      TRITONBACKEND_Request** requests, const uint32_t request_count);
-
-  // Responds to all the requests with an error message.
-  void RespondErrorToAllRequests(
-      const char* message,
-      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-      TRITONBACKEND_Request** requests, const uint32_t request_count);
 
   // In the decoupled mode, the parent message queue is monitored only by this
   // function during the execute phase. No other thread should pop any message
@@ -347,14 +329,8 @@ class ModelInstanceState : public BackendModelInstance {
       TRITONBACKEND_Request* request,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
 
-  // Process all the requests obtained from Triton.
-  void ProcessRequests(
-      TRITONBACKEND_Request** requests, const uint32_t request_count,
-      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
-      bool& restart);
-
   // Process all the requests in the decoupled mode.
-  TRITONSERVER_Error* ProcessRequestsDecoupled(
+  TRITONSERVER_Error* ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
       PbMetricReporter& pb_metric_reporter);
@@ -367,9 +343,6 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Cleanup BLS responses
   void CleanupBLSResponses();
-
-  // Wait for BLS requests to complete
-  void WaitForBLSRequestsToFinish();
 
   // Check the incoming requests for errors
   TRITONSERVER_Error* CheckIncomingRequests(
