@@ -289,7 +289,7 @@ class ModelInstanceState : public BackendModelInstance {
   bool stub_to_parent_thread_;
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
-  bool decoupled_thread_;
+  bool queue_monitor_thread_;
   std::mutex mu_;
   std::condition_variable cv_;
   std::unique_ptr<IPCMessage> received_message_;
@@ -311,10 +311,10 @@ class ModelInstanceState : public BackendModelInstance {
 
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
 
-  // In the decoupled mode, the parent message queue is monitored only by this
-  // function during the execute phase. No other thread should pop any message
-  // from the message queue in the decoupled mode.
-  void DecoupledMessageQueueMonitor();
+  // The parent message queue is monitored only by this function during the
+  // execute phase. No other thread should pop any message from the message
+  // queue.
+  void MessageQueueMonitor();
 
   // This function is executed on a separate thread and monitors the queue for
   // message sent from stub to parent process.

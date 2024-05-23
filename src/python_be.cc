@@ -322,9 +322,9 @@ ModelInstanceState::LaunchStubProcess()
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
-  decoupled_thread_ = true;
+  queue_monitor_thread_ = true;
   decoupled_monitor_ =
-      std::thread(&ModelInstanceState::DecoupledMessageQueueMonitor, this);
+      std::thread(&ModelInstanceState::MessageQueueMonitor, this);
   request_executor_ = std::make_unique<RequestExecutor>(
       Stub()->ShmPool(), model_state->TritonServer());
 
@@ -677,9 +677,9 @@ ModelInstanceState::ExecuteBLSRequest(
 }
 
 void
-ModelInstanceState::DecoupledMessageQueueMonitor()
+ModelInstanceState::MessageQueueMonitor()
 {
-  while (decoupled_thread_) {
+  while (queue_monitor_thread_) {
     bi::managed_external_buffer::handle_t handle =
         Stub()->ParentMessageQueue()->Pop();
     if (handle == DUMMY_MESSAGE) {
