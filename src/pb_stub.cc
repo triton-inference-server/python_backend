@@ -658,7 +658,8 @@ Stub::LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr)
   for (size_t i = 0; i < batch_size; i++) {
     std::shared_ptr<InferRequest> infer_request =
         InferRequest::LoadFromSharedMemory(
-            shm_pool_, request_shm_handle[i], true /* open_cuda_handle */);
+            shm_pool_, request_shm_handle[i], true /* open_cuda_handle */,
+            &ipc_control_->decoupled /* is_model_decoupled */);
     py_request_list.append(infer_request);
   }
 

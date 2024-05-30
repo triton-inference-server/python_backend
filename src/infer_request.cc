@@ -74,7 +74,7 @@ InferRequest::InferRequest(
   pb_cancel_ =
       std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
-      request_address_, response_factory_address_,
+      request_address_, response_factory_address_, nullptr /* is_decoupled */,
       Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
@@ -272,7 +272,8 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 std::unique_ptr<InferRequest>
 InferRequest::LoadFromSharedMemory(
     std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t request_handle, bool open_cuda_handle)
+    bi::managed_external_buffer::handle_t request_handle, bool open_cuda_handle,
+    bool const* is_model_decoupled)
 {
   AllocatedSharedMemory<char> infer_request_shm =
       shm_pool->Load<char>(request_handle);
@@ -328,7 +329,7 @@ InferRequest::LoadFromSharedMemory(
   return std::unique_ptr<InferRequest>(new InferRequest(
       infer_request_shm, request_id_shm, correlation_id_shm,
       requested_output_names_shm, model_name_shm, input_tensors, parameters_shm,
-      infer_trace_shm));
+      infer_trace_shm, is_model_decoupled));
 }
 
 InferRequest::InferRequest(
@@ -339,7 +340,8 @@ InferRequest::InferRequest(
     std::unique_ptr<PbString>& model_name_shm,
     std::vector<std::shared_ptr<PbTensor>>& input_tensors,
     std::unique_ptr<PbString>& parameters_shm,
-    std::unique_ptr<InferenceTrace>& infer_trace_shm)
+    std::unique_ptr<InferenceTrace>& infer_trace_shm,
+    bool const* is_model_decoupled)
     : infer_request_shm_(std::move(infer_request_shm)),
       request_id_shm_(std::move(request_id_shm)),
       requested_output_names_shm_(std::move(requested_output_names_shm)),
@@ -387,7 +389,7 @@ InferRequest::InferRequest(
   pb_cancel_ =
       std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
-      request_address_, response_factory_address_,
+      request_address_, response_factory_address_, is_model_decoupled,
       Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }

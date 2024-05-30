@@ -35,13 +35,31 @@
 
 namespace triton { namespace backend { namespace python {
 
+void
+AssertResponseSenderArgumentsWellFormed(
+    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+{
+  // Check the correctness of the provided flags.
+  if (flags != TRITONSERVER_RESPONSE_COMPLETE_FINAL && flags != 0) {
+    throw PythonBackendException(
+        "Unable to send response. Unsupported flag provided.");
+  }
+
+  if (flags == 0 && response == nullptr) {
+    throw PythonBackendException(
+        "Inference Response object must be provided when the response flags is "
+        "set to zero.");
+  }
+}
+
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bool const* is_decoupled, std::unique_ptr<SharedMemoryManager>& shm_pool,
     const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
-      response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false), pb_cancel_(pb_cancel)
+      response_factory_address_(response_factory_address),
+      is_decoupled_(is_decoupled), shm_pool_(shm_pool), pb_cancel_(pb_cancel),
+      closed_(false), number_of_response_sent_(0)
 {
 }
 
@@ -51,6 +69,45 @@ ResponseSender::~ResponseSender()
   stub->EnqueueCleanupId(
       reinterpret_cast<void*>(response_factory_address_),
       PYTHONSTUB_DecoupledResponseFactoryCleanup);
+}
+
+void
+ResponseSender::UpdateStateAndCounters(
+    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+{
+  if (is_decoupled_ == nullptr) {
+    // TODO: Can a model access the response sender on a BLS infer request?
+    throw PythonBackendException(
+        "Unable to send response. Response sender has no reference to the "
+        "decoupled state of the model.");
+  }
+  bool is_decoupled = *is_decoupled_;
+
+  std::lock_guard<std::mutex> lk(mu_);
+
+  if (!is_decoupled) {
+    if (response != nullptr && number_of_response_sent_ > 0) {
+      throw PythonBackendException(
+          "Unable to send response. Non-decoupled model cannot send more than "
+          "one response.");
+    }
+    if (response == nullptr && flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL &&
+        number_of_response_sent_ == 0) {
+      throw PythonBackendException(
+          "Unable to send response. Non-decoupled model cannot send complete "
+          "final before sending a response.");
+    }
+  }
+
+  if (closed_) {
+    throw PythonBackendException(
+        "Unable to send response. Response sender has been closed.");
+  }
+
+  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    closed_ = true;
+  }
+  number_of_response_sent_++;
 }
 
 void
@@ -64,26 +121,8 @@ ResponseSender::Send(
   // the next available thread to pick up the job during resource contention.
   py::gil_scoped_release release;
 
-  if (closed_) {
-    throw PythonBackendException(
-        "Unable to send response. Response sender has been closed.");
-  }
-
-  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-    closed_ = true;
-  }
-
-  // Check the correctness of the provided flags.
-  if (flags != TRITONSERVER_RESPONSE_COMPLETE_FINAL && flags != 0) {
-    throw PythonBackendException(
-        "Unable to send response. Unsupported flag provided.");
-  }
-
-  if (flags == 0 && infer_response == nullptr) {
-    throw PythonBackendException(
-        "Inference Response object must be provided when the response flags is "
-        "set to zero.");
-  }
+  AssertResponseSenderArgumentsWellFormed(infer_response, flags);
+  UpdateStateAndCounters(infer_response, flags);
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 

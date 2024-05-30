@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <mutex>
+
 #include "infer_response.h"
 #include "pb_cancel.h"
 #include "shm_manager.h"
@@ -36,17 +38,24 @@ class ResponseSender {
  public:
   ResponseSender(
       intptr_t request_address, intptr_t response_factory_address,
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bool const* is_decoupled, std::unique_ptr<SharedMemoryManager>& shm_pool,
       const std::shared_ptr<PbCancel>& pb_cancel);
   ~ResponseSender();
   void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
   bool IsCancelled();
 
  private:
+  void UpdateStateAndCounters(
+      const std::shared_ptr<InferResponse>& response, const uint32_t flags);
+
   intptr_t request_address_;
   intptr_t response_factory_address_;
+  bool const* is_decoupled_;
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
-  bool closed_;
   std::shared_ptr<PbCancel> pb_cancel_;
+
+  std::mutex mu_;
+  bool closed_;
+  size_t number_of_response_sent_;
 };
 }}}  // namespace triton::backend::python
