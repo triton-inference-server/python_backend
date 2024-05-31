@@ -402,13 +402,6 @@ InferRequest::IsCancelled()
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  if (!stub->IsDecoupled()) {
-    throw PythonBackendException(
-        "'get_response_sender' function must be called only when the model is "
-        "using the decoupled transaction policy.");
-  }
-
   return response_sender_;
 }
 
