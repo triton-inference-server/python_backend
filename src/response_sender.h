@@ -44,6 +44,9 @@ class ResponseSender {
   void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
   bool IsCancelled();
 
+  // Can be useful at stopping the model from sending any more responses.
+  void ForceClose();
+
  private:
   void UpdateStateAndCounters(
       const std::shared_ptr<InferResponse>& response, const uint32_t flags);

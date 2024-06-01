@@ -741,6 +741,14 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     error_string_shm = PbString::Create(shm_pool_, error_string);
     response_batch_shm_ptr->error = error_string_shm->ShmHandle();
     response_batch_shm_ptr->is_error_set = true;
+    // Once the error is sent to the backend, the backend is supposed to close
+    // all response factories if not already closed, so closing all response
+    // senders if not already closed to prevent the model from sending more
+    // responses after the factories are closed.
+    for (py::handle py_request : py_request_list) {
+      InferRequest* request = py_request.cast<InferRequest*>();
+      request->GetResponseSender()->ForceClose();
+    }
   }
 }
 

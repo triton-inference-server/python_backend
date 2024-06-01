@@ -245,4 +245,11 @@ ResponseSender::IsCancelled()
   return pb_cancel_->IsCancelled();
 }
 
+void
+ResponseSender::ForceClose()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  closed_ = true;
+}
+
 }}}  // namespace triton::backend::python
