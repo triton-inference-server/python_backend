@@ -147,9 +147,26 @@ ResponseSender::Send(
   }
 
   if (has_gpu_output) {
+    ScopedDefer _([send_message_payload] {
+      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+      send_message_payload->is_stub_turn = false;
+      send_message_payload->cv.notify_one();
+      while (!send_message_payload->is_stub_turn) {
+        // Wait for the stub process to send the response and populate error
+        // message if any.
+        send_message_payload->cv.wait(guard);
+      }
+    });
+
     AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_handle =
         shm_pool_->Load<GPUBuffersShm>(
             send_message_payload->gpu_buffers_handle);
+    if (!gpu_buffers_handle.data_->success) {
+      std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(
+          shm_pool_, gpu_buffers_handle.data_->error);
+      throw PythonBackendException(
+          "Failed to load GPU buffers: " + error->String());
+    }
 
     AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
         gpu_buffers_handle_shm =
@@ -157,12 +174,11 @@ ResponseSender::Send(
                 gpu_buffers_handle.data_->buffers);
     uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
     if (gpu_tensors.size() != gpu_buffer_count) {
-      LOG_ERROR
-          << (std::string(
-                  "GPU buffers size does not match the provided buffers: ") +
-              std::to_string(gpu_tensors.size()) +
-              " != " + std::to_string(gpu_buffer_count));
-      return;
+      throw PythonBackendException(
+          std::string(
+              "GPU buffers size does not match the provided buffers: ") +
+          std::to_string(gpu_tensors.size()) +
+          " != " + std::to_string(gpu_buffer_count));
     }
 
     std::vector<std::unique_ptr<PbMemory>> dst_buffers;
@@ -174,17 +190,6 @@ ResponseSender::Send(
       dst_buffers.emplace_back(std::move(dst_buffer));
       std::shared_ptr<PbTensor>& src_buffer = gpu_tensors[i];
       PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
-    }
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
-      send_message_payload->is_stub_turn = false;
-      send_message_payload->cv.notify_one();
-      while (!send_message_payload->is_stub_turn) {
-        // Wait for the stub process to send the response and populate error
-        // message if any.
-        send_message_payload->cv.wait(guard);
-      }
     }
   }
 
