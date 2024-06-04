@@ -571,7 +571,8 @@ ModelInstanceState::ExecuteBLSRequest(
           reinterpret_cast<bi::managed_external_buffer::handle_t*>(
               request_batch.data_.get() + sizeof(RequestBatch));
       infer_request = InferRequest::LoadFromSharedMemory(
-          Stub()->ShmPool(), *request_handle, false /* open_cuda_handle */);
+          Stub()->ShmPool(), *request_handle, false /* open_cuda_handle */,
+          nullptr /* is_model_decoupled */);
 
       // If the BLS inputs are in GPU an additional round trip between the
       // stub process and the main process is required. The reason is that we
