@@ -747,7 +747,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     // responses after the factories are closed.
     for (py::handle py_request : py_request_list) {
       InferRequest* request = py_request.cast<InferRequest*>();
-      request->GetResponseSender()->ForceClose();
+      request->GetResponseSender()->Close();
     }
   }
 }

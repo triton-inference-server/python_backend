@@ -36,7 +36,7 @@
 namespace triton { namespace backend { namespace python {
 
 void
-AssertResponseSenderArgumentsWellFormed(
+CheckResponseSenderArguments(
     const std::shared_ptr<InferResponse>& response, const uint32_t flags)
 {
   // Check the correctness of the provided flags.
@@ -121,7 +121,7 @@ ResponseSender::Send(
   // the next available thread to pick up the job during resource contention.
   py::gil_scoped_release release;
 
-  AssertResponseSenderArgumentsWellFormed(infer_response, flags);
+  CheckResponseSenderArguments(infer_response, flags);
   UpdateStateAndCounters(infer_response, flags);
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
@@ -246,7 +246,7 @@ ResponseSender::IsCancelled()
 }
 
 void
-ResponseSender::ForceClose()
+ResponseSender::Close()
 {
   std::lock_guard<std::mutex> lk(mu_);
   closed_ = true;

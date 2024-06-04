@@ -45,7 +45,7 @@ class ResponseSender {
   bool IsCancelled();
 
   // Can be useful at stopping the model from sending any more responses.
-  void ForceClose();
+  void Close();
 
  private:
   void UpdateStateAndCounters(
