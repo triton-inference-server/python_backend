@@ -107,27 +107,8 @@ PyDefaultArgumentToMutableType(const py::object& argument)
 void
 AsyncEventFutureDoneCallback(const py::object& py_future)
 {
-  // TODO: Why using `py_future.result()` with error hangs on exit?
-  try {
-    py::object exception = py_future.attr("exception")();
-    if (!py::isinstance<py::none>(exception)) {
-      std::string err_msg = "";
-      py::object traceback = py::module_::import("traceback")
-                                 .attr("TracebackException")
-                                 .attr("from_exception")(exception)
-                                 .attr("format")();
-      for (py::handle line : traceback) {
-        err_msg += py::str(line);
-      }
-      LOG_ERROR << err_msg;
-    }
-  }
-  catch (const PythonBackendException& pb_exception) {
-    LOG_ERROR << pb_exception.what();
-  }
-  catch (const py::error_already_set& error) {
-    LOG_ERROR << error.what();
-  }
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  stub->BackgroundFutureDone(py_future);
 }
 
 void
@@ -556,6 +537,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   async_event_loop_ = py::none();
+  background_futures_ = py::module_::import("builtins").attr("set")();
 
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
@@ -838,9 +820,43 @@ Stub::RunCoroutine(py::object coroutine, bool in_background)
     py_future.attr("add_done_callback")(
         py::module_::import("c_python_backend_utils")
             .attr("async_event_future_done_callback"));
+    background_futures_.attr("add")(py_future);
     return py::none();
   }
   return py_future.attr("result")();
+}
+
+void
+Stub::BackgroundFutureDone(const py::object& py_future)
+{
+  // TODO: Why using `py_future.result()` with error hangs on exit?
+  try {
+    py::object exception = py_future.attr("exception")();
+    if (!py::isinstance<py::none>(exception)) {
+      std::string err_msg = "";
+      py::object traceback = py::module_::import("traceback")
+                                 .attr("TracebackException")
+                                 .attr("from_exception")(exception)
+                                 .attr("format")();
+      for (py::handle line : traceback) {
+        err_msg += py::str(line);
+      }
+      LOG_ERROR << err_msg;
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    LOG_ERROR << pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    LOG_ERROR << error.what();
+  }
+  // Remove future from background
+  try {
+    background_futures_.attr("remove")(py_future);
+  }
+  catch (const py::error_already_set& error) {
+    LOG_ERROR << "Cannot remove future from background; " << error.what();
+  }
 }
 
 void
@@ -923,6 +939,7 @@ Stub::~Stub()
   {
     py::gil_scoped_acquire acquire;
     async_event_loop_ = py::none();
+    background_futures_ = py::none();
     model_instance_ = py::none();
   }
   stub_instance_.reset();

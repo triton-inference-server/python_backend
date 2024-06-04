@@ -260,6 +260,8 @@ class Stub {
 
   py::object RunCoroutine(py::object coroutine, bool in_background);
 
+  void BackgroundFutureDone(const py::object& py_future);
+
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
@@ -367,6 +369,7 @@ class Stub {
   py::object deserialize_bytes_;
   py::object serialize_bytes_;
   py::object async_event_loop_;
+  py::object background_futures_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
