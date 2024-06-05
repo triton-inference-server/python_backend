@@ -323,8 +323,7 @@ ModelInstanceState::LaunchStubProcess()
       model_state->StateForBackend()->thread_pool_size);
 
   queue_monitor_thread_ = true;
-  decoupled_monitor_ =
-      std::thread(&ModelInstanceState::MessageQueueMonitor, this);
+  queue_monitor_ = std::thread(&ModelInstanceState::MessageQueueMonitor, this);
   request_executor_ = std::make_unique<RequestExecutor>(
       Stub()->ShmPool(), model_state->TritonServer());
 
@@ -1393,7 +1392,7 @@ ModelInstanceState::~ModelInstanceState()
     thread_pool_->wait();
     // Push a dummy message to signal the thread to terminate.
     Stub()->ParentMessageQueue()->Push(DUMMY_MESSAGE);
-    decoupled_monitor_.join();
+    queue_monitor_.join();
   }
   // Terminate stub first to allow any last messages to be received by the back
   // end before deallocating the queue memory

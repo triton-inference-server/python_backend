@@ -287,8 +287,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   std::thread stub_to_parent_queue_monitor_;
   bool stub_to_parent_thread_;
-  // Decoupled monitor thread
-  std::thread decoupled_monitor_;
+  // Queue monitor thread
+  std::thread queue_monitor_;
   bool queue_monitor_thread_;
   std::mutex mu_;
   std::condition_variable cv_;
