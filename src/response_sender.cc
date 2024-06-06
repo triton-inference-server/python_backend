@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -35,13 +35,31 @@
 
 namespace triton { namespace backend { namespace python {
 
+void
+CheckResponseSenderArguments(
+    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+{
+  // Check the correctness of the provided flags.
+  if (flags != TRITONSERVER_RESPONSE_COMPLETE_FINAL && flags != 0) {
+    throw PythonBackendException(
+        "Unable to send response. Unsupported flag provided.");
+  }
+
+  if (flags == 0 && response == nullptr) {
+    throw PythonBackendException(
+        "Inference Response object must be provided when the response flags is "
+        "set to zero.");
+  }
+}
+
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bool const* is_decoupled, std::unique_ptr<SharedMemoryManager>& shm_pool,
     const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
-      response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false), pb_cancel_(pb_cancel)
+      response_factory_address_(response_factory_address),
+      is_decoupled_(is_decoupled), shm_pool_(shm_pool), pb_cancel_(pb_cancel),
+      closed_(false), number_of_response_sent_(0)
 {
 }
 
@@ -51,6 +69,45 @@ ResponseSender::~ResponseSender()
   stub->EnqueueCleanupId(
       reinterpret_cast<void*>(response_factory_address_),
       PYTHONSTUB_DecoupledResponseFactoryCleanup);
+}
+
+void
+ResponseSender::UpdateStateAndCounters(
+    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+{
+  if (is_decoupled_ == nullptr) {
+    // TODO: Can a model access the response sender on a BLS infer request?
+    throw PythonBackendException(
+        "Unable to send response. Response sender has no reference to the "
+        "decoupled state of the model.");
+  }
+  bool is_decoupled = *is_decoupled_;
+
+  std::lock_guard<std::mutex> lk(mu_);
+
+  if (!is_decoupled) {
+    if (response != nullptr && number_of_response_sent_ > 0) {
+      throw PythonBackendException(
+          "Unable to send response. Non-decoupled model cannot send more than "
+          "one response.");
+    }
+    if (response == nullptr && flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL &&
+        number_of_response_sent_ == 0) {
+      throw PythonBackendException(
+          "Unable to send response. Non-decoupled model cannot send complete "
+          "final before sending a response.");
+    }
+  }
+
+  if (closed_) {
+    throw PythonBackendException(
+        "Unable to send response. Response sender has been closed.");
+  }
+
+  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    closed_ = true;
+  }
+  number_of_response_sent_++;
 }
 
 void
@@ -64,26 +121,8 @@ ResponseSender::Send(
   // the next available thread to pick up the job during resource contention.
   py::gil_scoped_release release;
 
-  if (closed_) {
-    throw PythonBackendException(
-        "Unable to send response. Response sender has been closed.");
-  }
-
-  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-    closed_ = true;
-  }
-
-  // Check the correctness of the provided flags.
-  if (flags != TRITONSERVER_RESPONSE_COMPLETE_FINAL && flags != 0) {
-    throw PythonBackendException(
-        "Unable to send response. Unsupported flag provided.");
-  }
-
-  if (flags == 0 && infer_response == nullptr) {
-    throw PythonBackendException(
-        "Inference Response object must be provided when the response flags is "
-        "set to zero.");
-  }
+  CheckResponseSenderArguments(infer_response, flags);
+  UpdateStateAndCounters(infer_response, flags);
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
@@ -147,9 +186,26 @@ ResponseSender::Send(
   }
 
   if (has_gpu_output) {
+    ScopedDefer _([send_message_payload] {
+      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+      send_message_payload->is_stub_turn = false;
+      send_message_payload->cv.notify_one();
+      while (!send_message_payload->is_stub_turn) {
+        // Wait for the stub process to send the response and populate error
+        // message if any.
+        send_message_payload->cv.wait(guard);
+      }
+    });
+
     AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_handle =
         shm_pool_->Load<GPUBuffersShm>(
             send_message_payload->gpu_buffers_handle);
+    if (!gpu_buffers_handle.data_->success) {
+      std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(
+          shm_pool_, gpu_buffers_handle.data_->error);
+      throw PythonBackendException(
+          "Failed to load GPU buffers: " + error->String());
+    }
 
     AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
         gpu_buffers_handle_shm =
@@ -157,12 +213,11 @@ ResponseSender::Send(
                 gpu_buffers_handle.data_->buffers);
     uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
     if (gpu_tensors.size() != gpu_buffer_count) {
-      LOG_ERROR
-          << (std::string(
-                  "GPU buffers size does not match the provided buffers: ") +
-              std::to_string(gpu_tensors.size()) +
-              " != " + std::to_string(gpu_buffer_count));
-      return;
+      throw PythonBackendException(
+          std::string(
+              "GPU buffers size does not match the provided buffers: ") +
+          std::to_string(gpu_tensors.size()) +
+          " != " + std::to_string(gpu_buffer_count));
     }
 
     std::vector<std::unique_ptr<PbMemory>> dst_buffers;
@@ -174,17 +229,6 @@ ResponseSender::Send(
       dst_buffers.emplace_back(std::move(dst_buffer));
       std::shared_ptr<PbTensor>& src_buffer = gpu_tensors[i];
       PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
-    }
-
-    {
-      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
-      send_message_payload->is_stub_turn = false;
-      send_message_payload->cv.notify_one();
-      while (!send_message_payload->is_stub_turn) {
-        // Wait for the stub process to send the response and populate error
-        // message if any.
-        send_message_payload->cv.wait(guard);
-      }
     }
   }
 
@@ -204,6 +248,13 @@ bool
 ResponseSender::IsCancelled()
 {
   return pb_cancel_->IsCancelled();
+}
+
+void
+ResponseSender::Close()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  closed_ = true;
 }
 
 }}}  // namespace triton::backend::python

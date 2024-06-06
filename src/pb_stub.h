@@ -253,19 +253,18 @@ class Stub {
   /// Execute a batch of requests.
   void ProcessRequests(RequestBatch* request_batch_shm_ptr);
 
-  void ProcessRequestsDecoupled(RequestBatch* request_batch_shm_ptr);
+  void ProcessReturnedResponses(
+      py::list py_requests, py::object py_responses_obj);
 
   py::object GetAsyncEventLoop();
 
-  void RunCoroutine(py::object coroutine);
+  py::object RunCoroutine(py::object coroutine, bool in_background);
 
   /// Get the memory manager message queue
   std::unique_ptr<MessageQueue<uint64_t>>& MemoryManagerQueue();
 
   /// Get the shared memory pool
   std::unique_ptr<SharedMemoryManager>& ShmPool() { return shm_pool_; }
-
-  void ProcessResponse(InferResponse* response);
 
   void ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message);
 

@@ -118,7 +118,7 @@ class InferRequest {
   static std::unique_ptr<InferRequest> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t request_handle,
-      bool open_cuda_handle);
+      bool open_cuda_handle, bool const* is_model_decoupled);
 
   /// Disallow copying the inference request object.
   DISALLOW_COPY_AND_ASSIGN(InferRequest);
@@ -135,7 +135,8 @@ class InferRequest {
       std::unique_ptr<PbString>& model_name_shm,
       std::vector<std::shared_ptr<PbTensor>>& input_tensors,
       std::unique_ptr<PbString>& parameters_shm,
-      std::unique_ptr<InferenceTrace>& infer_trace_shm);
+      std::unique_ptr<InferenceTrace>& infer_trace_shm,
+      bool const* is_model_decoupled);
 
   std::string request_id_;
   CorrelationId correlation_id_;

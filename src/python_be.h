@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -287,9 +287,9 @@ class ModelInstanceState : public BackendModelInstance {
 
   std::thread stub_to_parent_queue_monitor_;
   bool stub_to_parent_thread_;
-  // Decoupled monitor thread
-  std::thread decoupled_monitor_;
-  bool decoupled_thread_;
+  // Queue monitor thread
+  std::thread queue_monitor_;
+  bool queue_monitor_thread_;
   std::mutex mu_;
   std::condition_variable cv_;
   std::unique_ptr<IPCMessage> received_message_;
@@ -309,30 +309,12 @@ class ModelInstanceState : public BackendModelInstance {
   // Launch stub process.
   TRITONSERVER_Error* LaunchStubProcess();
 
-  TRITONSERVER_Error* SendMessageToStub(
-      bi::managed_external_buffer::handle_t message);
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
 
-  // Checks whether the stub process is live
-  bool IsStubProcessAlive();
-
-  // Get a message from the stub process
-  void SendMessageAndReceiveResponse(
-      bi::managed_external_buffer::handle_t message,
-      bi::managed_external_buffer::handle_t& response, bool& restart,
-      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-      TRITONBACKEND_Request** requests, const uint32_t request_count);
-
-  // Responds to all the requests with an error message.
-  void RespondErrorToAllRequests(
-      const char* message,
-      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-      TRITONBACKEND_Request** requests, const uint32_t request_count);
-
-  // In the decoupled mode, the parent message queue is monitored only by this
-  // function during the execute phase. No other thread should pop any message
-  // from the message queue in the decoupled mode.
-  void DecoupledMessageQueueMonitor();
+  // The parent message queue is monitored only by this function during the
+  // execute phase. No other thread should pop any message from the message
+  // queue.
+  void MessageQueueMonitor();
 
   // This function is executed on a separate thread and monitors the queue for
   // message sent from stub to parent process.
@@ -347,14 +329,8 @@ class ModelInstanceState : public BackendModelInstance {
       TRITONBACKEND_Request* request,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
 
-  // Process all the requests obtained from Triton.
-  void ProcessRequests(
-      TRITONBACKEND_Request** requests, const uint32_t request_count,
-      std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
-      bool& restart);
-
   // Process all the requests in the decoupled mode.
-  TRITONSERVER_Error* ProcessRequestsDecoupled(
+  TRITONSERVER_Error* ProcessRequests(
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
       PbMetricReporter& pb_metric_reporter);
@@ -367,9 +343,6 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Cleanup BLS responses
   void CleanupBLSResponses();
-
-  // Wait for BLS requests to complete
-  void WaitForBLSRequestsToFinish();
 
   // Check the incoming requests for errors
   TRITONSERVER_Error* CheckIncomingRequests(
