@@ -479,6 +479,12 @@ Upon return from the execute function all tensor data associated with the
 InferenceRequest objects passed to the function are deleted, and so
 InferenceRequest objects should not be retained by the Python model.
 
+Starting from 24.06, models may choose to send the response using the
+`InferenceResponseSender` as illustrated on [Decoupled mode](#decoupled-mode).
+Since the model is in default mode, it must send exactly one response per
+request. The `pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL` flag must be sent
+either with the response or as a flag only response afterward.
+
 #### Error Handling
 
 In case one of the requests has an error, you can use the `TritonError` object
