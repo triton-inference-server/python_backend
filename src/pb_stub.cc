@@ -537,7 +537,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   c_python_backend_utils.attr("shared_memory") = py::cast(shm_pool_.get());
 
   async_event_loop_ = py::none();
-  background_futures_ = py::module_::import("builtins").attr("set")();
+  background_futures_ = py::set();
 
   py::object TritonPythonModel = sys.attr("TritonPythonModel");
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
