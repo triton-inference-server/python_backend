@@ -829,6 +829,15 @@ Stub::RunCoroutine(py::object coroutine, bool in_background)
 void
 Stub::BackgroundFutureDone(const py::object& py_future)
 {
+  ScopedDefer _([this, &py_future] {
+    // Remove future from background
+    try {
+      background_futures_.attr("remove")(py_future);
+    }
+    catch (const py::error_already_set& error) {
+      LOG_ERROR << "Cannot remove future from background; " << error.what();
+    }
+  });
   // TODO: Why using `py_future.result()` with error hangs on exit?
   try {
     py::object exception = py_future.attr("exception")();
@@ -849,13 +858,6 @@ Stub::BackgroundFutureDone(const py::object& py_future)
   }
   catch (const py::error_already_set& error) {
     LOG_ERROR << error.what();
-  }
-  // Remove future from background
-  try {
-    background_futures_.attr("remove")(py_future);
-  }
-  catch (const py::error_already_set& error) {
-    LOG_ERROR << "Cannot remove future from background; " << error.what();
   }
 }
 
