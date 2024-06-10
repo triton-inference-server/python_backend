@@ -54,12 +54,15 @@ CheckResponseSenderArguments(
 
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    bool const* is_decoupled, std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bool const* is_decoupled,
+    const std::set<std::string>& requested_output_names,
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
     const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address),
-      is_decoupled_(is_decoupled), shm_pool_(shm_pool), pb_cancel_(pb_cancel),
-      closed_(false), number_of_response_sent_(0)
+      is_decoupled_(is_decoupled),
+      requested_output_names_(requested_output_names), shm_pool_(shm_pool),
+      pb_cancel_(pb_cancel), closed_(false), number_of_response_sent_(0)
 {
 }
 
@@ -71,9 +74,8 @@ ResponseSender::~ResponseSender()
       PYTHONSTUB_DecoupledResponseFactoryCleanup);
 }
 
-void
-ResponseSender::UpdateStateAndCounters(
-    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+bool
+ResponseSender::IsDecoupled() const
 {
   if (is_decoupled_ == nullptr) {
     // TODO: Can a model access the response sender on a BLS infer request?
@@ -81,7 +83,14 @@ ResponseSender::UpdateStateAndCounters(
         "Unable to send response. Response sender has no reference to the "
         "decoupled state of the model.");
   }
-  bool is_decoupled = *is_decoupled_;
+  return *is_decoupled_;
+}
+
+void
+ResponseSender::UpdateStateAndCounters(
+    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+{
+  bool is_decoupled = IsDecoupled();
 
   std::lock_guard<std::mutex> lk(mu_);
 
@@ -111,6 +120,16 @@ ResponseSender::UpdateStateAndCounters(
 }
 
 void
+ResponseSender::PruneNonRequestedOutputs(
+    const std::shared_ptr<InferResponse>& infer_response) const
+{
+  // TODO: should this be limited to non decoupled only?
+  if (!IsDecoupled() && infer_response) {
+    infer_response->PruneOutputTensors(requested_output_names_);
+  }
+}
+
+void
 ResponseSender::Send(
     std::shared_ptr<InferResponse> infer_response, const uint32_t flags)
 {
@@ -123,6 +142,7 @@ ResponseSender::Send(
 
   CheckResponseSenderArguments(infer_response, flags);
   UpdateStateAndCounters(infer_response, flags);
+  PruneNonRequestedOutputs(infer_response);
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
