@@ -74,8 +74,9 @@ ResponseSender::~ResponseSender()
       PYTHONSTUB_DecoupledResponseFactoryCleanup);
 }
 
-bool
-ResponseSender::IsDecoupled() const
+void
+ResponseSender::UpdateStateAndCounters(
+    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
 {
   if (is_decoupled_ == nullptr) {
     // TODO: Can a model access the response sender on a BLS infer request?
@@ -83,14 +84,7 @@ ResponseSender::IsDecoupled() const
         "Unable to send response. Response sender has no reference to the "
         "decoupled state of the model.");
   }
-  return *is_decoupled_;
-}
-
-void
-ResponseSender::UpdateStateAndCounters(
-    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
-{
-  bool is_decoupled = IsDecoupled();
+  bool is_decoupled = *is_decoupled_;
 
   std::lock_guard<std::mutex> lk(mu_);
 
@@ -120,16 +114,6 @@ ResponseSender::UpdateStateAndCounters(
 }
 
 void
-ResponseSender::PruneNonRequestedOutputs(
-    const std::shared_ptr<InferResponse>& infer_response) const
-{
-  // TODO: should this be limited to non decoupled only?
-  if (!IsDecoupled() && infer_response) {
-    infer_response->PruneOutputTensors(requested_output_names_);
-  }
-}
-
-void
 ResponseSender::Send(
     std::shared_ptr<InferResponse> infer_response, const uint32_t flags)
 {
@@ -142,7 +126,9 @@ ResponseSender::Send(
 
   CheckResponseSenderArguments(infer_response, flags);
   UpdateStateAndCounters(infer_response, flags);
-  PruneNonRequestedOutputs(infer_response);
+  if (infer_response) {
+    infer_response->PruneOutputTensors(requested_output_names_);
+  }
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 

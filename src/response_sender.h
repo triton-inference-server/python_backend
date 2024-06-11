@@ -50,11 +50,8 @@ class ResponseSender {
   void Close();
 
  private:
-  bool IsDecoupled() const;
   void UpdateStateAndCounters(
       const std::shared_ptr<InferResponse>& response, const uint32_t flags);
-  void PruneNonRequestedOutputs(
-      const std::shared_ptr<InferResponse>& infer_response) const;
 
   intptr_t request_address_;
   intptr_t response_factory_address_;
