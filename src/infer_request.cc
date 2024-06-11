@@ -68,8 +68,6 @@ InferRequest::InferRequest(
     }
   }
 
-  inputs_ = inputs;                                  // TODO: do we need this?
-  requested_output_names_ = requested_output_names;  // TODO: do we need this?
 #ifdef TRITON_PB_STUB
   pb_cancel_ =
       std::make_shared<PbCancel>(response_factory_address_, request_address_);
