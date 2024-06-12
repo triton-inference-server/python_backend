@@ -54,12 +54,15 @@ CheckResponseSenderArguments(
 
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    bool const* is_decoupled, std::unique_ptr<SharedMemoryManager>& shm_pool,
+    bool const* is_decoupled,
+    const std::set<std::string>& requested_output_names,
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
     const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address),
-      is_decoupled_(is_decoupled), shm_pool_(shm_pool), pb_cancel_(pb_cancel),
-      closed_(false), number_of_response_sent_(0)
+      is_decoupled_(is_decoupled),
+      requested_output_names_(requested_output_names), shm_pool_(shm_pool),
+      pb_cancel_(pb_cancel), closed_(false), number_of_response_sent_(0)
 {
 }
 
@@ -123,6 +126,9 @@ ResponseSender::Send(
 
   CheckResponseSenderArguments(infer_response, flags);
   UpdateStateAndCounters(infer_response, flags);
+  if (infer_response) {
+    infer_response->PruneOutputTensors(requested_output_names_);
+  }
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
