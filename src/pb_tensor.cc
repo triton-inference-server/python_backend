@@ -35,6 +35,11 @@ namespace py = pybind11;
 #endif
 #include "pb_tensor.h"
 
+// WAR for undefined ssize_t on Windows: https://stackoverflow.com/a/35368387
+#if defined(_MSC_VER)
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
 
 namespace triton { namespace backend { namespace python {
 
