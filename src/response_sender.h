@@ -38,7 +38,9 @@ class ResponseSender {
  public:
   ResponseSender(
       intptr_t request_address, intptr_t response_factory_address,
-      bool const* is_decoupled, std::unique_ptr<SharedMemoryManager>& shm_pool,
+      bool const* is_decoupled,
+      const std::set<std::string>& requested_output_names,
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
       const std::shared_ptr<PbCancel>& pb_cancel);
   ~ResponseSender();
   void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
@@ -54,6 +56,7 @@ class ResponseSender {
   intptr_t request_address_;
   intptr_t response_factory_address_;
   bool const* is_decoupled_;
+  std::set<std::string> requested_output_names_;
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
   std::shared_ptr<PbCancel> pb_cancel_;
 
