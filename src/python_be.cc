@@ -34,65 +34,6 @@
 #include "pb_log.h"
 
 namespace triton { namespace backend { namespace python {
-namespace {
-  
-TRITONSERVER_Error*
-CheckInputStringShape(
-    std::shared_ptr<PbTensor> tensor, const char* name)
-{
-  size_t element_idx = 0;
-
-  // For string data type, we always need to have the data on CPU so
-  // that we can read string length properly.
-  const char* content = reinterpret_cast<char*>(tensor->DataPtr());
-  size_t content_byte_size = tensor->ByteSize();
-  const size_t request_element_cnt = GetElementCount(tensor->Dims());
-
-  // Each string in 'content' is a 4-byte length followed by the string itself with no
-  // null-terminator.
-  while (content_byte_size >= sizeof(uint32_t)) {
-    if (element_idx >= request_element_cnt) {
-      return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INVALID_ARG,
-              std::string(
-                  "unexpected number of string elements " +
-                  std::to_string(element_idx + 1) + " for inference input '" +
-                  name + "', expecting " + std::to_string(request_element_cnt))
-                  .c_str());
-    }
-
-    const uint32_t len = *(reinterpret_cast<const uint32_t*>(content));
-    content += sizeof(uint32_t);
-    content_byte_size -= sizeof(uint32_t);
-
-    if (content_byte_size < len) {
-      return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_INVALID_ARG,
-              std::string(
-                  "incomplete string data for inference input '" +
-                  std::string(name) + "', expecting string of length " +
-                  std::to_string(len) + " but only " +
-                  std::to_string(content_byte_size) + " bytes available")
-                  .c_str());
-    }
-
-    content += len;
-    content_byte_size -= len;
-    element_idx++;
-  }
-
-  if (element_idx != request_element_cnt) {
-    return TRITONSERVER_ErrorNew(
-                      TRITONSERVER_ERROR_INTERNAL,
-                      std::string(
-                          "expected " + std::to_string(request_element_cnt) +
-                          " strings for inference input '" + name + "', got " +
-                          std::to_string(element_idx))
-                          .c_str());
-  }
-  return nullptr;
-}
-}
 
 namespace bi = boost::interprocess;
 
@@ -485,7 +426,15 @@ ModelInstanceState::GetInputTensor(
     }
 
     if (input_dtype == TRITONSERVER_TYPE_BYTES) {
-      RETURN_IF_ERROR(CheckInputStringShape(input_tensor, input_name));
+      const char* content = reinterpret_cast<char*>(input_tensor->DataPtr());
+      size_t content_byte_size = input_tensor->ByteSize();
+      const size_t request_element_cnt = GetElementCount(input_tensor->Dims());
+      size_t element_idx = 0;  // placeholder
+      auto callback = [](const size_t, const char*, const uint32_t) {
+      };  // no-op
+      RETURN_IF_ERROR(ValidateStringBuffer(
+          content, content_byte_size, request_element_cnt, input_name,
+          &element_idx, callback));
     }
   } else {
 #ifdef TRITON_ENABLE_GPU
