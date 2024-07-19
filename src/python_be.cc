@@ -429,12 +429,9 @@ ModelInstanceState::GetInputTensor(
       const char* content = reinterpret_cast<char*>(input_tensor->DataPtr());
       size_t content_byte_size = input_tensor->ByteSize();
       const size_t request_element_cnt = GetElementCount(input_tensor->Dims());
-      size_t element_idx = 0;  // placeholder
-      auto callback = [](const size_t, const char*, const uint32_t) {
-      };  // no-op
       RETURN_IF_ERROR(ValidateStringBuffer(
           content, content_byte_size, request_element_cnt, input_name,
-          &element_idx, callback));
+          nullptr /* str_list */));
     }
   } else {
 #ifdef TRITON_ENABLE_GPU
