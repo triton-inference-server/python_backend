@@ -168,6 +168,8 @@ triton_to_pybind_dtype(TRITONSERVER_DataType data_type)
       dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
       break;
     case TRITONSERVER_TYPE_BF16:
+      // Currently skipping this call via `if (BF16)` check, but probably
+      // need to handle this or set some default/invalid dtype.
       throw PythonBackendException("TYPE_BF16 not currently supported.");
     case TRITONSERVER_TYPE_INVALID:
       throw PythonBackendException("Dtype is invalid.");
@@ -240,6 +242,10 @@ triton_to_dlpack_type(TRITONSERVER_DataType triton_dtype)
     case TRITONSERVER_TYPE_BYTES:
       throw PythonBackendException(
           "TYPE_BYTES tensors cannot be converted to DLPack.");
+    case TRITONSERVER_TYPE_BF16:
+      dl_code = DLDataTypeCode::kDLBfloat;
+      dt_size = 16;
+      break;
 
     default:
       throw PythonBackendException(
@@ -299,6 +305,15 @@ dlpack_to_triton_type(const DLDataType& data_type)
     if (data_type.bits == 8) {
       return TRITONSERVER_TYPE_BOOL;
     }
+  }
+
+  if (data_type.code == DLDataTypeCode::kDLBfloat) {
+    if (data_type.bits != 16) {
+      throw PythonBackendException(
+          "Expected BF16 tensor to have 16 bits, but had: " +
+          std::to_string(data_type.bits));
+    }
+    return TRITONSERVER_TYPE_BF16;
   }
 
   return TRITONSERVER_TYPE_INVALID;
