@@ -515,12 +515,18 @@ PbTensor::Name() const
 const py::array*
 PbTensor::AsNumpy() const
 {
-  if (IsCPU()) {
-    return &numpy_array_;
-  } else {
+  if (!IsCPU()) {
     throw PythonBackendException(
         "Tensor is stored in GPU and cannot be converted to NumPy.");
   }
+
+  if (dtype_ == TRITONSERVER_TYPE_BF16) {
+    throw PythonBackendException(
+        "Tensor dtype is BF16 and cannot be converted to NumPy. Use "
+        "to_dlpack() and from_dlpack() instead.");
+  }
+
+  return &numpy_array_;
 }
 #endif  // TRITON_PB_STUB
 
