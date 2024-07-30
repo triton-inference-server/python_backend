@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -168,8 +168,8 @@ triton_to_pybind_dtype(TRITONSERVER_DataType data_type)
       dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
       break;
     case TRITONSERVER_TYPE_BF16:
-      // Currently skipping this call via `if (BF16)` check, but probably
-      // need to handle this or set some default/invalid dtype.
+      // NOTE: Currently skipping this call via `if (BF16)` check, but may
+      // want to better handle this or set some default/invalid dtype.
       throw PythonBackendException("TYPE_BF16 not currently supported.");
     case TRITONSERVER_TYPE_INVALID:
       throw PythonBackendException("Dtype is invalid.");
