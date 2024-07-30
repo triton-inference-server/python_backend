@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -152,7 +152,10 @@ PbTensor::PbTensor(
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
-    if (dtype != TRITONSERVER_TYPE_BYTES) {
+    if (dtype == TRITONSERVER_TYPE_BF16) {
+      // No native numpy representation for BF16. DLPack should be used instead.
+      numpy_array_ = py::none();
+    } else if (dtype != TRITONSERVER_TYPE_BYTES) {
       py::object numpy_array =
           py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
       numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
@@ -512,12 +515,18 @@ PbTensor::Name() const
 const py::array*
 PbTensor::AsNumpy() const
 {
-  if (IsCPU()) {
-    return &numpy_array_;
-  } else {
+  if (!IsCPU()) {
     throw PythonBackendException(
         "Tensor is stored in GPU and cannot be converted to NumPy.");
   }
+
+  if (dtype_ == TRITONSERVER_TYPE_BF16) {
+    throw PythonBackendException(
+        "Tensor dtype is BF16 and cannot be converted to NumPy. Use "
+        "to_dlpack() and from_dlpack() instead.");
+  }
+
+  return &numpy_array_;
 }
 #endif  // TRITON_PB_STUB
 
@@ -643,7 +652,10 @@ PbTensor::PbTensor(
 #ifdef TRITON_PB_STUB
   if (memory_type_ == TRITONSERVER_MEMORY_CPU ||
       memory_type_ == TRITONSERVER_MEMORY_CPU_PINNED) {
-    if (dtype_ != TRITONSERVER_TYPE_BYTES) {
+    if (dtype_ == TRITONSERVER_TYPE_BF16) {
+      // No native numpy representation for BF16. DLPack should be used instead.
+      numpy_array_ = py::none();
+    } else if (dtype_ != TRITONSERVER_TYPE_BYTES) {
       py::object numpy_array =
           py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
       numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));

@@ -1557,6 +1557,10 @@ input0 = pb_utils.Tensor.from_dlpack("INPUT0", pytorch_tensor)
 This method only supports contiguous Tensors that are in C-order. If the tensor
 is not C-order contiguous an exception will be raised.
 
+For python models with input or output tensors of type BFloat16 (BF16), the
+`as_numpy()` method is not supported, and the `from_dlpack` and `to_dlpack`
+methods must be used instead.
+
 ## `pb_utils.Tensor.is_cpu() -> bool`
 
 This function can be used to check whether a tensor is placed in CPU or not.
