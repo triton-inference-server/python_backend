@@ -424,6 +424,15 @@ ModelInstanceState::GetInputTensor(
       RETURN_IF_ERROR(backend::ReadInputTensor(
           request, input_name, input_buffer, &byte_size));
     }
+
+    if (input_dtype == TRITONSERVER_TYPE_BYTES) {
+      const char* content = reinterpret_cast<char*>(input_tensor->DataPtr());
+      size_t content_byte_size = input_tensor->ByteSize();
+      const size_t request_element_cnt = GetElementCount(input_tensor->Dims());
+      RETURN_IF_ERROR(ValidateStringBuffer(
+          content, content_byte_size, request_element_cnt, input_name,
+          nullptr /* str_list */));
+    }
   } else {
 #ifdef TRITON_ENABLE_GPU
     // Attempt to use the cuda shared memory pool for GPU tensor.
