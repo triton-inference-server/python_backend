@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <mutex>
 
 #include "infer_response.h"
@@ -52,6 +53,7 @@ class ResponseSender {
  private:
   void UpdateStateAndCounters(
       const std::shared_ptr<InferResponse>& response, const uint32_t flags);
+  void DeleteResponseFactory();
 
   intptr_t request_address_;
   intptr_t response_factory_address_;
@@ -63,5 +65,7 @@ class ResponseSender {
   std::mutex mu_;
   bool closed_;
   size_t number_of_response_sent_;
+
+  std::atomic<bool> response_factory_deleted_;
 };
 }}}  // namespace triton::backend::python
