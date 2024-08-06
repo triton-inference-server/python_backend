@@ -62,16 +62,14 @@ ResponseSender::ResponseSender(
       response_factory_address_(response_factory_address),
       is_decoupled_(is_decoupled),
       requested_output_names_(requested_output_names), shm_pool_(shm_pool),
-      pb_cancel_(pb_cancel), closed_(false), number_of_response_sent_(0)
+      pb_cancel_(pb_cancel), closed_(false), number_of_response_sent_(0),
+      response_factory_deleted_(false)
 {
 }
 
 ResponseSender::~ResponseSender()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  stub->EnqueueCleanupId(
-      reinterpret_cast<void*>(response_factory_address_),
-      PYTHONSTUB_DecoupledResponseFactoryCleanup);
+  DeleteResponseFactory();
 }
 
 void
@@ -248,6 +246,10 @@ ResponseSender::Send(
           "An error occurred while sending a response.");
     }
   }
+
+  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    DeleteResponseFactory();
+  }
 }
 
 bool
@@ -261,6 +263,18 @@ ResponseSender::Close()
 {
   std::lock_guard<std::mutex> lk(mu_);
   closed_ = true;
+}
+
+void
+ResponseSender::DeleteResponseFactory()
+{
+  bool already_deleted = response_factory_deleted_.exchange(true);
+  if (!already_deleted) {
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    stub->EnqueueCleanupId(
+        reinterpret_cast<void*>(response_factory_address_),
+        PYTHONSTUB_DecoupledResponseFactoryCleanup);
+  }
 }
 
 }}}  // namespace triton::backend::python
