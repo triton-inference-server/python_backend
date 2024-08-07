@@ -63,6 +63,7 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_MetricRequestValue,
   PYTHONSTUB_MetricRequestIncrement,
   PYTHONSTUB_MetricRequestSet,
+  PYTHONSTUB_MetricRequestObserve,
   PYTHONSTUB_LoadModelRequest,
   PYTHONSTUB_UnloadModelRequest,
   PYTHONSTUB_ModelReadinessRequest,

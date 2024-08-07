@@ -97,8 +97,11 @@ class MetricFamily {
 
   /// Create a metric from the metric family and store it in the metric map.
   /// \param labels The labels of the metric.
+  /// \param buckets Monotonically increasing values representing the
+  /// bucket boundaries. For histogram only.
   /// \return Returns the shared pointer to the created metric.
-  std::shared_ptr<Metric> CreateMetric(const py::object& labels);
+  std::shared_ptr<Metric> CreateMetric(
+      const py::object& labels, const py::object& buckets);
 #else
   /// Initialize the TRITONSERVER_MetricFamily object.
   /// \return Returns the address of the TRITONSERVER_MetricFamily object.
