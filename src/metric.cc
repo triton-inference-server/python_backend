@@ -124,13 +124,10 @@ Metric::Metric(
     size_t bucket_size = buckets_shm_->ByteSize() / sizeof(double);
     std::vector<double> buckets;
     buckets.reserve(bucket_size);
-    printf("xxxxxxxxxxxxxx: [");
     for (size_t i = 0; i < bucket_size; ++i) {
       buckets.emplace_back(
           reinterpret_cast<double*>(buckets_shm_->DataPtr())[i]);
-      printf("%f, ", reinterpret_cast<double*>(buckets_shm_->DataPtr())[i]);
     }
-    printf("]\n");
     buckets_ = std::move(buckets);
   }
 
