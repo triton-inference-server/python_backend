@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -57,6 +57,9 @@ PbCancel::ShmPayload()
 bool
 PbCancel::IsCancelled()
 {
+  // Release the GIL. Python objects are not accessed during the check.
+  py::gil_scoped_release gil_release;
+
   std::unique_lock<std::mutex> lk(mu_);
   // The cancelled flag can only move from false to true, not the other way, so
   // it is checked on each query until cancelled and then implicitly cached.
