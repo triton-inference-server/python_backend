@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -166,19 +166,39 @@ MetricFamily::SendCreateMetricFamilyRequest()
 }
 
 std::shared_ptr<Metric>
-MetricFamily::CreateMetric(const py::object& labels)
+MetricFamily::CreateMetric(const py::object& labels, const py::object& buckets)
 {
   if (!labels.is_none()) {
     if (!py::isinstance<py::dict>(labels)) {
       throw PythonBackendException(
-          "Failed to create metric. Labels must be a "
-          "dictionary.");
+          "Failed to create metric. Labels must be a dictionary.");
     }
   }
 
   py::module json = py::module_::import("json");
   std::string labels_str = std::string(py::str(json.attr("dumps")(labels)));
-  auto metric = std::make_shared<Metric>(labels_str, metric_family_address_);
+
+  std::optional<std::vector<double>> buckets_vec;
+  if (!buckets.is_none()) {
+    if (!py::isinstance<py::list>(buckets)) {
+      throw PythonBackendException(
+          "Failed to create metric. Buckets must be a list.");
+    }
+    if (kind_ == kCounter || kind_ == kGauge) {
+      throw PythonBackendException(
+          "Failed to create metric. Unexpected buckets found.");
+    }
+    buckets_vec = buckets.cast<std::vector<double>>();
+  } else {
+    if (kind_ == kHistogram) {
+      throw PythonBackendException(
+          "Failed to create metric. Missing required buckets.");
+    }
+    buckets_vec = std::nullopt;
+  }
+
+  auto metric =
+      std::make_shared<Metric>(labels_str, buckets_vec, metric_family_address_);
   {
     std::lock_guard<std::mutex> lock(metric_map_mu_);
     metric_map_.insert({metric->MetricAddress(), metric});
@@ -205,6 +225,8 @@ MetricFamily::ToTritonServerMetricKind(const MetricKind& kind)
       return TRITONSERVER_METRIC_KIND_COUNTER;
     case kGauge:
       return TRITONSERVER_METRIC_KIND_GAUGE;
+    case kHistogram:
+      return TRITONSERVER_METRIC_KIND_HISTOGRAM;
     default:
       throw PythonBackendException("Unknown metric kind");
   }

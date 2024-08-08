@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -63,6 +63,7 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_MetricRequestValue,
   PYTHONSTUB_MetricRequestIncrement,
   PYTHONSTUB_MetricRequestSet,
+  PYTHONSTUB_MetricRequestObserve,
   PYTHONSTUB_LoadModelRequest,
   PYTHONSTUB_UnloadModelRequest,
   PYTHONSTUB_ModelReadinessRequest,

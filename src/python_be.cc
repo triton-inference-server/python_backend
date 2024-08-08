@@ -758,7 +758,8 @@ ModelInstanceState::StubToParentMQMonitor()
       case PYTHONSTUB_MetricRequestDelete:
       case PYTHONSTUB_MetricRequestValue:
       case PYTHONSTUB_MetricRequestIncrement:
-      case PYTHONSTUB_MetricRequestSet: {
+      case PYTHONSTUB_MetricRequestSet:
+      case PYTHONSTUB_MetricRequestObserve: {
         ProcessMetricRequest(message);
         break;
       }
@@ -978,6 +979,7 @@ ModelInstanceState::ProcessMetricRequest(
             }
             case PYTHONSTUB_MetricRequestIncrement:
             case PYTHONSTUB_MetricRequestSet:
+            case PYTHONSTUB_MetricRequestObserve:
             case PYTHONSTUB_MetricRequestValue: {
               metric->HandleMetricOperation(metrics_message_ptr, command);
               break;
