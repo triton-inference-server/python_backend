@@ -564,6 +564,24 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_config_params[pair.first.c_str()] = pair.second;
   }
 
+  // Set metrics_mode value based on the build flag.
+#ifdef TRITON_ENABLE_METRICS
+#if defined(TRITON_ENABLE_METRICS_CPU) && defined(TRITON_ENABLE_METRICS_GPU)
+  model_config_params["metrics_mode"] = "all";
+#else  // defined(TRITON_ENABLE_METRICS_CPU) &&
+       // defined(TRITON_ENABLE_METRICS_GPU)
+#ifdef TRITON_ENABLE_METRICS_CPU
+  model_config_params["metrics_mode"] = "cpu";
+#endif  // TRITON_ENABLE_METRICS_CPU
+#ifdef TRITON_ENABLE_METRICS_GPU
+  model_config_params["metrics_mode"] = "gpu";
+#endif  // TRITON_ENABLE_METRICS_GPU
+#endif  // defined(TRITON_ENABLE_METRICS_CPU) &&
+        // defined(TRITON_ENABLE_METRICS_GPU)
+#else   // TRITON_ENABLE_METRICS
+  model_config_params["metrics_mode"] = "off";
+#endif  // TRITON_ENABLE_METRICS
+
   LaunchStubToParentQueueMonitor();
   LaunchParentToStubQueueMonitor();
 
