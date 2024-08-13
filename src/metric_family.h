@@ -131,8 +131,8 @@ class MetricFamily {
   std::string name_;
   // The description of the metric family.
   std::string description_;
-  // The metric kind of the metric family. Currently only supports GAUGE and
-  // COUNTER.
+  // The metric kind of the metric family. Currently only supports GAUGE,
+  // COUNTER and HISTOGRAM.
   MetricKind kind_;
   // The address of the TRITONSERVER_MetricFamily object.
   void* metric_family_address_;
