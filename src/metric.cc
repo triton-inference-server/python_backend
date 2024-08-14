@@ -358,6 +358,16 @@ Metric::Increment(const double& value)
 void
 Metric::SetValue(const double& value)
 {
+  // SetValue and Observe share the same C API TRITONSERVER_MetricSet.
+  // Throws if SetValue is called by a histogram metric.
+  TRITONSERVER_MetricKind kind;
+  THROW_IF_TRITON_ERROR(TRITONSERVER_GetMetricKind(
+      reinterpret_cast<TRITONSERVER_Metric*>(metric_address_), &kind));
+  if (kind == TRITONSERVER_METRIC_KIND_HISTOGRAM) {
+    throw PythonBackendException(
+        "TRITONSERVER_METRIC_KIND_HISTOGRAM does not support SetValue");
+  }
+
   auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricSet(triton_metric, value));
 }
@@ -365,6 +375,19 @@ Metric::SetValue(const double& value)
 void
 Metric::Observe(const double& value)
 {
+  // SetValue and Observe share the same C API TRITONSERVER_MetricSet.
+  // Throws if Observe is called by a non-histogram metric.
+  TRITONSERVER_MetricKind kind;
+  THROW_IF_TRITON_ERROR(TRITONSERVER_GetMetricKind(
+      reinterpret_cast<TRITONSERVER_Metric*>(metric_address_), &kind));
+  if (kind == TRITONSERVER_METRIC_KIND_COUNTER) {
+    throw PythonBackendException(
+        "TRITONSERVER_METRIC_KIND_COUNTER does not support Observe");
+  } else if (kind == TRITONSERVER_METRIC_KIND_GAUGE) {
+    throw PythonBackendException(
+        "TRITONSERVER_METRIC_KIND_GAUGE does not support Observe");
+  }
+
   auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricSet(triton_metric, value));
 }

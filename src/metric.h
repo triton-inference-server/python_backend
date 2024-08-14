@@ -166,8 +166,8 @@ class Metric {
 
   // The labels of the metric, which is the identifier of the metric.
   std::string labels_;
-  // Monotonically increasing values representing the
-  // bucket boundaries. For histogram only.
+  // Monotonically increasing values representing bucket boundaries for creating
+  // histogram metric.
   std::optional<std::vector<double>> buckets_;
   // The value used for incrementing or setting the metric.
   double operation_value_;
