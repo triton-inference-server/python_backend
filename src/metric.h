@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,9 +26,11 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "ipc_message.h"
+#include "pb_memory.h"
 #include "pb_string.h"
 #include "pb_utils.h"
 
@@ -47,6 +49,8 @@ namespace triton { namespace backend { namespace python {
 struct MetricShm {
   // The shared memory handle of the labels in PbString format.
   bi::managed_external_buffer::handle_t labels_shm_handle;
+  // The shared memory handle of the buckets in PbMemory format.
+  bi::managed_external_buffer::handle_t buckets_shm_handle;
   // The value used for incrementing or setting the metric.
   double operation_value;
   // The address of the TRITONSERVER_Metric object.
@@ -58,7 +62,10 @@ struct MetricShm {
 
 class Metric {
  public:
-  Metric(const std::string& labels, void* metric_family_address);
+  Metric(
+      const std::string& labels,
+      std::optional<const std::vector<double>> buckets,
+      void* metric_family_address);
 
   ~Metric();
 
@@ -97,6 +104,10 @@ class Metric {
   /// \param value The value to set the metric to.
   void SendSetValueRequest(const double& value);
 
+  /// Send the request to the parent process to observe the value to the metric.
+  /// \param value The value to set the metric to.
+  void SendObserveRequest(const double& value);
+
   /// Send the request to the parent process to get the value of the metric.
   /// \return Returns the value of the metric.
   double SendGetValueRequest();
@@ -132,6 +143,10 @@ class Metric {
   /// \param value The value to set the metric to.
   void SetValue(const double& value);
 
+  /// Use Triton C API to sample the observation to the metric.
+  /// \param value The value to sample observation to the metric.
+  void Observe(const double& value);
+
   /// Use Triton C API to get the value of the metric.
   double GetValue();
 
@@ -146,10 +161,14 @@ class Metric {
   // The private constructor for creating a Metric object from shared memory.
   Metric(
       AllocatedSharedMemory<MetricShm>& custom_metric_shm,
-      std::unique_ptr<PbString>& labels_shm);
+      std::unique_ptr<PbString>& labels_shm,
+      std::unique_ptr<PbMemory>& buckets);
 
   // The labels of the metric, which is the identifier of the metric.
   std::string labels_;
+  // Monotonically increasing values representing bucket boundaries for creating
+  // histogram metric.
+  std::optional<std::vector<double>> buckets_;
   // The value used for incrementing or setting the metric.
   double operation_value_;
   // The address of the TRITONSERVER_Metric object.
@@ -168,6 +187,7 @@ class Metric {
   MetricShm* custom_metric_shm_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
   std::unique_ptr<PbString> labels_shm_;
+  std::unique_ptr<PbMemory> buckets_shm_;
 };
 
 }}};  // namespace triton::backend::python
