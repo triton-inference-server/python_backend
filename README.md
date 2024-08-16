@@ -1656,12 +1656,12 @@ import triton_python_backend_utils as pb_utils
 class TritonPythonModel:
     def initialize(self, args):
       # Create a MetricFamily object to report the latency of the model
-      # execution. The 'kind' parameter must be either 'COUNTER' or
-      # 'GAUGE'.
+      # execution. The 'kind' parameter must be either 'COUNTER',
+      # 'GAUGE' or 'HISTOGRAM'.
       self.metric_family = pb_utils.MetricFamily(
           name="preprocess_latency_ns",
           description="Cumulative time spent pre-processing requests",
-          kind=pb_utils.MetricFamily.COUNTER # or pb_utils.MetricFamily.GAUGE
+          kind=pb_utils.MetricFamily.COUNTER
       )
 
       # Create a Metric object under the MetricFamily object. The 'labels'

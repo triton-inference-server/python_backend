@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -171,7 +171,7 @@ struct ResponseBatch : SendMessageBase {
 
 enum LogLevel { kInfo = 0, kWarning, kError, kVerbose };
 
-enum MetricKind { kCounter = 0, kGauge };
+enum MetricKind { kCounter = 0, kGauge, kHistogram };
 
 struct LogSendMessage : SendMessageBase {
   bi::managed_external_buffer::handle_t filename;

@@ -1824,11 +1824,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<Metric, std::shared_ptr<Metric>>(module, "Metric")
       .def("increment", &Metric::SendIncrementRequest)
       .def("set", &Metric::SendSetValueRequest)
+      .def("observe", &Metric::SendObserveRequest)
       .def("value", &Metric::SendGetValueRequest);
 
   py::enum_<MetricKind>(module, "MetricKind")
       .value("COUNTER", MetricKind::kCounter)
       .value("GAUGE", MetricKind::kGauge)
+      .value("HISTOGRAM", MetricKind::kHistogram)
       .export_values();
 
   py::class_<MetricFamily, std::shared_ptr<MetricFamily>>(
@@ -1839,9 +1841,11 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           py::arg("kind").none(false))
       .def(
           "Metric", &MetricFamily::CreateMetric,
-          py::arg("labels").none(true) = py::none());
+          py::arg("labels").none(true) = py::none(),
+          py::arg("buckets").none(true) = py::none());
   module.attr("MetricFamily").attr("COUNTER") = MetricKind::kCounter;
   module.attr("MetricFamily").attr("GAUGE") = MetricKind::kGauge;
+  module.attr("MetricFamily").attr("HISTOGRAM") = MetricKind::kHistogram;
 
   module.def(
       "load_model", &LoadModel, py::arg("model_name").none(false),

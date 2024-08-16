@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -32,9 +32,12 @@
 
 namespace triton { namespace backend { namespace python {
 
-Metric::Metric(const std::string& labels, void* metric_family_address)
-    : labels_(labels), operation_value_(0), metric_address_(nullptr),
-      metric_family_address_(metric_family_address), is_cleared_(false)
+Metric::Metric(
+    const std::string& labels, std::optional<const std::vector<double>> buckets,
+    void* metric_family_address)
+    : labels_(labels), buckets_(buckets), operation_value_(0),
+      metric_address_(nullptr), metric_family_address_(metric_family_address),
+      is_cleared_(false)
 {
 #ifdef TRITON_PB_STUB
   SendCreateMetricRequest();
@@ -62,6 +65,20 @@ Metric::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   custom_metric_shm_ptr_->metric_family_address = metric_family_address_;
   custom_metric_shm_ptr_->metric_address = metric_address_;
 
+  // Histogram specific case
+  if (buckets_.has_value()) {
+    auto buckets_size = buckets_.value().size() * sizeof(double);
+    std::unique_ptr<PbMemory> buckets_shm = PbMemory::Create(
+        shm_pool, TRITONSERVER_MemoryType::TRITONSERVER_MEMORY_CPU, 0,
+        buckets_size, reinterpret_cast<char*>(buckets_.value().data()),
+        false /* copy_gpu */);
+    custom_metric_shm_ptr_->buckets_shm_handle = buckets_shm->ShmHandle();
+    buckets_shm_ = std::move(buckets_shm);
+  } else {
+    custom_metric_shm_ptr_->buckets_shm_handle = 0;
+    buckets_shm_ = nullptr;
+  }
+
   // Save the references to shared memory.
   custom_metric_shm_ = std::move(custom_metric_shm);
   labels_shm_ = std::move(labels_shm);
@@ -80,17 +97,40 @@ Metric::LoadFromSharedMemory(
   std::unique_ptr<PbString> labels_shm = PbString::LoadFromSharedMemory(
       shm_pool, custom_metric_shm_ptr->labels_shm_handle);
 
-  return std::unique_ptr<Metric>(new Metric(custom_metric_shm, labels_shm));
+  std::unique_ptr<PbMemory> buckets_shm = nullptr;
+  if (custom_metric_shm_ptr->buckets_shm_handle != 0) {
+    buckets_shm = PbMemory::LoadFromSharedMemory(
+        shm_pool, custom_metric_shm_ptr->buckets_shm_handle,
+        false /* open_cuda_handle */);
+  }
+
+  return std::unique_ptr<Metric>(
+      new Metric(custom_metric_shm, labels_shm, buckets_shm));
 }
 
 Metric::Metric(
     AllocatedSharedMemory<MetricShm>& custom_metric_shm,
-    std::unique_ptr<PbString>& labels_shm)
+    std::unique_ptr<PbString>& labels_shm,
+    std::unique_ptr<PbMemory>& buckets_shm)
     : custom_metric_shm_(std::move(custom_metric_shm)),
-      labels_shm_(std::move(labels_shm))
+      labels_shm_(std::move(labels_shm)), buckets_shm_(std::move(buckets_shm))
 {
   custom_metric_shm_ptr_ = custom_metric_shm_.data_.get();
+
+  // FIXME: This constructor is called during each
+  // set/increment/observe/get_value call. It only needs the pointers.
   labels_ = labels_shm_->String();
+  if (buckets_shm_ != nullptr) {  // Histogram
+    size_t bucket_size = buckets_shm_->ByteSize() / sizeof(double);
+    std::vector<double> buckets;
+    buckets.reserve(bucket_size);
+    for (size_t i = 0; i < bucket_size; ++i) {
+      buckets.emplace_back(
+          reinterpret_cast<double*>(buckets_shm_->DataPtr())[i]);
+    }
+    buckets_ = std::move(buckets);
+  }
+
   operation_value_ = custom_metric_shm_ptr_->operation_value;
   metric_family_address_ = custom_metric_shm_ptr_->metric_family_address;
   metric_address_ = custom_metric_shm_ptr_->metric_address;
@@ -161,6 +201,24 @@ Metric::SendSetValueRequest(const double& value)
   }
 }
 
+void
+Metric::SendObserveRequest(const double& value)
+{
+  try {
+    CheckIfCleared();
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    operation_value_ = value;
+    SaveToSharedMemory(stub->ShmPool());
+    AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
+    stub->SendMessage<CustomMetricsMessage>(
+        custom_metrics_shm, PYTHONSTUB_MetricRequestObserve, shm_handle_);
+  }
+  catch (const PythonBackendException& pb_exception) {
+    throw PythonBackendException(
+        "Failed to observe metric value: " + std::string(pb_exception.what()));
+  }
+}
+
 double
 Metric::SendGetValueRequest()
 {
@@ -222,14 +280,35 @@ Metric::InitializeTritonMetric()
 {
   std::vector<const TRITONSERVER_Parameter*> labels_params;
   ParseLabels(labels_params, labels_);
+  TRITONSERVER_MetricKind kind;
+  THROW_IF_TRITON_ERROR(TRITONSERVER_GetMetricFamilyKind(
+      reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_),
+      &kind));
+  TRITONSERVER_MetricArgs* args = nullptr;
+  switch (kind) {
+    case TRITONSERVER_METRIC_KIND_COUNTER:
+    case TRITONSERVER_METRIC_KIND_GAUGE:
+      break;
+    case TRITONSERVER_METRIC_KIND_HISTOGRAM: {
+      const std::vector<double>& buckets = buckets_.value();
+      THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsNew(&args));
+      THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsSetHistogram(
+          args, buckets.data(), buckets.size()));
+      break;
+    }
+    default:
+      break;
+  }
+
   TRITONSERVER_Metric* triton_metric = nullptr;
-  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricNew(
+  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricNewWithArgs(
       &triton_metric,
       reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_),
-      labels_params.data(), labels_params.size()));
+      labels_params.data(), labels_params.size(), args));
   for (const auto label : labels_params) {
     TRITONSERVER_ParameterDelete(const_cast<TRITONSERVER_Parameter*>(label));
   }
+  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsDelete(args));
   return reinterpret_cast<void*>(triton_metric);
 }
 
@@ -262,6 +341,8 @@ Metric::HandleMetricOperation(
     Increment(operation_value_);
   } else if (command_type == PYTHONSTUB_MetricRequestSet) {
     SetValue(operation_value_);
+  } else if (command_type == PYTHONSTUB_MetricRequestObserve) {
+    Observe(operation_value_);
   } else {
     throw PythonBackendException("Unknown metric operation");
   }
@@ -279,6 +360,13 @@ Metric::SetValue(const double& value)
 {
   auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
   THROW_IF_TRITON_ERROR(TRITONSERVER_MetricSet(triton_metric, value));
+}
+
+void
+Metric::Observe(const double& value)
+{
+  auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
+  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricObserve(triton_metric, value));
 }
 
 double

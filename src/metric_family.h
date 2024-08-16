@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -97,8 +97,11 @@ class MetricFamily {
 
   /// Create a metric from the metric family and store it in the metric map.
   /// \param labels The labels of the metric.
+  /// \param buckets Monotonically increasing values representing bucket
+  /// boundaries for creating histogram metric.
   /// \return Returns the shared pointer to the created metric.
-  std::shared_ptr<Metric> CreateMetric(const py::object& labels);
+  std::shared_ptr<Metric> CreateMetric(
+      const py::object& labels, const py::object& buckets);
 #else
   /// Initialize the TRITONSERVER_MetricFamily object.
   /// \return Returns the address of the TRITONSERVER_MetricFamily object.
@@ -128,8 +131,8 @@ class MetricFamily {
   std::string name_;
   // The description of the metric family.
   std::string description_;
-  // The metric kind of the metric family. Currently only supports GAUGE and
-  // COUNTER.
+  // The metric kind of the metric family. Currently only supports GAUGE,
+  // COUNTER and HISTOGRAM.
   MetricKind kind_;
   // The address of the TRITONSERVER_MetricFamily object.
   void* metric_family_address_;
