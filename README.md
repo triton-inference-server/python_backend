@@ -809,8 +809,8 @@ Python version is different from Python 3.10 which is shipped by
 default in the Triton containers.**
 
 Python backend uses a *stub* process to connect your `model.py` file to the
-Triton C++ core. This stub process dynamically links to a specific `libpython<X>.<Y>.so` version.
-If you intend to use a Python interpreter with
+Triton C++ core. This stub process dynamically links to a specific
+`libpython<X>.<Y>.so` version. If you intend to use a Python interpreter with
 different version from the default Python backend stub, you need to compile
 your own Python backend stub by following the steps below:
 
