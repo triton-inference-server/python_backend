@@ -690,11 +690,7 @@ ModelInstanceState::MessageQueueMonitor()
 
     // Need to notify the model instance thread that the execute response has
     // been received.
-    if (message->Command() == PYTHONSTUB_ExecuteResponse) {
-      std::lock_guard<std::mutex> guard{mu_};
-      received_message_ = std::move(message);
-      cv_.notify_one();
-    } else if (message->Command() == PYTHONSTUB_ResponseSend) {
+    if (message->Command() == PYTHONSTUB_ResponseSend) {
       std::shared_ptr<IPCMessage> response_send_message = std::move(message);
       std::packaged_task<void()> task([this, response_send_message] {
         ResponseSendDecoupled(response_send_message);
@@ -1055,8 +1051,12 @@ ModelInstanceState::ResponseSendDecoupled(
       send_message_payload->is_stub_turn = true;
       send_message_payload->cv.notify_all();
 
-      while (send_message_payload->is_stub_turn) {
-        send_message_payload->cv.wait(guard);
+      // Only if there is an error we need the extra hop to
+      // make sure the error message lifetime is properly handled
+      if (send_message_payload->has_error) {
+      	while (send_message_payload->is_stub_turn) {
+      	  send_message_payload->cv.wait(guard);
+      	}
       }
     }
   });
@@ -1214,41 +1214,36 @@ ModelInstanceState::ProcessRequests(
   std::unique_ptr<IPCMessage> ipc_message;
   RETURN_IF_EXCEPTION(
       ipc_message =
-          IPCMessage::Create(Stub()->ShmPool(), false /*inline_response*/));
+          IPCMessage::Create(Stub()->ShmPool(), true /*inline_response*/));
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
-  received_message_ = nullptr;
   ScopedDefer _([this] {
     // Push a dummy message to signal the thread to terminate.
     Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
   });
 
   {
-    std::unique_lock<std::mutex> guard{mu_};
     Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
-    cv_.wait(guard, [this] { return received_message_ != nullptr; });
+    bi::scoped_lock<bi::interprocess_mutex> guard{*(ipc_message->ResponseMutex())};
+    ipc_message->ResponseCondition()->wait(guard);
   }
-
-  AllocatedSharedMemory<ResponseBatch> response_batch =
-      Stub()->ShmPool()->Load<ResponseBatch>(received_message_->Args());
-  received_message_.reset();
 
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
   reporter.SetComputeEndNs(compute_end_ns);
   reporter.SetBatchStatistics(total_batch_size);
 
-  if (response_batch.data_->has_error) {
-    if (response_batch.data_->is_error_set) {
-      auto error = PbString::LoadFromSharedMemory(
-          Stub()->ShmPool(), response_batch.data_->error);
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
-    }
+  // if (response_batch.data_->has_error) {
+  //   if (response_batch.data_->is_error_set) {
+  //     auto error = PbString::LoadFromSharedMemory(
+  //         Stub()->ShmPool(), response_batch.data_->error);
+  //     return TRITONSERVER_ErrorNew(
+  //         TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
+  //   }
 
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, "Failed to process the requests.");
-  }
+  //   return TRITONSERVER_ErrorNew(
+  //       TRITONSERVER_ERROR_INTERNAL, "Failed to process the requests.");
+  // }
 
   return nullptr;  // success
 }
@@ -1399,7 +1394,6 @@ ModelInstanceState::~ModelInstanceState()
   Stub()->TerminateStub();
   TerminateMonitor();
   Stub()->ClearQueues();
-  received_message_.reset();
   Stub().reset();
 }
 

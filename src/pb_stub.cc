@@ -403,6 +403,10 @@ Stub::RunCommand()
       RequestBatch* request_batch_shm_ptr =
           reinterpret_cast<RequestBatch*>(request_batch.data_.get());
       ProcessRequests(request_batch_shm_ptr);
+      {
+        bi::scoped_lock<bi::interprocess_mutex> guard{*ipc_message->ResponseMutex()};
+        ipc_message->ResponseCondition()->notify_all();
+      }
 
     } break;
     case PYTHONSTUB_CommandType::PYTHONSTUB_FinalizeRequest:
@@ -671,27 +675,10 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 {
   py::list py_request_list =
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
-  std::unique_ptr<IPCMessage> execute_response =
-      IPCMessage::Create(shm_pool_, false /* Inline response */);
-  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
-
-  AllocatedSharedMemory<ResponseBatch> response_batch =
-      shm_pool_->Construct<ResponseBatch>();
-  ResponseBatch* response_batch_shm_ptr =
-      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
-  execute_response->Args() = response_batch.handle_;
-  bool has_exception = false;
   std::string error_string;
-  std::unique_ptr<PbString> error_string_shm;
-
-  ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
-  ScopedDefer _(
-      [this, &execute_response] { SendIPCMessage(execute_response); });
+  bool has_exception = false;
 
   try {
-    response_batch_shm_ptr->has_error = false;
-    response_batch_shm_ptr->is_error_set = false;
-
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
@@ -737,10 +724,6 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
             "', message: ") +
         error_string;
     LOG_ERROR << err_message.c_str();
-    response_batch_shm_ptr->has_error = true;
-    error_string_shm = PbString::Create(shm_pool_, err_message);
-    response_batch_shm_ptr->error = error_string_shm->ShmHandle();
-    response_batch_shm_ptr->is_error_set = true;
     // Once the error is sent to the backend, the backend is supposed to close
     // all response factories if not already closed, so closing all response
     // senders if not already closed to prevent the model from sending more

@@ -160,9 +160,11 @@ ResponseSender::Send(
 
   ScopedDefer _([send_message_payload] {
     {
-      bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
-      send_message_payload->is_stub_turn = false;
-      send_message_payload->cv.notify_all();
+      if (send_message_payload->has_error) {
+      	bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+      	send_message_payload->is_stub_turn = false;
+      	send_message_payload->cv.notify_all();
+      }
     }
   });
 
