@@ -1229,7 +1229,7 @@ ModelInstanceState::ProcessRequests(
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
   received_message_ = nullptr;
-  ScopedDefer _([this] {
+  ScopedDefer execute_finalize([this] {
     // Push a dummy message to signal the thread to terminate.
     Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
   });
@@ -1240,8 +1240,12 @@ ModelInstanceState::ProcessRequests(
     cv_.wait(guard, [this] { return received_message_ != nullptr; });
   }
 
-  AllocatedSharedMemory<ResponseBatch> response_batch =
-      Stub()->ShmPool()->Load<ResponseBatch>(received_message_->Args());
+
+  AllocatedSharedMemory<char> response_batch = Stub()->ShmPool()->Load<char>(received_message_->Args());
+
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+  
   received_message_.reset();
 
   uint64_t compute_end_ns = 0;
@@ -1249,10 +1253,10 @@ ModelInstanceState::ProcessRequests(
   reporter.SetComputeEndNs(compute_end_ns);
   reporter.SetBatchStatistics(total_batch_size);
 
-  if (response_batch.data_->has_error) {
-    if (response_batch.data_->is_error_set) {
+  if (response_batch_shm_ptr->has_error) {
+    if (response_batch_shm_ptr->is_error_set) {
       auto error = PbString::LoadFromSharedMemory(
-          Stub()->ShmPool(), response_batch.data_->error);
+          Stub()->ShmPool(), response_batch_shm_ptr->error);
       return TRITONSERVER_ErrorNew(
           TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
     }
@@ -1260,6 +1264,202 @@ ModelInstanceState::ProcessRequests(
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, "Failed to process the requests.");
   }
+
+  if (response_batch_shm_ptr->batch_size > 0) {
+     std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
+      new std::vector<TRITONBACKEND_Response*>());
+    responses->reserve(request_count);
+     for (size_t i = 0; i < request_count; i++) {
+      TRITONBACKEND_Response* response;
+      auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
+      if (err == nullptr) {
+        responses->emplace_back(response);
+      } else {
+        responses->emplace_back(nullptr);
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
+        TRITONSERVER_ErrorDelete(err);
+      }
+    }
+    bi::managed_external_buffer::handle_t* response_shm_handle =
+        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+            response_batch.data_.get() + sizeof(ResponseBatch));
+
+    // If the output provided by the model is in GPU, we will pass the list of
+    // buffers provided by Triton to the stub process.
+    // bool has_gpu_output = false;
+    std::vector<bool> requires_deferred_callback;
+
+    std::vector<std::unique_ptr<InferResponse>> shm_responses;
+    std::vector<std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>>
+        gpu_output_buffers(request_count);
+    GPUBuffersHelper gpu_buffer_helper;
+
+    for (uint32_t r = 0; r < request_count; ++r) {
+      NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
+      TRITONBACKEND_Response* response = (*responses)[r];
+      TRITONBACKEND_Request* request = requests[r];
+      uint32_t requested_output_count = 0;
+      requires_deferred_callback.push_back(false);
+
+      shm_responses.emplace_back(nullptr);
+      std::unique_ptr<InferResponse>& infer_response = shm_responses.back();
+      try {
+        if (pb_infer_requests[r]->ReleaseFlags() ==
+            TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
+          // For rescheduled requests, we do not need to send a response.
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseDelete((*responses)[r]),
+              "failed to delete response");
+          (*responses)[r] = nullptr;
+          continue;
+        }
+        infer_response = InferResponse::LoadFromSharedMemory(
+            Stub()->ShmPool(), response_shm_handle[r],
+            false /* open_cuda_handle */);
+        if (infer_response->HasError()) {
+          TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+              infer_response->Error()->Code(),
+              infer_response->Error()->Message().c_str());
+
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseSend(
+                  (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+              "failed sending response");
+          TRITONSERVER_ErrorDelete(err);
+          (*responses)[r] = nullptr;
+
+          // Reset the release flags for the request.
+          pb_infer_requests[r]->SetReleaseFlags(
+              TRITONSERVER_REQUEST_RELEASE_ALL);
+
+          // If has_error is true, we do not look at the response tensors.
+          continue;
+        }
+      }
+      catch (const PythonBackendException& pb_exception) {
+        TRITONSERVER_Error* err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+        LOG_IF_ERROR(
+            TRITONBACKEND_ResponseSend(
+                (*responses)[r], TRITONSERVER_RESPONSE_COMPLETE_FINAL, err),
+            "failed sending response");
+        TRITONSERVER_ErrorDelete(err);
+        (*responses)[r] = nullptr;
+
+        // Reset the release flags for the request.
+        pb_infer_requests[r]->SetReleaseFlags(TRITONSERVER_REQUEST_RELEASE_ALL);
+
+        continue;
+      }
+
+      GUARDED_RESPOND_IF_ERROR(
+          responses, r,
+          TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
+
+      std::set<std::string> requested_output_names;
+      for (size_t j = 0; j < requested_output_count; ++j) {
+        const char* output_name;
+        GUARDED_RESPOND_IF_ERROR(
+            responses, r,
+            TRITONBACKEND_RequestOutputName(request, j, &output_name));
+        requested_output_names.insert(output_name);
+      }
+
+      bool require_deferred_callback = false;
+
+#ifdef TRITON_ENABLE_GPU
+      for (auto& output_tensor : infer_response->OutputTensors()) {
+        if (output_tensor->MemoryType() == TRITONSERVER_MEMORY_GPU) {
+          // Attempt to use the cuda shared memory pool for GPU tensor.
+          ShareCUDAMemoryPool(output_tensor->MemoryTypeId());
+        }
+      }
+#endif  // TRITON_ENABLE_GPU
+
+      gpu_output_buffers[r] =
+          std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>{};
+      infer_response->Send(
+          response, CudaStream(), require_deferred_callback,
+          TRITONSERVER_RESPONSE_COMPLETE_FINAL, Stub()->ShmPool(),
+          gpu_buffer_helper, gpu_output_buffers[r], requested_output_names);
+
+      requires_deferred_callback[r] = require_deferred_callback;
+
+      if (requires_deferred_callback[r]) {
+        // has_gpu_output = true;
+      }
+    }
+
+    // Finalize the execute.
+    execute_finalize.Complete();
+  }
+
+    // If the output tensor is in GPU, there will be a second round trip
+    // required for filling the GPU buffers provided by the main process.
+//     if (has_gpu_output) {
+//       ipc_message->Command() =
+//           PYTHONSTUB_CommandType::PYTHONSTUB_LoadGPUBuffers;
+//       gpu_buffer_helper.Complete(Stub()->ShmPool());
+//       ipc_message->Args() = gpu_buffer_helper.ShmHandle();
+//       SendMessageAndReceiveResponse(
+//           ipc_message->ShmHandle(), response_message, restart, responses,
+//           requests, 0);
+
+//       bool cuda_copy = false;
+
+//       uint32_t response_index = 0;
+//       for (auto& gpu_output_buffer : gpu_output_buffers) {
+//         for (auto& buffer_memory_pair : gpu_output_buffer) {
+//           auto& pb_memory = buffer_memory_pair.first;
+//           void* pointer = buffer_memory_pair.second;
+//           bool cuda_used = false;
+
+//           if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+//             GUARDED_RESPOND_IF_ERROR(
+//                 responses, response_index,
+//                 CopyBuffer(
+//                     "Failed to copy the output tensor to buffer.",
+//                     TRITONSERVER_MEMORY_CPU, 0, TRITONSERVER_MEMORY_CPU, 0,
+//                     pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
+//                     CudaStream(), &cuda_used));
+//             cuda_copy |= cuda_used;
+//           } else if (
+//               (pb_memory->MemoryType() == TRITONSERVER_MEMORY_GPU) &&
+//               pb_memory->UseCUDASharedPool() &&
+//               (pb_memory->DataPtr() != pointer)) {
+//             // If the data pointer from pb_memory is not the same as the
+//             // pointer, it means that the Triton-provided buffer is not used
+//             // during tensor transfer. Instead, an intermediate buffer that uses
+//             // CUDA shared memory pool is used. In this case, we need to copy
+//             // the data from the intermediate buffer back to the Triton-provided
+//             // buffer.
+//             GUARDED_RESPOND_IF_ERROR(
+//                 responses, response_index,
+//                 CopyBuffer(
+//                     "Failed to copy the output tensor to buffer.",
+//                     TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
+//                     TRITONSERVER_MEMORY_GPU, pb_memory->MemoryTypeId(),
+//                     pb_memory->ByteSize(), pb_memory->DataPtr(), pointer,
+//                     CudaStream(), &cuda_used));
+//             cuda_copy |= cuda_used;
+//           }
+//         }
+//         response_index++;
+// #ifdef TRITON_ENABLE_GPU
+//         if (cuda_copy) {
+//           cudaStreamSynchronize(stream_);
+//         }
+// #endif  // TRITON_ENABLE_GPU
+//       }
+//     }
+
+//     bls_defer.Complete();
+//     for (uint32_t r = 0; r < request_count; ++r) {
+//       if (requires_deferred_callback[r]) {
+//         shm_responses[r]->DeferredSendCallback();
+//       }
+//     }
+//   }
 
   return nullptr;  // success
 }

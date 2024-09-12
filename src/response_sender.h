@@ -46,13 +46,13 @@ class ResponseSender {
   ~ResponseSender();
   void Send(std::shared_ptr<InferResponse> response, const uint32_t flags);
   bool IsCancelled();
+  void UpdateStateAndCounters(
+      const std::shared_ptr<InferResponse>& response, const uint32_t flags);
 
   // Can be useful at stopping the model from sending any more responses.
   void Close();
 
  private:
-  void UpdateStateAndCounters(
-      const std::shared_ptr<InferResponse>& response, const uint32_t flags);
   void DeleteResponseFactory();
 
   intptr_t request_address_;

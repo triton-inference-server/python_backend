@@ -657,11 +657,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
       IPCMessage::Create(shm_pool_, false /* Inline response */);
   execute_response->Command() = PYTHONSTUB_ExecuteResponse;
 
-  AllocatedSharedMemory<ResponseBatch> response_batch =
-      shm_pool_->Construct<ResponseBatch>();
-  ResponseBatch* response_batch_shm_ptr =
-      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
-  execute_response->Args() = response_batch.handle_;
+  std::optional<AllocatedSharedMemory<char>> response_batch;
   bool has_exception = false;
   std::string error_string;
   std::unique_ptr<PbString> error_string_shm;
@@ -669,11 +665,8 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   ScopedDefer execute_finalize([this] { stub_message_queue_->Pop(); });
   ScopedDefer _(
       [this, &execute_response] { SendIPCMessage(execute_response); });
-
+  py::object execute_return;
   try {
-    response_batch_shm_ptr->has_error = false;
-    response_batch_shm_ptr->is_error_set = false;
-
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
@@ -683,7 +676,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     {
       NVTX_RANGE(nvtx_, "PyExecute " + name_);
 
-      py::object execute_return =
+      execute_return =
           model_instance_.attr("execute")(py_request_list);
 
       bool is_coroutine = py::module::import("asyncio")
@@ -696,10 +689,10 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         } else {
           py::object coroutine_return =
               RunCoroutine(execute_return, false /* in_background */);
-          ProcessReturnedResponses(py_request_list, coroutine_return);
+          ProcessReturnedResponses(py_request_list, coroutine_return, response_batch);
         }
       } else {
-        ProcessReturnedResponses(py_request_list, execute_return);
+        ProcessReturnedResponses(py_request_list, execute_return, response_batch);
       }
     }
   }
@@ -719,6 +712,12 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
             "', message: ") +
         error_string;
     LOG_ERROR << err_message.c_str();
+    if (!response_batch) {
+      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch));
+    } 
+    ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+
+    response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
     response_batch_shm_ptr->has_error = true;
     error_string_shm = PbString::Create(shm_pool_, err_message);
     response_batch_shm_ptr->error = error_string_shm->ShmHandle();
@@ -732,11 +731,35 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
       request->GetResponseSender()->Close();
     }
   }
+
+  if (!response_batch) {
+      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch));
+      ResponseBatch* response_batch_shm_ptr =reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+      response_batch_shm_ptr->batch_size = 0;
+  }
+  ResponseBatch* response_batch_shm_ptr =reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+  response_batch_shm_ptr->has_error = false;
+  response_batch_shm_ptr->is_error_set = false;
+  execute_response->Args() = response_batch.value().handle_;
+  _.Complete();
+  execute_finalize.Complete();
+}
+
+void
+Stub::ProcessResponse(InferResponse* response)
+{
+  response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
+
+  for (auto& output_tensor : response->OutputTensors()) {
+    if (!output_tensor->IsCPU()) {
+      gpu_tensors_.push_back(output_tensor);
+    }
+  }
 }
 
 void
 Stub::ProcessReturnedResponses(
-    py::list py_requests, py::object py_responses_obj)
+    py::list py_requests, py::object py_responses_obj, std::optional<AllocatedSharedMemory<char>>& response_batch)
 {
   // Return if there is nothing to process.
   if (py::isinstance<py::none>(py_responses_obj)) {
@@ -784,12 +807,32 @@ Stub::ProcessReturnedResponses(
             "return list, found type '" +
             std::string(py::str(py_responses[i].get_type())) + "'.");
       }
+
       std::shared_ptr<InferResponse> response =
           py_responses[i].cast<std::shared_ptr<InferResponse>>();
-      request->GetResponseSender()->Send(
-          response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+      request->GetResponseSender()->UpdateStateAndCounters(response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
     }
   }
+  response_batch = std::move(shm_pool_->Construct<char>(
+      requests_size * sizeof(bi::managed_external_buffer::handle_t) +
+      sizeof(ResponseBatch)));
+  ResponseBatch* response_batch_shm_ptr =
+      reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+
+  bi::managed_external_buffer::handle_t* responses_shm_handle =
+      reinterpret_cast<bi::managed_external_buffer::handle_t*>(
+          response_batch.value().data_.get() + sizeof(ResponseBatch));
+ 
+    for (size_t i = 0; i < responses_size; i++) {
+      // Check the return type of execute function.
+      InferRequest* infer_request = py_requests[i].cast<InferRequest*>();
+      InferResponse* infer_response = py_responses[i].cast<InferResponse*>();
+      infer_response->PruneOutputTensors(
+          infer_request->RequestedOutputNames());
+      ProcessResponse(infer_response);
+      responses_shm_handle[i] = infer_response->ShmHandle();
+    }
+    response_batch_shm_ptr->batch_size = requests_size;
 }
 
 py::object
