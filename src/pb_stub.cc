@@ -402,9 +402,9 @@ Stub::RunCommand()
           shm_pool_->Load<char>(ipc_message->Args());
       RequestBatch* request_batch_shm_ptr =
           reinterpret_cast<RequestBatch*>(request_batch.data_.get());
-      ProcessRequests(request_batch_shm_ptr);
+      ProcessRequests(request_batch_shm_ptr, ipc_message);
       {
-        bi::scoped_lock<bi::interprocess_mutex> guard{*ipc_message->ResponseMutex()};
+        bi::scoped_lock<bi::interprocess_mutex> guard{*(ipc_message->ResponseMutex())};
         ipc_message->ResponseCondition()->notify_all();
       }
 
@@ -671,14 +671,19 @@ Stub::LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr)
 }
 
 void
-Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
+Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr, std::unique_ptr<IPCMessage>& ipc_message)
 {
   py::list py_request_list =
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
-  std::string error_string;
+
   bool has_exception = false;
+  std::string error_string;
+  std::unique_ptr<PbString> error_string_shm;
 
   try {
+    // response_batch_shm_ptr->has_error = false;
+    // response_batch_shm_ptr->is_error_set = false;
+
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_context_.PythonModelPath() +
                             " does not implement `execute` method.";
@@ -710,11 +715,11 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   }
   catch (const PythonBackendException& pb_exception) {
     has_exception = true;
-    error_string = pb_exception.what();
+    // error_string = pb_exception.what();
   }
   catch (const py::error_already_set& error) {
     has_exception = true;
-    error_string = error.what();
+    // error_string = error.what();
   }
 
   if (has_exception) {
@@ -724,6 +729,10 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
             "', message: ") +
         error_string;
     LOG_ERROR << err_message.c_str();
+    // response_batch_shm_ptr->has_error = true;
+    // error_string_shm = PbString::Create(shm_pool_, err_message);
+    // response_batch_shm_ptr->error = error_string_shm->ShmHandle();
+    // response_batch_shm_ptr->is_error_set = true;
     // Once the error is sent to the backend, the backend is supposed to close
     // all response factories if not already closed, so closing all response
     // senders if not already closed to prevent the model from sending more

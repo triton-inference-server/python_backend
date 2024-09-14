@@ -65,10 +65,7 @@ ResponseSender::ResponseSender(
 
 ResponseSender::~ResponseSender()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  stub->EnqueueCleanupId(
-      reinterpret_cast<void*>(response_factory_address_),
-      PYTHONSTUB_DecoupledResponseFactoryCleanup);
+  // DeleteResponseFactory();
 }
 
 void
@@ -126,15 +123,15 @@ ResponseSender::Send(
 
   std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
 
-  AllocatedSharedMemory<ResponseSendMessage> response_send_message =
-      shm_pool_->Construct<ResponseSendMessage>(
-          1 /* count */, true /* aligned */);
+  AllocatedSharedMemory<char> response_send_message =
+      shm_pool_->Construct<char>(
+          sizeof(IPCMessageShm) + sizeof(ResponseSendMessage), true /* aligned */);
 
   if (infer_response) {
     infer_response->SaveToSharedMemory(shm_pool_, false /* copy_gpu */);
   }
 
-  ResponseSendMessage* send_message_payload = response_send_message.data_.get();
+  ResponseSendMessage* send_message_payload = reinterpret_cast<ResponseSendMessage*>(response_send_message.data_.get() + sizeof(IPCMessageShm));
   new (&(send_message_payload->mu)) bi::interprocess_mutex;
   new (&(send_message_payload->cv)) bi::interprocess_condition;
 
@@ -152,11 +149,11 @@ ResponseSender::Send(
   send_message_payload->is_error_set = false;
   send_message_payload->flags = flags;
 
-  std::unique_ptr<IPCMessage> ipc_message =
-      IPCMessage::Create(shm_pool_, false /* inline_response */);
-
+  IPCMessageShm* ipc_message_shm = reinterpret_cast<IPCMessageShm*>(response_send_message.data_.get());
+  ipc_message_shm->inline_response = false;
+  std::unique_ptr<IPCMessage> ipc_message = IPCMessage::Create(ipc_message_shm, response_send_message.handle_);
   ipc_message->Command() = PYTHONSTUB_ResponseSend;
-  ipc_message->Args() = response_send_message.handle_;
+  ipc_message->Args() = response_send_message.handle_ + sizeof(IPCMessageShm);
 
   ScopedDefer _([send_message_payload] {
     {
@@ -164,6 +161,11 @@ ResponseSender::Send(
       	bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
       	send_message_payload->is_stub_turn = false;
       	send_message_payload->cv.notify_all();
+      }
+      if (send_message_payload->has_error) {
+        bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+        send_message_payload->is_stub_turn = false;
+        send_message_payload->cv.notify_all();
       }
     }
   });

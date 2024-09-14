@@ -333,6 +333,8 @@ bool IsUsingCUDAPool(
 // being retrieved from core that are not platform-agnostic.
 void SanitizePath(std::string& path);
 
+uint32_t GetAlignedSize(uint32_t byte_size);
+
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
     TRITONSERVER_Error* error);

@@ -82,7 +82,7 @@ typedef enum PYTHONSTUB_commandtype_enum {
 /// object.
 /// \param response_cond stores the handle for the condition variable
 /// for the response object.
-struct IPCMessageShm {
+struct alignas(16) IPCMessageShm {
   PYTHONSTUB_CommandType command;
   bi::managed_external_buffer::handle_t args;
   bool inline_response = false;
@@ -96,6 +96,9 @@ class IPCMessage {
   static std::unique_ptr<IPCMessage> Create(
       const std::unique_ptr<SharedMemoryManager>& shm_pool,
       bool inline_response);
+  static std::unique_ptr<IPCMessage> Create(
+      IPCMessageShm* ipc_message_shm,
+      bi::managed_external_buffer::handle_t& message_handle);
   static std::unique_ptr<IPCMessage> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t message_handle);
@@ -107,6 +110,7 @@ class IPCMessage {
   bi::interprocess_mutex* ResponseMutex();
   bi::managed_external_buffer::handle_t& Args();
   bi::managed_external_buffer::handle_t ShmHandle();
+  AllocatedSharedMemory<IPCMessageShm>& GetAllocatedSharedMemory();
 
  private:
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm_;
@@ -128,6 +132,8 @@ class IPCMessage {
       AllocatedSharedMemory<IPCMessageShm>& ipc_message_shm,
       AllocatedSharedMemory<bi::interprocess_mutex>& response_mutex_shm,
       AllocatedSharedMemory<bi::interprocess_condition>& response_cond_shm);
+  
+  IPCMessage(IPCMessageShm* ipc_message_shm, bi::managed_external_buffer::handle_t& handle);
 };
 
 }}};  // namespace triton::backend::python

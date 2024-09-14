@@ -692,10 +692,13 @@ ModelInstanceState::MessageQueueMonitor()
     // been received.
     if (message->Command() == PYTHONSTUB_ResponseSend) {
       std::shared_ptr<IPCMessage> response_send_message = std::move(message);
-      std::packaged_task<void()> task([this, response_send_message] {
+      // std::packaged_task<void()> task([this, response_send_message] {
+      // std::packaged_task<void()> task([this, response_send_message] {
         ResponseSendDecoupled(response_send_message);
-      });
-      boost::asio::post(*thread_pool_, std::move(task));
+      // });
+      // boost::asio::post(*thread_pool_, std::move(task));
+      // });
+      // boost::asio::post(*thread_pool_, std::move(task));
     } else if (
         message->Command() == PYTHONSTUB_InferExecRequest ||
         message->Command() == PYTHONSTUB_InferStreamExecRequest) {
@@ -1038,12 +1041,8 @@ void
 ModelInstanceState::ResponseSendDecoupled(
     std::shared_ptr<IPCMessage> response_send_message)
 {
-  AllocatedSharedMemory<ResponseSendMessage> send_message =
-      Stub()->ShmPool()->Load<ResponseSendMessage>(
-          response_send_message->Args());
-
   ResponseSendMessage* send_message_payload =
-      reinterpret_cast<ResponseSendMessage*>(send_message.data_.get());
+      reinterpret_cast<ResponseSendMessage*>(reinterpret_cast<char*>(response_send_message->GetAllocatedSharedMemory().data_.get()) + sizeof(IPCMessageShm));
   std::unique_ptr<PbString> error_message;
   ScopedDefer _([send_message_payload] {
     {
@@ -1217,15 +1216,16 @@ ModelInstanceState::ProcessRequests(
           IPCMessage::Create(Stub()->ShmPool(), true /*inline_response*/));
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
-  ScopedDefer _([this] {
-    // Push a dummy message to signal the thread to terminate.
-    Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
-  });
+  // ScopedDefer _([this] {
+  //   // Push a dummy message to signal the thread to terminate.
+  //   Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
+  // });
 
   {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
     Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
-    bi::scoped_lock<bi::interprocess_mutex> guard{*(ipc_message->ResponseMutex())};
-    ipc_message->ResponseCondition()->wait(guard);
+    ipc_message->ResponseCondition()->wait(lock);
   }
 
   uint64_t compute_end_ns = 0;

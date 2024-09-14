@@ -40,6 +40,8 @@
 
 #include "pb_exception.h"
 
+#define ALIGNMENT_SIZE 16
+
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
 
@@ -90,7 +92,7 @@ struct AllocatedSharedMemory {
 // info is placed in the beginning and the actual object is placed after that
 // (i.e. 4 plus the aligned address is not 16-bytes aligned). The aligned memory
 // is required by semaphore otherwise it may lead to SIGBUS error on ARM.
-struct alignas(16) AllocatedShmOwnership {
+struct alignas(ALIGNMENT_SIZE) AllocatedShmOwnership {
   uint32_t ref_count_;
 };
 

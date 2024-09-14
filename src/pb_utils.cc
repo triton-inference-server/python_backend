@@ -323,4 +323,13 @@ GenerateUUID()
   return boost::uuids::to_string(uuid);
 }
 
+uint32_t
+GetAlignedSize(uint32_t byte_size) {
+  if (byte_size % 16 != 0) {
+    return (byte_size / ALIGNMENT_SIZE + 1) * 16;
+  } else {
+    return byte_size;
+  }
+}
+
 }}}  // namespace triton::backend::python

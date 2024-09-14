@@ -52,8 +52,14 @@ IPCMessage::Create(
     new (response_cond_shm.data_.get()) bi::interprocess_condition{};
   }
 
-  return std::unique_ptr<IPCMessage>(
-      new IPCMessage(ipc_message_shm, response_mutex_shm, response_cond_shm));
+  return std::unique_ptr<IPCMessage>(new IPCMessage(ipc_message_shm, response_mutex_shm, response_cond_shm));
+}
+
+std::unique_ptr<IPCMessage>
+IPCMessage::Create(IPCMessageShm* ipc_message_shm,
+      bi::managed_external_buffer::handle_t& message_handle)
+{
+  return std::unique_ptr<IPCMessage>(new IPCMessage(ipc_message_shm, message_handle));
 }
 
 std::unique_ptr<IPCMessage>
@@ -119,6 +125,12 @@ IPCMessage::ShmHandle()
   return ipc_message_handle_;
 }
 
+AllocatedSharedMemory<IPCMessageShm>&
+IPCMessage::GetAllocatedSharedMemory()
+{
+  return ipc_message_shm_;
+}
+
 IPCMessage::IPCMessage(
     AllocatedSharedMemory<IPCMessageShm>& ipc_message_shm,
     AllocatedSharedMemory<bi::interprocess_mutex>& response_mutex_shm,
@@ -131,6 +143,12 @@ IPCMessage::IPCMessage(
   response_mutex_shm_ptr_ = response_mutex_shm_.data_.get();
   response_cond_shm_ptr_ = response_cond_shm_.data_.get();
   ipc_message_handle_ = ipc_message_shm_.handle_;
+}
+
+IPCMessage::IPCMessage(IPCMessageShm* ipc_message_shm, bi::managed_external_buffer::handle_t& handle)
+{
+  ipc_message_handle_ = handle;
+  ipc_message_shm_ptr_ = ipc_message_shm;
 }
 
 }}};  // namespace triton::backend::python

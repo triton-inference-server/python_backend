@@ -251,7 +251,7 @@ class Stub {
   py::list LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr);
 
   /// Execute a batch of requests.
-  void ProcessRequests(RequestBatch* request_batch_shm_ptr);
+  void ProcessRequests(RequestBatch* request_batch_shm_ptr, std::unique_ptr<IPCMessage>& ipc_message);
 
   void ProcessReturnedResponses(
       py::list py_requests, py::object py_responses_obj);
