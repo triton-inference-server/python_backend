@@ -69,7 +69,7 @@ ResponseSender::ResponseSender(
 
 ResponseSender::~ResponseSender()
 {
-  // DeleteResponseFactory();
+  DeleteResponseFactory();
 }
 
 void
@@ -172,6 +172,10 @@ ResponseSender::Send(
 
   {
     bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
+    // The server will destruct the response factory if the final flag is set.
+    if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      response_factory_deleted_.exchange(true);
+    }
     stub->SendIPCUtilsMessage(ipc_message);
     while (!send_message_payload->is_stub_turn) {
       send_message_payload->cv.wait(guard);
@@ -247,9 +251,6 @@ ResponseSender::Send(
     }
   }
 
-  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-    // DeleteResponseFactory();
-  }
 }
 
 bool
@@ -270,10 +271,10 @@ ResponseSender::DeleteResponseFactory()
 {
   bool already_deleted = response_factory_deleted_.exchange(true);
   if (!already_deleted) {
-    // std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-    // stub->EnqueueCleanupId(
-    //     reinterpret_cast<void*>(response_factory_address_),
-    //     PYTHONSTUB_DecoupledResponseFactoryCleanup);
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    stub->EnqueueCleanupId(
+        reinterpret_cast<void*>(response_factory_address_),
+        PYTHONSTUB_DecoupledResponseFactoryCleanup);
   }
 }
 
