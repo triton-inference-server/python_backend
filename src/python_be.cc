@@ -290,8 +290,8 @@ ModelInstanceState::SaveRequestsToSharedMemory(
         request, &request_timeout));
 
     std::unique_ptr<InferRequest> infer_request;
-    TRITONBACKEND_ResponseFactory* factory_ptr;
-    RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
+    TRITONBACKEND_ResponseFactory* factory_ptr = nullptr;
+    // RETURN_IF_ERROR(TRITONBACKEND_ResponseFactoryNew(&factory_ptr, request));
 
     infer_request = std::make_unique<InferRequest>(
         id, correlation_id, pb_input_tensors, requested_output_names,
@@ -322,8 +322,6 @@ ModelInstanceState::LaunchStubProcess()
   thread_pool_ = std::make_unique<boost::asio::thread_pool>(
       model_state->StateForBackend()->thread_pool_size);
 
-  queue_monitor_thread_ = true;
-  queue_monitor_ = std::thread(&ModelInstanceState::MessageQueueMonitor, this);
   request_executor_ = std::make_unique<RequestExecutor>(
       Stub()->ShmPool(), model_state->TritonServer());
 
@@ -686,44 +684,6 @@ ModelInstanceState::ExecuteBLSRequest(
 }
 
 void
-ModelInstanceState::MessageQueueMonitor()
-{
-  while (queue_monitor_thread_) {
-    bi::managed_external_buffer::handle_t handle =
-        Stub()->ParentMessageQueue()->Pop();
-    if (handle == DUMMY_MESSAGE) {
-      break;
-    }
-    std::unique_ptr<IPCMessage> message =
-        IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), handle);
-
-    // Need to notify the model instance thread that the execute response has
-    // been received.
-    if (message->Command() == PYTHONSTUB_ExecuteResponse) {
-      std::lock_guard<std::mutex> guard{mu_};
-      received_message_ = std::move(message);
-      cv_.notify_one();
-    } else if (message->Command() == PYTHONSTUB_ResponseSend) {
-      std::shared_ptr<IPCMessage> response_send_message = std::move(message);
-      std::packaged_task<void()> task([this, response_send_message] {
-        ResponseSendDecoupled(response_send_message);
-      });
-      boost::asio::post(*thread_pool_, std::move(task));
-    } else if (
-        message->Command() == PYTHONSTUB_InferExecRequest ||
-        message->Command() == PYTHONSTUB_InferStreamExecRequest) {
-      std::shared_ptr<IPCMessage> bls_execute = std::move(message);
-      std::packaged_task<void()> task([this, bls_execute] {
-        ExecuteBLSRequest(
-            bls_execute,
-            (bls_execute->Command() == PYTHONSTUB_InferStreamExecRequest));
-      });
-      boost::asio::post(*thread_pool_, std::move(task));
-    }
-  }
-}
-
-void
 ModelInstanceState::StubToParentMQMonitor()
 {
   while (stub_to_parent_thread_) {
@@ -767,6 +727,25 @@ ModelInstanceState::StubToParentMQMonitor()
       case PYTHONSTUB_LoadModelRequest:
       case PYTHONSTUB_UnloadModelRequest: {
         ProcessModelControlRequest(message);
+        break;
+      }
+      case PYTHONSTUB_ResponseSend: {
+        std::shared_ptr<IPCMessage> response_send_message = std::move(message);
+        std::packaged_task<void()> task([this, response_send_message] {
+          ResponseSendDecoupled(response_send_message);
+        });
+        boost::asio::post(*thread_pool_, std::move(task));
+        break;
+      }
+      case PYTHONSTUB_InferExecRequest:
+      case PYTHONSTUB_InferStreamExecRequest: {
+        std::shared_ptr<IPCMessage> bls_execute = std::move(message);
+        std::packaged_task<void()> task([this, bls_execute] {
+          ExecuteBLSRequest(
+              bls_execute,
+              (bls_execute->Command() == PYTHONSTUB_InferStreamExecRequest));
+        });
+        boost::asio::post(*thread_pool_, std::move(task));
         break;
       }
       default: {
@@ -1228,26 +1207,23 @@ ModelInstanceState::ProcessRequests(
           IPCMessage::Create(Stub()->ShmPool(), false /*inline_response*/));
   ipc_message->Command() = PYTHONSTUB_CommandType::PYTHONSTUB_ExecuteRequest;
   ipc_message->Args() = request_batch.handle_;
-  received_message_ = nullptr;
+
   ScopedDefer execute_finalize([this] {
     // Push a dummy message to signal the thread to terminate.
     Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
   });
 
+  std::unique_ptr<IPCMessage> response;
   {
-    std::unique_lock<std::mutex> guard{mu_};
     Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
-    cv_.wait(guard, [this] { return received_message_ != nullptr; });
+    bi::managed_external_buffer::handle_t response_message;
+    Stub()->ReceiveMessageFromStub(response_message);
+    response = IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), response_message);
   }
-
-
-  AllocatedSharedMemory<char> response_batch = Stub()->ShmPool()->Load<char>(received_message_->Args());
-
+  char* ipc_message_shm = reinterpret_cast<char*>(response->GetAllocatedSharedMemory().data_.get());;
   ResponseBatch* response_batch_shm_ptr =
-      reinterpret_cast<ResponseBatch*>(response_batch.data_.get());
+      reinterpret_cast<ResponseBatch*>(ipc_message_shm + sizeof(IPCMessageShm));
   
-  received_message_.reset();
-
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
   reporter.SetComputeEndNs(compute_end_ns);
@@ -1282,7 +1258,7 @@ ModelInstanceState::ProcessRequests(
     }
     bi::managed_external_buffer::handle_t* response_shm_handle =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-            response_batch.data_.get() + sizeof(ResponseBatch));
+            ipc_message_shm + sizeof(ResponseBatch) + sizeof(IPCMessageShm));
 
     // If the output provided by the model is in GPU, we will pass the list of
     // buffers provided by Triton to the stub process.
@@ -1390,8 +1366,6 @@ ModelInstanceState::ProcessRequests(
       }
     }
 
-    // Finalize the execute.
-    execute_finalize.Complete();
   }
 
     // If the output tensor is in GPU, there will be a second round trip
@@ -1610,7 +1584,6 @@ ModelInstanceState::~ModelInstanceState()
   Stub()->TerminateStub();
   TerminateMonitor();
   Stub()->ClearQueues();
-  received_message_.reset();
   Stub().reset();
 }
 

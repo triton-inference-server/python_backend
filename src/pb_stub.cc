@@ -653,9 +653,8 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 {
   py::list py_request_list =
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
-  std::unique_ptr<IPCMessage> execute_response =
-      IPCMessage::Create(shm_pool_, false /* Inline response */);
-  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
+  std::unique_ptr<IPCMessage> execute_response;
+      // IPCMessage::Create(shm_pool_, false /* Inline response */);
 
   std::optional<AllocatedSharedMemory<char>> response_batch;
   bool has_exception = false;
@@ -713,9 +712,9 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         error_string;
     LOG_ERROR << err_message.c_str();
     if (!response_batch) {
-      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch));
+      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch) + sizeof(IPCMessageShm));
     } 
-    ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+    ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
     response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
     response_batch_shm_ptr->has_error = true;
@@ -733,14 +732,17 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   }
 
   if (!response_batch) {
-      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch));
-      ResponseBatch* response_batch_shm_ptr =reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch) + sizeof(IPCMessageShm));
+      ResponseBatch* response_batch_shm_ptr =reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
       response_batch_shm_ptr->batch_size = 0;
   }
-  ResponseBatch* response_batch_shm_ptr =reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+  ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
   response_batch_shm_ptr->has_error = false;
   response_batch_shm_ptr->is_error_set = false;
+  execute_response = IPCMessage::Create(reinterpret_cast<IPCMessageShm*>(response_batch.value().data_.get()), response_batch.value().handle_);
   execute_response->Args() = response_batch.value().handle_;
+  execute_response->InlineResponse() = false;
+  execute_response->Command() = PYTHONSTUB_ExecuteResponse;
   _.Complete();
   execute_finalize.Complete();
 }
@@ -813,15 +815,15 @@ Stub::ProcessReturnedResponses(
       request->GetResponseSender()->UpdateStateAndCounters(response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
     }
   }
-  response_batch = std::move(shm_pool_->Construct<char>(
+  response_batch = std::move(shm_pool_->Construct<char>(sizeof(IPCMessageShm) + 
       requests_size * sizeof(bi::managed_external_buffer::handle_t) +
       sizeof(ResponseBatch)));
   ResponseBatch* response_batch_shm_ptr =
-      reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+      reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
   bi::managed_external_buffer::handle_t* responses_shm_handle =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-          response_batch.value().data_.get() + sizeof(ResponseBatch));
+          response_batch.value().data_.get() + sizeof(ResponseBatch) + sizeof(IPCMessageShm));
  
     for (size_t i = 0; i < responses_size; i++) {
       // Check the return type of execute function.
