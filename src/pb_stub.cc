@@ -732,19 +732,20 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
       InferRequest* request = py_request.cast<InferRequest*>();
       request->GetResponseSender()->Close();
     }
-  }
-
-  if (!response_batch) {
-    response_batch = shm_pool_->Construct<char>(
-        sizeof(ResponseBatch) + sizeof(IPCMessageShm));
+  } else {
+    if (!response_batch) {
+      response_batch = shm_pool_->Construct<char>(
+          sizeof(ResponseBatch) + sizeof(IPCMessageShm));
+      ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
+          response_batch.value().data_.get() + sizeof(IPCMessageShm));
+      response_batch_shm_ptr->batch_size = 0;
+    }
     ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
-    response_batch_shm_ptr->batch_size = 0;
+    response_batch_shm_ptr->has_error = false;
+    response_batch_shm_ptr->is_error_set = false;
   }
-  ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
-      response_batch.value().data_.get() + sizeof(IPCMessageShm));
-  response_batch_shm_ptr->has_error = false;
-  response_batch_shm_ptr->is_error_set = false;
+
   execute_response = IPCMessage::Create(
       reinterpret_cast<IPCMessageShm*>(response_batch.value().data_.get()),
       response_batch.value().handle_);
