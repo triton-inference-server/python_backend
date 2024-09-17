@@ -278,38 +278,39 @@ Metric::CheckIfCleared()
 void*
 Metric::InitializeTritonMetric()
 {
-  std::vector<const TRITONSERVER_Parameter*> labels_params;
-  ParseLabels(labels_params, labels_);
-  TRITONSERVER_MetricKind kind;
-  THROW_IF_TRITON_ERROR(TRITONSERVER_GetMetricFamilyKind(
-      reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_),
-      &kind));
-  TRITONSERVER_MetricArgs* args = nullptr;
-  switch (kind) {
-    case TRITONSERVER_METRIC_KIND_COUNTER:
-    case TRITONSERVER_METRIC_KIND_GAUGE:
-      break;
-    case TRITONSERVER_METRIC_KIND_HISTOGRAM: {
-      const std::vector<double>& buckets = buckets_.value();
-      THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsNew(&args));
-      THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsSetHistogram(
-          args, buckets.data(), buckets.size()));
-      break;
-    }
-    default:
-      break;
-  }
+  // std::vector<const TRITONSERVER_Parameter*> labels_params;
+  // ParseLabels(labels_params, labels_);
+  // TRITONSERVER_MetricKind kind;
+  // THROW_IF_TRITON_ERROR(TRITONSERVER_GetMetricFamilyKind(
+  //     reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_),
+  //     &kind));
+  // TRITONSERVER_MetricArgs* args = nullptr;
+  // switch (kind) {
+  //   case TRITONSERVER_METRIC_KIND_COUNTER:
+  //   case TRITONSERVER_METRIC_KIND_GAUGE:
+  //     break;
+  //   case TRITONSERVER_METRIC_KIND_HISTOGRAM: {
+  //     const std::vector<double>& buckets = buckets_.value();
+  //     THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsNew(&args));
+  //     THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsSetHistogram(
+  //         args, buckets.data(), buckets.size()));
+  //     break;
+  //   }
+  //   default:
+  //     break;
+  // }
 
-  TRITONSERVER_Metric* triton_metric = nullptr;
-  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricNewWithArgs(
-      &triton_metric,
-      reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_),
-      labels_params.data(), labels_params.size(), args));
-  for (const auto label : labels_params) {
-    TRITONSERVER_ParameterDelete(const_cast<TRITONSERVER_Parameter*>(label));
-  }
-  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsDelete(args));
-  return reinterpret_cast<void*>(triton_metric);
+  // TRITONSERVER_Metric* triton_metric = nullptr;
+  // THROW_IF_TRITON_ERROR(TRITONSERVER_MetricNewWithArgs(
+  //     &triton_metric,
+  //     reinterpret_cast<TRITONSERVER_MetricFamily*>(metric_family_address_),
+  //     labels_params.data(), labels_params.size(), args));
+  // for (const auto label : labels_params) {
+  //   TRITONSERVER_ParameterDelete(const_cast<TRITONSERVER_Parameter*>(label));
+  // }
+  // THROW_IF_TRITON_ERROR(TRITONSERVER_MetricArgsDelete(args));
+  // return reinterpret_cast<void*>(triton_metric);
+  return nullptr;
 }
 
 void
@@ -342,7 +343,7 @@ Metric::HandleMetricOperation(
   } else if (command_type == PYTHONSTUB_MetricRequestSet) {
     SetValue(operation_value_);
   } else if (command_type == PYTHONSTUB_MetricRequestObserve) {
-    Observe(operation_value_);
+    // Observe(operation_value_);
   } else {
     throw PythonBackendException("Unknown metric operation");
   }
@@ -365,8 +366,8 @@ Metric::SetValue(const double& value)
 void
 Metric::Observe(const double& value)
 {
-  auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
-  THROW_IF_TRITON_ERROR(TRITONSERVER_MetricObserve(triton_metric, value));
+  // auto triton_metric = reinterpret_cast<TRITONSERVER_Metric*>(metric_address_);
+  // THROW_IF_TRITON_ERROR(TRITONSERVER_MetricObserve(triton_metric, value));
 }
 
 double
