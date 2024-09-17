@@ -98,8 +98,8 @@ class IPCMessage {
       const std::unique_ptr<SharedMemoryManager>& shm_pool,
       bool inline_response);
 
-  static std::unique_ptr<IPCMessage>
-  Create(IPCMessageShm* ipc_message_shm,
+  static std::unique_ptr<IPCMessage> Create(
+      IPCMessageShm* ipc_message_shm,
       bi::managed_external_buffer::handle_t& message_handle);
   static std::unique_ptr<IPCMessage> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
@@ -135,7 +135,9 @@ class IPCMessage {
       AllocatedSharedMemory<bi::interprocess_mutex>& response_mutex_shm,
       AllocatedSharedMemory<bi::interprocess_condition>& response_cond_shm);
 
-  IPCMessage(IPCMessageShm* ipc_message_shm, bi::managed_external_buffer::handle_t& handle);
+  IPCMessage(
+      IPCMessageShm* ipc_message_shm,
+      bi::managed_external_buffer::handle_t& handle);
 };
 
 }}};  // namespace triton::backend::python

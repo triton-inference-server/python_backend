@@ -57,13 +57,15 @@ IPCMessage::Create(
 }
 
 std::unique_ptr<IPCMessage>
-IPCMessage::Create(IPCMessageShm* ipc_message_shm,
-      bi::managed_external_buffer::handle_t& message_handle)
+IPCMessage::Create(
+    IPCMessageShm* ipc_message_shm,
+    bi::managed_external_buffer::handle_t& message_handle)
 {
-  return std::unique_ptr<IPCMessage>(new IPCMessage(ipc_message_shm, message_handle));
+  return std::unique_ptr<IPCMessage>(
+      new IPCMessage(ipc_message_shm, message_handle));
 }
 
-  AllocatedSharedMemory<IPCMessageShm>&
+AllocatedSharedMemory<IPCMessageShm>&
 IPCMessage::GetAllocatedSharedMemory()
 {
   return ipc_message_shm_;
@@ -146,7 +148,9 @@ IPCMessage::IPCMessage(
   ipc_message_handle_ = ipc_message_shm_.handle_;
 }
 
-IPCMessage::IPCMessage(IPCMessageShm* ipc_message_shm, bi::managed_external_buffer::handle_t& handle)
+IPCMessage::IPCMessage(
+    IPCMessageShm* ipc_message_shm,
+    bi::managed_external_buffer::handle_t& handle)
 {
   ipc_message_handle_ = handle;
   ipc_message_shm_ptr_ = ipc_message_shm;

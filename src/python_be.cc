@@ -1023,7 +1023,7 @@ ModelInstanceState::SendMessageAndReceiveResponse(
     std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
     TRITONBACKEND_Request** requests, const uint32_t request_count)
 {
- SendMessageToStub(message);
+  SendMessageToStub(message);
 
   bi::managed_external_buffer::handle_t response_message;
   auto error = Stub()->ReceiveMessageFromStub(response_message);
@@ -1224,7 +1224,8 @@ ModelInstanceState::ResponseSendDecoupled(
   if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
     std::unique_ptr<
         TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-        lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
+        lresponse_factory(
+            reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
   }
 }
 
@@ -1280,12 +1281,15 @@ ModelInstanceState::ProcessRequests(
     Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
     bi::managed_external_buffer::handle_t response_message;
     Stub()->ReceiveMessageFromStub(response_message);
-    response = IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), response_message);
+    response =
+        IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), response_message);
   }
-  char* ipc_message_shm = reinterpret_cast<char*>(response->GetAllocatedSharedMemory().data_.get());;
+  char* ipc_message_shm =
+      reinterpret_cast<char*>(response->GetAllocatedSharedMemory().data_.get());
+  ;
   ResponseBatch* response_batch_shm_ptr =
       reinterpret_cast<ResponseBatch*>(ipc_message_shm + sizeof(IPCMessageShm));
-  
+
   uint64_t compute_end_ns = 0;
   SET_TIMESTAMP(compute_end_ns);
   reporter.SetComputeEndNs(compute_end_ns);
@@ -1304,10 +1308,10 @@ ModelInstanceState::ProcessRequests(
   }
 
   if (response_batch_shm_ptr->batch_size > 0) {
-     std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
-      new std::vector<TRITONBACKEND_Response*>());
+    std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
+        new std::vector<TRITONBACKEND_Response*>());
     responses->reserve(request_count);
-     for (size_t i = 0; i < request_count; i++) {
+    for (size_t i = 0; i < request_count; i++) {
       TRITONBACKEND_Response* response;
       auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
       if (err == nullptr) {
@@ -1324,7 +1328,6 @@ ModelInstanceState::ProcessRequests(
 
     // If the output provided by the model is in GPU, we will pass the list of
     // buffers provided by Triton to the stub process.
-    // bool has_gpu_output = false;
     std::vector<bool> requires_deferred_callback;
 
     bool has_gpu_output = false;
@@ -1428,6 +1431,8 @@ ModelInstanceState::ProcessRequests(
         has_gpu_output = true;
       }
     }
+
+    execute_finalize.Complete();
 
     // If the output tensor is in GPU, there will be a second round trip
     // required for filling the GPU buffers provided by the main process.

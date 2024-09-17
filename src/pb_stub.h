@@ -254,7 +254,8 @@ class Stub {
   void ProcessRequests(RequestBatch* request_batch_shm_ptr);
 
   void ProcessReturnedResponses(
-    py::list py_requests, py::object py_responses_obj, std::optional<AllocatedSharedMemory<char>>& response_batch);
+      py::list py_requests, py::object py_responses_obj,
+      std::optional<AllocatedSharedMemory<char>>& response_batch);
 
   void ProcessResponse(InferResponse* response);
 

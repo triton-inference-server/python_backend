@@ -654,7 +654,6 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   py::list py_request_list =
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
   std::unique_ptr<IPCMessage> execute_response;
-      // IPCMessage::Create(shm_pool_, false /* Inline response */);
 
   std::optional<AllocatedSharedMemory<char>> response_batch;
   bool has_exception = false;
@@ -675,8 +674,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     {
       NVTX_RANGE(nvtx_, "PyExecute " + name_);
 
-      execute_return =
-          model_instance_.attr("execute")(py_request_list);
+      execute_return = model_instance_.attr("execute")(py_request_list);
 
       bool is_coroutine = py::module::import("asyncio")
                               .attr("iscoroutine")(execute_return)
@@ -688,10 +686,12 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         } else {
           py::object coroutine_return =
               RunCoroutine(execute_return, false /* in_background */);
-          ProcessReturnedResponses(py_request_list, coroutine_return, response_batch);
+          ProcessReturnedResponses(
+              py_request_list, coroutine_return, response_batch);
         }
       } else {
-        ProcessReturnedResponses(py_request_list, execute_return, response_batch);
+        ProcessReturnedResponses(
+            py_request_list, execute_return, response_batch);
       }
     }
   }
@@ -712,11 +712,14 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         error_string;
     LOG_ERROR << err_message.c_str();
     if (!response_batch) {
-      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch) + sizeof(IPCMessageShm));
-    } 
-    ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
+      response_batch = shm_pool_->Construct<char>(
+          sizeof(ResponseBatch) + sizeof(IPCMessageShm));
+    }
+    ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
+        response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
-    response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
+    response_batch_shm_ptr =
+        reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get());
     response_batch_shm_ptr->has_error = true;
     error_string_shm = PbString::Create(shm_pool_, err_message);
     response_batch_shm_ptr->error = error_string_shm->ShmHandle();
@@ -732,14 +735,19 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   }
 
   if (!response_batch) {
-      response_batch = shm_pool_->Construct<char>(sizeof(ResponseBatch) + sizeof(IPCMessageShm));
-      ResponseBatch* response_batch_shm_ptr =reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
-      response_batch_shm_ptr->batch_size = 0;
+    response_batch = shm_pool_->Construct<char>(
+        sizeof(ResponseBatch) + sizeof(IPCMessageShm));
+    ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
+        response_batch.value().data_.get() + sizeof(IPCMessageShm));
+    response_batch_shm_ptr->batch_size = 0;
   }
-  ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
+  ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
+      response_batch.value().data_.get() + sizeof(IPCMessageShm));
   response_batch_shm_ptr->has_error = false;
   response_batch_shm_ptr->is_error_set = false;
-  execute_response = IPCMessage::Create(reinterpret_cast<IPCMessageShm*>(response_batch.value().data_.get()), response_batch.value().handle_);
+  execute_response = IPCMessage::Create(
+      reinterpret_cast<IPCMessageShm*>(response_batch.value().data_.get()),
+      response_batch.value().handle_);
   execute_response->Args() = response_batch.value().handle_;
   execute_response->InlineResponse() = false;
   execute_response->Command() = PYTHONSTUB_ExecuteResponse;
@@ -761,7 +769,8 @@ Stub::ProcessResponse(InferResponse* response)
 
 void
 Stub::ProcessReturnedResponses(
-    py::list py_requests, py::object py_responses_obj, std::optional<AllocatedSharedMemory<char>>& response_batch)
+    py::list py_requests, py::object py_responses_obj,
+    std::optional<AllocatedSharedMemory<char>>& response_batch)
 {
   // Return if there is nothing to process.
   if (py::isinstance<py::none>(py_responses_obj)) {
@@ -812,29 +821,34 @@ Stub::ProcessReturnedResponses(
 
       std::shared_ptr<InferResponse> response =
           py_responses[i].cast<std::shared_ptr<InferResponse>>();
-      request->GetResponseSender()->UpdateStateAndCounters(response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+      request->GetResponseSender()->UpdateStateAndCounters(
+          response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
     }
   }
-  response_batch = std::move(shm_pool_->Construct<char>(sizeof(IPCMessageShm) + 
+  // Return all the created responses using response_batch. The reason
+  // that both of the paths are available is that sending the responses
+  // using response_batch is faster than using `response_sender`.
+  response_batch = std::move(shm_pool_->Construct<char>(
+      sizeof(IPCMessageShm) +
       requests_size * sizeof(bi::managed_external_buffer::handle_t) +
       sizeof(ResponseBatch)));
-  ResponseBatch* response_batch_shm_ptr =
-      reinterpret_cast<ResponseBatch*>(response_batch.value().data_.get() + sizeof(IPCMessageShm));
+  ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
+      response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
   bi::managed_external_buffer::handle_t* responses_shm_handle =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-          response_batch.value().data_.get() + sizeof(ResponseBatch) + sizeof(IPCMessageShm));
- 
-    for (size_t i = 0; i < responses_size; i++) {
-      // Check the return type of execute function.
-      InferRequest* infer_request = py_requests[i].cast<InferRequest*>();
-      InferResponse* infer_response = py_responses[i].cast<InferResponse*>();
-      infer_response->PruneOutputTensors(
-          infer_request->RequestedOutputNames());
-      ProcessResponse(infer_response);
-      responses_shm_handle[i] = infer_response->ShmHandle();
-    }
-    response_batch_shm_ptr->batch_size = requests_size;
+          response_batch.value().data_.get() + sizeof(ResponseBatch) +
+          sizeof(IPCMessageShm));
+
+  for (size_t i = 0; i < responses_size; i++) {
+    // Check the return type of execute function.
+    InferRequest* infer_request = py_requests[i].cast<InferRequest*>();
+    InferResponse* infer_response = py_responses[i].cast<InferResponse*>();
+    infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
+    ProcessResponse(infer_response);
+    responses_shm_handle[i] = infer_response->ShmHandle();
+  }
+  response_batch_shm_ptr->batch_size = requests_size;
 }
 
 py::object

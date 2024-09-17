@@ -365,12 +365,11 @@ class ModelInstanceState : public BackendModelInstance {
       TRITONBACKEND_Request** requests, const uint32_t request_count);
 
   void RespondErrorToAllRequests(
-    const char* message,
-    std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
-    TRITONBACKEND_Request** requests, const uint32_t request_count);
+      const char* message,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
+      TRITONBACKEND_Request** requests, const uint32_t request_count);
 
-  void SendMessageToStub(
-    bi::managed_external_buffer::handle_t message);
+  void SendMessageToStub(bi::managed_external_buffer::handle_t message);
 
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }

@@ -250,7 +250,6 @@ ResponseSender::Send(
           "An error occurred while sending a response.");
     }
   }
-
 }
 
 bool
