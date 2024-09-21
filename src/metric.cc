@@ -167,6 +167,7 @@ Metric::SendCreateMetricRequest()
 void
 Metric::SendIncrementRequest(const double& value)
 {
+  py::gil_scoped_release release;
   try {
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
@@ -204,6 +205,7 @@ Metric::SendSetValueRequest(const double& value)
 void
 Metric::SendObserveRequest(const double& value)
 {
+  py::gil_scoped_release release;
   try {
     CheckIfCleared();
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
