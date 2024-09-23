@@ -1026,13 +1026,7 @@ ModelInstanceState::SendMessageAndReceiveResponse(
   SendMessageToStub(message);
 
   bi::managed_external_buffer::handle_t response_message;
-  auto error = Stub()->ReceiveMessageFromStub(response_message);
-  if (error != nullptr) {
-    RespondErrorToAllRequests(
-        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
-
-    return;
-  }
+  Stub()->ReceiveMessageFromStub(response_message);
 
   response = response_message;
 }
@@ -1349,6 +1343,14 @@ ModelInstanceState::ProcessRequests(
         if (pb_infer_requests[r]->ReleaseFlags() ==
             TRITONSERVER_REQUEST_RELEASE_RESCHEDULE) {
           // For rescheduled requests, we do not need to send a response.
+          LOG_IF_ERROR(
+              TRITONBACKEND_ResponseDelete((*responses)[r]),
+              "failed to delete response");
+          (*responses)[r] = nullptr;
+          continue;
+        }
+
+        if (response_shm_handle[r] == 0) {
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseDelete((*responses)[r]),
               "failed to delete response");

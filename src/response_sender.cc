@@ -74,7 +74,7 @@ ResponseSender::~ResponseSender()
 
 void
 ResponseSender::UpdateStateAndCounters(
-    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+    InferResponse* response, const uint32_t flags)
 {
   if (is_decoupled_ == nullptr) {
     // TODO: Can a model access the response sender on a BLS infer request?
@@ -106,6 +106,7 @@ ResponseSender::UpdateStateAndCounters(
   }
 
   if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    response_factory_deleted_.exchange(true);
     closed_ = true;
   }
   number_of_response_sent_++;
@@ -123,7 +124,7 @@ ResponseSender::Send(
   py::gil_scoped_release release;
 
   CheckResponseSenderArguments(infer_response, flags);
-  UpdateStateAndCounters(infer_response, flags);
+  UpdateStateAndCounters(infer_response.get(), flags);
   if (infer_response) {
     infer_response->PruneOutputTensors(requested_output_names_);
   }

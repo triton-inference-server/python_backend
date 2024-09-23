@@ -820,8 +820,7 @@ Stub::ProcessReturnedResponses(
             std::string(py::str(py_responses[i].get_type())) + "'.");
       }
 
-      std::shared_ptr<InferResponse> response =
-          py_responses[i].cast<std::shared_ptr<InferResponse>>();
+      InferResponse* response = py_responses[i].cast<InferResponse*>();
       request->GetResponseSender()->UpdateStateAndCounters(
           response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
     }
@@ -845,9 +844,13 @@ Stub::ProcessReturnedResponses(
     // Check the return type of execute function.
     InferRequest* infer_request = py_requests[i].cast<InferRequest*>();
     InferResponse* infer_response = py_responses[i].cast<InferResponse*>();
-    infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
-    ProcessResponse(infer_response);
-    responses_shm_handle[i] = infer_response->ShmHandle();
+    if (!py::isinstance<py::none>(py_responses[i])) {
+      infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
+      ProcessResponse(infer_response);
+      responses_shm_handle[i] = infer_response->ShmHandle();
+    } else {
+      responses_shm_handle[i] = 0;
+    }
   }
   response_batch_shm_ptr->batch_size = requests_size;
 }
