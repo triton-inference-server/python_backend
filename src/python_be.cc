@@ -1089,6 +1089,17 @@ ModelInstanceState::ResponseSendDecoupled(
   ResponseSendMessage* send_message_payload =
       reinterpret_cast<ResponseSendMessage*>(send_message.data_.get());
   std::unique_ptr<PbString> error_message;
+  ScopedDefer response_factory_deleter([send_message_payload] {
+    if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      TRITONBACKEND_ResponseFactory* response_factory =
+          reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              send_message_payload->response_factory_address);
+      std::unique_ptr<
+          TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+          lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              response_factory));
+    }
+  });
   ScopedDefer _([send_message_payload] {
     {
       bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
@@ -1214,13 +1225,6 @@ ModelInstanceState::ResponseSendDecoupled(
     SetErrorForResponseSendMessage(
         send_message_payload, WrapTritonErrorInSharedPtr(error), error_message);
   }
-
-  if (send_message_payload->flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-    std::unique_ptr<
-        TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-        lresponse_factory(
-            reinterpret_cast<TRITONBACKEND_ResponseFactory*>(response_factory));
-  }
 }
 
 TRITONSERVER_Error*
@@ -1291,6 +1295,15 @@ ModelInstanceState::ProcessRequests(
 
   if (response_batch_shm_ptr->has_error) {
     if (response_batch_shm_ptr->is_error_set) {
+      for (uint32_t r = 0; r < request_count; r++) {
+        TRITONBACKEND_ResponseFactory* response_factory =
+            reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                pb_infer_requests[r]->GetResponseFactoryAddress());
+        std::unique_ptr<
+            TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+            lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                response_factory));
+      }
       auto error = PbString::LoadFromSharedMemory(
           Stub()->ShmPool(), response_batch_shm_ptr->error);
       return TRITONSERVER_ErrorNew(
@@ -1356,6 +1369,16 @@ ModelInstanceState::ProcessRequests(
               "failed to delete response");
           (*responses)[r] = nullptr;
           continue;
+        }
+        {
+          TRITONBACKEND_ResponseFactory* response_factory =
+              reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                  pb_infer_requests[r]->GetResponseFactoryAddress());
+          std::unique_ptr<
+              TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
+              lresponse_factory(
+                  reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                      response_factory));
         }
         infer_response = InferResponse::LoadFromSharedMemory(
             Stub()->ShmPool(), response_shm_handle[r],
