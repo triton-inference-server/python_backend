@@ -383,6 +383,7 @@ InferRequest::InferRequest(
   preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
   trace_ = InferenceTrace(infer_trace_shm);
   request_release_flags_ = infer_request_shm_ptr_->request_release_flags;
+  shm_handle_ = infer_request_shm_.handle_;
 
 #ifdef TRITON_PB_STUB
   pb_cancel_ =
