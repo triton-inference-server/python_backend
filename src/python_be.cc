@@ -153,6 +153,23 @@ ModelInstanceState::SetErrorForResponseSendMessage(
   }
 }
 
+bool
+ModelInstanceState::IsStubProcessAlive()
+{
+  boost::posix_time::ptime timeout =
+      boost::get_system_time() + boost::posix_time::seconds(1);
+  bi::scoped_lock<bi::interprocess_mutex> lock(*Stub()->HealthMutex(), timeout);
+
+  // Check if lock has been acquired.
+  if (lock) {
+    return Stub()->IpcControl()->stub_health;
+  } else {
+    // If It failed to obtain the lock, it means that the stub has been
+    // stuck or exited while holding the health mutex lock.
+    return false;
+  }
+}
+
 TRITONSERVER_Error*
 ModelInstanceState::SaveRequestsToSharedMemory(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -1011,11 +1028,43 @@ ModelInstanceState::ProcessModelControlRequest(
       });
 }
 
-void
+TRITONSERVER_Error*
 ModelInstanceState::SendMessageToStub(
     bi::managed_external_buffer::handle_t message)
 {
-  Stub()->StubMessageQueue()->Push(message);
+  // Stub()->StubMessageQueue()->Push(message);
+  bool success = false;
+  while (!success) {
+    uint64_t timeout_miliseconds = 1000;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() +
+          boost::posix_time::milliseconds(timeout_miliseconds);
+
+      bi::scoped_lock<bi::interprocess_mutex> lock(
+          *(Stub()->HealthMutex()), timeout);
+
+      // Check if lock has been acquired.
+      if (lock) {
+        Stub()->IpcControl()->stub_health = false;
+      } else {
+        // If it failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
+      }
+    }
+
+    Stub()->StubMessageQueue()->Push(
+        message, timeout_miliseconds /* duration ms */, success);
+
+    if (!success && !IsStubProcessAlive()) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Stub process is not healthy.");
+    }
+  }
+
+  return nullptr;  // success
 }
 
 void
@@ -1025,10 +1074,29 @@ ModelInstanceState::SendMessageAndReceiveResponse(
     std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
     TRITONBACKEND_Request** requests, const uint32_t request_count)
 {
-  SendMessageToStub(message);
+  // SendMessageToStub(message);
+
+  // bi::managed_external_buffer::handle_t response_message;
+  // Stub()->ReceiveMessageFromStub(response_message);
+
+  // response = response_message;
+
+  auto error = SendMessageToStub(message);
+  if (error != nullptr) {
+    RespondErrorToAllRequests(
+        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
+
+    return;
+  }
 
   bi::managed_external_buffer::handle_t response_message;
-  Stub()->ReceiveMessageFromStub(response_message);
+  error = Stub()->ReceiveMessageFromStub(response_message);
+  if (error != nullptr) {
+    RespondErrorToAllRequests(
+        TRITONSERVER_ErrorMessage(error), responses, requests, request_count);
+
+    return;
+  }
 
   response = response_message;
 }
@@ -1060,6 +1128,7 @@ ModelInstanceState::RespondErrorToAllRequests(
     TRITONSERVER_ErrorDelete(err);
   }
 }
+
 
 void
 ModelInstanceState::StartMonitor()
@@ -1282,7 +1351,7 @@ ModelInstanceState::ProcessRequests(
   {
     Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
     bi::managed_external_buffer::handle_t response_message;
-    Stub()->ReceiveMessageFromStub(response_message);
+    RETURN_IF_ERROR(Stub()->ReceiveMessageFromStub(response_message));
     response =
         IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), response_message);
   }
@@ -1329,26 +1398,34 @@ ModelInstanceState::ProcessRequests(
   }
 
   if (response_batch_shm_ptr->batch_size > 0) {
-    std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
-        new std::vector<TRITONBACKEND_Response*>());
-    responses->reserve(request_count);
-    for (size_t i = 0; i < request_count; i++) {
-      TRITONBACKEND_Response* response;
-      auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
-      if (err == nullptr) {
-        responses->emplace_back(response);
-      } else {
-        responses->emplace_back(nullptr);
-        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
-        TRITONSERVER_ErrorDelete(err);
-      }
-    }
     bi::managed_external_buffer::handle_t* response_shm_handle =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             ipc_message_shm + sizeof(ResponseBatch) + sizeof(IPCMessageShm));
 
-    // If the output provided by the model is in GPU, we will pass the list of
-    // buffers provided by Triton to the stub process.
+    std::shared_ptr<std::vector<TRITONBACKEND_Response*>> responses(
+        new std::vector<TRITONBACKEND_Response*>());
+    responses->reserve(request_count);
+    for (size_t i = 0; i < request_count; i++) {
+      // It is possible to have multiple responses batched together in a single
+      // response batch shm, where some of the responses are None due to the
+      // usage of response sender, so only create a TRITONBACKEND_Response
+      // object for the valid responses, and skip the None responses later.
+      if (response_shm_handle[i] == 0) {
+        std::cerr << "=== PYBE response_shm_handle is 0 ===" << std::endl;
+        responses->emplace_back(nullptr);
+      } else {
+        TRITONBACKEND_Response* response;
+        auto err = TRITONBACKEND_ResponseNew(&response, requests[i]);
+        if (err == nullptr) {
+          responses->emplace_back(response);
+        } else {
+          responses->emplace_back(nullptr);
+          LOG_MESSAGE(TRITONSERVER_LOG_ERROR, "Fail to create response");
+          TRITONSERVER_ErrorDelete(err);
+        }
+      }
+    }
+
     std::vector<bool> requires_deferred_callback;
 
     bool has_gpu_output = false;
@@ -1360,6 +1437,11 @@ ModelInstanceState::ProcessRequests(
     std::cerr << "=== PYBE request_count: " << request_count << std::endl;
     for (uint32_t r = 0; r < request_count; ++r) {
       NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
+      if (response_shm_handle[r] == 0) {
+        std::cerr << "=== PYBE skip the response_shm_handle is 0 ==="
+                  << std::endl;
+        continue;
+      }
       TRITONBACKEND_Response* response = (*responses)[r];
       TRITONBACKEND_Request* request = requests[r];
       uint32_t requested_output_count = 0;
@@ -1378,13 +1460,14 @@ ModelInstanceState::ProcessRequests(
           continue;
         }
 
-        if (response_shm_handle[r] == 0) {
-          LOG_IF_ERROR(
-              TRITONBACKEND_ResponseDelete((*responses)[r]),
-              "failed to delete response");
-          (*responses)[r] = nullptr;
-          continue;
-        }
+        // if (response_shm_handle[r] == 0) {
+        //   std::cerr << "=== PYBE response_shm_handle is 0 ===" << std::endl;
+        //   LOG_IF_ERROR(
+        //       TRITONBACKEND_ResponseDelete((*responses)[r]),
+        //       "failed to delete response");
+        //   (*responses)[r] = nullptr;
+        //   continue;
+        // }
         {
           TRITONBACKEND_ResponseFactory* response_factory =
               reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
@@ -1448,6 +1531,8 @@ ModelInstanceState::ProcessRequests(
             responses, r,
             TRITONBACKEND_RequestOutputName(request, j, &output_name));
         requested_output_names.insert(output_name);
+        std::cerr << "=== PYBE requested_output_name: " << output_name
+                  << std::endl;
       }
 
       bool require_deferred_callback = false;
