@@ -826,6 +826,8 @@ ModelInstanceState::ProcessCleanupRequest(
     infer_payload_.erase(id);
   } else if (message->Command() == PYTHONSTUB_DecoupledResponseFactoryCleanup) {
     // Delete response factory
+    std::cerr << "=== ResponseFactoryDeleter -> ProcessCleanupRequest ==="
+              << std::endl;
     std::unique_ptr<
         TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
         response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(id));
@@ -1094,6 +1096,8 @@ ModelInstanceState::ResponseSendDecoupled(
       TRITONBACKEND_ResponseFactory* response_factory =
           reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
               send_message_payload->response_factory_address);
+      std::cerr << "=== ResponseFactoryDeleter -> ResponseSendDecoupled ==="
+                << std::endl;
       std::unique_ptr<
           TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
           lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
@@ -1284,7 +1288,6 @@ ModelInstanceState::ProcessRequests(
   }
   char* ipc_message_shm =
       reinterpret_cast<char*>(response->GetAllocatedSharedMemory().data_.get());
-  ;
   ResponseBatch* response_batch_shm_ptr =
       reinterpret_cast<ResponseBatch*>(ipc_message_shm + sizeof(IPCMessageShm));
 
@@ -1294,16 +1297,27 @@ ModelInstanceState::ProcessRequests(
   reporter.SetBatchStatistics(total_batch_size);
 
   if (response_batch_shm_ptr->has_error) {
-    if (response_batch_shm_ptr->is_error_set) {
+    // The "is_response_factory_deleted" flag indicates whether the response
+    // factory has been deleted. The flag is used in a corner case
+    // where after the response sender sends a response and complete final flag,
+    // and closes the response factory, the model returns a response from
+    // `execute()`. For both default and decoupled mode, upon handling that
+    // error, no need to delete the response factory.
+    if (!response_batch_shm_ptr->is_response_factory_deleted) {
       for (uint32_t r = 0; r < request_count; r++) {
         TRITONBACKEND_ResponseFactory* response_factory =
             reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
                 pb_infer_requests[r]->GetResponseFactoryAddress());
+        std::cerr << "=== ResponseFactoryDeleter -> "
+                     "response_batch_shm_ptr->has_error ==="
+                  << std::endl;
         std::unique_ptr<
             TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
             lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
                 response_factory));
       }
+    }
+    if (response_batch_shm_ptr->is_error_set) {
       auto error = PbString::LoadFromSharedMemory(
           Stub()->ShmPool(), response_batch_shm_ptr->error);
       return TRITONSERVER_ErrorNew(
@@ -1343,6 +1357,7 @@ ModelInstanceState::ProcessRequests(
         gpu_output_buffers(request_count);
     GPUBuffersHelper gpu_buffer_helper;
 
+    std::cerr << "=== PYBE request_count: " << request_count << std::endl;
     for (uint32_t r = 0; r < request_count; ++r) {
       NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
       TRITONBACKEND_Response* response = (*responses)[r];
@@ -1374,6 +1389,8 @@ ModelInstanceState::ProcessRequests(
           TRITONBACKEND_ResponseFactory* response_factory =
               reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
                   pb_infer_requests[r]->GetResponseFactoryAddress());
+          std::cerr << "=== ResponseFactoryDeleter -> regular workflow ==="
+                    << std::endl;
           std::unique_ptr<
               TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
               lresponse_factory(
@@ -1422,7 +1439,8 @@ ModelInstanceState::ProcessRequests(
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-
+      std::cerr << "=== PYBE requested_output_count: " << requested_output_count
+                << std::endl;
       std::set<std::string> requested_output_names;
       for (size_t j = 0; j < requested_output_count; ++j) {
         const char* output_name;

@@ -665,6 +665,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   ScopedDefer _(
       [this, &execute_response] { SendIPCMessage(execute_response); });
   py::object execute_return;
+  py::object coroutine_return;
   try {
     if (!py::hasattr(model_instance_, "execute")) {
       std::string message = "Python model " + model_context_.PythonModelPath() +
@@ -685,7 +686,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
           // Do not wait for async decoupled execute to return.
           RunCoroutine(execute_return, true /* in_background */);
         } else {
-          py::object coroutine_return =
+          coroutine_return =
               RunCoroutine(execute_return, false /* in_background */);
           ProcessReturnedResponses(
               py_request_list, coroutine_return, response_batch);
@@ -733,6 +734,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     }
   } else {
     if (!response_batch) {
+      std::cerr << "===== response_batch is not set" << std::endl;
       response_batch = shm_pool_->Construct<char>(
           sizeof(ResponseBatch) + sizeof(IPCMessageShm));
       ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
@@ -743,6 +745,8 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
     response_batch_shm_ptr->has_error = false;
     response_batch_shm_ptr->is_error_set = false;
+    std::cerr << "===== response_batch_shm_ptr->batch_size: "
+              << response_batch_shm_ptr->batch_size << std::endl;
   }
 
   execute_response = IPCMessage::Create(
@@ -779,6 +783,27 @@ Stub::ProcessReturnedResponses(
   }
   // Only non-decoupled may return responses.
   if (IsDecoupled()) {
+    // For decoupled mode, if before returning from this error, there was
+    // already a response sent from the response sender, along with the complete
+    // final flag, then use the `is_response_factory_deleted` flag to notify the
+    // backend to NOT to delete the response factory again during error
+    // handling.
+    for (py::handle py_request : py_requests) {
+      InferRequest* request = py_request.cast<InferRequest*>();
+      if (request->GetResponseSender()->IsClosed()) {
+        // Notify the backend to NOT to delete the response factory again during
+        // error handling.
+        if (!response_batch) {
+          response_batch = std::move(shm_pool_->Construct<char>(
+              sizeof(ResponseBatch) + sizeof(IPCMessageShm)));
+        }
+        ResponseBatch* response_batch_shm_ptr =
+            reinterpret_cast<ResponseBatch*>(
+                response_batch.value().data_.get() + sizeof(IPCMessageShm));
+        response_batch_shm_ptr->is_response_factory_deleted = true;
+      }
+    }
+
     throw PythonBackendException(
         "Python model '" + name_ +
         "' is using the decoupled mode and the execute function must return "
@@ -821,8 +846,31 @@ Stub::ProcessReturnedResponses(
       }
 
       InferResponse* response = py_responses[i].cast<InferResponse*>();
-      request->GetResponseSender()->UpdateStateAndCounters(
-          response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+
+      try {
+        request->GetResponseSender()->UpdateStateAndCounters(
+            response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        // Special case for default(non-decoupled) mode, where the response
+        // factory should already be cleaned up with the previous response sent
+        // from response sender, and yet the model tries to return another
+        // response from `execute()` function. Notify the backend to NOT to
+        // delete the response factory again during error handling.
+        std::string error_string = pb_exception.what();
+        if (error_string.find(
+                "Non-decoupled model cannot send more than one response") !=
+            std::string::npos) {
+          response_batch = std::move(shm_pool_->Construct<char>(
+              sizeof(ResponseBatch) + sizeof(IPCMessageShm)));
+          ResponseBatch* response_batch_shm_ptr =
+              reinterpret_cast<ResponseBatch*>(
+                  response_batch.value().data_.get() + sizeof(IPCMessageShm));
+          response_batch_shm_ptr->is_response_factory_deleted = true;
+          LOG_ERROR << "=== caught error: " << pb_exception.what();
+        }
+        throw pb_exception;
+      }
     }
   }
   // Return all the created responses using response_batch. The reason

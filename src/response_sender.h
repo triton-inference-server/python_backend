@@ -51,6 +51,7 @@ class ResponseSender {
 
   // Can be useful at stopping the model from sending any more responses.
   void Close();
+  bool IsClosed();
 
  private:
   void DeleteResponseFactory();

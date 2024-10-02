@@ -106,6 +106,8 @@ ResponseSender::UpdateStateAndCounters(
   }
 
   if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    std::cerr << "=== ResponseSender -> UpdateStateAndCounters closing RF ==="
+              << std::endl;
     response_factory_deleted_.exchange(true);
     closed_ = true;
   }
@@ -175,6 +177,7 @@ ResponseSender::Send(
     bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
     // The server will destruct the response factory if the final flag is set.
     if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      std::cerr << "====== scoped_defer -> closing RF =====" << std::endl;
       response_factory_deleted_.exchange(true);
     }
     stub->SendIPCUtilsMessage(ipc_message);
@@ -259,16 +262,26 @@ ResponseSender::IsCancelled()
   return pb_cancel_->IsCancelled();
 }
 
+bool
+ResponseSender::IsClosed()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return closed_;
+}
+
 void
 ResponseSender::Close()
 {
   std::lock_guard<std::mutex> lk(mu_);
   closed_ = true;
+  response_factory_deleted_.exchange(true);
 }
 
 void
 ResponseSender::DeleteResponseFactory()
 {
+  std::cerr << "=== ResponseSender -> DeleteResponseFactory, "
+            << response_factory_deleted_ << " ===" << std::endl;
   bool already_deleted = response_factory_deleted_.exchange(true);
   if (!already_deleted) {
     std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
