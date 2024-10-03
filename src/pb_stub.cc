@@ -719,22 +719,12 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
-    // Handle two special cases:
-    // 1. For default(non-decoupled) mode, where the response
-    // factory should already be cleaned up with the previous response sent
-    // from response sender, and yet the model tries to return another
-    // response from `execute()` function. Notify the backend to NOT to
+
+    // If the response sender is already closed, notify the backend NOT to
     // delete the response factory again during error handling.
-    // 2.The response sender is already closed, need to notify the backend to
-    // NOT to delete the response factory again during error handling.
-    // std::string error_string = pb_exception.what();
-    if ((err_message.find(
-             "Non-decoupled model cannot send more than one response") !=
-         std::string::npos) ||
-        (err_message.find("Response sender has been closed") !=
-         std::string::npos)) {
+    if (err_message.find("Response sender has been closed") !=
+        std::string::npos) {
       response_batch_shm_ptr->is_response_factory_deleted = true;
-      LOG_ERROR << "=== caught error: " << err_message;
     }
 
     response_batch_shm_ptr->has_error = true;
@@ -752,8 +742,6 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     }
   } else {
     if (!response_batch) {
-      // No response is returned from `execute()`.
-      std::cerr << "===== response_batch is not set" << std::endl;
       response_batch = shm_pool_->Construct<char>(
           sizeof(ResponseBatch) + sizeof(IPCMessageShm));
       ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
@@ -764,8 +752,6 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
     response_batch_shm_ptr->has_error = false;
     response_batch_shm_ptr->is_error_set = false;
-    std::cerr << "===== response_batch_shm_ptr->batch_size: "
-              << response_batch_shm_ptr->batch_size << std::endl;
   }
 
   execute_response = IPCMessage::Create(
@@ -865,8 +851,32 @@ Stub::ProcessReturnedResponses(
       }
 
       InferResponse* response = py_responses[i].cast<InferResponse*>();
-      request->GetResponseSender()->UpdateStateAndCounters(
-          response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+      try {
+        request->GetResponseSender()->UpdateStateAndCounters(
+            response, TRITONSERVER_RESPONSE_COMPLETE_FINAL);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        // Handle the exception here to catch the error when there's a response
+        // returned from `execute()`, and the below error message is thrown.
+        // In default (non-decoupled) mode, the response factory should already
+        // have been cleaned up when the previous response was sent by the
+        // response sender. However, if the model attempts to return another
+        // response from the `execute()` function, notify the backend NOT to
+        // delete the response factory again during error handling.
+        std::string err_message = pb_exception.what();
+        if (err_message.find(
+                "Non-decoupled model cannot send more than one response") !=
+            std::string::npos) {
+          response_batch = std::move(shm_pool_->Construct<char>(
+              sizeof(ResponseBatch) + sizeof(IPCMessageShm)));
+          ResponseBatch* response_batch_shm_ptr =
+              reinterpret_cast<ResponseBatch*>(
+                  response_batch.value().data_.get() + sizeof(IPCMessageShm));
+          response_batch_shm_ptr->batch_size = 0;
+          response_batch_shm_ptr->is_response_factory_deleted = true;
+        }
+        throw pb_exception;
+      }
     }
   }
   // Return all the created responses using response_batch. The reason
@@ -883,18 +893,15 @@ Stub::ProcessReturnedResponses(
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
           response_batch.value().data_.get() + sizeof(ResponseBatch) +
           sizeof(IPCMessageShm));
-  std::cerr << "===== response_size: " << responses_size << std::endl;
   for (size_t i = 0; i < responses_size; i++) {
     // Check the return type of execute function.
     InferRequest* infer_request = py_requests[i].cast<InferRequest*>();
     InferResponse* infer_response = py_responses[i].cast<InferResponse*>();
     if (!py::isinstance<py::none>(py_responses[i])) {
-      std::cerr << "===== response is NOT None" << std::endl;
       infer_response->PruneOutputTensors(infer_request->RequestedOutputNames());
       ProcessResponse(infer_response);
       responses_shm_handle[i] = infer_response->ShmHandle();
     } else {
-      std::cerr << "===== response is None" << std::endl;
       responses_shm_handle[i] = 0;
     }
   }

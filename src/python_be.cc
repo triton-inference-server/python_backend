@@ -843,8 +843,6 @@ ModelInstanceState::ProcessCleanupRequest(
     infer_payload_.erase(id);
   } else if (message->Command() == PYTHONSTUB_DecoupledResponseFactoryCleanup) {
     // Delete response factory
-    std::cerr << "=== ResponseFactoryDeleter -> ProcessCleanupRequest ==="
-              << std::endl;
     std::unique_ptr<
         TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
         response_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(id));
@@ -1165,8 +1163,6 @@ ModelInstanceState::ResponseSendDecoupled(
       TRITONBACKEND_ResponseFactory* response_factory =
           reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
               send_message_payload->response_factory_address);
-      std::cerr << "=== ResponseFactoryDeleter -> ResponseSendDecoupled ==="
-                << std::endl;
       std::unique_ptr<
           TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
           lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
@@ -1366,20 +1362,11 @@ ModelInstanceState::ProcessRequests(
   reporter.SetBatchStatistics(total_batch_size);
 
   if (response_batch_shm_ptr->has_error) {
-    // The "is_response_factory_deleted" flag indicates whether the response
-    // factory has been deleted. The flag is used in a corner case
-    // where after the response sender sends a response and complete final flag,
-    // and closes the response factory, the model returns a response from
-    // `execute()`. For both default and decoupled mode, upon handling that
-    // error, no need to delete the response factory.
     if (!response_batch_shm_ptr->is_response_factory_deleted) {
       for (uint32_t r = 0; r < request_count; r++) {
         TRITONBACKEND_ResponseFactory* response_factory =
             reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
                 pb_infer_requests[r]->GetResponseFactoryAddress());
-        std::cerr << "=== ResponseFactoryDeleter -> "
-                     "response_batch_shm_ptr->has_error ==="
-                  << std::endl;
         std::unique_ptr<
             TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
             lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
@@ -1411,7 +1398,6 @@ ModelInstanceState::ProcessRequests(
       // usage of response sender, so only create a TRITONBACKEND_Response
       // object for the valid responses, and skip the None responses later.
       if (response_shm_handle[i] == 0) {
-        std::cerr << "=== PYBE response_shm_handle is 0 ===" << std::endl;
         responses->emplace_back(nullptr);
       } else {
         TRITONBACKEND_Response* response;
@@ -1434,18 +1420,15 @@ ModelInstanceState::ProcessRequests(
         gpu_output_buffers(request_count);
     GPUBuffersHelper gpu_buffer_helper;
 
-    std::cerr << "=== PYBE request_count: " << request_count << std::endl;
     for (uint32_t r = 0; r < request_count; ++r) {
       NVTX_RANGE(nvtx_, "LoadingResponse " + Name());
+      requires_deferred_callback.push_back(false);
       if (response_shm_handle[r] == 0) {
-        std::cerr << "=== PYBE skip the response_shm_handle is 0 ==="
-                  << std::endl;
         continue;
       }
       TRITONBACKEND_Response* response = (*responses)[r];
       TRITONBACKEND_Request* request = requests[r];
       uint32_t requested_output_count = 0;
-      requires_deferred_callback.push_back(false);
 
       shm_responses.emplace_back(nullptr);
       std::unique_ptr<InferResponse>& infer_response = shm_responses.back();
@@ -1459,21 +1442,10 @@ ModelInstanceState::ProcessRequests(
           (*responses)[r] = nullptr;
           continue;
         }
-
-        // if (response_shm_handle[r] == 0) {
-        //   std::cerr << "=== PYBE response_shm_handle is 0 ===" << std::endl;
-        //   LOG_IF_ERROR(
-        //       TRITONBACKEND_ResponseDelete((*responses)[r]),
-        //       "failed to delete response");
-        //   (*responses)[r] = nullptr;
-        //   continue;
-        // }
         {
           TRITONBACKEND_ResponseFactory* response_factory =
               reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
                   pb_infer_requests[r]->GetResponseFactoryAddress());
-          std::cerr << "=== ResponseFactoryDeleter -> regular workflow ==="
-                    << std::endl;
           std::unique_ptr<
               TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
               lresponse_factory(
@@ -1522,8 +1494,6 @@ ModelInstanceState::ProcessRequests(
       GUARDED_RESPOND_IF_ERROR(
           responses, r,
           TRITONBACKEND_RequestOutputCount(request, &requested_output_count));
-      std::cerr << "=== PYBE requested_output_count: " << requested_output_count
-                << std::endl;
       std::set<std::string> requested_output_names;
       for (size_t j = 0; j < requested_output_count; ++j) {
         const char* output_name;
@@ -1531,8 +1501,6 @@ ModelInstanceState::ProcessRequests(
             responses, r,
             TRITONBACKEND_RequestOutputName(request, j, &output_name));
         requested_output_names.insert(output_name);
-        std::cerr << "=== PYBE requested_output_name: " << output_name
-                  << std::endl;
       }
 
       bool require_deferred_callback = false;
