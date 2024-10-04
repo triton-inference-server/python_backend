@@ -1362,6 +1362,9 @@ ModelInstanceState::ProcessRequests(
   reporter.SetBatchStatistics(total_batch_size);
 
   if (response_batch_shm_ptr->has_error) {
+    // Clean up the response factory if an error occurred. The
+    // `is_response_factory_deleted` flag indicates whether the response factory
+    // has been deleted for some corner cases.
     if (!response_batch_shm_ptr->is_response_factory_deleted) {
       for (uint32_t r = 0; r < request_count; r++) {
         TRITONBACKEND_ResponseFactory* response_factory =
@@ -1396,7 +1399,7 @@ ModelInstanceState::ProcessRequests(
       // It is possible to have multiple responses batched together in a single
       // response batch shm, where some of the responses are None due to the
       // usage of response sender, so only create a TRITONBACKEND_Response
-      // object for the valid responses, and skip the None responses later.
+      // object for the valid responses.
       if (response_shm_handle[i] == 0) {
         responses->emplace_back(nullptr);
       } else {

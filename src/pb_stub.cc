@@ -719,12 +719,22 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
-
-    // If the response sender is already closed, notify the backend NOT to
+    // The backend will clean up the response factory if there is an error in
+    // the response batch. It is necessary to handle cases where the response
+    // sender should have already cleaned up, ensuring the backend does not
     // delete the response factory again during error handling.
     if (err_message.find("Response sender has been closed") !=
         std::string::npos) {
       response_batch_shm_ptr->is_response_factory_deleted = true;
+    } else if (
+        err_message.find("is using the decoupled mode and the execute function "
+                         "must return None") != std::string::npos) {
+      for (py::handle py_request : py_request_list) {
+        InferRequest* request = py_request.cast<InferRequest*>();
+        if (request->GetResponseSender()->IsClosed()) {
+          response_batch_shm_ptr->is_response_factory_deleted = true;
+        }
+      }
     }
 
     response_batch_shm_ptr->has_error = true;
@@ -788,27 +798,6 @@ Stub::ProcessReturnedResponses(
   }
   // Only non-decoupled may return responses.
   if (IsDecoupled()) {
-    // For decoupled mode, if before returning from this error, there was
-    // already a response sent from the response sender, along with the complete
-    // final flag, then use the `is_response_factory_deleted` flag to notify the
-    // backend to NOT to delete the response factory again during error
-    // handling.
-    for (py::handle py_request : py_requests) {
-      InferRequest* request = py_request.cast<InferRequest*>();
-      if (request->GetResponseSender()->IsClosed()) {
-        // Notify the backend to NOT to delete the response factory again during
-        // error handling.
-        if (!response_batch) {
-          response_batch = std::move(shm_pool_->Construct<char>(
-              sizeof(ResponseBatch) + sizeof(IPCMessageShm)));
-        }
-        ResponseBatch* response_batch_shm_ptr =
-            reinterpret_cast<ResponseBatch*>(
-                response_batch.value().data_.get() + sizeof(IPCMessageShm));
-        response_batch_shm_ptr->is_response_factory_deleted = true;
-      }
-    }
-
     throw PythonBackendException(
         "Python model '" + name_ +
         "' is using the decoupled mode and the execute function must return "

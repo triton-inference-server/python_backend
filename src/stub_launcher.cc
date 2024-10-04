@@ -728,7 +728,6 @@ TRITONSERVER_Error*
 StubLauncher::ReceiveMessageFromStub(
     bi::managed_external_buffer::handle_t& message)
 {
-  // message = parent_message_queue_->Pop();
   bool success = false;
   while (!success) {
     uint64_t timeout_miliseconds = 1000;
