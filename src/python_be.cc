@@ -1030,7 +1030,6 @@ TRITONSERVER_Error*
 ModelInstanceState::SendMessageToStub(
     bi::managed_external_buffer::handle_t message)
 {
-  // Stub()->StubMessageQueue()->Push(message);
   bool success = false;
   while (!success) {
     uint64_t timeout_miliseconds = 1000;
@@ -1072,13 +1071,6 @@ ModelInstanceState::SendMessageAndReceiveResponse(
     std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
     TRITONBACKEND_Request** requests, const uint32_t request_count)
 {
-  // SendMessageToStub(message);
-
-  // bi::managed_external_buffer::handle_t response_message;
-  // Stub()->ReceiveMessageFromStub(response_message);
-
-  // response = response_message;
-
   auto error = SendMessageToStub(message);
   if (error != nullptr) {
     RespondErrorToAllRequests(

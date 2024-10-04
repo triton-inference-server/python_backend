@@ -723,17 +723,10 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     // the response batch. It is necessary to handle cases where the response
     // sender should have already cleaned up, ensuring the backend does not
     // delete the response factory again during error handling.
-    if (err_message.find("Response sender has been closed") !=
-        std::string::npos) {
-      response_batch_shm_ptr->is_response_factory_deleted = true;
-    } else if (
-        err_message.find("is using the decoupled mode and the execute function "
-                         "must return None") != std::string::npos) {
-      for (py::handle py_request : py_request_list) {
-        InferRequest* request = py_request.cast<InferRequest*>();
-        if (request->GetResponseSender()->IsClosed()) {
-          response_batch_shm_ptr->is_response_factory_deleted = true;
-        }
+    for (py::handle py_request : py_request_list) {
+      InferRequest* request = py_request.cast<InferRequest*>();
+      if (request->GetResponseSender()->IsClosed()) {
+        response_batch_shm_ptr->is_response_factory_deleted = true;
       }
     }
 
@@ -846,16 +839,8 @@ Stub::ProcessReturnedResponses(
       }
       catch (const PythonBackendException& pb_exception) {
         // Handle the exception here to catch the error when there's a response
-        // returned from `execute()`, and the below error message is thrown.
-        // In default (non-decoupled) mode, the response factory should already
-        // have been cleaned up when the previous response was sent by the
-        // response sender. However, if the model attempts to return another
-        // response from the `execute()` function, notify the backend NOT to
-        // delete the response factory again during error handling.
-        std::string err_message = pb_exception.what();
-        if (err_message.find(
-                "Non-decoupled model cannot send more than one response") !=
-            std::string::npos) {
+        // returned from `execute()`.
+        if (request->GetResponseSender()->IsClosed()) {
           response_batch = std::move(shm_pool_->Construct<char>(
               sizeof(ResponseBatch) + sizeof(IPCMessageShm)));
           ResponseBatch* response_batch_shm_ptr =
