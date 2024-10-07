@@ -720,13 +720,15 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
 
     // The backend will clean up the response factory if there is an error in
-    // the response batch. It is necessary to handle cases where the response
-    // sender should have already cleaned up, ensuring the backend does not
-    // delete the response factory again during error handling.
-    for (py::handle py_request : py_request_list) {
-      InferRequest* request = py_request.cast<InferRequest*>();
-      if (request->GetResponseSender()->IsClosed()) {
-        response_batch_shm_ptr->is_response_factory_deleted = true;
+    // the response batch. For decoupled mode, it is necessary to handle cases
+    // where the response sender should have already cleaned up, ensuring the
+    // backend does not delete the response factory again during error handling.
+    if (IsDecoupled()) {
+      for (py::handle py_request : py_request_list) {
+        InferRequest* request = py_request.cast<InferRequest*>();
+        if (request->GetResponseSender()->IsClosed()) {
+          response_batch_shm_ptr->is_response_factory_deleted = true;
+        }
       }
     }
 
