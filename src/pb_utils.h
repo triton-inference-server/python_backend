@@ -167,6 +167,9 @@ struct ResponseBatch : SendMessageBase {
   bool is_error_set;
 
   uint32_t response_size;
+
+  // Indicates whether the response factory has been deleted or not.
+  bool is_response_factory_deleted = false;
 };
 
 enum LogLevel { kInfo = 0, kWarning, kError, kVerbose };
