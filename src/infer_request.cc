@@ -484,7 +484,7 @@ InferRequest::Exec(const bool is_decoupled)
     {
       bi::scoped_lock<bi::interprocess_mutex> lock{
           *(ipc_message->ResponseMutex())};
-      stub->SendIPCMessage(ipc_message);
+      stub->SendIPCUtilsMessage(ipc_message);
       ipc_message->ResponseCondition()->wait(lock);
     }
 

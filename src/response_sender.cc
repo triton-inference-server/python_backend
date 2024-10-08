@@ -74,7 +74,7 @@ ResponseSender::~ResponseSender()
 
 void
 ResponseSender::UpdateStateAndCounters(
-    const std::shared_ptr<InferResponse>& response, const uint32_t flags)
+    InferResponse* response, const uint32_t flags)
 {
   if (is_decoupled_ == nullptr) {
     // TODO: Can a model access the response sender on a BLS infer request?
@@ -106,6 +106,7 @@ ResponseSender::UpdateStateAndCounters(
   }
 
   if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    response_factory_deleted_.exchange(true);
     closed_ = true;
   }
   number_of_response_sent_++;
@@ -123,7 +124,7 @@ ResponseSender::Send(
   py::gil_scoped_release release;
 
   CheckResponseSenderArguments(infer_response, flags);
-  UpdateStateAndCounters(infer_response, flags);
+  UpdateStateAndCounters(infer_response.get(), flags);
   if (infer_response) {
     infer_response->PruneOutputTensors(requested_output_names_);
   }
@@ -172,7 +173,11 @@ ResponseSender::Send(
 
   {
     bi::scoped_lock<bi::interprocess_mutex> guard{send_message_payload->mu};
-    stub->SendIPCMessage(ipc_message);
+    // The server will destruct the response factory if the final flag is set.
+    if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+      response_factory_deleted_.exchange(true);
+    }
+    stub->SendIPCUtilsMessage(ipc_message);
     while (!send_message_payload->is_stub_turn) {
       send_message_payload->cv.wait(guard);
     }
@@ -246,10 +251,6 @@ ResponseSender::Send(
           "An error occurred while sending a response.");
     }
   }
-
-  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
-    DeleteResponseFactory();
-  }
 }
 
 bool
@@ -258,11 +259,19 @@ ResponseSender::IsCancelled()
   return pb_cancel_->IsCancelled();
 }
 
+bool
+ResponseSender::IsClosed()
+{
+  std::lock_guard<std::mutex> lk(mu_);
+  return closed_;
+}
+
 void
 ResponseSender::Close()
 {
   std::lock_guard<std::mutex> lk(mu_);
   closed_ = true;
+  response_factory_deleted_.exchange(true);
 }
 
 void
