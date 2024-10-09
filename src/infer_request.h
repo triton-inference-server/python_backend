@@ -96,6 +96,7 @@ class InferRequest {
   InferenceTrace& GetTrace();
   uint32_t ReleaseFlags();
   void SetReleaseFlags(const uint32_t& flags);
+  intptr_t GetResponseFactoryAddress() { return response_factory_address_; }
 
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);

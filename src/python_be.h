@@ -287,9 +287,6 @@ class ModelInstanceState : public BackendModelInstance {
 
   std::thread stub_to_parent_queue_monitor_;
   bool stub_to_parent_thread_;
-  // Queue monitor thread
-  std::thread queue_monitor_;
-  bool queue_monitor_thread_;
   std::mutex mu_;
   std::condition_variable cv_;
   std::unique_ptr<IPCMessage> received_message_;
@@ -360,6 +357,24 @@ class ModelInstanceState : public BackendModelInstance {
       std::vector<std::unique_ptr<InferRequest>>& pb_inference_requests,
       AllocatedSharedMemory<char>& request_batch,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses);
+
+  void SendMessageAndReceiveResponse(
+      bi::managed_external_buffer::handle_t message,
+      bi::managed_external_buffer::handle_t& response,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
+      TRITONBACKEND_Request** requests, const uint32_t request_count);
+
+  void RespondErrorToAllRequests(
+      const char* message,
+      std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
+      TRITONBACKEND_Request** requests, const uint32_t request_count);
+
+  // void SendMessageToStub(bi::managed_external_buffer::handle_t message);
+  TRITONSERVER_Error* SendMessageToStub(
+      bi::managed_external_buffer::handle_t message);
+
+  // Checks whether the stub process is live
+  bool IsStubProcessAlive();
 
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
