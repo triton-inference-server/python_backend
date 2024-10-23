@@ -92,6 +92,16 @@ FetchContent_Declare(
   GIT_TAG "aa304c9c7d725ffb9d10af08a3b34cb372307020"
   GIT_SHALLOW ON
 )
+
+# RHEL base container has multiple version of Python installed. By default
+# it seems like pybind will pickup v3.6, so we specifically assign it to
+# search for 3.12 here.
+if(LINUX)
+  file(STRINGS "/etc/os-release" DISTRO_ID_LIKE REGEX "ID_LIKE")
+  if(${DISTRO_ID_LIKE} MATCHES "rhel|centos")
+    set(PYBIND11_PYTHON_VERSION 3.12)
+  endif(${DISTRO_ID_LIKE} MATCHES "rhel|centos")
+endif(LINUX)
 FetchContent_MakeAvailable(pybind11)
 
 #
