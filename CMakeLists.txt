@@ -96,9 +96,11 @@ FetchContent_Declare(
 # RHEL base container has multiple version of Python installed. By default
 # it seems like pybind will pickup v3.6, so we specifically assign it to
 # search for 3.12 here.
+set(RHEL_BUILD OFF)
 if(LINUX)
   file(STRINGS "/etc/os-release" DISTRO_ID_LIKE REGEX "ID_LIKE")
   if(${DISTRO_ID_LIKE} MATCHES "rhel|centos")
+    set(RHEL_BUILD ON)
     set(PYBIND11_PYTHON_VERSION 3.12)
   endif(${DISTRO_ID_LIKE} MATCHES "rhel|centos")
 endif(LINUX)
@@ -277,6 +279,23 @@ target_compile_options(
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor>
 )
 target_compile_definitions(triton-python-backend-stub PRIVATE TRITON_PB_STUB)
+
+# RHEL assets are not released in a container environment nor do the current
+# Python lib versions in the manylinux base container match those currently
+# available for RHEL8 package managers. Therefore, we package the correct
+# python libs in the backend folder and adjust the stub executable to look
+# in its own folder at runtime.
+if(RHEL_BUILD)
+  set_target_properties(
+    triton-python-backend-stub
+    PROPERTIES
+      SKIP_BUILD_RPATH TRUE
+      BUILD_WITH_INSTALL_RPATH TRUE
+      INSTALL_RPATH_USE_LINK_PATH FALSE
+      INSTALL_RPATH "$\{ORIGIN\}"
+  )
+endif(RHEL_BUILD)
+
 
 # For WIN32 do not link Threads and DL_LIBS
 if(WIN32)
