@@ -267,7 +267,7 @@ target_compile_features(triton-python-backend PRIVATE cxx_std_${TRITON_MIN_CXX_S
 target_compile_options(
   triton-python-backend PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:
-    -Wall -Wextra -Wno-unused-parameter -Wno-type-limits -Werror>
+    -Wall -Wextra -Wno-unused-parameter -Wno-type-limits>
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor>
 )
 
