@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -210,7 +210,7 @@ ModelLoader::LoadModel(TRITONSERVER_Server* server)
     }
   }
 
-  THROW_IF_TRITON_ERROR(TRITONSERVER_ServerLoadModelWithParameters(
+  THROW_IF_TRITON_ERROR(TRITONBACKEND_ServerLoadModelWithParameters(
       server, name_.c_str(), const_params.data(), const_params.size()));
 
   for (const auto param : const_params) {
@@ -223,10 +223,10 @@ ModelLoader::UnloadModel(TRITONSERVER_Server* server)
 {
   if (unload_dependents_) {
     THROW_IF_TRITON_ERROR(
-        TRITONSERVER_ServerUnloadModelAndDependents(server, name_.c_str()));
+        TRITONBACKEND_ServerUnloadModelAndDependents(server, name_.c_str()));
   } else {
     THROW_IF_TRITON_ERROR(
-        TRITONSERVER_ServerUnloadModel(server, name_.c_str()));
+        TRITONBACKEND_ServerUnloadModel(server, name_.c_str()));
   }
 }
 
