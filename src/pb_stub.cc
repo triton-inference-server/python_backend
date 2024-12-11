@@ -1032,9 +1032,9 @@ Stub::~Stub()
 
   {
     py::gil_scoped_acquire acquire;
-    async_event_loop_ = py::none();
-    background_futures_ = py::none();
-    model_instance_ = py::none();
+    py::object async_event_loop_local(std::move(async_event_loop_));
+    py::object background_futures_local(std::move(background_futures_));
+    py::object model_instance_local(std::move(model_instance_));
   }
   stub_instance_.reset();
   stub_message_queue_.reset();
