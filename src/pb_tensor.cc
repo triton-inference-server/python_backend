@@ -503,6 +503,14 @@ PbTensor::~PbTensor() noexcept(false)
 {
   pb_memory_.reset();
   DeleteDLPack();
+
+#ifdef TRITON_PB_STUB
+  {
+    py::gil_scoped_acquire acquire;
+    py::array numpy_array_local(std::move(numpy_array_));
+    py::array numpy_array_serialized_local(std::move(numpy_array_serialized_));
+  }
+#endif
 }
 
 const std::string&
