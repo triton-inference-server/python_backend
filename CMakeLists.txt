@@ -39,7 +39,7 @@ set(TRITON_MIN_CXX_STANDARD 17 CACHE STRING "The minimum C++ standard which feat
 #
 option(TRITON_ENABLE_GPU "Enable GPU support in backend" ON)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend" ON)
-option(TRITON_ENABLE_NVTX "Include nvtx markers collection in backend." OFF)
+option(TRITON_ENABLE_NVTX "Include nvtx markers collection in backend." ON)
 
 # FIXME: CI needs to enable the GPU flag. Python for window currently does not
 # support GPU tensors. For simplicity, we will override this option here.
@@ -50,7 +50,7 @@ endif()
 set(TRITON_REPO_ORGANIZATION "https://github.com/triton-inference-server" CACHE STRING "Git repository to pull from")
 set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/backend repo")
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
-set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
+set(TRITON_CORE_REPO_TAG "spolisetty_nvtx_test" CACHE STRING "Tag for triton-inference-server/core repo")
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
@@ -145,9 +145,9 @@ elseif()
   message(WARNING "TRITON_ENABLE_GPU is OFF, GPU Tensor support will be disabled")
 endif() # TRITON_ENABLE_GPU
 
-if(${TRITON_ENABLE_NVTX})
-  add_definitions(-DTRITON_ENABLE_NVTX=1)
-endif() # TRITON_ENABLE_NVTX
+#if(${TRITON_ENABLE_NVTX})
+add_definitions(-DTRITON_ENABLE_NVTX=1)
+#endif() # TRITON_ENABLE_NVTX
 
 find_package(ZLIB REQUIRED)
 
