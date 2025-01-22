@@ -1,4 +1,4 @@
-// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -102,6 +102,28 @@ PyDefaultArgumentToMutableType(const py::object& argument)
   throw PythonBackendException(
       std::string("Expect ") + typeid(PYTYPE).name() + ", got " +
       std::string(py::str(argument.get_type())));
+}
+
+std::string
+PyParametersToJSON(const py::dict& parameters)
+{
+  for (const auto& pair : parameters) {
+    if (!py::isinstance<py::str>(pair.first)) {
+      throw PythonBackendException(
+          "Expect parameters keys to have type str, found type " +
+          std::string(py::str(pair.first.get_type())));
+    }
+    if (!py::isinstance<py::bool_>(pair.second) &&
+        !py::isinstance<py::int_>(pair.second) &&
+        !py::isinstance<py::str>(pair.second)) {
+      throw PythonBackendException(
+          "Expect parameters values to have type bool/int/str, found type " +
+          std::string(py::str(pair.second.get_type())));
+    }
+  }
+  py::module_ py_json = py::module_::import("json");
+  std::string parameters_str = py::str(py_json.attr("dumps")(parameters));
+  return parameters_str;
 }
 
 void
@@ -1714,59 +1736,41 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<InferRequest, std::shared_ptr<InferRequest>>(
       module, "InferenceRequest")
       .def(
-          py::init([](const std::string& request_id,
-                      const py::object& correlation_id,
-                      const std::vector<std::shared_ptr<PbTensor>>& inputs,
-                      const std::vector<std::string>& requested_output_names,
-                      const std::string& model_name,
-                      const int64_t model_version, const uint32_t flags,
-                      const uint64_t timeout,
-                      const PreferredMemory& preferred_memory,
-                      const InferenceTrace& trace,
-                      const py::object& parameters_) {
-            py::dict parameters =
-                PyDefaultArgumentToMutableType<py::dict>(parameters_);
-            std::set<std::string> requested_outputs;
-            for (auto& requested_output_name : requested_output_names) {
-              requested_outputs.emplace(requested_output_name);
-            }
-            for (const auto& pair : parameters) {
-              if (!py::isinstance<py::str>(pair.first)) {
-                throw PythonBackendException(
-                    "Expect parameters keys to have type str, found type " +
-                    std::string(py::str(pair.first.get_type())));
-              }
-              if (!py::isinstance<py::bool_>(pair.second) &&
-                  !py::isinstance<py::int_>(pair.second) &&
-                  !py::isinstance<py::str>(pair.second)) {
-                throw PythonBackendException(
-                    "Expect parameters values to have type bool/int/str, found "
-                    "type " +
-                    std::string(py::str(pair.second.get_type())));
-              }
-            }
-            py::module_ py_json = py::module_::import("json");
-            std::string parameters_str =
-                py::str(py_json.attr("dumps")(parameters));
+          py::init(
+              [](const std::string& request_id,
+                 const py::object& correlation_id,
+                 const std::vector<std::shared_ptr<PbTensor>>& inputs,
+                 const std::vector<std::string>& requested_output_names,
+                 const std::string& model_name, const int64_t model_version,
+                 const uint32_t flags, const uint64_t timeout,
+                 const PreferredMemory& preferred_memory,
+                 const InferenceTrace& trace, const py::object& parameters_) {
+                py::dict parameters =
+                    PyDefaultArgumentToMutableType<py::dict>(parameters_);
+                std::set<std::string> requested_outputs;
+                for (auto& requested_output_name : requested_output_names) {
+                  requested_outputs.emplace(requested_output_name);
+                }
+                std::string parameters_str = PyParametersToJSON(parameters);
 
-            CorrelationId correlation_id_obj;
-            if (py::isinstance<py::int_>(correlation_id)) {
-              correlation_id_obj =
-                  CorrelationId(py::cast<uint64_t>(correlation_id));
-            } else if (py::isinstance<py::str>(correlation_id)) {
-              correlation_id_obj =
-                  CorrelationId(py::cast<std::string>(correlation_id));
-            } else {
-              throw PythonBackendException(
-                  "Correlation ID must be integer or string");
-            }
+                CorrelationId correlation_id_obj;
+                if (py::isinstance<py::int_>(correlation_id)) {
+                  correlation_id_obj =
+                      CorrelationId(py::cast<uint64_t>(correlation_id));
+                } else if (py::isinstance<py::str>(correlation_id)) {
+                  correlation_id_obj =
+                      CorrelationId(py::cast<std::string>(correlation_id));
+                } else {
+                  throw PythonBackendException(
+                      "Correlation ID must be integer or string");
+                }
 
-            return std::make_shared<InferRequest>(
-                request_id, correlation_id_obj, inputs, requested_outputs,
-                model_name, model_version, parameters_str, flags, timeout,
-                0 /*response_factory_address*/, 0 /*request_address*/,
-                preferred_memory, trace);
-          }),
+                return std::make_shared<InferRequest>(
+                    request_id, correlation_id_obj, inputs, requested_outputs,
+                    model_name, model_version, parameters_str, flags, timeout,
+                    0 /*response_factory_address*/, 0 /*request_address*/,
+                    preferred_memory, trace);
+              }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,
           py::arg("inputs").none(false),
@@ -1869,16 +1873,25 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<InferResponse, std::shared_ptr<InferResponse>>(
       module, "InferenceResponse")
       .def(
-          py::init<
-              const std::vector<std::shared_ptr<PbTensor>>&,
-              std::shared_ptr<PbError>>(),
+          py::init(
+              [](const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
+                 const std::shared_ptr<PbError>& error,
+                 const py::object& parameters_) {
+                py::dict parameters =
+                    PyDefaultArgumentToMutableType<py::dict>(parameters_);
+                std::string parameters_str = PyParametersToJSON(parameters);
+                return std::make_shared<InferResponse>(
+                    output_tensors, error, parameters_str /* parameters */);
+              }),
           py::arg("output_tensors") = py::list(),
-          py::arg("error") = static_cast<std::shared_ptr<PbError>>(nullptr))
+          py::arg("error") = static_cast<std::shared_ptr<PbError>>(nullptr),
+          py::arg("parameters") = py::none())
       .def(
           "output_tensors", &InferResponse::OutputTensors,
           py::return_value_policy::reference)
       .def("has_error", &InferResponse::HasError)
-      .def("error", &InferResponse::Error);
+      .def("error", &InferResponse::Error)
+      .def("parameters", &InferResponse::Parameters);
 
   py::class_<ResponseSender, std::shared_ptr<ResponseSender>>(
       module, "InferenceResponseSender")
