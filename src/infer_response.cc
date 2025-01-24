@@ -169,7 +169,8 @@ InferResponse::LoadFromSharedMemory(
             response_shm.data_.get() + sizeof(ResponseShm));
     {
 #ifdef TRITON_PB_STUB
-      // Need to acquire the GIL to avoid hangs.
+      // PbTensor::LoadFromSharedMemory() will construct Python objects if
+      // called from pb_stub, which requires holding the GIL.
       py::gil_scoped_acquire acquire;
 #endif
       for (size_t idx = 0; idx < requested_output_count; ++idx) {
