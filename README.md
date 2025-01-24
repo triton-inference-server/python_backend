@@ -803,6 +803,9 @@ You can read more about the inference response parameters in the [parameters
 extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
 documentation.
 
+Inference response parameters is currently not supported on BLS inference
+responses received by BLS models.
+
 ## Managing Python Runtime and Libraries
 
 Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
