@@ -76,7 +76,7 @@ class InferResponse {
       std::shared_ptr<PbError> error = nullptr, std::string parameters = "",
       const bool is_last_response = true, void* id = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
-  std::string& Parameters();
+  const std::string& Parameters() const;  // JSON serializable unless empty
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
   static std::unique_ptr<InferResponse> LoadFromSharedMemory(

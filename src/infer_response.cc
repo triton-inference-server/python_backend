@@ -60,8 +60,8 @@ InferResponse::OutputTensors()
   return output_tensors_;
 }
 
-std::string&
-InferResponse::Parameters()
+const std::string&
+InferResponse::Parameters() const
 {
   return parameters_;
 }
