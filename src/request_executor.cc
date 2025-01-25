@@ -1,4 +1,4 @@
-// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -153,20 +153,22 @@ InferResponseComplete(
       output_tensors.clear();
     }
 
+    // TODO: [DLIS-7864] Pass response parameters from BLS response.
     if (!infer_payload->IsDecoupled()) {
       infer_response = std::make_unique<InferResponse>(
-          output_tensors, pb_error, true /* is_last_response */);
+          output_tensors, pb_error, "" /* parameters */,
+          true /* is_last_response */);
     } else {
       if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
         // Not the last response.
         infer_response = std::make_unique<InferResponse>(
-            output_tensors, pb_error, false /* is_last_response */,
-            userp /* id */);
+            output_tensors, pb_error, "" /* parameters */,
+            false /* is_last_response */, userp /* id */);
       } else {
         // The last response.
         infer_response = std::make_unique<InferResponse>(
-            output_tensors, pb_error, true /* is_last_response */,
-            userp /* id */);
+            output_tensors, pb_error, "" /* parameters */,
+            true /* is_last_response */, userp /* id */);
       }
     }
 
@@ -178,11 +180,13 @@ InferResponseComplete(
       (flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
     // An empty response may be the last response for decoupled models.
     infer_response = std::make_unique<InferResponse>(
-        output_tensors, pb_error, true /* is_last_response */, userp /* id */);
+        output_tensors, pb_error, "" /* parameters */,
+        true /* is_last_response */, userp /* id */);
   } else {
     pb_error = std::make_shared<PbError>("Unexpected empty response.");
     infer_response = std::make_unique<InferResponse>(
-        output_tensors, pb_error, true /* is_last_response */, userp /* id */);
+        output_tensors, pb_error, "" /* parameters */,
+        true /* is_last_response */, userp /* id */);
   }
 
   infer_payload->SetValue(std::move(infer_response));

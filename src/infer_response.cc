@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -39,8 +39,10 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error, const bool is_last_response, void* id)
-    : error_(error), is_last_response_(is_last_response), id_(id)
+    std::shared_ptr<PbError> error, std::string parameters,
+    const bool is_last_response, void* id)
+    : error_(error), is_last_response_(is_last_response), id_(id),
+      parameters_(std::move(parameters))
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -56,6 +58,12 @@ std::vector<std::shared_ptr<PbTensor>>&
 InferResponse::OutputTensors()
 {
   return output_tensors_;
+}
+
+const std::string&
+InferResponse::Parameters() const
+{
+  return parameters_;
 }
 
 bool
@@ -106,6 +114,9 @@ InferResponse::SaveToSharedMemory(
       j++;
     }
     response_shm_ptr->id = id_;
+
+    parameters_shm_ = PbString::Create(shm_pool, parameters_);
+    response_shm_ptr->parameters = parameters_shm_->ShmHandle();
   }
 }
 
@@ -143,6 +154,8 @@ InferResponse::LoadFromSharedMemory(
 
   std::shared_ptr<PbError> pb_error;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
+  std::shared_ptr<PbString> parameters_shm;
+  std::string parameters;
 
   // If the error field is set, do not load output tensors from shared memory.
   if (response_shm_ptr->has_error && response_shm_ptr->is_error_set) {
@@ -154,26 +167,35 @@ InferResponse::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t* tensor_handle_shm =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             response_shm.data_.get() + sizeof(ResponseShm));
+    {
 #ifdef TRITON_PB_STUB
-    // Need to acquire the GIL to avoid hangs.
-    py::gil_scoped_acquire acquire;
+      // PbTensor::LoadFromSharedMemory() will construct Python objects if
+      // called from pb_stub, which requires holding the GIL.
+      py::gil_scoped_acquire acquire;
 #endif
-    for (size_t idx = 0; idx < requested_output_count; ++idx) {
-      std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
-          shm_pool, tensor_handle_shm[idx], open_cuda_handle);
-      output_tensors.emplace_back(std::move(pb_tensor));
+      for (size_t idx = 0; idx < requested_output_count; ++idx) {
+        std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
+            shm_pool, tensor_handle_shm[idx], open_cuda_handle);
+        output_tensors.emplace_back(std::move(pb_tensor));
+      }
     }
+
+    parameters_shm = std::move(
+        PbString::LoadFromSharedMemory(shm_pool, response_shm_ptr->parameters));
+    parameters = parameters_shm->String();
   }
 
   return std::unique_ptr<InferResponse>(new InferResponse(
       response_shm, output_tensors, pb_error,
-      response_shm_ptr->is_last_response, response_shm_ptr->id));
+      response_shm_ptr->is_last_response, response_shm_ptr->id, parameters_shm,
+      parameters));
 }
 
 InferResponse::InferResponse(
     AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id)
+    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id,
+    std::shared_ptr<PbString>& parameters_shm, std::string& parameters)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
@@ -181,6 +203,8 @@ InferResponse::InferResponse(
   shm_handle_ = response_shm_.handle_;
   id_ = id;
   is_last_response_ = is_last_response;
+  parameters_shm_ = std::move(parameters_shm);
+  parameters_ = std::move(parameters);
 }
 
 std::shared_ptr<PbError>&
@@ -385,6 +409,38 @@ InferResponse::Send(
     }
 
     cuda_copy |= cuda_used;
+  }
+
+  if (!parameters_.empty()) {
+    triton::common::TritonJson::Value param;
+    THROW_IF_TRITON_ERROR(
+        param.Parse(parameters_.c_str(), parameters_.length()));
+    std::vector<std::string> param_keys;
+    THROW_IF_TRITON_ERROR(param.Members(&param_keys));
+    for (const auto& key : param_keys) {
+      triton::common::TritonJson::Value value;
+      if (!param.Find(key.c_str(), &value)) {
+        throw PythonBackendException("Unexpected missing key on parameters");
+      }
+      if (value.IsString()) {
+        std::string string_value;
+        THROW_IF_TRITON_ERROR(value.AsString(&string_value));
+        THROW_IF_TRITON_ERROR(TRITONBACKEND_ResponseSetStringParameter(
+            response, key.c_str(), string_value.c_str()));
+      } else if (value.IsInt()) {
+        int64_t int_value = 0;
+        THROW_IF_TRITON_ERROR(value.AsInt(&int_value));
+        THROW_IF_TRITON_ERROR(TRITONBACKEND_ResponseSetIntParameter(
+            response, key.c_str(), int_value));
+      } else if (value.IsBool()) {
+        bool bool_value = false;
+        THROW_IF_TRITON_ERROR(value.AsBool(&bool_value));
+        THROW_IF_TRITON_ERROR(TRITONBACKEND_ResponseSetBoolParameter(
+            response, key.c_str(), bool_value));
+      } else {
+        throw PythonBackendException("Unsupported value type on parameters");
+      }
+    }
   }
 
 #ifdef TRITON_ENABLE_GPU

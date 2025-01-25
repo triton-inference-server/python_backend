@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -38,6 +38,7 @@ namespace triton { namespace backend { namespace python {
 
 struct ResponseShm {
   uint32_t outputs_size;
+  bi::managed_external_buffer::handle_t parameters;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
   // Indicates whether this error has a message or not.
@@ -72,9 +73,10 @@ class InferResponse {
  public:
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error = nullptr,
+      std::shared_ptr<PbError> error = nullptr, std::string parameters = "",
       const bool is_last_response = true, void* id = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
+  const std::string& Parameters() const;  // JSON serializable unless empty
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
   static std::unique_ptr<InferResponse> LoadFromSharedMemory(
@@ -116,8 +118,8 @@ class InferResponse {
   InferResponse(
       AllocatedSharedMemory<char>& response_shm,
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error, const bool is_last_response,
-      void* id);
+      std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id,
+      std::shared_ptr<PbString>& parameters_shm, std::string& parameters);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
 
   std::shared_ptr<PbError> error_;
@@ -128,6 +130,9 @@ class InferResponse {
   bool is_last_response_;
   // Representing the request id that the response was created from.
   void* id_;
+
+  std::shared_ptr<PbString> parameters_shm_;
+  std::string parameters_;
 };
 
 }}}  // namespace triton::backend::python
