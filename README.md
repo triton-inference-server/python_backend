@@ -1,5 +1,5 @@
 <!--
-# Copyright 2020-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -54,6 +54,7 @@ any C++ code.
     - [`finalize`](#finalize)
   - [Model Config File](#model-config-file)
   - [Inference Request Parameters](#inference-request-parameters)
+  - [Inference Response Parameters](#inference-response-parameters)
   - [Managing Python Runtime and Libraries](#managing-python-runtime-and-libraries)
     - [Building Custom Python Backend Stub](#building-custom-python-backend-stub)
     - [Creating Custom Execution Environments](#creating-custom-execution-environments)
@@ -786,6 +787,24 @@ request = pb_utils.InferenceRequest(parameters={"key": "value"}, ...)
 You can read more about the inference request parameters in the [parameters
 extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
 documentation.
+
+## Inference Response Parameters
+
+Inference response parameters may be optionally set during the construction of
+an inference response object. The parameters should be a dictionary of key value
+pairs, where keys are `str` and values are `bool`, `int` or `str`. For example,
+```python
+response = pb_utils.InferenceResponse(
+    output_tensors, parameters={"key": "value"}
+)
+```
+
+You can read more about the inference response parameters in the [parameters
+extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
+documentation.
+
+Inference response parameters is currently not supported on BLS inference
+responses received by BLS models.
 
 ## Managing Python Runtime and Libraries
 
