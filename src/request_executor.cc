@@ -199,11 +199,7 @@ InferResponseComplete(
       }
       pb_error = std::make_shared<PbError>(pb_exception.what());
     }
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> 408c23b (feat: Extend response parameters support to BLS in python backend)
     if (!infer_payload->IsDecoupled()) {
       infer_response = std::make_unique<InferResponse>(
           output_tensors, pb_error, parameters_string,
