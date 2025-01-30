@@ -803,8 +803,9 @@ You can read more about the inference response parameters in the [parameters
 extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
 documentation.
 
-Inference response parameters is currently not supported on BLS inference
-responses received by BLS models.
+Inference response parameters is supported when using BLS as well, i.e. when
+using BLS to call another model A, you can access the the optional parameters
+if set by A in its response.
 
 ## Managing Python Runtime and Libraries
 

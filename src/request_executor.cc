@@ -84,6 +84,7 @@ InferResponseComplete(
   std::unique_ptr<InferResponse> infer_response;
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   std::shared_ptr<PbError> pb_error;
+  std::string parameters_string;
 
   if (response != nullptr) {
     try {
@@ -153,21 +154,64 @@ InferResponseComplete(
       output_tensors.clear();
     }
 
-    // TODO: [DLIS-7864] Pass response parameters from BLS response.
+    try {
+      triton::common::TritonJson::Value parameters_json(
+          triton::common::TritonJson::ValueType::OBJECT);
+      uint32_t parameter_count;
+      THROW_IF_TRITON_ERROR(
+          TRITONSERVER_InferenceResponseParameterCount(response, &parameter_count));
+      for (size_t i = 0; i < parameter_count; i++) {
+        const char* name;
+        TRITONSERVER_ParameterType type;
+        const void* vvalue;
+        THROW_IF_TRITON_ERROR(
+            TRITONSERVER_InferenceResponseParameter(response, i, &name, &type, &vvalue));
+        if (type == TRITONSERVER_PARAMETER_INT) {
+          THROW_IF_TRITON_ERROR(parameters_json.AddInt(
+              name, *(reinterpret_cast<const int64_t*>(vvalue))));
+        } else if (type == TRITONSERVER_PARAMETER_BOOL) {
+          THROW_IF_TRITON_ERROR(parameters_json.AddBool(
+              name, *(reinterpret_cast<const bool*>(vvalue))));
+        } else if (type == TRITONSERVER_PARAMETER_STRING) {
+          std::string string = reinterpret_cast<const char*>(vvalue);
+          THROW_IF_TRITON_ERROR(parameters_json.AddString(name, string));
+        } else if (type == TRITONSERVER_PARAMETER_DOUBLE) {
+          THROW_IF_TRITON_ERROR(parameters_json.AddDouble(
+              name, *(reinterpret_cast<const double*>(vvalue))));
+        } else {
+          throw PythonBackendException((std::string("Unsupported parameter type for parameter '") + name + "'."))
+        }
+      }
+
+      triton::common::TritonJson::WriteBuffer buffer;
+      THROW_IF_TRITON_ERROR(parameters_json.Write(&buffer));
+      parameters_string = buffer.Contents();
+    }
+    catch (const PythonBackendException& pb_exception) {
+      if (response != nullptr) {
+        LOG_IF_ERROR(
+            TRITONSERVER_InferenceResponseDelete(response),
+            "Failed to delete inference response.");
+
+        response = nullptr;
+      }
+      pb_error = std::make_shared<PbError>(pb_exception.what());
+    }
+    
     if (!infer_payload->IsDecoupled()) {
       infer_response = std::make_unique<InferResponse>(
-          output_tensors, pb_error, "" /* parameters */,
+          output_tensors, pb_error, parameters_string,
           true /* is_last_response */);
     } else {
       if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
         // Not the last response.
         infer_response = std::make_unique<InferResponse>(
-            output_tensors, pb_error, "" /* parameters */,
+            output_tensors, pb_error, parameters_string,
             false /* is_last_response */, userp /* id */);
       } else {
         // The last response.
         infer_response = std::make_unique<InferResponse>(
-            output_tensors, pb_error, "" /* parameters */,
+            output_tensors, pb_error, parameters_string,
             true /* is_last_response */, userp /* id */);
       }
     }
