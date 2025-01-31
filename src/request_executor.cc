@@ -181,7 +181,7 @@ InferResponseComplete(
         } else {
           throw PythonBackendException(
               (std::string("Unsupported parameter type for parameter '") +
-               name + "'."))
+               name + "'."));
         }
       }
 
