@@ -157,6 +157,7 @@ InferResponseComplete(
     try {
       triton::common::TritonJson::Value parameters_json(
           triton::common::TritonJson::ValueType::OBJECT);
+      std::cerr << "debug ziqif: response = " << response << std::endl;
       uint32_t parameter_count;
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseParameterCount(
           response, &parameter_count));
