@@ -141,23 +141,9 @@ InferResponseComplete(
           output_tensors.push_back(pb_tensor);
         }
       }
-    }
-    catch (const PythonBackendException& pb_exception) {
-      if (response != nullptr) {
-        LOG_IF_ERROR(
-            TRITONSERVER_InferenceResponseDelete(response),
-            "Failed to delete inference response.");
 
-        response = nullptr;
-      }
-      pb_error = std::make_shared<PbError>(pb_exception.what());
-      output_tensors.clear();
-    }
-
-    try {
       triton::common::TritonJson::Value parameters_json(
           triton::common::TritonJson::ValueType::OBJECT);
-      std::cerr << "debug ziqif: response = " << response << std::endl;
       uint32_t parameter_count;
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseParameterCount(
           response, &parameter_count));
@@ -185,10 +171,6 @@ InferResponseComplete(
                name + "'."));
         }
       }
-
-      triton::common::TritonJson::WriteBuffer buffer;
-      THROW_IF_TRITON_ERROR(parameters_json.Write(&buffer));
-      parameters_string = buffer.Contents();
     }
     catch (const PythonBackendException& pb_exception) {
       if (response != nullptr) {
@@ -199,6 +181,7 @@ InferResponseComplete(
         response = nullptr;
       }
       pb_error = std::make_shared<PbError>(pb_exception.what());
+      output_tensors.clear();
     }
 
     if (!infer_payload->IsDecoupled()) {
