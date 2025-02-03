@@ -171,6 +171,9 @@ InferResponseComplete(
                name + "'."));
         }
       }
+      triton::common::TritonJson::WriteBuffer buffer;
+      THROW_IF_TRITON_ERROR(parameters_json.Write(&buffer));
+      parameters_string = buffer.Contents();
     }
     catch (const PythonBackendException& pb_exception) {
       if (response != nullptr) {
