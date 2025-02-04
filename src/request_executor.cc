@@ -147,6 +147,7 @@ InferResponseComplete(
       uint32_t parameter_count;
       THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseParameterCount(
           response, &parameter_count));
+
       for (size_t i = 0; i < parameter_count; i++) {
         const char* name;
         TRITONSERVER_ParameterType type;
@@ -162,15 +163,13 @@ InferResponseComplete(
         } else if (type == TRITONSERVER_PARAMETER_STRING) {
           std::string string = reinterpret_cast<const char*>(vvalue);
           THROW_IF_TRITON_ERROR(parameters_json.AddString(name, string));
-        } else if (type == TRITONSERVER_PARAMETER_DOUBLE) {
-          THROW_IF_TRITON_ERROR(parameters_json.AddDouble(
-              name, *(reinterpret_cast<const double*>(vvalue))));
         } else {
           throw PythonBackendException(
               (std::string("Unsupported parameter type for parameter '") +
                name + "'."));
         }
       }
+
       triton::common::TritonJson::WriteBuffer buffer;
       THROW_IF_TRITON_ERROR(parameters_json.Write(&buffer));
       parameters_string = buffer.Contents();
