@@ -803,8 +803,11 @@ You can read more about the inference response parameters in the [parameters
 extension](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_parameters.md)
 documentation.
 
-Inference response parameters is currently not supported on BLS inference
-responses received by BLS models.
+The parameters associated with an inference response can be retrieved using the
+`inference_response.parameters()` function. This function returns a JSON string
+where the keys are the keys of the parameters object and the values are the
+values for the parameters field. Note that you need to parse this string using
+`json.loads` to convert it to a dictionary.
 
 ## Managing Python Runtime and Libraries
 
