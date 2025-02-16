@@ -1,4 +1,4 @@
-# Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -112,6 +112,12 @@ class TritonPythonModel:
         self.out_dtype = pb_utils.triton_string_to_numpy(out_config["data_type"])
         self.idx_dtype = pb_utils.triton_string_to_numpy(idx_config["data_type"])
 
+        # Optional parameter to specify the number of elements in the OUT tensor in each response.
+        # Defaults to 1 if not provided. Example: If input 'IN' is [4] and 'output_num_elements' is set to 3,
+        # then 'OUT' will be [4, 4, 4]. If 'output_num_elements' is not specified, 'OUT' will default to [4].
+        parameters = self.model_config.get("parameters", {})
+        self.output_num_elements = int(parameters.get("output_num_elements", {}).get("string_value", 1))
+
         # To keep track of response threads so that we can delay
         # the finalizing the model until all response threads
         # have completed.
@@ -209,7 +215,10 @@ class TritonPythonModel:
             time.sleep(delay_value / 1000)
 
             idx_output = pb_utils.Tensor("IDX", numpy.array([idx], idx_dtype))
-            out_output = pb_utils.Tensor("OUT", numpy.array([in_value], out_dtype))
+            out_output = pb_utils.Tensor(
+                "OUT",
+                numpy.full((self.output_num_elements,), in_value, dtype=out_dtype),
+            )
             response = pb_utils.InferenceResponse(
                 output_tensors=[idx_output, out_output]
             )
