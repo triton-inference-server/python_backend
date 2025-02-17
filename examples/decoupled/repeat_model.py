@@ -116,7 +116,9 @@ class TritonPythonModel:
         # Defaults to 1 if not provided. Example: If input 'IN' is [4] and 'output_num_elements' is set to 3,
         # then 'OUT' will be [4, 4, 4]. If 'output_num_elements' is not specified, 'OUT' will default to [4].
         parameters = self.model_config.get("parameters", {})
-        self.output_num_elements = int(parameters.get("output_num_elements", {}).get("string_value", 1))
+        self.output_num_elements = int(
+            parameters.get("output_num_elements", {}).get("string_value", 1)
+        )
 
         # To keep track of response threads so that we can delay
         # the finalizing the model until all response threads
