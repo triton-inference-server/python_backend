@@ -655,9 +655,11 @@ ModelInstanceState::ExecuteBLSRequest(
             std::placeholders::_1);
         std::shared_ptr<InferPayload> infer_payload =
             std::make_shared<InferPayload>(is_decoupled, callback);
-
+        
+        TRITONSERVER_InferenceRequest* irequest = nullptr;
         auto response_future =
-            request_executor_->Infer(infer_request, infer_payload);
+            request_executor_->Infer(infer_request, infer_payload, &irequest);
+          
         infer_response = response_future.get();
 
         if (is_decoupled && (infer_response->Id() != nullptr)) {
@@ -669,6 +671,25 @@ ModelInstanceState::ExecuteBLSRequest(
         }
 
         PrepareResponseHandle(&infer_response, response_handle);
+        
+        // Another round trip to share the request address to the stub process,
+        // so that the stub process could initiate the request cancellation with
+        // the request address. 
+        if (is_decoupled) {
+          std::unique_ptr<BLSDecoupledInferRequestPayload> bls_infer_playload(
+            new BLSDecoupledInferRequestPayload(
+              reinterpret_cast<intptr_t>(irequest), 
+              reinterpret_cast<intptr_t>(infer_payload.get())));
+          bls_infer_playload->SaveBLSDecoupledInferRequestPayloadToSharedMemory(Stub()->ShmPool());
+          
+          request_batch_shm_ptr->bls_decoupled_infer_request_handle = 
+            bls_infer_playload->BLSDecoupledInferRequestShmHandle();
+
+          bi::scoped_lock<bi::interprocess_mutex> lock{
+              *(ipc_message->ResponseMutex())};
+          ipc_message->ResponseCondition()->notify_all();
+          ipc_message->ResponseCondition()->wait(lock);
+        }
       } else {
         throw pb_exception;
       }
@@ -763,6 +784,10 @@ ModelInstanceState::StubToParentMQMonitor()
               (bls_execute->Command() == PYTHONSTUB_InferStreamExecRequest));
         });
         boost::asio::post(*thread_pool_, std::move(task));
+        break;
+      }
+      case PYTHONSTUB_CancelBLSDecoupledInferRequest: {
+        ProcessCancelBLSDecoupledInferRequest(message);
         break;
       }
       default: {
@@ -887,6 +912,13 @@ ModelInstanceState::ProcessIsRequestCancelled(
       message_payload->cv.wait(lk);
     }
   }
+}
+
+void
+ModelInstanceState::ProcessIsRequestCancelled(
+    const std::unique_ptr<IPCMessage>& message) 
+{
+  
 }
 
 template <typename T, typename MessageType>

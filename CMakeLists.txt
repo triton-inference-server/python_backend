@@ -199,6 +199,8 @@ set(
   src/gpu_buffers.h
   src/model_loader.h
   src/model_loader.cc
+  src/bls_decoupled_payload.cc
+  src/bls_decoupled_payload.h
 )
 
 set(

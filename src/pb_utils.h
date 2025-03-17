@@ -244,6 +244,9 @@ struct RequestBatch {
 
   // A shm handle to a GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
+
+  // A shm handle to a RequestAddressShm object.
+  bi::managed_external_buffer::handle_t bls_decoupled_infer_request_handle;
 };
 
 struct MemoryReleaseMessage {

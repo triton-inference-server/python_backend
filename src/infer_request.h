@@ -28,12 +28,15 @@
 
 #include <future>
 #include <string>
+#include <shared_mutex>
+#include <queue>
 
 #include "correlation_id.h"
 #include "infer_response.h"
 #include "infer_trace.h"
 #include "pb_preferred_memory.h"
 #include "pb_tensor.h"
+#include "bls_decoupled_payload.h"
 
 #ifdef TRITON_PB_STUB
 #include "pb_cancel.h"
@@ -77,7 +80,8 @@ class InferRequest {
       const intptr_t request_address = 0,
       const PreferredMemory& preferred_memory =
           PreferredMemory(PreferredMemory::kDefault, 0),
-      const InferenceTrace& trace = InferenceTrace());
+      const InferenceTrace& trace = InferenceTrace(),
+      const bool is_bls_inference_request = false);
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
@@ -101,6 +105,7 @@ class InferRequest {
 #ifdef TRITON_PB_STUB
   std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
+  void Cancel();
   bool IsCancelled();
 #endif
 
@@ -151,9 +156,17 @@ class InferRequest {
   intptr_t response_factory_address_;
   intptr_t request_address_;
   bool is_decoupled_;
+  bool is_bls_infer_request_;
   PreferredMemory preferred_memory_;
   InferenceTrace trace_;
   uint32_t request_release_flags_;
+  // shared_mutex between Exec and Cancel methods
+  std::shared_mutex exec_cancel_mu_;
+  // Indicating if the BLS infer request is cancelled
+  bool is_explicitly_cancelled_;
+  std::mutex bls_decoupled_requests_mu_;
+  // caching the Triton server inference requests invoked with BLS InferRequest
+  std::queue<std::unique_ptr<BLSDecoupledInferRequestPayload>> bls_decoupled_requests_queue_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;

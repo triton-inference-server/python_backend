@@ -31,6 +31,7 @@
 #include "gpu_buffers.h"
 #include "pb_utils.h"
 #include "scoped_defer.h"
+#include "bls_decoupled_payload.h"
 #ifdef TRITON_PB_STUB
 #include "pb_stub.h"
 #endif
@@ -44,13 +45,14 @@ InferRequest::InferRequest(
     const std::string& model_name, const int64_t model_version,
     const std::string& parameters, const uint32_t flags, const uint64_t timeout,
     const intptr_t response_factory_address, const intptr_t request_address,
-    const PreferredMemory& preferred_memory, const InferenceTrace& trace)
+    const PreferredMemory& preferred_memory, const InferenceTrace& trace, bool is_bls_inference_request)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
       model_version_(model_version), parameters_(parameters), flags_(flags),
       timeout_(timeout), response_factory_address_(response_factory_address),
-      request_address_(request_address), preferred_memory_(preferred_memory),
-      trace_(trace), request_release_flags_(TRITONSERVER_REQUEST_RELEASE_ALL)
+      request_address_(request_address), is_bls_infer_request_(is_bls_inference_request),
+      preferred_memory_(preferred_memory),trace_(trace),
+      request_release_flags_(TRITONSERVER_REQUEST_RELEASE_ALL)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -398,7 +400,15 @@ InferRequest::InferRequest(
 bool
 InferRequest::IsCancelled()
 {
-  return pb_cancel_->IsCancelled();
+  // Release the GIL.
+  py::gil_scoped_release release;
+
+  if (is_bls_infer_request_) {
+    std::shared_lock lock(exec_cancel_mu_);
+    return is_explicitly_cancelled_;
+  } else {
+    return pb_cancel_->IsCancelled();
+  }
 }
 
 std::shared_ptr<ResponseSender>
@@ -422,6 +432,18 @@ InferRequest::Exec(const bool is_decoupled)
   if (!stub->IsInitialized() || stub->IsFinalizing()) {
     throw PythonBackendException(
         "BLS is only supported during the 'execute' function.");
+  }
+
+  // Allow concurrent execution of Exec, 
+  // but all threads will be blocked when calling Cancel
+  std::shared_lock lock(exec_cancel_mu_);
+
+  if (is_explicitly_cancelled_) {
+    return std::make_unique<InferResponse>(
+      std::vector<std::shared_ptr<PbTensor>>{},
+      std::make_shared<PbError>(
+          "BLS InferenceRequest has been cancelled.", 
+          TRITONSERVER_Error_Code::TRITONSERVER_ERROR_CANCELLED));
   }
 
   ResponseBatch* response_batch = nullptr;
@@ -539,6 +561,23 @@ InferRequest::Exec(const bool is_decoupled)
       throw pb_exception;
     }
 
+    // Additional round trip for getting the Triton server request address from the python backend process
+    if (is_decoupled) {
+      std::unique_ptr<BLSDecoupledInferRequestPayload> bls_request_payload
+        = BLSDecoupledInferRequestPayload::LoadBLSDecoupledInferRequestPayloadFromSharedMemory(shm_pool, 
+        request_batch_shm_ptr->bls_decoupled_infer_request_handle);
+      
+      {
+        std::lock_guard<std::mutex> lock(bls_decoupled_requests_mu_);
+        bls_decoupled_requests_queue_.push(std::move(bls_request_payload));
+      }
+
+      bi::scoped_lock<bi::interprocess_mutex> lock{
+          *(ipc_message->ResponseMutex())};
+      ipc_message->ResponseCondition()->notify_all();
+      ipc_message->ResponseCondition()->wait(lock);
+    }
+
     // Get the response for the current message.
     std::unique_ptr<IPCMessage> bls_response = IPCMessage::LoadFromSharedMemory(
         shm_pool, ipc_message->ResponseHandle());
@@ -602,6 +641,43 @@ InferRequest::Exec(const bool is_decoupled)
             "An error occurred while performing BLS request."));
 
     return error_response;
+  }
+}
+
+void
+InferRequest::Cancel() {
+  // Release the GIL. This avoids a potential deadlock situation in the parent process.
+  py::gil_scoped_release release;
+
+  // cancelling a BLS inference request should not be used in "initialize" or "finalize" function.
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (!stub->IsInitialized() || stub->IsFinalizing()) {
+    throw PythonBackendException(
+        "cancelling a BLS request is only supported during the 'execute' function.");
+  }
+
+  // Block other threads entering Exec and Cancel
+  std::unique_lock lock(exec_cancel_mu_);
+
+  if (is_explicitly_cancelled_) {
+    return;
+  }
+
+  // Mark this request as cancelled.
+  is_explicitly_cancelled_ = true;
+
+  // send all bls decoupled requests cancellation to python backend
+  if (!stub->StubToParentServiceActive()) {
+    LOG_ERROR << "Cannot communicate with parent service";
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(bls_decoupled_requests_mu_);
+    while(!bls_decoupled_requests_queue_.empty()) {
+      stub->EnqueueBlsDecoupledRequestCancellation(bls_decoupled_requests_queue_.front());
+      bls_decoupled_requests_queue_.pop();
+    }
   }
 }
 

@@ -1136,6 +1136,8 @@ Stub::ServiceStubToParentRequests()
       } else if (
           utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
         SendIsCancelled(utils_msg_payload);
+      } else if (utils_msg_payload->command_type == PYTHONSTUB_CancelBLSDecoupledInferRequest) {
+        SendBlsDecoupledRequestCancellation(utils_msg_payload);
       } else {
         std::cerr << "Error when sending message via stub_to_parent message "
                      "buffer - unknown command\n";
@@ -1257,6 +1259,28 @@ Stub::SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
     message_payload->cv.notify_all();
   }
   pb_cancel->ReportIsCancelled(is_cancelled);
+}
+
+void 
+Stub::EnqueueBlsDecoupledRequestCancellation(std::unique_ptr<BLSDecoupledInferRequestPayload>& request_payload) {
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+  std::make_unique<UtilsMessagePayload>(
+    PYTHONSTUB_CancelBLSDecoupledInferRequest, reinterpret_cast<void*>(request_payload.release()));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
+}
+
+void
+Stub::SendBlsDecoupledRequestCancellation(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload) 
+{
+  std::unique_ptr<BLSDecoupledInferRequestPayload> request_payload = std::unique_ptr<BLSDecoupledInferRequestPayload>(
+    reinterpret_cast<BLSDecoupledInferRequestPayload*>(utils_msg_payload->utils_message_ptr));
+  request_payload->SaveBLSDecoupledInferRequestPayloadToSharedMemory(shm_pool_);
+
+  std::unique_ptr<IPCMessage> ipc_message =
+    IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = utils_msg_payload->command_type;
+  ipc_message->Args() = request_payload->BLSDecoupledInferRequestShmHandle();
+  SendIPCUtilsMessage(ipc_message);
 }
 
 bool
@@ -1769,7 +1793,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
                     request_id, correlation_id_obj, inputs, requested_outputs,
                     model_name, model_version, parameters_str, flags, timeout,
                     0 /*response_factory_address*/, 0 /*request_address*/,
-                    preferred_memory, trace);
+                    preferred_memory, trace, true /*is_bls_infer_request*/);
               }),
           py::arg("request_id").none(false) = "",
           py::arg("correlation_id").none(false) = 0,

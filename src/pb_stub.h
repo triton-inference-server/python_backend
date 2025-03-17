@@ -42,6 +42,7 @@
 #include "pb_log.h"
 #include "pb_response_iterator.h"
 #include "pb_utils.h"
+#include "bls_decoupled_payload.h"
 
 
 namespace bi = boost::interprocess;
@@ -326,6 +327,12 @@ class Stub {
 
   /// Send request cancellation query to python backend
   void SendIsCancelled(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
+
+  /// Add request cancellation to queue
+  void EnqueueBlsDecoupledRequestCancellation(std::unique_ptr<BLSDecoupledInferRequestPayload>& request_payload);
+
+  /// Send request cancellation to python backend
+  void SendBlsDecoupledRequestCancellation(std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Is the stub initialized
   bool IsInitialized();

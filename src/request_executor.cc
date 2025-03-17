@@ -348,7 +348,8 @@ RequestExecutor::RequestExecutor(
 std::future<std::unique_ptr<InferResponse>>
 RequestExecutor::Infer(
     std::shared_ptr<InferRequest>& infer_request,
-    std::shared_ptr<InferPayload>& infer_payload)
+    std::shared_ptr<InferPayload>& infer_payload,
+    TRITONSERVER_InferenceRequest** tritonserver_irequest_ptr)
 {
   std::future<std::unique_ptr<InferResponse>> response_future;
   std::unique_ptr<InferResponse> infer_response;
@@ -478,6 +479,9 @@ RequestExecutor::Infer(
 
       THROW_IF_TRITON_ERROR(
           TRITONSERVER_ServerInferAsync(server_, irequest, trace));
+      
+      // Return the inference request submitted to the Triton server
+      *tritonserver_irequest_ptr = reinterpret_cast<TRITONSERVER_InferenceRequest*>(irequest); 
     }
   }
   catch (const PythonBackendException& pb_exception) {

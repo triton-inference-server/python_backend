@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,32 +26,46 @@
 
 #pragma once
 
-#include <memory>
-
-#include "infer_payload.h"
-#include "infer_request.h"
-#include "infer_response.h"
+#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
+class Stub;
 
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
-
- public:
-  std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      std::shared_ptr<InferPayload>& infer_payload,
-      TRITONSERVER_InferenceRequest** tritonserver_irequest_ptr);
-
-  RequestExecutor(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_Server* server);
-
-  ~RequestExecutor();
+//
+// Sharing the info about triton server inference requests
+// invoked by this BLS decoupled inference request
+//
+struct BLSDecoupledInferRequestShm {
+    intptr_t request_address;
+    intptr_t infer_payload_id;
 };
-}}}  // namespace triton::backend::python
+  
+class BLSDecoupledInferRequestPayload {
+public:
+    BLSDecoupledInferRequestPayload(intptr_t request_address, intptr_t infer_payload_id):
+    request_address_(request_address), infer_payload_id_(infer_payload_id)
+    {
+    };
+
+    bi::managed_external_buffer::handle_t BLSDecoupledInferRequestShmHandle();
+
+    /// Save a inference Request invoked with BLS related information to shared memory.
+    /// Currently, only the inference request address from the python backend will be included.
+    /// Can only be called from the python backend process.
+    /// \param shm_pool Shared memory pool
+    void SaveBLSDecoupledInferRequestPayloadToSharedMemory(
+        std::unique_ptr<SharedMemoryManager>& shm_pool);
+
+    static std::unique_ptr<BLSDecoupledInferRequestPayload> LoadBLSDecoupledInferRequestPayloadFromSharedMemory(
+        std::unique_ptr<SharedMemoryManager>& shm_pool,
+        bi::managed_external_buffer::handle_t shm_handle);
+
+private:
+    intptr_t request_address_;
+    intptr_t infer_payload_id_;
+    AllocatedSharedMemory<char> bls_decoupled_infer_request_shm_;
+    BLSDecoupledInferRequestShm* bls_decoupled_infer_request_shm_ptr_;
+};
+
+}}}
