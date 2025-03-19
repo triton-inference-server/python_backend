@@ -1,4 +1,4 @@
-// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -320,6 +320,14 @@ class Stub {
   /// Add cleanup id to queue. This is used for cleaning up the infer_payload
   /// and the response factory for BLS decoupled response.
   void EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type);
+
+  /// Send the id to the python backend for object cleanup
+  void SendCancelBLSDecoupledRequest(
+      std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
+
+  /// Add infer payload id to queue. This is used for retrieving the request
+  /// address from the infer_payload
+  void EnqueueCancelBLSDecoupledRequest(PbBLSCancel* pb_bls_cancel);
 
   /// Add request cancellation query to queue
   void EnqueueIsCancelled(PbCancel* pb_cancel);

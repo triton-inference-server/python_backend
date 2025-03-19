@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,7 +31,8 @@ namespace triton { namespace backend { namespace python {
 InferPayload::InferPayload(
     const bool is_decoupled,
     std::function<void(std::unique_ptr<InferResponse>)> callback)
-    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
+    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback),
+      request_address_(reinterpret_cast<intptr_t>(nullptr))
 {
   promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
@@ -89,6 +90,18 @@ std::shared_ptr<ResponseAllocatorUserp>
 InferPayload::ResponseAllocUserp()
 {
   return response_alloc_userp_;
+}
+
+void
+InferPayload::SetRequestAddress(intptr_t request_address)
+{
+  request_address_ = request_address;
+}
+
+intptr_t
+InferPayload::GetRequestAddress()
+{
+  return request_address_;
 }
 
 }}}  // namespace triton::backend::python

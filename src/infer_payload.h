@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -62,6 +62,8 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
   void SetResponseAllocUserp(
       const ResponseAllocatorUserp& response_alloc_userp);
   std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
+  void SetRequestAddress(intptr_t request_address);
+  intptr_t GetRequestAddress();
 
  private:
   std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> promise_;
@@ -70,6 +72,7 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;
   std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
+  intptr_t request_address_;
 };
 
 }}}  // namespace triton::backend::python

@@ -1,4 +1,4 @@
-// Copyright 2020-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -765,6 +765,10 @@ ModelInstanceState::StubToParentMQMonitor()
         boost::asio::post(*thread_pool_, std::move(task));
         break;
       }
+      case PYTHONSTUB_CancelBLSDecoupledInferRequest: {
+        ProcessCancelBLSDecoupledRequest(message);
+        break;
+      }
       default: {
         LOG_MESSAGE(
             TRITONSERVER_LOG_ERROR, "Unexpected message type received.");
@@ -852,6 +856,40 @@ ModelInstanceState::ProcessCleanupRequest(
     bi::scoped_lock<bi::interprocess_mutex> lock{*(message->ResponseMutex())};
     cleanup_message_ptr->waiting_on_stub = true;
     message->ResponseCondition()->notify_all();
+  }
+}
+
+void
+ModelInstanceState::ProcessCancelBLSDecoupledRequest(
+    const std::unique_ptr<IPCMessage>& message)
+{
+  AllocatedSharedMemory<CancelBLSRequestMessage> message_shm =
+      Stub()->ShmPool()->Load<CancelBLSRequestMessage>(message->Args());
+  CancelBLSRequestMessage* message_payload =
+      reinterpret_cast<CancelBLSRequestMessage*>(message_shm.data_.get());
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lk{message_payload->mu};
+
+    intptr_t id = reinterpret_cast<intptr_t>(message_payload->infer_payload_id);
+    try {
+      {
+        std::lock_guard<std::mutex> lock(infer_payload_mu_);
+        if (infer_payload_.find(id) != infer_payload_.end()) {
+          request_executor_->Cancel(infer_payload_[id]);
+        }
+      }
+      message_payload->is_cancelled = true;
+    }
+    catch (const PythonBackendException& pb_exception) {
+      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, pb_exception.what());
+    }
+
+    message_payload->waiting_on_stub = true;
+    message_payload->cv.notify_all();
+    while (message_payload->waiting_on_stub) {
+      message_payload->cv.wait(lk);
+    }
   }
 }
 

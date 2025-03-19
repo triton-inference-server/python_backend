@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,36 +26,38 @@
 
 #pragma once
 
-#include <memory>
-#include <unordered_set>
+#include <condition_variable>
+#include <mutex>
 
-#include "infer_payload.h"
-#include "infer_request.h"
-#include "infer_response.h"
+#include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error* CreateTritonErrorFromException(
-    const PythonBackendException& pb_exception);
-
-class RequestExecutor {
-  TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
-  TRITONSERVER_Server* server_;
-  std::unique_ptr<SharedMemoryManager>& shm_pool_;
-  std::mutex on_going_request_addresses_mu_;
-  std::unordered_set<intptr_t> on_going_request_addresses_;
-
+class PbBLSCancel {
  public:
-  std::future<std::unique_ptr<InferResponse>> Infer(
-      std::shared_ptr<InferRequest>& infer_request,
-      std::shared_ptr<InferPayload>& infer_payload);
-  void EraseRequestAddress(intptr_t request_address);
-  void Cancel(std::shared_ptr<InferPayload>& infer_payload);
+  PbBLSCancel(void* infer_playload_id)
+      : updating_(false), infer_playload_id_(infer_playload_id),
+        is_cancelled_(false)
+  {
+  }
+  DISALLOW_COPY_AND_ASSIGN(PbBLSCancel);
 
-  RequestExecutor(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      TRITONSERVER_Server* server);
+  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  bi::managed_external_buffer::handle_t ShmHandle();
+  CancelBLSRequestMessage* ShmPayload();
 
-  ~RequestExecutor();
+  void Cancel();
+  void ReportIsCancelled(bool is_cancelled);
+
+ private:
+  AllocatedSharedMemory<CancelBLSRequestMessage> cancel_shm_;
+
+  std::mutex mu_;
+  std::condition_variable cv_;
+  bool updating_;
+
+  void* infer_playload_id_;
+  bool is_cancelled_;
 };
-}}}  // namespace triton::backend::python
+
+}}};  // namespace triton::backend::python
