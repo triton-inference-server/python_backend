@@ -404,7 +404,8 @@ class ModelInstanceState : public BackendModelInstance {
   void ProcessCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process cancelling a BLS decoupled request
-  void ProcessCancelBLSDecoupledRequest(const std::unique_ptr<IPCMessage>& message);
+  void ProcessCancelBLSDecoupledRequest(
+      const std::unique_ptr<IPCMessage>& message);
 
   // Process request cancellation query
   void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);
