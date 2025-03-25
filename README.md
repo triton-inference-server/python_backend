@@ -1427,39 +1427,29 @@ inference request. For example,
 import triton_python_backend_utils as pb_utils
 
 class TritonPythonModel:
-  ...
+    ...
     def execute(self, requests):
-      ...
-      infer_request = pb_utils.InferenceRequest(
-          model_name='model_name',
-          requested_output_names=['REQUESTED_OUTPUT'],
-          inputs=[<pb_utils.Tensor object>])
+        ...
+        bls_response_iterator = bls_request.exec(decoupled=True)
+        ...
+        bls_response_iterator.cancel()
+        ...
+```
 
-      # Execute the infer_request and wait for the response. Here we are
-      # running a BLS request on a decoupled model, hence setting the parameter
-      # 'decoupled' to 'True'.
-      infer_responses = infer_request.exec(decoupled=True)
+You may also call the `cancel()` method on the response iterator returned from
+the `async_exec()` method of the inference request. For example,
 
-      response_tensors_received = []
-      for infer_response in infer_responses:
-        # Check if the inference response indicates an error.
-        # vLLM backend uses the CANCELLED error code when a request is cancelled.
-        # TensorRT-LLM backend does not use error codes; instead, it sends the
-        # TRITONSERVER_RESPONSE_COMPLETE_FINAL flag to the iterator.
-        if infer_response.has_error():
-            if infer_response.error().code() == pb_utils.TritonError.CANCELLED:
-                print("request has been cancelled.")
-                break
+```python
+import triton_python_backend_utils as pb_utils
 
-        # Collect the output tensor from the model's response
-        output = pb_utils.get_output_tensor_by_name(
-            infer_response, 'REQUESTED_OUTPUT')
-        response_tensors_received.append(output)
-
-        # Check if we have received enough inference output tensors
-        # and then cancel the response iterator
-        if has_enough_response(response_tensors_received):
-            infer_responses.cancel()
+class TritonPythonModel:
+    ...
+    async def execute(self, requests):
+        ...
+        bls_response_iterator = await bls_request.async_exec(decoupled=True)
+        ...
+        bls_response_iterator.cancel()
+        ...
 ```
 
 Note: Whether the decoupled model returns a cancellation error and stops executing
