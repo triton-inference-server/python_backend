@@ -72,7 +72,7 @@ PbBLSCancel::Cancel()
       return;
     }
 
-    stub->EnqueueCancelBLSDecoupledRequest(this);
+    stub->EnqueueCancelBLSRequest(this);
     updating_ = true;
   }
   cv_.wait(lk, [this] { return !updating_; });

@@ -1418,13 +1418,10 @@ will be automatically deallocated. This can increase the number of BLS requests
 that you can execute in your model without running into the out of GPU or
 shared memory error.
 
-Starting from the 25.04 release, you can use the `infer_responses.cancel()` function
-on a BLS decoupled response iterator to stop the response stream, which cancels
-the request to the decoupled model. This is useful for stopping long inference
-requests, such as those from auto-generative large language models, which may
-run for an indeterminate amount of time and consume significant server resources.
-The response iterator can be generated from `infer_request.exec(decoupled=True)`
-and `infer_request.async_exec(decoupled=True)` functions:
+### Cancelling decoupled BLS requests
+A decoupled BLS inference request may be cancelled by calling the `cancel()`
+method on the response iterator returned from the method executing the BLS
+inference request. For example,
 
 ```python
 import triton_python_backend_utils as pb_utils
@@ -1433,12 +1430,12 @@ class TritonPythonModel:
   ...
     def execute(self, requests):
       ...
-      inference_request = pb_utils.InferenceRequest(
+      infer_request = pb_utils.InferenceRequest(
           model_name='model_name',
           requested_output_names=['REQUESTED_OUTPUT'],
           inputs=[<pb_utils.Tensor object>])
 
-      # Execute the inference_request and wait for the response. Here we are
+      # Execute the infer_request and wait for the response. Here we are
       # running a BLS request on a decoupled model, hence setting the parameter
       # 'decoupled' to 'True'.
       infer_responses = infer_request.exec(decoupled=True)
@@ -1449,14 +1446,14 @@ class TritonPythonModel:
         # vLLM backend uses the CANCELLED error code when a request is cancelled.
         # TensorRT-LLM backend does not use error codes; instead, it sends the
         # TRITONSERVER_RESPONSE_COMPLETE_FINAL flag to the iterator.
-        if inference_response.has_error():
+        if infer_response.has_error():
             if infer_response.error().code() == pb_utils.TritonError.CANCELLED:
                 print("request has been cancelled.")
                 break
 
         # Collect the output tensor from the model's response
         output = pb_utils.get_output_tensor_by_name(
-            inference_response, 'REQUESTED_OUTPUT')
+            infer_response, 'REQUESTED_OUTPUT')
         response_tensors_received.append(output)
 
         # Check if we have received enough inference output tensors

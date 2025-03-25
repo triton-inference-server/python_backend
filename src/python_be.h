@@ -403,9 +403,8 @@ class ModelInstanceState : public BackendModelInstance {
   // Process the decoupled cleanup request for InferPayload and ResponseFactory
   void ProcessCleanupRequest(const std::unique_ptr<IPCMessage>& message);
 
-  // Process cancelling a BLS decoupled request
-  void ProcessCancelBLSDecoupledRequest(
-      const std::unique_ptr<IPCMessage>& message);
+  // Process cancelling a BLS request
+  void ProcessCancelBLSRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process request cancellation query
   void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);

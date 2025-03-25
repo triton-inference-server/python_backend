@@ -38,19 +38,21 @@ namespace triton { namespace backend { namespace python {
 TRITONSERVER_Error* CreateTritonErrorFromException(
     const PythonBackendException& pb_exception);
 
+struct RequestCompletionUserp {
+  std::shared_ptr<InferPayload> infer_payload;
+  RequestCompletionUserp(std::shared_ptr<InferPayload>& infer_payload)
+      : infer_payload(infer_payload){};
+};
+
 class RequestExecutor {
   TRITONSERVER_ResponseAllocator* response_allocator_ = nullptr;
   TRITONSERVER_Server* server_;
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
-  std::mutex on_going_request_addresses_mu_;
-  std::unordered_set<intptr_t> on_going_request_addresses_;
 
  public:
   std::future<std::unique_ptr<InferResponse>> Infer(
       std::shared_ptr<InferRequest>& infer_request,
       std::shared_ptr<InferPayload>& infer_payload);
-  void EraseRequestAddress(intptr_t request_address);
-  void Cancel(std::shared_ptr<InferPayload>& infer_payload);
 
   RequestExecutor(
       std::unique_ptr<SharedMemoryManager>& shm_pool,

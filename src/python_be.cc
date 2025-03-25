@@ -765,8 +765,8 @@ ModelInstanceState::StubToParentMQMonitor()
         boost::asio::post(*thread_pool_, std::move(task));
         break;
       }
-      case PYTHONSTUB_CancelBLSDecoupledInferRequest: {
-        ProcessCancelBLSDecoupledRequest(message);
+      case PYTHONSTUB_CancelBLSInferRequest: {
+        ProcessCancelBLSRequest(message);
         break;
       }
       default: {
@@ -860,7 +860,7 @@ ModelInstanceState::ProcessCleanupRequest(
 }
 
 void
-ModelInstanceState::ProcessCancelBLSDecoupledRequest(
+ModelInstanceState::ProcessCancelBLSRequest(
     const std::unique_ptr<IPCMessage>& message)
 {
   AllocatedSharedMemory<CancelBLSRequestMessage> message_shm =
@@ -876,7 +876,7 @@ ModelInstanceState::ProcessCancelBLSDecoupledRequest(
       {
         std::lock_guard<std::mutex> lock(infer_payload_mu_);
         if (infer_payload_.find(id) != infer_payload_.end()) {
-          request_executor_->Cancel(infer_payload_[id]);
+          infer_payload_[id]->SafeCancelRequest();
         }
       }
       message_payload->is_cancelled = true;

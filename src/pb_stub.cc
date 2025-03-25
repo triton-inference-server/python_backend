@@ -1137,9 +1137,8 @@ Stub::ServiceStubToParentRequests()
           utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
         SendIsCancelled(utils_msg_payload);
       } else if (
-          utils_msg_payload->command_type ==
-          PYTHONSTUB_CancelBLSDecoupledInferRequest) {
-        SendCancelBLSDecoupledRequest(utils_msg_payload);
+          utils_msg_payload->command_type == PYTHONSTUB_CancelBLSInferRequest) {
+        SendCancelBLSRequest(utils_msg_payload);
       } else {
         std::cerr << "Error when sending message via stub_to_parent message "
                      "buffer - unknown command\n";
@@ -1226,7 +1225,7 @@ Stub::EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type)
 }
 
 void
-Stub::SendCancelBLSDecoupledRequest(
+Stub::SendCancelBLSRequest(
     std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
 {
   PbBLSCancel* pb_bls_cancel =
@@ -1256,11 +1255,11 @@ Stub::SendCancelBLSDecoupledRequest(
 }
 
 void
-Stub::EnqueueCancelBLSDecoupledRequest(PbBLSCancel* pb_bls_cancel)
+Stub::EnqueueCancelBLSRequest(PbBLSCancel* pb_bls_cancel)
 {
   std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
       std::make_unique<UtilsMessagePayload>(
-          PYTHONSTUB_CancelBLSDecoupledInferRequest,
+          PYTHONSTUB_CancelBLSInferRequest,
           reinterpret_cast<void*>(pb_bls_cancel));
   EnqueueUtilsMessage(std::move(utils_msg_payload));
 }

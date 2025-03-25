@@ -322,12 +322,12 @@ class Stub {
   void EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type);
 
   /// Send the id to the python backend for object cleanup
-  void SendCancelBLSDecoupledRequest(
+  void SendCancelBLSRequest(
       std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
   /// Add infer payload id to queue. This is used for retrieving the request
   /// address from the infer_payload
-  void EnqueueCancelBLSDecoupledRequest(PbBLSCancel* pb_bls_cancel);
+  void EnqueueCancelBLSRequest(PbBLSCancel* pb_bls_cancel);
 
   /// Add request cancellation query to queue
   void EnqueueIsCancelled(PbCancel* pb_cancel);
