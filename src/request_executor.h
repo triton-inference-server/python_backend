@@ -27,7 +27,6 @@
 #pragma once
 
 #include <memory>
-#include <unordered_set>
 
 #include "infer_payload.h"
 #include "infer_request.h"
