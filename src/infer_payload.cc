@@ -32,7 +32,6 @@ InferPayload::InferPayload(
     const bool is_decoupled,
     std::function<void(std::unique_ptr<InferResponse>)> callback)
     : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback),
-      is_request_deleted_(false),
       request_address_(reinterpret_cast<intptr_t>(nullptr))
 {
   promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
@@ -96,20 +95,8 @@ InferPayload::ResponseAllocUserp()
 void
 InferPayload::SetRequestAddress(intptr_t request_address)
 {
+  std::unique_lock<std::mutex> lock(request_address_mutex_);
   request_address_ = request_address;
-}
-
-intptr_t
-InferPayload::GetRequestAddress()
-{
-  return request_address_;
-}
-
-void
-InferPayload::SetRequestDeleted()
-{
-  std::unique_lock<std::mutex> lock(request_deletion_mutex_);
-  is_request_deleted_ = true;
 }
 
 void
@@ -122,11 +109,7 @@ InferPayload::SetRequestCancellationFunc(
 void
 InferPayload::SafeCancelRequest()
 {
-  std::unique_lock<std::mutex> lock(request_deletion_mutex_);
-  if (is_request_deleted_) {
-    return;
-  }
-
+  std::unique_lock<std::mutex> lock(request_address_mutex_);
   if (request_address_ == 0L) {
     return;
   }

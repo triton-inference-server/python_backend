@@ -62,9 +62,7 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
   void SetResponseAllocUserp(
       const ResponseAllocatorUserp& response_alloc_userp);
   std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
-  void SetRequestDeleted();
   void SetRequestAddress(intptr_t request_address);
-  intptr_t GetRequestAddress();
   void SetRequestCancellationFunc(
       const std::function<void(intptr_t)>& request_cancel_func);
   void SafeCancelRequest();
@@ -76,8 +74,7 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;
   std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
-  std::mutex request_deletion_mutex_;
-  bool is_request_deleted_;
+  std::mutex request_address_mutex_;
   intptr_t request_address_;
   std::function<void(intptr_t)> request_cancel_func_;
 };

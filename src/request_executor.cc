@@ -71,7 +71,7 @@ InferRequestComplete(
   if (request != nullptr) {
     RequestCompletionUserp* completion_userp =
         reinterpret_cast<RequestCompletionUserp*>(userp);
-    completion_userp->infer_payload->SetRequestDeleted();
+    completion_userp->infer_payload->SetRequestAddress(0L);
 
     LOG_IF_ERROR(
         TRITONSERVER_InferenceRequestDelete(request),
