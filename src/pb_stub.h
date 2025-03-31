@@ -321,7 +321,8 @@ class Stub {
   /// and the response factory for BLS decoupled response.
   void EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type);
 
-  /// Send the id to the python backend for object cleanup
+  /// Send the id to the python backend for request address retrieval and
+  /// cancellation
   void SendCancelBLSRequest(
       std::unique_ptr<UtilsMessagePayload>& utils_msg_payload);
 
