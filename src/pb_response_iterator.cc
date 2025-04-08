@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -40,6 +40,7 @@ ResponseIterator::ResponseIterator(
     : id_(response->Id()), is_finished_(false), is_cleared_(false), idx_(0)
 {
   response_buffer_.push(response);
+  pb_bls_cancel_ = std::make_shared<PbBLSCancel>(response->Id());
 }
 
 ResponseIterator::~ResponseIterator()
@@ -157,6 +158,14 @@ ResponseIterator::GetExistingResponses()
   is_cleared_ = true;
 
   return responses;
+}
+
+void
+ResponseIterator::Cancel()
+{
+  if (!is_finished_) {
+    pb_bls_cancel_->Cancel();
+  }
 }
 
 }}}  // namespace triton::backend::python

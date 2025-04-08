@@ -69,9 +69,15 @@ InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
 {
   if (request != nullptr) {
+    RequestCompletionUserp* completion_userp =
+        reinterpret_cast<RequestCompletionUserp*>(userp);
+    completion_userp->infer_payload->SetRequestAddress(0L);
+
     LOG_IF_ERROR(
         TRITONSERVER_InferenceRequestDelete(request),
         "Failed to delete inference request.");
+
+    delete completion_userp;
   }
 }
 
@@ -85,10 +91,16 @@ InferResponseComplete(
   std::vector<std::shared_ptr<PbTensor>> output_tensors;
   std::shared_ptr<PbError> pb_error;
   std::string parameters_string;
+  TRITONSERVER_Error_Code error_code = TRITONSERVER_ERROR_INTERNAL;
 
   if (response != nullptr) {
     try {
-      THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceResponseError(response));
+      TRITONSERVER_Error* server_error =
+          TRITONSERVER_InferenceResponseError(response);
+      if (server_error != nullptr) {
+        error_code = TRITONSERVER_ErrorCode(server_error);
+      }
+      THROW_IF_TRITON_ERROR(server_error);
 
       uint32_t output_count;
       THROW_IF_TRITON_ERROR(
@@ -182,7 +194,7 @@ InferResponseComplete(
 
         response = nullptr;
       }
-      pb_error = std::make_shared<PbError>(pb_exception.what());
+      pb_error = std::make_shared<PbError>(pb_exception.what(), error_code);
       output_tensors.clear();
     }
 
@@ -313,6 +325,18 @@ ResponseAlloc(
   return nullptr;  // Success
 }
 
+void
+InferRequestCancel(intptr_t request_address)
+{
+  if (request_address == 0L) {
+    return;
+  }
+
+  TRITONSERVER_InferenceRequest* irequest =
+      reinterpret_cast<TRITONSERVER_InferenceRequest*>(request_address);
+  THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestCancel(irequest));
+}
+
 TRITONSERVER_Error*
 OutputBufferQuery(
     TRITONSERVER_ResponseAllocator* allocator, void* userp,
@@ -355,6 +379,7 @@ RequestExecutor::Infer(
   bool is_ready = false;
   const char* model_name = infer_request->ModelName().c_str();
   TRITONSERVER_InferenceRequest* irequest = nullptr;
+  RequestCompletionUserp* completion_userp = nullptr;
 
   try {
     int64_t model_version = infer_request->ModelVersion();
@@ -406,8 +431,10 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetTimeoutMicroseconds(
         irequest, infer_request->Timeout()));
 
+    completion_userp = new RequestCompletionUserp(infer_payload);
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
-        irequest, InferRequestComplete, nullptr /* request_release_userp */));
+        irequest, InferRequestComplete,
+        reinterpret_cast<void*>(completion_userp)));
 
     TRITONSERVER_InferenceTrace* trace = nullptr;
     if (infer_request->GetTrace().TritonTrace() != nullptr) {
@@ -476,11 +503,21 @@ RequestExecutor::Infer(
           reinterpret_cast<void*>(infer_payload->ResponseAllocUserp().get()),
           InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
+      // Store the inference request address submitted to the Triton server for
+      // retrieval
+      infer_payload->SetRequestAddress(reinterpret_cast<intptr_t>(irequest));
+      infer_payload->SetRequestCancellationFunc(InferRequestCancel);
+
       THROW_IF_TRITON_ERROR(
           TRITONSERVER_ServerInferAsync(server_, irequest, trace));
     }
   }
   catch (const PythonBackendException& pb_exception) {
+    infer_payload->SetRequestAddress(0L);
+    if (completion_userp != nullptr) {
+      delete completion_userp;
+    }
+
     LOG_IF_ERROR(
         TRITONSERVER_InferenceRequestDelete(irequest),
         "Failed to delete inference request.");
