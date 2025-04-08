@@ -1409,14 +1409,52 @@ class TritonPythonModel:
 A complete example for sync and async BLS for decoupled models is included in
 the [Examples](#examples) section.
 
+Note: Async BLS is not supported on Python 3.6 or lower due to the `async`
+keyword and `asyncio.run` being introduced in Python 3.7.
+
 Starting from the 22.04 release, the lifetime of the BLS output tensors have
 been improved such that if a tensor is no longer needed in your Python model it
 will be automatically deallocated. This can increase the number of BLS requests
 that you can execute in your model without running into the out of GPU or
 shared memory error.
 
-Note: Async BLS is not supported on Python 3.6 or lower due to the `async`
-keyword and `asyncio.run` being introduced in Python 3.7.
+### Cancelling decoupled BLS requests
+A decoupled BLS inference request may be cancelled by calling the `cancel()`
+method on the response iterator returned from the method executing the BLS
+inference request. For example,
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    ...
+    def execute(self, requests):
+        ...
+        bls_response_iterator = bls_request.exec(decoupled=True)
+        ...
+        bls_response_iterator.cancel()
+        ...
+```
+
+You may also call the `cancel()` method on the response iterator returned from
+the `async_exec()` method of the inference request. For example,
+
+```python
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    ...
+    async def execute(self, requests):
+        ...
+        bls_response_iterator = await bls_request.async_exec(decoupled=True)
+        ...
+        bls_response_iterator.cancel()
+        ...
+```
+
+Note: Whether the decoupled model returns a cancellation error and stops executing
+the request depends on the model's backend implementation. Please refer to the
+documentation for more details [Handing in Backend](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/request_cancellation.md#handling-in-backend)
 
 ## Model Loading API
 

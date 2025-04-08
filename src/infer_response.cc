@@ -91,6 +91,7 @@ InferResponse::SaveToSharedMemory(
   response_shm_ptr->is_error_set = false;
   shm_handle_ = response_shm_.handle_;
   response_shm_ptr->is_last_response = is_last_response_;
+  response_shm_ptr->id = id_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
@@ -113,7 +114,6 @@ InferResponse::SaveToSharedMemory(
       tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
-    response_shm_ptr->id = id_;
 
     parameters_shm_ = PbString::Create(shm_pool, parameters_);
     response_shm_ptr->parameters = parameters_shm_->ShmHandle();

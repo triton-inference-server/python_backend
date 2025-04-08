@@ -1,4 +1,4 @@
-// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,38 +24,69 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-
-#include <queue>
-
-#include "infer_response.h"
 #include "pb_bls_cancel.h"
+
+#include "pb_stub.h"
 
 namespace triton { namespace backend { namespace python {
 
-class ResponseIterator {
- public:
-  ResponseIterator(const std::shared_ptr<InferResponse>& response);
-  ~ResponseIterator();
+void
+PbBLSCancel::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+{
+  cancel_shm_ = shm_pool->Construct<CancelBLSRequestMessage>();
+  new (&(cancel_shm_.data_->mu)) bi::interprocess_mutex;
+  new (&(cancel_shm_.data_->cv)) bi::interprocess_condition;
+  cancel_shm_.data_->waiting_on_stub = false;
+  cancel_shm_.data_->infer_payload_id = infer_playload_id_;
+  cancel_shm_.data_->is_cancelled = is_cancelled_;
+}
 
-  std::shared_ptr<InferResponse> Next();
-  void Iter();
-  void EnqueueResponse(std::shared_ptr<InferResponse> infer_response);
-  void* Id();
-  void Clear();
-  std::vector<std::shared_ptr<InferResponse>> GetExistingResponses();
-  void Cancel();
+bi::managed_external_buffer::handle_t
+PbBLSCancel::ShmHandle()
+{
+  return cancel_shm_.handle_;
+}
 
- private:
-  std::vector<std::shared_ptr<InferResponse>> responses_;
-  std::queue<std::shared_ptr<InferResponse>> response_buffer_;
-  std::mutex mu_;
-  std::condition_variable cv_;
-  void* id_;
-  bool is_finished_;
-  bool is_cleared_;
-  size_t idx_;
-  std::shared_ptr<PbBLSCancel> pb_bls_cancel_;
-};
+CancelBLSRequestMessage*
+PbBLSCancel::ShmPayload()
+{
+  return cancel_shm_.data_.get();
+}
+
+void
+PbBLSCancel::Cancel()
+{
+  // Release the GIL. Python objects are not accessed during the check.
+  py::gil_scoped_release gil_release;
+
+  std::unique_lock<std::mutex> lk(mu_);
+  // The cancelled flag can only move from false to true, not the other way, so
+  // it is checked on each query until cancelled and then implicitly cached.
+  if (is_cancelled_) {
+    return;
+  }
+  if (!updating_) {
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    if (!stub->StubToParentServiceActive()) {
+      LOG_ERROR << "Cannot communicate with parent service";
+      return;
+    }
+
+    stub->EnqueueCancelBLSRequest(this);
+    updating_ = true;
+  }
+  cv_.wait(lk, [this] { return !updating_; });
+}
+
+void
+PbBLSCancel::ReportIsCancelled(bool is_cancelled)
+{
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    is_cancelled_ = is_cancelled;
+    updating_ = false;
+  }
+  cv_.notify_all();
+}
 
 }}}  // namespace triton::backend::python

@@ -1136,6 +1136,9 @@ Stub::ServiceStubToParentRequests()
       } else if (
           utils_msg_payload->command_type == PYTHONSTUB_IsRequestCancelled) {
         SendIsCancelled(utils_msg_payload);
+      } else if (
+          utils_msg_payload->command_type == PYTHONSTUB_CancelBLSInferRequest) {
+        SendCancelBLSRequest(utils_msg_payload);
       } else {
         std::cerr << "Error when sending message via stub_to_parent message "
                      "buffer - unknown command\n";
@@ -1219,6 +1222,46 @@ Stub::EnqueueCleanupId(void* id, const PYTHONSTUB_CommandType& command_type)
         std::make_unique<UtilsMessagePayload>(command_type, id);
     EnqueueUtilsMessage(std::move(utils_msg_payload));
   }
+}
+
+void
+Stub::SendCancelBLSRequest(
+    std::unique_ptr<UtilsMessagePayload>& utils_msg_payload)
+{
+  PbBLSCancel* pb_bls_cancel =
+      reinterpret_cast<PbBLSCancel*>(utils_msg_payload->utils_message_ptr);
+  pb_bls_cancel->SaveToSharedMemory(shm_pool_);
+
+  CancelBLSRequestMessage* message_payload = pb_bls_cancel->ShmPayload();
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  ipc_message->Command() = utils_msg_payload->command_type;
+  ipc_message->Args() = pb_bls_cancel->ShmHandle();
+
+  bool is_cancelled = false;
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lk(message_payload->mu);
+
+    SendIPCUtilsMessage(ipc_message);
+    while (!message_payload->waiting_on_stub) {
+      message_payload->cv.wait(lk);
+    }
+
+    is_cancelled = message_payload->is_cancelled;
+    message_payload->waiting_on_stub = false;
+    message_payload->cv.notify_all();
+  }
+  pb_bls_cancel->ReportIsCancelled(is_cancelled);
+}
+
+void
+Stub::EnqueueCancelBLSRequest(PbBLSCancel* pb_bls_cancel)
+{
+  std::unique_ptr<UtilsMessagePayload> utils_msg_payload =
+      std::make_unique<UtilsMessagePayload>(
+          PYTHONSTUB_CancelBLSInferRequest,
+          reinterpret_cast<void*>(pb_bls_cancel));
+  EnqueueUtilsMessage(std::move(utils_msg_payload));
 }
 
 void
@@ -1909,7 +1952,8 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             it.Iter();
             return it;
           })
-      .def("__next__", &ResponseIterator::Next);
+      .def("__next__", &ResponseIterator::Next)
+      .def("cancel", &ResponseIterator::Cancel);
 
   py::class_<Logger> logger(module, "Logger");
   py::enum_<LogLevel>(logger, "LogLevel")

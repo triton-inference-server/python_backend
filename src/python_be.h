@@ -1,4 +1,4 @@
-// Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -402,6 +402,9 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Process the decoupled cleanup request for InferPayload and ResponseFactory
   void ProcessCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process cancelling a BLS request
+  void ProcessCancelBLSRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Process request cancellation query
   void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);

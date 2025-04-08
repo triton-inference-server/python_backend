@@ -241,6 +241,8 @@ set(
   src/pb_response_iterator.cc
   src/pb_cancel.cc
   src/pb_cancel.h
+  src/pb_bls_cancel.cc
+  src/pb_bls_cancel.h
 )
 
 list(APPEND
