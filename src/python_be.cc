@@ -443,7 +443,9 @@ ModelInstanceState::GetInputTensor(
     if (input_dtype == TRITONSERVER_TYPE_BYTES) {
       const char* content = reinterpret_cast<char*>(input_tensor->DataPtr());
       size_t content_byte_size = input_tensor->ByteSize();
-      const size_t request_element_cnt = GetElementCount(input_tensor->Dims());
+      int64_t request_element_cnt = 0;
+      RETURN_IF_ERROR(
+          GetElementCount(input_tensor->Dims(), &request_element_cnt));
       RETURN_IF_ERROR(ValidateStringBuffer(
           content, content_byte_size, request_element_cnt, input_name,
           nullptr /* str_list */));
