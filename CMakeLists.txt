@@ -121,6 +121,7 @@ ExternalProject_Add(
   INSTALL_COMMAND ""
   BUILD_COMMAND ""
 )
+add_compile_definitions(BOOST_NO_CXX98_FUNCTION_BASE)
 set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
 
 #
