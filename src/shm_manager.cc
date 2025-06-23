@@ -227,9 +227,21 @@ SharedMemoryManager::FreeMemory()
 
 SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
+  std::cerr << "---------------  SharedMemoryManager::~SharedMemoryManager() - delete_region_: " 
+  << delete_region_ << ", region_name: " << shm_region_name_ << " -----------------" << std::endl;
   if (delete_region_) {
-    bi::shared_memory_object::remove(shm_region_name_.c_str());
+    try {
+      bi::shared_memory_object::remove(shm_region_name_.c_str());
+      std::cerr << "Successfully called remove for " << shm_region_name_ << std::endl;
+    } catch (const bi::interprocess_exception& ex) {
+      std::cerr << "Boost IPC exception during remove for " << shm_region_name_ << ": " << ex.what() << std::endl;
+    } catch (const std::exception& ex) {
+      std::cerr << "Std exception during remove for " << shm_region_name_ << ": " << ex.what() << std::endl;
+    } catch (...) {
+      std::cerr << "Unknown exception during remove for " << shm_region_name_ << std::endl;
+    }
   }
+  std::cerr << "--------------------------------------------" << std::endl;
 }
 
 void

@@ -1767,17 +1767,37 @@ ModelInstanceState::ShareCUDAMemoryPool(const int32_t device_id)
 
 ModelInstanceState::~ModelInstanceState()
 {
+  std::cerr << "---------------  ModelInstanceState::~ModelInstanceState() - "
+               "Stub()->IsHealthy(): "
+            << Stub()->IsHealthy() << " -----------------" << std::endl;
+
   Stub()->UpdateHealth();
+  std::cerr << " -- Stub()->IsHealthy(): " << Stub()->IsHealthy() << std::endl;
   if (Stub()->IsHealthy()) {
     // Wait for all the pending tasks to finish.
     thread_pool_->wait();
   }
   // Terminate stub first to allow any last messages to be received by the back
   // end before deallocating the queue memory
-  Stub()->TerminateStub();
-  TerminateMonitor();
-  Stub()->ClearQueues();
-  Stub().reset();
+  // ... (UpdateHealth, thread_pool_->wait())
+  try {
+    Stub()->TerminateStub();
+    TerminateMonitor();
+    Stub()->ClearQueues();
+  }
+  catch (const std::exception& e) {
+    std::cerr << std::string(
+                     " -----  Exception during ~ModelInstanceState cleanup: ")
+              << e.what() << std::endl;
+    // Potentially force-kill the stub if TerminateStub failed, though this is
+    // risky.
+  }
+  catch (...) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_ERROR,
+        " -----  Unknown exception during ~ModelInstanceState cleanup.");
+  }
+  model_instance_stub_.reset();  // Ensure this is called
 }
 
 TRITONSERVER_Error*
@@ -2420,15 +2440,60 @@ TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 {
   void* vstate;
-  RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(instance, &vstate));
+  LOG_IF_ERROR(
+      TRITONBACKEND_ModelInstanceState(instance, &vstate),
+      "TRITONBACKEND_ModelInstanceFinalize: failed to get instance state");
   ModelInstanceState* instance_state =
       reinterpret_cast<ModelInstanceState*>(vstate);
+
+  const char* instance_name;
+  LOG_IF_ERROR(
+      TRITONBACKEND_ModelInstanceName(instance, &instance_name),
+      "TRITONBACKEND_ModelInstanceFinalize: failed to get instance name");
+  std::string name_str = (instance_name != nullptr) ? std::string(instance_name)
+                                                    : "unknown_instance";
+
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_INFO,
+      (std::string(
+           "TRITONBACKEND_ModelInstanceFinalize: Entered for instance: ") +
+       name_str)
+          .c_str());
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       "TRITONBACKEND_ModelInstanceFinalize: delete instance state");
 
-  delete instance_state;
+  if (instance_state != nullptr) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO, (std::string(
+                                    "TRITONBACKEND_ModelInstanceFinalize: "
+                                    "About to delete instance_state for: ") +
+                                name_str)
+                                   .c_str());
+    delete instance_state;
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO, (std::string(
+                                    "TRITONBACKEND_ModelInstanceFinalize: "
+                                    "Deleted instance_state for: ") +
+                                name_str)
+                                   .c_str());
+  } else {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_WARN, (std::string(
+                                    "TRITONBACKEND_ModelInstanceFinalize: "
+                                    "instance_state was null for: ") +
+                                name_str)
+                                   .c_str());
+  }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_INFO,
+      (std::string(
+           "TRITONBACKEND_ModelInstanceFinalize: Exiting for instance: ") +
+       name_str)
+          .c_str());
 
   return nullptr;
 }

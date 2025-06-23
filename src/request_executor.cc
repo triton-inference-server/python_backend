@@ -383,8 +383,15 @@ RequestExecutor::Infer(
 
   try {
     int64_t model_version = infer_request->ModelVersion();
+    LOG_MESSAGE(TRITONSERVER_LOG_INFO,
+        (std::string("RequestExecutor::Infer: Checking readiness for model: ") + model_name +
+        ", version: " + std::to_string(model_version)).c_str());
     THROW_IF_TRITON_ERROR(TRITONSERVER_ServerModelIsReady(
         server_, model_name, model_version, &is_ready));
+
+    LOG_MESSAGE(TRITONSERVER_LOG_INFO,
+        (std::string("RequestExecutor::Infer: Readiness for model: ") + model_name +
+        ", version: " + std::to_string(model_version) + ", is_ready: " + (is_ready ? "true" : "false")).c_str());
 
     if (!is_ready) {
       throw PythonBackendException(
