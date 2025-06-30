@@ -36,10 +36,12 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <climits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "pb_exception.h"
@@ -341,11 +343,30 @@ bool IsUsingCUDAPool(
 // being retrieved from core that are not platform-agnostic.
 void SanitizePath(std::string& path);
 
+// Invalid characters that are not allowed in user input
+constexpr const char* INVALID_CHARS = ";|&$`<>()[]{}\\\"'*?~#!";
+
+// Validate that an identifier (model name, region name, etc.)
+bool IsValidIdentifier(const std::string& input);
+
+// Validate that a path exists and is absolute
+bool IsValidPath(const std::string& path);
+
+// Check if a file exists and is executable
+bool IsExecutableFile(const std::string& filepath);
+
 #ifndef TRITON_PB_STUB
 std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
     TRITONSERVER_Error* error);
 #endif
 
 std::string GenerateUUID();
+
+// Environment handling utilities for Python activation scripts
+std::map<std::string, std::string> ParseActivationScript(const std::string& activate_path);
+
+std::pair<std::vector<std::string>, std::vector<char*>> PrepareEnvironment(
+    const std::map<std::string, std::string>& env_vars,  
+    const std::string& additional_lib_path = "");
 
 }}}  // namespace triton::backend::python

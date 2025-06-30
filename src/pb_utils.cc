@@ -26,12 +26,20 @@
 
 #include "pb_utils.h"
 
+#include <sys/stat.h>
+#include <fstream>
+
 #ifdef _WIN32
 #include <windows.h>
 
 #include <algorithm>
 #else
 #include <dlfcn.h>
+#include <unistd.h>
+#endif
+
+#ifndef _WIN32
+extern char **environ;
 #endif
 
 
@@ -315,12 +323,139 @@ WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)
 }
 #endif  // NOT TRITON_PB_STUB
 
+bool IsValidIdentifier(const std::string& input) {
+  if (input.empty()) {
+    return false;
+  }
+  
+  // Check for invalid characters
+  if (input.find_first_of(INVALID_CHARS) != std::string::npos) {
+    return false;
+  }
+  
+  return true;
+}
+
+bool IsValidPath(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+  
+  // Must be absolute path
+  if (path[0] != '/') {
+    return false;
+  }
+  
+  return true;
+}
+
+bool IsExecutableFile(const std::string& filepath) {
+  struct stat file_stat;
+  if (stat(filepath.c_str(), &file_stat) != 0) {
+    return false;
+  }
+  
+  // Check if it's a regular file and executable by owner
+  return S_ISREG(file_stat.st_mode) && (file_stat.st_mode & S_IXUSR);
+}
+
 std::string
 GenerateUUID()
 {
   static boost::uuids::random_generator generator;
   boost::uuids::uuid uuid = generator();
   return boost::uuids::to_string(uuid);
+}
+
+// Helper function to parse environment variables from activation script
+std::map<std::string, std::string> 
+ParseActivationScript(const std::string& activate_path) {
+  std::map<std::string, std::string> env_vars;
+  
+  // Read the current environment as baseline
+#ifndef _WIN32
+  if (environ != nullptr) {
+    for (char **env = environ; *env != nullptr; env++) {
+      std::string env_str(*env);
+      size_t eq_pos = env_str.find('=');
+      if (eq_pos != std::string::npos) {
+        std::string key = env_str.substr(0, eq_pos);
+        std::string value = env_str.substr(eq_pos + 1);
+        env_vars[key] = value;
+      }
+    }
+  }
+#endif
+  
+  // Parse activation script for environment changes
+  std::ifstream activate_file(activate_path);
+  if (!activate_file.is_open()) {
+    return env_vars; // Return current environment if can't read activation script
+  }
+  
+  std::string line;
+  while (std::getline(activate_file, line)) {
+    // Look for export statements or direct assignments
+    if (line.find("export ") == 0) {
+      // Handle: export VAR=value
+      line = line.substr(7); // Remove "export "
+    }
+    
+    size_t eq_pos = line.find('=');
+    if (eq_pos != std::string::npos && line[0] != '#') {
+      std::string key = line.substr(0, eq_pos);
+      std::string value = line.substr(eq_pos + 1);
+      
+      // Remove quotes if present
+      if (value.size() >= 2 && 
+          ((value[0] == '"' && value.back() == '"') ||
+           (value[0] == '\'' && value.back() == '\''))) {
+        value = value.substr(1, value.size() - 2);
+      }
+      
+      // Handle variable substitution for common cases
+      if (value.find("$PATH") != std::string::npos) {
+        size_t pos = value.find("$PATH");
+        value.replace(pos, 5, env_vars["PATH"]);
+      }
+      if (value.find("$LD_LIBRARY_PATH") != std::string::npos) {
+        size_t pos = value.find("$LD_LIBRARY_PATH");
+        value.replace(pos, 16, env_vars["LD_LIBRARY_PATH"]);
+      }
+      
+      env_vars[key] = value;
+    }
+  }
+  
+  return env_vars;
+}
+
+// Helper function to prepare environment array for execve
+std::pair<std::vector<std::string>, std::vector<char*>> 
+PrepareEnvironment(const std::map<std::string, std::string>& env_vars, 
+                   const std::string& additional_lib_path) {
+  
+  std::vector<std::string> env_strings;
+  std::vector<char*> env_array;
+  
+  for (const auto& [key, value] : env_vars) {
+    std::string env_string;
+    if (key == "LD_LIBRARY_PATH" && !additional_lib_path.empty()) {
+      // Prepend the additional library path
+      env_string = key + "=" + additional_lib_path + ":" + value;
+    } else {
+      env_string = key + "=" + value;
+    }
+    env_strings.push_back(env_string);
+  }
+  
+  // Convert to char* array
+  for (auto& env_str : env_strings) {
+    env_array.push_back(const_cast<char*>(env_str.c_str()));
+  }
+  env_array.push_back(nullptr);
+  
+  return std::make_pair(std::move(env_strings), std::move(env_array));
 }
 
 }}}  // namespace triton::backend::python
