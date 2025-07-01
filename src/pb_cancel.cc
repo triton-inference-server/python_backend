@@ -27,6 +27,7 @@
 #include "pb_cancel.h"
 
 #include "pb_stub.h"
+#include "pb_stub_log.h"
 
 namespace triton { namespace backend { namespace python {
 

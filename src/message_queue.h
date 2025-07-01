@@ -32,7 +32,12 @@
 #include <boost/thread/thread_time.hpp>
 #include <cstddef>
 
+#include "pb_exception.h"
+#include "pb_utils.h"
 #include "shm_manager.h"
+#ifdef TRITON_PB_STUB
+#include "pb_stub_log.h"
+#endif
 
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
@@ -110,7 +115,20 @@ class MessageQueue {
 
     {
       bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
-      Buffer()[Head()] = message;
+      int head_idx = Head();
+      // Additional check to avoid out of bounds read/write. Check DLIS-8378 for
+      // additional details.
+      if (head_idx < 0 || static_cast<size_t>(head_idx) >= Size()) {
+        constexpr const char* error_msg =
+            "Message queue head index out of bounds";
+#ifdef TRITON_PB_STUB
+        LOG_ERROR << error_msg;
+#else
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, error_msg);
+#endif
+        return;
+      }
+      Buffer()[head_idx] = message;
       HeadIncrement();
     }
     SemFullMutable()->post();
@@ -145,7 +163,20 @@ class MessageQueue {
       }
       success = true;
 
-      Buffer()[Head()] = message;
+      int head_idx = Head();
+      // Additional check to avoid out of bounds read/write. Check DLIS-8378 for
+      // additional details.
+      if (head_idx < 0 || static_cast<size_t>(head_idx) >= Size()) {
+        constexpr const char* error_msg =
+            "Message queue head index out of bounds";
+#ifdef TRITON_PB_STUB
+        LOG_ERROR << error_msg;
+#else
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, error_msg);
+#endif
+        return;
+      }
+      Buffer()[head_idx] = message;
       HeadIncrement();
     }
     SemFullMutable()->post();
