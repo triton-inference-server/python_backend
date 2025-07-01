@@ -363,10 +363,11 @@ std::shared_ptr<TRITONSERVER_Error*> WrapTritonErrorInSharedPtr(
 std::string GenerateUUID();
 
 // Environment handling utilities for Python activation scripts
-std::map<std::string, std::string> ParseActivationScript(const std::string& activate_path);
+std::map<std::string, std::string> ParseActivationScript(
+    const std::string& activate_path);
 
 std::pair<std::vector<std::string>, std::vector<char*>> PrepareEnvironment(
-    const std::map<std::string, std::string>& env_vars,  
+    const std::map<std::string, std::string>& env_vars,
     const std::string& additional_lib_path = "");
 
 }}}  // namespace triton::backend::python

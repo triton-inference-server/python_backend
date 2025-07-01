@@ -28,14 +28,14 @@
 
 #include <filesystem>
 
-#include "python_be.h"
 #include "pb_utils.h"
+#include "python_be.h"
 
 #ifdef _WIN32
 #include <process.h>  // getpid()
 #endif
 
-extern char **environ;
+extern char** environ;
 
 namespace triton { namespace backend { namespace python {
 
@@ -345,13 +345,13 @@ StubLauncher::Launch()
         TRITONSERVER_ERROR_INVALID_ARG,
         "Invalid stub name: contains invalid characters");
   }
-  
+
   if (!IsValidPath(model_path_)) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG,
         "Invalid model path: contains invalid characters or not absolute");
   }
-  
+
   if (!IsValidIdentifier(shm_region_name_)) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG,
@@ -372,12 +372,12 @@ StubLauncher::Launch()
   // Validate the stub executable path
   if (!IsValidPath(python_backend_stub)) {
     return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG,
-        "Invalid python backend stub path");
+        TRITONSERVER_ERROR_INVALID_ARG, "Invalid python backend stub path");
   }
 
   if (!IsExecutableFile(python_backend_stub)) {
-    // Give the execute permission for the triton_python_backend_stub to the owner.
+    // Give the execute permission for the triton_python_backend_stub to the
+    // owner.
     int error = chmod(python_backend_stub.c_str(), S_IXUSR);
     if (error != 0) {
       return TRITONSERVER_ErrorNew(
@@ -398,24 +398,24 @@ StubLauncher::Launch()
   // revert the LD_LIBRARY_PATH changes to avoid shared library issues in
   // executables and libraries.
   ipc_control_->uses_env = false;
-  
+
   if (python_execution_env_ != "") {
-    
     // Validate Python environment paths
     if (!IsValidPath(path_to_activate_) || !IsValidPath(path_to_libpython_)) {
       return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INVALID_ARG,
-          "Invalid Python environment paths");
+          TRITONSERVER_ERROR_INVALID_ARG, "Invalid Python environment paths");
     }
-    
+
     ipc_control_->uses_env = true;
-    
+
     // Parse environment variables from activation script
-    std::map<std::string, std::string> env_vars = ParseActivationScript(path_to_activate_);
-    
-    // Prepare environment with additional library path  
-    auto [env_strings, custom_env] = PrepareEnvironment(env_vars, path_to_libpython_);
-    
+    std::map<std::string, std::string> env_vars =
+        ParseActivationScript(path_to_activate_);
+
+    // Prepare environment with additional library path
+    auto [env_strings, custom_env] =
+        PrepareEnvironment(env_vars, path_to_libpython_);
+
     // Set up arguments for direct execution
     arg_strings.push_back(python_backend_stub);
     arg_strings.push_back(model_path_);
@@ -427,7 +427,7 @@ StubLauncher::Launch()
     arg_strings.push_back(std::to_string(ipc_control_handle_));
     arg_strings.push_back(stub_name);
     arg_strings.push_back(runtime_modeldir_);
-    
+
     // Convert strings to char* array for exec
     for (const auto& arg : arg_strings) {
       exec_args.push_back(arg.c_str());
@@ -437,12 +437,15 @@ StubLauncher::Launch()
     // Log the command being executed
     std::ostringstream log_cmd;
     for (size_t i = 0; i < arg_strings.size(); ++i) {
-      if (i > 0) log_cmd << " ";
+      if (i > 0)
+        log_cmd << " ";
       log_cmd << "'" << arg_strings[i] << "'";
     }
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Starting Python backend stub with custom environment: ") + log_cmd.str()).c_str());
+        (std::string("Starting Python backend stub with custom environment: ") +
+         log_cmd.str())
+            .c_str());
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -451,11 +454,16 @@ StubLauncher::Launch()
           "Failed to fork the stub process for auto-complete.");
     }
     if (pid == 0) {
-      // Replace this child process with the new stub process using custom environment
-      execve(python_backend_stub.c_str(), const_cast<char**>(exec_args.data()), custom_env.data());
+      // Replace this child process with the new stub process using custom
+      // environment
+      execve(
+          python_backend_stub.c_str(), const_cast<char**>(exec_args.data()),
+          custom_env.data());
       // execve() never returns if succeeded. Otherwise, an error has occurred.
       std::stringstream ss;
-      ss << "Failed to run python backend stub with custom environment. Errno = " << errno << '\n'
+      ss << "Failed to run python backend stub with custom environment. Errno "
+            "= "
+         << errno << '\n'
          << "Python backend stub path: " << python_backend_stub << '\n'
          << "Activation script: " << path_to_activate_ << '\n'
          << "Library path: " << path_to_libpython_ << '\n';
@@ -464,7 +472,7 @@ StubLauncher::Launch()
     } else {
       stub_pid_ = pid;
     }
-    
+
   } else {
     arg_strings.push_back(python_backend_stub);
     arg_strings.push_back(model_path_);
@@ -476,7 +484,7 @@ StubLauncher::Launch()
     arg_strings.push_back(std::to_string(ipc_control_handle_));
     arg_strings.push_back(stub_name);
     arg_strings.push_back(runtime_modeldir_);
-    
+
     // Convert strings to char* array for exec
     for (const auto& arg : arg_strings) {
       exec_args.push_back(arg.c_str());
@@ -486,12 +494,14 @@ StubLauncher::Launch()
     // Log the command being executed
     std::ostringstream log_cmd;
     for (size_t i = 0; i < arg_strings.size(); ++i) {
-      if (i > 0) log_cmd << " ";
+      if (i > 0)
+        log_cmd << " ";
       log_cmd << "'" << arg_strings[i] << "'";
     }
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Starting Python backend stub: ") + log_cmd.str()).c_str());
+        (std::string("Starting Python backend stub: ") + log_cmd.str())
+            .c_str());
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -974,6 +984,6 @@ StubLauncher::ShareCUDAMemoryPool(
   if (pb_exception.what() != std::string{""}) {
     throw pb_exception;
   }
-  }
-  #endif  // TRITON_ENABLE_GPU
+}
+#endif  // TRITON_ENABLE_GPU
 }}};    // namespace triton::backend::python
