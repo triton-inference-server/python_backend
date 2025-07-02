@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -188,8 +188,8 @@ SharedMemoryManager::GrowIfNeeded(uint64_t byte_size)
     }
     catch (bi::interprocess_exception& ex) {
       std::string error_message =
-          ("Failed to increase the shared memory pool size to " +
-           std::to_string(*total_size_) +
+          ("Failed to increase the shared memory pool size for key '" +
+           shm_region_name_ + "' to " + std::to_string(*total_size_) +
            " bytes. If you are running Triton inside docker, use '--shm-size' "
            "flag to control the shared memory region size. Error: " +
            ex.what());
