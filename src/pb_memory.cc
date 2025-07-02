@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -226,6 +226,11 @@ PbMemory::LoadFromSharedMemory(
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
 
+  if (memory_data_shm + memory_shm_ptr->byte_size >
+      (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity()) {
+    throw PythonBackendException("Attempted to access out of bounds memory.");
+  }
+
   char* data_ptr = nullptr;
   bool opened_cuda_ipc_handle = false;
   if (memory_shm_ptr->memory_type == TRITONSERVER_MEMORY_GPU &&
@@ -274,6 +279,11 @@ PbMemory::LoadFromSharedMemory(
   MemoryShm* memory_shm_ptr =
       reinterpret_cast<MemoryShm*>(memory_shm.data_.get());
   char* memory_data_shm = memory_shm.data_.get() + sizeof(MemoryShm);
+
+  if (memory_data_shm + memory_shm_ptr->byte_size >
+      (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity()) {
+    throw PythonBackendException("Attempted to access out of bounds memory.");
+  }
 
   char* data_ptr = nullptr;
   bool opened_cuda_ipc_handle = false;

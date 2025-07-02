@@ -1,4 +1,4 @@
-// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -187,6 +187,9 @@ class SharedMemoryManager {
   {
     return cuda_memory_pool_manager_;
   }
+
+  uint64_t GetCurrentCapacity() { return current_capacity_; }
+  void* GetBaseAddress() { return managed_buffer_->get_address(); }
 
   ~SharedMemoryManager() noexcept(false);
 
