@@ -237,6 +237,8 @@ set(
   src/response_sender.h
   src/pb_stub.h
   src/pb_stub.cc
+  src/pb_stub_log.h
+  src/pb_stub_log.cc
   src/pb_response_iterator.h
   src/pb_response_iterator.cc
   src/pb_cancel.cc

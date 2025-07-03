@@ -30,8 +30,6 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
-#include <filesystem>
-
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
@@ -41,7 +39,6 @@
 #include "pb_cancel.h"
 #include "pb_log.h"
 #include "pb_response_iterator.h"
-#include "pb_utils.h"
 
 
 namespace bi = boost::interprocess;
@@ -53,105 +50,6 @@ using cudaStream_t = void*;
 #endif
 
 namespace triton { namespace backend { namespace python {
-
-#define LOG_IF_EXCEPTION(X)                              \
-  do {                                                   \
-    try {                                                \
-      (X);                                               \
-    }                                                    \
-    catch (const PythonBackendException& pb_exception) { \
-      LOG_INFO << pb_exception.what();                   \
-    }                                                    \
-  } while (false)
-
-#define LOG_EXCEPTION(E)  \
-  do {                    \
-    LOG_INFO << E.what(); \
-  } while (false)
-
-/// Macros that use current filename and line number.
-#define LOG_INFO LOG_FL(__FILE__, __LINE__, LogLevel::kInfo)
-#define LOG_WARN LOG_FL(__FILE__, __LINE__, LogLevel::kWarning)
-#define LOG_ERROR LOG_FL(__FILE__, __LINE__, LogLevel::kError)
-#define LOG_VERBOSE LOG_FL(__FILE__, __LINE__, LogLevel::kVerbose)
-
-class Logger {
- public:
-  Logger() { backend_logging_active_ = false; };
-  ~Logger() { log_instance_.reset(); };
-  /// Python client log function
-  static void Log(const std::string& message, LogLevel level = LogLevel::kInfo);
-
-  /// Python client log info function
-  static void LogInfo(const std::string& message);
-
-  /// Python client warning function
-  static void LogWarn(const std::string& message);
-
-  /// Python client log error function
-  static void LogError(const std::string& message);
-
-  /// Python client log verbose function
-  static void LogVerbose(const std::string& message);
-
-  /// Internal log function
-  void Log(
-      const std::string& filename, uint32_t lineno, LogLevel level,
-      const std::string& message);
-
-  /// Log format helper function
-  const std::string LeadingLogChar(const LogLevel& level);
-
-  /// Set PYBE Logging Status
-  void SetBackendLoggingActive(bool status);
-
-  /// Get PYBE Logging Status
-  bool BackendLoggingActive();
-
-  /// Singleton Getter Function
-  static std::unique_ptr<Logger>& GetOrCreateInstance();
-
-  DISALLOW_COPY_AND_ASSIGN(Logger);
-
-  /// Flush the log.
-  void Flush() { std::cerr << std::flush; }
-
- private:
-  static std::unique_ptr<Logger> log_instance_;
-  bool backend_logging_active_;
-};
-
-class LogMessage {
- public:
-  /// Create a log message, stripping the path down to the filename only
-  LogMessage(const char* file, int line, LogLevel level) : level_(level)
-  {
-    std::string path(file);
-    const char os_slash = std::filesystem::path::preferred_separator;
-    size_t pos = path.rfind(os_slash);
-    if (pos != std::string::npos) {
-      path = path.substr(pos + 1, std::string::npos);
-    }
-    file_ = path;
-    line_ = static_cast<uint32_t>(line);
-  }
-  /// Log message to console or send to backend (see Logger::Log for details)
-  ~LogMessage()
-  {
-    Logger::GetOrCreateInstance()->Log(file_, line_, level_, stream_.str());
-  }
-
-  std::stringstream& stream() { return stream_; }
-
- private:
-  std::stringstream stream_;
-  std::string file_;
-  uint32_t line_;
-  LogLevel level_;
-};
-
-#define LOG_FL(FN, LN, LVL) LogMessage((char*)(FN), LN, LVL).stream()
-
 
 class ModelContext {
  public:
