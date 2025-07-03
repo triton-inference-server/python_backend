@@ -227,7 +227,7 @@ PbMemory::LoadFromSharedMemory(
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
 
   if (memory_data_shm + memory_shm_ptr->byte_size >
-      (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity()) {
+      (char*)shm_pool->GetBaseAddress() + shm_pool->GetTotalSize()) {
     throw PythonBackendException("Attempted to access out of bounds memory.");
   }
 
@@ -281,7 +281,7 @@ PbMemory::LoadFromSharedMemory(
   char* memory_data_shm = memory_shm.data_.get() + sizeof(MemoryShm);
 
   if (memory_data_shm + memory_shm_ptr->byte_size >
-      (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity()) {
+      (char*)shm_pool->GetBaseAddress() + shm_pool->GetTotalSize()) {
     throw PythonBackendException("Attempted to access out of bounds memory.");
   }
 

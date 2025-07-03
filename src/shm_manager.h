@@ -188,7 +188,7 @@ class SharedMemoryManager {
     return cuda_memory_pool_manager_;
   }
 
-  uint64_t GetCurrentCapacity() { return current_capacity_; }
+  uint64_t GetTotalSize() { return *total_size_; }
   void* GetBaseAddress() { return managed_buffer_->get_address(); }
 
   ~SharedMemoryManager() noexcept(false);
