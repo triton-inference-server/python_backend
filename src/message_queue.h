@@ -32,7 +32,6 @@
 #include <boost/thread/thread_time.hpp>
 #include <cstddef>
 
-#include "pb_exception.h"
 #include "pb_utils.h"
 #include "shm_manager.h"
 #ifdef TRITON_PB_STUB
