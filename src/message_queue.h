@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -32,14 +32,19 @@
 #include <boost/thread/thread_time.hpp>
 #include <cstddef>
 
+#include "pb_utils.h"
 #include "shm_manager.h"
+#ifdef TRITON_PB_STUB
+#include "pb_stub_log.h"
+#endif
 
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
 
 /// Struct holding the representation of a message queue inside the shared
 /// memory.
-/// \param size Total size of the message queue.
+/// \param size Total size of the message queue. Considered invalid after
+/// MessageQueue::LoadFromSharedMemory. Check DLIS-8378 for additional details.
 /// \param mutex Handle of the mutex variable protecting index.
 /// \param index Used element index.
 /// \param sem_empty Semaphore object counting the number of empty buffer slots.
@@ -110,7 +115,22 @@ class MessageQueue {
 
     {
       bi::scoped_lock<bi::interprocess_mutex> lock{*MutexMutable()};
-      Buffer()[Head()] = message;
+      int head_idx = Head();
+      // Additional check to avoid out of bounds read/write. Check DLIS-8378 for
+      // additional details.
+      if (head_idx < 0 || static_cast<uint32_t>(head_idx) >= Size()) {
+        std::string error_msg =
+            "internal error: message queue head index out of bounds. Expects "
+            "positive integer less than the size of message queue " +
+            std::to_string(Size()) + " but got " + std::to_string(head_idx);
+#ifdef TRITON_PB_STUB
+        LOG_ERROR << error_msg;
+#else
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, error_msg.c_str());
+#endif
+        return;
+      }
+      Buffer()[head_idx] = message;
       HeadIncrement();
     }
     SemFullMutable()->post();
@@ -145,7 +165,22 @@ class MessageQueue {
       }
       success = true;
 
-      Buffer()[Head()] = message;
+      int head_idx = Head();
+      // Additional check to avoid out of bounds read/write. Check DLIS-8378 for
+      // additional details.
+      if (head_idx < 0 || static_cast<uint32_t>(head_idx) >= Size()) {
+        std::string error_msg =
+            "internal error: message queue head index out of bounds. Expects "
+            "positive integer less than the size of message queue " +
+            std::to_string(Size()) + " but got " + std::to_string(head_idx);
+#ifdef TRITON_PB_STUB
+        LOG_ERROR << error_msg;
+#else
+        LOG_MESSAGE(TRITONSERVER_LOG_ERROR, error_msg.c_str());
+#endif
+        return;
+      }
+      Buffer()[head_idx] = message;
       HeadIncrement();
     }
     SemFullMutable()->post();
@@ -244,7 +279,7 @@ class MessageQueue {
   }
 
  private:
-  std::size_t& Size() { return mq_shm_ptr_->size; }
+  uint32_t Size() { return size_; }
   const bi::interprocess_mutex& Mutex() { return mq_shm_ptr_->mutex; }
   bi::interprocess_mutex* MutexMutable() { return &(mq_shm_ptr_->mutex); }
   int& Head() { return mq_shm_ptr_->head; }
@@ -273,6 +308,7 @@ class MessageQueue {
   MessageQueueShm* mq_shm_ptr_;
   T* mq_buffer_shm_ptr_;
   bi::managed_external_buffer::handle_t mq_handle_;
+  uint32_t size_;
 
   /// Create/load a Message queue.
   /// \param mq_shm Message queue representation in shared memory.
@@ -284,6 +320,7 @@ class MessageQueue {
     mq_buffer_shm_ptr_ = mq_buffer_shm_.data_.get();
     mq_shm_ptr_ = mq_shm_.data_.get();
     mq_handle_ = mq_shm_.handle_;
+    size_ = mq_shm_ptr_->size;
   }
 };
 }}}  // namespace triton::backend::python

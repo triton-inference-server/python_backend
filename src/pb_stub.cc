@@ -49,6 +49,7 @@
 #include "pb_preferred_memory.h"
 #include "pb_response_iterator.h"
 #include "pb_string.h"
+#include "pb_stub_log.h"
 #include "pb_utils.h"
 #include "response_sender.h"
 #include "scoped_defer.h"
@@ -1567,138 +1568,6 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
     response_batch->waiting_on_stub = true;
     ipc_message->ResponseCondition()->notify_all();
   }
-}
-
-std::unique_ptr<Logger> Logger::log_instance_;
-
-std::unique_ptr<Logger>&
-Logger::GetOrCreateInstance()
-{
-  if (Logger::log_instance_.get() == nullptr) {
-    Logger::log_instance_ = std::make_unique<Logger>();
-  }
-
-  return Logger::log_instance_;
-}
-
-// Bound function, called from the python client
-void
-Logger::Log(const std::string& message, LogLevel level)
-{
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-  py::object frame = py::module_::import("inspect").attr("currentframe");
-  py::object caller_frame = frame();
-  py::object info = py::module_::import("inspect").attr("getframeinfo");
-  py::object caller_info = info(caller_frame);
-  py::object filename_python = caller_info.attr("filename");
-  std::string filename = filename_python.cast<std::string>();
-  py::object lineno = caller_info.attr("lineno");
-  uint32_t line = lineno.cast<uint32_t>();
-
-  if (!stub->StubToParentServiceActive()) {
-    Logger::GetOrCreateInstance()->Log(filename, line, level, message);
-  } else {
-    std::unique_ptr<PbLog> log_msg(new PbLog(filename, line, message, level));
-    stub->EnqueueLogRequest(log_msg);
-  }
-}
-
-// Called internally (.e.g. LOG_ERROR << "Error"; )
-void
-Logger::Log(
-    const std::string& filename, uint32_t lineno, LogLevel level,
-    const std::string& message)
-{
-  // If the log monitor service is not active yet, format
-  // and pass messages to cerr
-  if (!BackendLoggingActive()) {
-    std::string path(filename);
-    size_t pos = path.rfind(std::filesystem::path::preferred_separator);
-    if (pos != std::string::npos) {
-      path = path.substr(pos + 1, std::string::npos);
-    }
-#ifdef _WIN32
-    std::stringstream ss;
-    SYSTEMTIME system_time;
-    GetSystemTime(&system_time);
-    ss << LeadingLogChar(level) << std::setfill('0') << std::setw(2)
-       << system_time.wMonth << std::setw(2) << system_time.wDay << ' '
-       << std::setw(2) << system_time.wHour << ':' << std::setw(2)
-       << system_time.wMinute << ':' << std::setw(2) << system_time.wSecond
-       << '.' << std::setw(6) << system_time.wMilliseconds * 1000 << ' '
-       << static_cast<uint32_t>(GetCurrentProcessId()) << ' ' << path << ':'
-       << lineno << "] ";
-#else
-    std::stringstream ss;
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tm_time;
-    gmtime_r(((time_t*)&(tv.tv_sec)), &tm_time);
-    ss << LeadingLogChar(level) << std::setfill('0') << std::setw(2)
-       << (tm_time.tm_mon + 1) << std::setw(2) << tm_time.tm_mday << " "
-       << std::setw(2) << tm_time.tm_hour << ':' << std::setw(2)
-       << tm_time.tm_min << ':' << std::setw(2) << tm_time.tm_sec << "."
-       << std::setw(6) << tv.tv_usec << ' ' << static_cast<uint32_t>(getpid())
-       << ' ' << path << ':' << lineno << "] ";
-    std::cerr << ss.str() << " " << message << std::endl;
-#endif
-  } else {
-    // Ensure we do not create a stub instance before it has initialized
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
-    std::unique_ptr<PbLog> log_msg(new PbLog(filename, lineno, message, level));
-    stub->EnqueueLogRequest(log_msg);
-  }
-}
-
-void
-Logger::LogInfo(const std::string& message)
-{
-  Logger::Log(message, LogLevel::kInfo);
-}
-
-void
-Logger::LogWarn(const std::string& message)
-{
-  Logger::Log(message, LogLevel::kWarning);
-}
-
-void
-Logger::LogError(const std::string& message)
-{
-  Logger::Log(message, LogLevel::kError);
-}
-
-void
-Logger::LogVerbose(const std::string& message)
-{
-  Logger::Log(message, LogLevel::kVerbose);
-}
-
-const std::string
-Logger::LeadingLogChar(const LogLevel& level)
-{
-  switch (level) {
-    case LogLevel::kWarning:
-      return "W";
-    case LogLevel::kError:
-      return "E";
-    case LogLevel::kInfo:
-    case LogLevel::kVerbose:
-    default:
-      return "I";
-  }
-}
-
-void
-Logger::SetBackendLoggingActive(bool status)
-{
-  backend_logging_active_ = status;
-}
-
-bool
-Logger::BackendLoggingActive()
-{
-  return backend_logging_active_;
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
