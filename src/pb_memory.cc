@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,6 +25,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "pb_memory.h"
+
+#include <sstream>
 
 namespace triton { namespace backend { namespace python {
 
@@ -225,7 +227,6 @@ PbMemory::LoadFromSharedMemory(
 {
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
-
   char* data_ptr = nullptr;
   bool opened_cuda_ipc_handle = false;
   if (memory_shm_ptr->memory_type == TRITONSERVER_MEMORY_GPU &&
@@ -260,6 +261,19 @@ PbMemory::LoadFromSharedMemory(
   } else {
     data_ptr = memory_data_shm;
   }
+
+  // This check only validates CPU shared memory access.
+  if (memory_shm_ptr->memory_type != TRITONSERVER_MEMORY_GPU &&
+      (data_ptr + memory_shm_ptr->byte_size >
+       (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity())) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex
+        << (reinterpret_cast<uintptr_t>(data_ptr) + memory_shm_ptr->byte_size);
+    throw PythonBackendException(
+        std::string("Attempted to access out of bounds memory address ") +
+        oss.str());
+  }
+
   return std::unique_ptr<PbMemory>(new PbMemory(
       data_shm, data_ptr, handle,
       opened_cuda_ipc_handle /* opened_cuda_ipc_handle */));
@@ -309,6 +323,19 @@ PbMemory::LoadFromSharedMemory(
   } else {
     data_ptr = memory_data_shm;
   }
+
+  // This check only validates CPU shared memory access.
+  if (memory_shm_ptr->memory_type != TRITONSERVER_MEMORY_GPU &&
+      (data_ptr + memory_shm_ptr->byte_size >
+       (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity())) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex
+        << (reinterpret_cast<uintptr_t>(data_ptr) + memory_shm_ptr->byte_size);
+    throw PythonBackendException(
+        std::string("Attempted to access out of bounds memory address ") +
+        oss.str());
+  }
+
   return std::unique_ptr<PbMemory>(new PbMemory(
       memory_shm, data_ptr,
       opened_cuda_ipc_handle /* opened_cuda_ipc_handle */));
