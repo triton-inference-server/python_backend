@@ -26,6 +26,8 @@
 
 #include "pb_memory.h"
 
+#include <sstream>
+
 namespace triton { namespace backend { namespace python {
 
 std::unique_ptr<PbMemory>
@@ -225,12 +227,6 @@ PbMemory::LoadFromSharedMemory(
 {
   MemoryShm* memory_shm_ptr = reinterpret_cast<MemoryShm*>(data_shm);
   char* memory_data_shm = data_shm + sizeof(MemoryShm);
-
-  if (memory_data_shm + memory_shm_ptr->byte_size >
-      (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity()) {
-    throw PythonBackendException("Attempted to access out of bounds memory.");
-  }
-
   char* data_ptr = nullptr;
   bool opened_cuda_ipc_handle = false;
   if (memory_shm_ptr->memory_type == TRITONSERVER_MEMORY_GPU &&
@@ -265,6 +261,19 @@ PbMemory::LoadFromSharedMemory(
   } else {
     data_ptr = memory_data_shm;
   }
+
+  // This check only validates CPU shared memory access.
+  if (memory_shm_ptr->memory_type != TRITONSERVER_MEMORY_GPU &&
+      (data_ptr + memory_shm_ptr->byte_size >
+       (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity())) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex
+        << (reinterpret_cast<uintptr_t>(data_ptr) + memory_shm_ptr->byte_size);
+    throw PythonBackendException(
+        std::string("Attempted to access out of bounds memory address ") +
+        oss.str());
+  }
+
   return std::unique_ptr<PbMemory>(new PbMemory(
       data_shm, data_ptr, handle,
       opened_cuda_ipc_handle /* opened_cuda_ipc_handle */));
@@ -279,11 +288,6 @@ PbMemory::LoadFromSharedMemory(
   MemoryShm* memory_shm_ptr =
       reinterpret_cast<MemoryShm*>(memory_shm.data_.get());
   char* memory_data_shm = memory_shm.data_.get() + sizeof(MemoryShm);
-
-  if (memory_data_shm + memory_shm_ptr->byte_size >
-      (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity()) {
-    throw PythonBackendException("Attempted to access out of bounds memory.");
-  }
 
   char* data_ptr = nullptr;
   bool opened_cuda_ipc_handle = false;
@@ -319,6 +323,19 @@ PbMemory::LoadFromSharedMemory(
   } else {
     data_ptr = memory_data_shm;
   }
+
+  // This check only validates CPU shared memory access.
+  if (memory_shm_ptr->memory_type != TRITONSERVER_MEMORY_GPU &&
+      (data_ptr + memory_shm_ptr->byte_size >
+       (char*)shm_pool->GetBaseAddress() + shm_pool->GetCurrentCapacity())) {
+    std::ostringstream oss;
+    oss << "0x" << std::hex
+        << (reinterpret_cast<uintptr_t>(data_ptr) + memory_shm_ptr->byte_size);
+    throw PythonBackendException(
+        std::string("Attempted to access out of bounds memory address ") +
+        oss.str());
+  }
+
   return std::unique_ptr<PbMemory>(new PbMemory(
       memory_shm, data_ptr,
       opened_cuda_ipc_handle /* opened_cuda_ipc_handle */));
