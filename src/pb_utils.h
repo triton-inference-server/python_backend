@@ -75,7 +75,7 @@ namespace bi = boost::interprocess;
             TRITONSERVER_ErrorMessage(pb2_exception.what()));      \
       }                                                            \
     }                                                              \
-    while (false)
+  } while (false)
 
 #define THROW_IF_TRITON_ERROR(X)                                              \
   do {                                                                        \
