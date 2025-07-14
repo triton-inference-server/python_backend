@@ -374,7 +374,8 @@ GenerateUUID()
   return boost::uuids::to_string(uuid);
 }
 
-// Helper function to parse environment variables from activation script
+// Helper function to get environment variables for Python virtual environments
+// Uses pattern-based derivation instead of parsing activation scripts
 std::map<std::string, std::string>
 ParseActivationScript(const std::string& activate_path)
 {
@@ -395,45 +396,33 @@ ParseActivationScript(const std::string& activate_path)
   }
 #endif
 
-  // Parse activation script for environment changes
-  std::ifstream activate_file(activate_path);
-  if (!activate_file.is_open()) {
-    return env_vars;  // Return current environment if can't read activation
-                      // script
+  // Extract virtual environment root from activation script path
+  std::string venv_path = activate_path;
+  size_t bin_activate_pos = venv_path.find("/bin/activate");
+  if (bin_activate_pos != std::string::npos) {
+    venv_path = venv_path.substr(0, bin_activate_pos);
   }
 
-  std::string line;
-  while (std::getline(activate_file, line)) {
-    // Look for export statements or direct assignments
-    if (line.find("export ") == 0) {
-      // Handle: export VAR=value
-      line = line.substr(7);  // Remove "export "
-    }
+  // Set standard virtual environment variables
+  env_vars["VIRTUAL_ENV"] = venv_path;
+  env_vars["VIRTUAL_ENV_PROMPT"] = "(" + venv_path + ")";
 
-    size_t eq_pos = line.find('=');
-    if (eq_pos != std::string::npos && line[0] != '#') {
-      std::string key = line.substr(0, eq_pos);
-      std::string value = line.substr(eq_pos + 1);
-
-      // Remove quotes if present
-      if (value.size() >= 2 && ((value[0] == '"' && value.back() == '"') ||
-                                (value[0] == '\'' && value.back() == '\''))) {
-        value = value.substr(1, value.size() - 2);
-      }
-
-      // Handle variable substitution for common cases
-      if (value.find("$PATH") != std::string::npos) {
-        size_t pos = value.find("$PATH");
-        value.replace(pos, 5, env_vars["PATH"]);
-      }
-      if (value.find("$LD_LIBRARY_PATH") != std::string::npos) {
-        size_t pos = value.find("$LD_LIBRARY_PATH");
-        value.replace(pos, 16, env_vars["LD_LIBRARY_PATH"]);
-      }
-
-      env_vars[key] = value;
-    }
+  // Update PATH to include the virtual environment's bin directory
+  std::string new_path = venv_path + "/bin";
+  if (env_vars.find("PATH") != env_vars.end()) {
+    new_path += ":" + env_vars["PATH"];
   }
+  env_vars["PATH"] = new_path;
+
+  // Update LD_LIBRARY_PATH to include the virtual environment's lib directory
+  std::string new_lib_path = venv_path + "/lib";
+  if (env_vars.find("LD_LIBRARY_PATH") != env_vars.end()) {
+    new_lib_path += ":" + env_vars["LD_LIBRARY_PATH"];
+  }
+  env_vars["LD_LIBRARY_PATH"] = new_lib_path;
+
+  // Remove PYTHONHOME if it exists
+  env_vars.erase("PYTHONHOME");
 
   return env_vars;
 }
