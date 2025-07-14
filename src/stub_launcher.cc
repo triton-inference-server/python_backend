@@ -363,12 +363,6 @@ StubLauncher::Launch()
     python_backend_stub = model_python_backend_stub;
   }
 
-  // Validate the stub executable path
-  if (!IsValidPath(python_backend_stub)) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG, "Invalid python backend stub path");
-  }
-
   if (!IsExecutableFile(python_backend_stub)) {
     // Give the execute permission for the triton_python_backend_stub to the
     // owner.
@@ -394,12 +388,6 @@ StubLauncher::Launch()
   ipc_control_->uses_env = false;
 
   if (python_execution_env_ != "") {
-    // Validate Python environment paths
-    if (!IsValidPath(path_to_activate_) || !IsValidPath(path_to_libpython_)) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INVALID_ARG, "Invalid Python environment paths");
-    }
-
     ipc_control_->uses_env = true;
 
     // Parse environment variables from activation script
