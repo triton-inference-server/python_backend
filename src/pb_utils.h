@@ -349,9 +349,6 @@ constexpr const char* INVALID_CHARS = ";|&$`<>()[]{}\\\"'*?~#!";
 // Validate that an identifier (model name, region name, etc.)
 bool IsValidIdentifier(const std::string& input);
 
-// Validate that a path exists and is absolute
-bool IsValidPath(const std::string& path);
-
 // Check if a file exists and is executable
 bool IsExecutableFile(const std::string& filepath);
 

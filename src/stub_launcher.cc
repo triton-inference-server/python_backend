@@ -346,12 +346,6 @@ StubLauncher::Launch()
         "Invalid stub name: contains invalid characters");
   }
 
-  if (!IsValidPath(model_path_)) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INVALID_ARG,
-        "Invalid model path: contains invalid characters or not absolute");
-  }
-
   if (!IsValidIdentifier(shm_region_name_)) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INVALID_ARG,

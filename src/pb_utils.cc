@@ -340,21 +340,6 @@ IsValidIdentifier(const std::string& input)
 }
 
 bool
-IsValidPath(const std::string& path)
-{
-  if (path.empty()) {
-    return false;
-  }
-
-  // Must be absolute path
-  if (path[0] != '/') {
-    return false;
-  }
-
-  return true;
-}
-
-bool
 IsExecutableFile(const std::string& filepath)
 {
   struct stat file_stat;
