@@ -360,7 +360,6 @@ GenerateUUID()
 }
 
 // Helper function to get environment variables for Python virtual environments
-// Uses pattern-based derivation instead of parsing activation scripts
 std::map<std::string, std::string>
 ParseActivationScript(const std::string& activate_path)
 {
