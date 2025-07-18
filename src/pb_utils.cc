@@ -327,12 +327,9 @@ WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)
 bool
 IsValidIdentifier(const std::string& input)
 {
-  if (input.empty()) {
-    return false;
-  }
-
   // Check for invalid characters
-  if (input.find_first_of(INVALID_CHARS) != std::string::npos) {
+  if (input.empty() ||
+      input.find_first_of(INVALID_CHARS) != std::string::npos) {
     return false;
   }
 
