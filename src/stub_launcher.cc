@@ -288,7 +288,6 @@ StubLauncher::Launch()
       parent_message_queue_.reset();
       memory_manager_.reset();
       WaitForStubProcess();
-      shm_pool_.reset();
     }
   });
 
@@ -445,7 +444,6 @@ StubLauncher::Launch()
         parent_message_queue_.reset();
         memory_manager_.reset();
         WaitForStubProcess();
-        shm_pool_.reset();
       }
     });
 
