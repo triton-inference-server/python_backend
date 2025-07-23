@@ -277,11 +277,6 @@ StubLauncher::Launch()
     _Exit(1);
   }
   ScopedDefer _([&] {
-    // Push a dummy message to the message queue so that the stub
-    // process is notified that it can release the object stored in
-    // shared memory.
-    stub_message_queue_->Push(DUMMY_MESSAGE);
-
     // If the model is not initialized, wait for the stub process to exit.
     if (!is_initialized_) {
       stub_message_queue_.reset();
@@ -303,6 +298,11 @@ StubLauncher::Launch()
   // health thread is spawn would make sure would prevent this issue.
   bi::managed_external_buffer::handle_t message;
   RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+
+  // Push a dummy message to the message queue so that the stub
+  // process is notified that it can release the object stored in
+  // shared memory.
+  stub_message_queue_->Push(DUMMY_MESSAGE);
 
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
     try {
@@ -433,11 +433,6 @@ StubLauncher::Launch()
     _Exit(1);
   } else {
     ScopedDefer _([&] {
-      // Push a dummy message to the message queue so that the stub
-      // process is notified that it can release the object stored in
-      // shared memory.
-      stub_message_queue_->Push(DUMMY_MESSAGE);
-
       // If the model is not initialized, wait for the stub process to exit.
       if (!is_initialized_) {
         stub_message_queue_.reset();
@@ -461,6 +456,11 @@ StubLauncher::Launch()
     // health thread is spawn would prevent this issue.
     bi::managed_external_buffer::handle_t message;
     RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+
+    // Push a dummy message to the message queue so that the stub
+    // process is notified that it can release the object stored in
+    // shared memory.
+    stub_message_queue_->Push(DUMMY_MESSAGE);
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
       try {
