@@ -301,7 +301,8 @@ StubLauncher::Launch()
   // monitoring thread may take longer which can make the server process think
   // that the stub process is unhealthy and return early. Waiting until the
   // health thread is spawn would make sure would prevent this issue.
-  parent_message_queue_->Pop();
+  bi::managed_external_buffer::handle_t message;
+  RETURN_IF_ERROR(ReceiveMessageFromStub(message));
 
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
     try {
@@ -458,7 +459,8 @@ StubLauncher::Launch()
     // monitoring thread may take longer which can make the server process think
     // that the stub process is unhealthy and return early. Waiting until the
     // health thread is spawn would prevent this issue.
-    parent_message_queue_->Pop();
+    bi::managed_external_buffer::handle_t message;
+    RETURN_IF_ERROR(ReceiveMessageFromStub(message));
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
       try {
