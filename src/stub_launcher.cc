@@ -302,9 +302,12 @@ StubLauncher::Launch()
   // that the stub process is unhealthy and return early. Waiting until the
   // health thread is spawn would make sure would prevent this issue.
   bi::managed_external_buffer::handle_t message;
-  RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+  auto err = ReceiveMessageFromStub(message);
 
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
+    if (err != nullptr) {
+      throw BackendModelException(err);
+    }
     try {
       AutocompleteStubProcess();
     }
@@ -315,6 +318,7 @@ StubLauncher::Launch()
           TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, ex.what()));
     }
   } else if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
+    RETURN_IF_ERROR(err);
     RETURN_IF_ERROR(ModelInstanceStubProcess());
   } else {
     return TRITONSERVER_ErrorNew(
@@ -460,9 +464,12 @@ StubLauncher::Launch()
     // that the stub process is unhealthy and return early. Waiting until the
     // health thread is spawn would prevent this issue.
     bi::managed_external_buffer::handle_t message;
-    RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+    auto err = ReceiveMessageFromStub(message);
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
+      if (err != nullptr) {
+        throw BackendModelException(err);
+      }
       try {
         AutocompleteStubProcess();
       }
@@ -473,6 +480,7 @@ StubLauncher::Launch()
             TRITONSERVER_ErrorNew(TRITONSERVER_ERROR_INTERNAL, ex.what()));
       }
     } else if (stub_process_kind_ == "MODEL_INSTANCE_STUB") {
+      RETURN_IF_ERROR(err);
       RETURN_IF_ERROR(ModelInstanceStubProcess());
     } else {
       return TRITONSERVER_ErrorNew(
