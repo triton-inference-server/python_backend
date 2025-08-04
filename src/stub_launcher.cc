@@ -280,7 +280,9 @@ StubLauncher::Launch()
     // Push a dummy message to the message queue so that the stub
     // process is notified that it can release the object stored in
     // shared memory.
-    stub_message_queue_->Push(DUMMY_MESSAGE);
+    if (stub_message_queue_) {
+      stub_message_queue_->Push(DUMMY_MESSAGE);
+    }
 
     // If the model is not initialized, wait for the stub process to exit.
     if (!is_initialized_) {
@@ -303,6 +305,9 @@ StubLauncher::Launch()
   // health thread is spawn would make sure would prevent this issue.
   bi::managed_external_buffer::handle_t message;
   auto err = ReceiveMessageFromStub(message);
+  if (err != nullptr) {
+    KillStubProcess();
+  }
 
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
     if (err != nullptr) {
@@ -440,7 +445,9 @@ StubLauncher::Launch()
       // Push a dummy message to the message queue so that the stub
       // process is notified that it can release the object stored in
       // shared memory.
-      stub_message_queue_->Push(DUMMY_MESSAGE);
+      if (stub_message_queue_) {
+        stub_message_queue_->Push(DUMMY_MESSAGE);
+      }
 
       // If the model is not initialized, wait for the stub process to exit.
       if (!is_initialized_) {
@@ -465,6 +472,9 @@ StubLauncher::Launch()
     // health thread is spawn would prevent this issue.
     bi::managed_external_buffer::handle_t message;
     auto err = ReceiveMessageFromStub(message);
+    if (err != nullptr) {
+      KillStubProcess();
+    }
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
       if (err != nullptr) {
