@@ -301,18 +301,21 @@ StubLauncher::Launch()
   //
   // The reason it is broken into two steps is that creation of the health
   // monitoring thread may take longer which can make the server process think
-  // that the stub process is unhealthy and return early. Waiting until the
-  // health thread is spawn would make sure would prevent this issue.
+  // that the stub process is unhealthy and return early. Waiting with a longer
+  // timeout prevents this issue.
+  const uint64_t initialization_timeout_ms = 5000;  // 5 sec
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      "Waiting for the stub health monitoring thread to start");
+
   bi::managed_external_buffer::handle_t message;
-  auto err = ReceiveMessageFromStub(message);
+  auto err = ReceiveMessageFromStub(message, initialization_timeout_ms);
   if (err != nullptr) {
     KillStubProcess();
   }
 
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
-    if (err != nullptr) {
-      throw BackendModelException(err);
-    }
+    THROW_IF_BACKEND_MODEL_ERROR(err);
     try {
       AutocompleteStubProcess();
     }
@@ -468,18 +471,21 @@ StubLauncher::Launch()
     //
     // The reason it is broken into two steps is that creation of the health
     // monitoring thread may take longer which can make the server process think
-    // that the stub process is unhealthy and return early. Waiting until the
-    // health thread is spawn would prevent this issue.
+    // that the stub process is unhealthy and return early. Waiting with a
+    // longer timeout prevents this issue.
+    const uint64_t initialization_timeout_ms = 5000;  // 5 sec
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_VERBOSE,
+        "Waiting for the stub health monitoring thread to start");
+
     bi::managed_external_buffer::handle_t message;
-    auto err = ReceiveMessageFromStub(message);
+    auto err = ReceiveMessageFromStub(message, initialization_timeout_ms);
     if (err != nullptr) {
       KillStubProcess();
     }
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
-      if (err != nullptr) {
-        throw BackendModelException(err);
-      }
+      THROW_IF_BACKEND_MODEL_ERROR(err);
       try {
         AutocompleteStubProcess();
       }
@@ -612,8 +618,13 @@ StubLauncher::ModelInstanceStubProcess()
   initialize_message->Args() = initialize_map_handle;
   stub_message_queue_->Push(initialize_message->ShmHandle());
 
+  const uint64_t initialization_timeout_ms = 5000;  // 5 sec
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      "Waiting for the stub process initialization response");
+
   bi::managed_external_buffer::handle_t message;
-  RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+  RETURN_IF_ERROR(ReceiveMessageFromStub(message, initialization_timeout_ms));
 
   std::unique_ptr<IPCMessage> initialize_response_message =
       IPCMessage::LoadFromSharedMemory(shm_pool_, message);
@@ -746,11 +757,11 @@ StubLauncher::KillStubProcess()
 
 TRITONSERVER_Error*
 StubLauncher::ReceiveMessageFromStub(
-    bi::managed_external_buffer::handle_t& message)
+    bi::managed_external_buffer::handle_t& message,
+    uint64_t timeout_miliseconds)
 {
   bool success = false;
   while (!success) {
-    uint64_t timeout_miliseconds = 1000;
     {
       boost::posix_time::ptime timeout =
           boost::get_system_time() +
