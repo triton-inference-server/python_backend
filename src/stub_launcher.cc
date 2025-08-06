@@ -315,7 +315,9 @@ StubLauncher::Launch()
   }
 
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
-    THROW_IF_BACKEND_MODEL_ERROR(err);
+    if (err != nullptr) {
+      throw BackendModelException(err);
+    }
     try {
       AutocompleteStubProcess();
     }
@@ -485,7 +487,9 @@ StubLauncher::Launch()
     }
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
-      THROW_IF_BACKEND_MODEL_ERROR(err);
+      if (err != nullptr) {
+        throw BackendModelException(err);
+      }
       try {
         AutocompleteStubProcess();
       }
