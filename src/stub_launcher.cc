@@ -303,7 +303,7 @@ StubLauncher::Launch()
   // monitoring thread may take longer which can make the server process think
   // that the stub process is unhealthy and return early. Waiting with a longer
   // timeout prevents this issue.
-  const uint64_t initialization_timeout_ms = 5000;  // 5 sec
+  const uint64_t initialization_timeout_ms = 10000;  // 10 sec
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       "Waiting for the stub health monitoring thread to start");
@@ -475,7 +475,7 @@ StubLauncher::Launch()
     // monitoring thread may take longer which can make the server process think
     // that the stub process is unhealthy and return early. Waiting with a
     // longer timeout prevents this issue.
-    const uint64_t initialization_timeout_ms = 5000;  // 5 sec
+    const uint64_t initialization_timeout_ms = 10000;  // 10 sec
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         "Waiting for the stub health monitoring thread to start");
