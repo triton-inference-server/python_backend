@@ -1040,11 +1040,13 @@ Stub::~Stub()
 {
 #ifdef TRITON_ENABLE_GPU
   try {
-    CUDAHandler& cuda_api = CUDAHandler::getInstance();
-    for (auto& m :
-         shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddressMap()) {
-      if (m.second != nullptr) {
-        cuda_api.CloseCudaHandle(m.first, m.second);
+    if (shm_pool_ != nullptr) {
+      CUDAHandler& cuda_api = CUDAHandler::getInstance();
+      for (auto& m :
+           shm_pool_->GetCUDAMemoryPoolManager()->CUDAPoolAddressMap()) {
+        if (m.second != nullptr) {
+          cuda_api.CloseCudaHandle(m.first, m.second);
+        }
       }
     }
   }
@@ -1053,13 +1055,14 @@ Stub::~Stub()
   }
 #endif
 
-  {
+  // Ensure the interpreter is active before trying to clean up.
+  if (Py_IsInitialized()) {
     py::gil_scoped_acquire acquire;
     py::object async_event_loop_local(std::move(async_event_loop_));
     py::object background_futures_local(std::move(background_futures_));
     py::object model_instance_local(std::move(model_instance_));
   }
-  stub_instance_.reset();
+
   stub_message_queue_.reset();
   parent_message_queue_.reset();
   stub_to_parent_mq_.reset();
@@ -2030,6 +2033,7 @@ main(int argc, char** argv)
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
     logger.reset();
+    stub.reset();
     exit(1);
   }
 

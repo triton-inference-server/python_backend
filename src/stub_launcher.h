@@ -147,7 +147,8 @@ class StubLauncher {
 
   // Get a message from the stub process
   TRITONSERVER_Error* ReceiveMessageFromStub(
-      bi::managed_external_buffer::handle_t& message);
+      bi::managed_external_buffer::handle_t& message,
+      uint64_t timeout_miliseconds = 1000);
 
   // Wait for stub process
   void WaitForStubProcess();
