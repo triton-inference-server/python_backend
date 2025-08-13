@@ -26,12 +26,21 @@
 
 #include "pb_utils.h"
 
+#include <sys/stat.h>
+
+#include <fstream>
+
 #ifdef _WIN32
 #include <windows.h>
 
 #include <algorithm>
 #else
 #include <dlfcn.h>
+#include <unistd.h>
+#endif
+
+#ifndef _WIN32
+extern char** environ;
 #endif
 
 
@@ -315,12 +324,117 @@ WrapTritonErrorInSharedPtr(TRITONSERVER_Error* error)
 }
 #endif  // NOT TRITON_PB_STUB
 
+bool
+IsValidIdentifier(const std::string& input)
+{
+  // Check for invalid characters
+  if (input.empty() ||
+      input.find_first_of(INVALID_CHARS) != std::string::npos) {
+    return false;
+  }
+
+  return true;
+}
+
+bool
+IsExecutableFile(const std::string& filepath)
+{
+  struct stat file_stat;
+  if (stat(filepath.c_str(), &file_stat) != 0) {
+    return false;
+  }
+
+  // Check if it's a regular file and executable by owner
+  return S_ISREG(file_stat.st_mode) && (file_stat.st_mode & S_IXUSR);
+}
+
 std::string
 GenerateUUID()
 {
   static boost::uuids::random_generator generator;
   boost::uuids::uuid uuid = generator();
   return boost::uuids::to_string(uuid);
+}
+
+// Helper function to get environment variables for Python virtual environments
+std::map<std::string, std::string>
+ParseActivationScript(const std::string& activate_path)
+{
+  std::map<std::string, std::string> env_vars;
+
+  // Read the current environment as baseline
+#ifndef _WIN32
+  if (environ != nullptr) {
+    for (char** env = environ; *env != nullptr; env++) {
+      std::string env_str(*env);
+      size_t eq_pos = env_str.find('=');
+      if (eq_pos != std::string::npos) {
+        std::string key = env_str.substr(0, eq_pos);
+        std::string value = env_str.substr(eq_pos + 1);
+        env_vars[key] = value;
+      }
+    }
+  }
+#endif
+
+  // Extract virtual environment root from activation script path
+  std::string venv_path = activate_path;
+  size_t bin_activate_pos = venv_path.find("/bin/activate");
+  if (bin_activate_pos != std::string::npos) {
+    venv_path = venv_path.substr(0, bin_activate_pos);
+  }
+
+  // Set standard virtual environment variables
+  env_vars["VIRTUAL_ENV"] = venv_path;
+  env_vars["VIRTUAL_ENV_PROMPT"] = "(" + venv_path + ")";
+
+  // Update PATH to include the virtual environment's bin directory
+  std::string new_path = venv_path + "/bin";
+  if (env_vars.find("PATH") != env_vars.end()) {
+    new_path += ":" + env_vars["PATH"];
+  }
+  env_vars["PATH"] = new_path;
+
+  // Update LD_LIBRARY_PATH to include the virtual environment's lib directory
+  std::string new_lib_path = venv_path + "/lib";
+  if (env_vars.find("LD_LIBRARY_PATH") != env_vars.end()) {
+    new_lib_path += ":" + env_vars["LD_LIBRARY_PATH"];
+  }
+  env_vars["LD_LIBRARY_PATH"] = new_lib_path;
+
+  // Remove PYTHONHOME if it exists
+  env_vars.erase("PYTHONHOME");
+
+  return env_vars;
+}
+
+// Helper function to prepare environment array for execve
+std::pair<std::vector<std::string>, std::vector<char*>>
+PrepareEnvironment(
+    const std::map<std::string, std::string>& env_vars,
+    const std::string& additional_lib_path)
+{
+  std::vector<std::string> env_strings;
+  std::vector<char*> env_array;
+
+  for (const auto& [key, value] : env_vars) {
+    std::string env_string;
+    if (key == "LD_LIBRARY_PATH" && !additional_lib_path.empty()) {
+      // Prepend the additional library path
+      env_string = key + "=" + additional_lib_path + ":" + value;
+    } else {
+      env_string = key + "=" + value;
+    }
+    env_strings.push_back(env_string);
+  }
+
+  // Convert to char* array
+  for (auto& env_str : env_strings) {
+    env_array.push_back(const_cast<char*>(env_str.c_str()));
+  }
+  env_array.push_back(nullptr);
+
+  return std::make_pair(std::move(env_strings), std::move(env_array));
 }
 
 }}}  // namespace triton::backend::python
