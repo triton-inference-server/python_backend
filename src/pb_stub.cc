@@ -1785,6 +1785,24 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       .def("__dlpack__", &PbTensor::DLPack, py::arg("stream") = py::none())
       .def("__dlpack_device__", &PbTensor::DLPackDevice);
 
+  py::enum_<TRITONSERVER_DataType>(module, "TritonDtype")
+      .value("TYPE_INVALID", TRITONSERVER_DataType::TRITONSERVER_TYPE_INVALID)
+      .value("TYPE_BOOL", TRITONSERVER_DataType::TRITONSERVER_TYPE_BOOL)
+      .value("TYPE_UINT8", TRITONSERVER_DataType::TRITONSERVER_TYPE_UINT8)
+      .value("TYPE_UINT16", TRITONSERVER_DataType::TRITONSERVER_TYPE_UINT16)
+      .value("TYPE_UINT32", TRITONSERVER_DataType::TRITONSERVER_TYPE_UINT32)
+      .value("TYPE_UINT64", TRITONSERVER_DataType::TRITONSERVER_TYPE_UINT64)
+      .value("TYPE_INT8", TRITONSERVER_DataType::TRITONSERVER_TYPE_INT8)
+      .value("TYPE_INT16", TRITONSERVER_DataType::TRITONSERVER_TYPE_INT16)
+      .value("TYPE_INT32", TRITONSERVER_DataType::TRITONSERVER_TYPE_INT32)
+      .value("TYPE_INT64", TRITONSERVER_DataType::TRITONSERVER_TYPE_INT64)
+      .value("TYPE_FP16", TRITONSERVER_DataType::TRITONSERVER_TYPE_FP16)
+      .value("TYPE_FP32", TRITONSERVER_DataType::TRITONSERVER_TYPE_FP32)
+      .value("TYPE_FP64", TRITONSERVER_DataType::TRITONSERVER_TYPE_FP64)
+      .value("TYPE_BYTES", TRITONSERVER_DataType::TRITONSERVER_TYPE_BYTES)
+      .value("TYPE_BF16", TRITONSERVER_DataType::TRITONSERVER_TYPE_BF16)
+      .export_values();
+
   py::class_<InferResponse, std::shared_ptr<InferResponse>>(
       module, "InferenceResponse")
       .def(
