@@ -416,8 +416,9 @@ Stub::RunCommand()
       // processed before the message queue is destroyed.
       {
         std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-        std::unordered_map<void*, std::shared_ptr<ResponseIterator>>().swap(
-            response_iterator_map_);
+        response_iterator_map_ = std::unordered_map<
+            void*, std::variant<
+                       ResponseIterator*, std::unique_ptr<ResponseIterator>>>();
       }
       SendIPCMessage(ipc_message);
       return true;  // Terminate the stub process
