@@ -301,7 +301,14 @@ class Stub {
   std::thread parent_to_stub_queue_monitor_;
   bool parent_to_stub_thread_;
   std::mutex response_iterator_map_mu_;
-  std::unordered_map<void*, std::shared_ptr<ResponseIterator>>
+  // Stores ResponseIterator for routing BLS responses.
+  // The map has the ownership if the type is std::unique_ptr.
+  // Python model has the ownership if the type is the raw pointer.
+  // Uses raw pointer to ensure responses can be enqueued even during
+  // destruction. The destructor removes itself from the map after fetching all
+  // responses.
+  std::unordered_map<
+      void*, std::variant<ResponseIterator*, std::unique_ptr<ResponseIterator>>>
       response_iterator_map_;
   std::mutex dlpack_proxy_stream_pool_mu_;
   std::unordered_map<int, cudaStream_t> dlpack_proxy_stream_pool_;

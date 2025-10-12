@@ -1366,27 +1366,31 @@ std::shared_ptr<ResponseIterator>
 Stub::GetResponseIterator(std::shared_ptr<InferResponse> infer_response)
 {
   std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-  if (response_iterator_map_.find(infer_response->Id()) !=
-      response_iterator_map_.end()) {
+  auto id = infer_response->Id();
+  auto response_iterator = std::make_shared<ResponseIterator>(infer_response);
+
+  auto it = response_iterator_map_.find(id);
+  if (it != response_iterator_map_.end()) {
+    if (std::get_if<ResponseIterator*>(&it->second)) {
+      throw PythonBackendException(
+          "ResponseIterator is not owned by response_iterator_map_");
+    }
+
     // Need to re-construct the 'ResponseIterator' and update the
     // 'response_iterator_map_' to make sure the 'ResponseIterator' object has
     // the correct first response.
-    auto response_iterator = std::make_shared<ResponseIterator>(infer_response);
-    std::vector<std::shared_ptr<InferResponse>> existing_responses =
-        response_iterator_map_[infer_response->Id()]->GetExistingResponses();
-    for (auto& response : existing_responses) {
+    auto& old_response_iterator =
+        *std::get_if<std::unique_ptr<ResponseIterator>>(&it->second);
+    for (auto& response : old_response_iterator->GetExistingResponses()) {
       response_iterator->EnqueueResponse(response);
     }
-
-    response_iterator_map_[infer_response->Id()] = response_iterator;
-  } else {
-    auto response_iterator = std::make_shared<ResponseIterator>(infer_response);
-    response_iterator_map_.insert(
-        std::pair<void*, std::shared_ptr<ResponseIterator>>(
-            response_iterator->Id(), response_iterator));
   }
 
-  return response_iterator_map_[infer_response->Id()];
+  // Store the raw pointer instead of the shared_ptr. If using weak_ptr and
+  // response_iterator is destructed prematurely in Python, the map entry is
+  // invalid and may cause a crash.
+  response_iterator_map_[id] = response_iterator.get();
+  return response_iterator;
 }
 
 bool
@@ -1552,16 +1556,19 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
 
   {
     std::lock_guard<std::mutex> lock(response_iterator_map_mu_);
-    if (response_iterator_map_.find(infer_response->Id()) !=
-        response_iterator_map_.end()) {
-      response_iterator_map_[infer_response->Id()]->EnqueueResponse(
-          std::move(infer_response));
+    auto id = infer_response->Id();
+    auto it = response_iterator_map_.find(id);
+    if (it != response_iterator_map_.end()) {
+      std::visit(
+          [&infer_response](auto&& response_iterator_holder) {
+            response_iterator_holder->EnqueueResponse(
+                std::move(infer_response));
+          },
+          it->second);
     } else {
       auto response_iterator =
-          std::make_shared<ResponseIterator>(std::move(infer_response));
-      response_iterator_map_.insert(
-          std::pair<void*, std::shared_ptr<ResponseIterator>>(
-              response_iterator->Id(), response_iterator));
+          std::make_unique<ResponseIterator>(std::move(infer_response));
+      response_iterator_map_[id] = std::move(response_iterator);
     }
   }
 

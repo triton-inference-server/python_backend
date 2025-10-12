@@ -80,17 +80,15 @@ ResponseIterator::Next()
   } else {
     std::shared_ptr<InferResponse> response;
     {
-      {
-        std::unique_lock<std::mutex> lock{mu_};
-        while (response_buffer_.empty()) {
-          py::gil_scoped_release release;
-          cv_.wait(lock);
-        }
-        response = response_buffer_.front();
-        response_buffer_.pop();
-        is_finished_ = response->IsLastResponse();
-        responses_.push_back(response);
+      std::unique_lock<std::mutex> lock{mu_};
+      while (response_buffer_.empty()) {
+        py::gil_scoped_release release;
+        cv_.wait(lock);
       }
+      response = response_buffer_.front();
+      response_buffer_.pop();
+      is_finished_ = response->IsLastResponse();
+      responses_.push_back(response);
     }
 
     if (is_finished_) {
