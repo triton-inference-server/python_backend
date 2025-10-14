@@ -1387,10 +1387,13 @@ Stub::GetResponseIterator(std::shared_ptr<InferResponse> infer_response)
     }
   }
 
-  // Store the raw pointer instead of the shared_ptr. If using weak_ptr and
-  // response_iterator is destructed prematurely in Python, the map entry is
-  // invalid and may cause a crash.
-  response_iterator_map_[id] = response_iterator.get();
+  // Don't store error response iterator to map because id is always nullptr
+  if (id != nullptr) {
+    // Store the raw pointer instead of the shared_ptr. If using weak_ptr and
+    // response_iterator is destructed prematurely in Python, the map entry is
+    // invalid and may cause a crash.
+    response_iterator_map_[id] = response_iterator.get();
+  }
   return response_iterator;
 }
 
