@@ -122,10 +122,12 @@ FetchContent_MakeAvailable(dlpack)
 #
 # Boost
 #
+set(TRITON_BOOST_URL "https://archives.boost.io/release/1.80.0/source/boost_1_80_0.tar.gz")
+
 ExternalProject_Add(
   boostorg
-  URL https://archives.boost.io/release/1.79.0/source/boost_1_79_0.tar.gz
-  URL_HASH SHA256=273f1be93238a068aba4f9735a4a2b003019af067b9c183ed227780b8f36062c
+  URL ${TRITON_BOOST_URL}
+  URL_HASH SHA256=4b2136f98bdd1f5857f1c3dea9ac2018effe65286cf251534b6ae20cc45e1847
   PREFIX "boost-src"
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E copy_directory
                     <SOURCE_DIR>/boost/ ${CMAKE_BINARY_DIR}/boost
