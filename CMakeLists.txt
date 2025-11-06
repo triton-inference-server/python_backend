@@ -122,7 +122,7 @@ FetchContent_MakeAvailable(dlpack)
 #
 # Boost
 #
-set(TRITON_BOOST_URL "https://archives.boost.io/release/1.80.0/source/boost_1_80_0.tar.gz")
+set(TRITON_BOOST_URL "https://archives.boost.io/release/1.80.0/source/boost_1_80_0.tar.gz" CACHE STRING "Boost source code URL")
 
 ExternalProject_Add(
   boostorg
