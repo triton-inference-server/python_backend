@@ -494,6 +494,21 @@ Stub::StubSetup()
   deserialize_bytes_ = python_backend_utils.attr("deserialize_bytes_tensor");
   serialize_bytes_ = python_backend_utils.attr("serialize_byte_tensor");
 
+  // add a debug mode for triton python backend
+  py::module os = py::module_::import("os");  
+  py::object env = os.attr("environ");  
+  std::string triton_debug = py::str(env.attr("get")("TRITON_DEBUG", "0"));
+  if (triton_debug == "1") {  
+    py::module debugpy = py::module_::import("debugpy");
+    std::string debug_port = py::str(env.attr("get")("TRITON_DEBUG_PORT", "8003"));  
+    int triton_debug_port = std::stoi(debug_port); 
+    LOG_INFO << "Running with debugpy mode on 0.0.0.0:" << triton_debug_port;
+    py::tuple listen_args(2);  
+    listen_args[0] = "0.0.0.0";  
+    listen_args[1] = triton_debug_port;  
+    debugpy.attr("listen")(listen_args);
+  }
+
   return sys;
 }
 
