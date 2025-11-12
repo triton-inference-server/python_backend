@@ -43,6 +43,9 @@
 namespace triton { namespace backend { namespace python {
 namespace bi = boost::interprocess;
 
+static constexpr bi::managed_external_buffer::handle_t kShmControlRegionHandle{
+    1};
+
 class CUDAMemoryPoolManager {
  public:
   CUDAMemoryPoolManager() : triton_memory_manager_(nullptr) {}
@@ -166,6 +169,10 @@ class SharedMemoryManager {
 
   void Deallocate(bi::managed_external_buffer::handle_t handle)
   {
+    // Do not delete the control region, to avoid undefined behavior.
+    if (handle == kShmControlRegionHandle) {
+      return;
+    }
     bi::scoped_lock<bi::interprocess_mutex> guard{*shm_mutex_};
     GrowIfNeeded(0);
     void* ptr = managed_buffer_->get_address_from_handle(handle);
@@ -174,6 +181,10 @@ class SharedMemoryManager {
 
   void DeallocateUnsafe(bi::managed_external_buffer::handle_t handle)
   {
+    // Do not delete the control region, to avoid undefined behavior.
+    if (handle == kShmControlRegionHandle) {
+      return;
+    }
     void* ptr = managed_buffer_->get_address_from_handle(handle);
     managed_buffer_->deallocate(ptr);
   }
