@@ -2426,10 +2426,9 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
 
   if (!instance_state->Stub()->StubActive()) {
     return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        (std::string("Stub process '") + instance_state->Name() +
-         "' is not alive")
-            .c_str());
+        TRITONSERVER_ERROR_INTERNAL, (std::string("Stub process '") +
+                                      instance_state->Name() + "' is not alive")
+                                         .c_str());
   }
 
   if (!instance_state->IsStubProcessAlive()) {
