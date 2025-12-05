@@ -751,11 +751,16 @@ StubLauncher::StubActive()
   pid_t return_pid = waitpid(stub_pid_, &status, WNOHANG);
   if (return_pid == -1) {
     // If waitpid fails, it likely means the process no longer exists (ECHILD)
-    stub_pid_ = 0;
+    if (errno != ECHILD) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_VERBOSE,
+          (std::string("waitpid failed for stub process ") +
+           std::to_string(stub_pid_) + ": " + strerror(errno))
+              .c_str());
+    }
     return false;
   } else if (return_pid == stub_pid_) {
     // Process has exited and has been reaped
-    stub_pid_ = 0;
     return false;
   }
 
