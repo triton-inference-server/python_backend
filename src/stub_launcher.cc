@@ -743,7 +743,29 @@ StubLauncher::StubActive()
   GetExitCodeProcess(stub_pid_.hProcess, &ec);
   return (ec == STILL_ACTIVE);
 #else
-  return (stub_pid_ != 0);
+  if (stub_pid_ == 0) {
+    return false;
+  }
+
+  int status;
+  pid_t return_pid = waitpid(stub_pid_, &status, WNOHANG);
+  if (return_pid == -1) {
+    // If waitpid fails, it likely means the process no longer exists (ECHILD)
+    if (errno != ECHILD) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_VERBOSE,
+          (std::string("waitpid failed for stub process ") +
+           std::to_string(stub_pid_) + ": " + strerror(errno))
+              .c_str());
+    }
+    return false;
+  } else if (return_pid == stub_pid_) {
+    // Process has exited and has been reaped
+    return false;
+  }
+
+  // return_pid == 0 means the process is still running
+  return true;
 #endif
 }
 
@@ -824,9 +846,11 @@ StubLauncher::KillStubProcess()
   CloseHandle(stub_pid_.hProcess);
   CloseHandle(stub_pid_.hThread);
 #else
-  kill(stub_pid_, SIGKILL);
-  WaitForStubProcess();
-  stub_pid_ = 0;
+  if (stub_pid_ != 0) {
+    kill(stub_pid_, SIGKILL);
+    WaitForStubProcess();
+    stub_pid_ = 0;
+  }
 #endif
 }
 
