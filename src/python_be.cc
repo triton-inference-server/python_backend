@@ -2427,9 +2427,10 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
   // Check if the stub process is running
   if (!instance_state->Stub()->StubActive()) {
     return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, (std::string("Stub process '") +
-                                      instance_state->Name() + "' is not alive")
-                                         .c_str());
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("Stub process '") + instance_state->Name() +
+         "' is not healthy.")
+            .c_str());
   }
 
   // Check if the stub process is responsive
@@ -2437,7 +2438,7 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         (std::string("Stub process '") + instance_state->Name() +
-         "' is not healthy (unresponsive).")
+         "' is not healthy.")
             .c_str());
   }
 
