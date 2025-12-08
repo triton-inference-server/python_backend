@@ -812,13 +812,13 @@ values for the parameters field. Note that you need to parse this string using
 ## Managing Python Runtime and Libraries
 
 Python backend shipped in the [NVIDIA GPU Cloud](https://ngc.nvidia.com/)
-containers uses Python 3.10. Python backend is able to use the libraries
+containers uses Python 3.12. Python backend is able to use the libraries
 that exist in the current Python environment. These libraries can
 be installed in a virtualenv, conda environment, or the global system
 Python. These libraries will only be used if the Python version matches
 the Python version of the Python backend's stub executable. For example,
 if you install a set of libraries in a Python 3.9 environment and your
-Python backend stub is compiled with Python 3.10 these libraries will NOT
+Python backend stub is compiled with Python 3.12 these libraries will NOT
 be available in your Python model served using Triton. You would need to
 compile the stub executable with Python 3.9 using the instructions in
 [Building Custom Python Backend Stub](#building-custom-python-backend-stub)
@@ -827,7 +827,7 @@ section.
 ### Building Custom Python Backend Stub
 
 **Important Note: You only need to compile a custom Python backend stub if the
-Python version is different from Python 3.10 which is shipped by
+Python version is different from Python 3.12 which is shipped by
 default in the Triton containers.**
 
 Python backend uses a *stub* process to connect your `model.py` file to the
@@ -1016,7 +1016,7 @@ In this case you only need to pack your environment using `conda-pack` and
 provide the path to tar file in the model config. However, the previous note
 still applies here and the version of the Python interpreter inside the conda
 environment must match the Python version of stub used by Python backend. The
-default version of the stub is Python 3.10.
+default version of the stub is Python 3.12.
 
 3. You can share a single execution environment across multiple models. You
 need to provide the path to the tar file in the `EXECUTION_ENV_PATH` in the
@@ -1039,8 +1039,10 @@ other than Ubuntu 22.04 can lead to unexpected errors.
 
 7. If you encounter the "GLIBCXX_3.4.30 not found" error during runtime, we
 recommend upgrading your conda version and installing `libstdcxx-ng=12` by
-running `conda install -c conda-forge libstdcxx-ng=12 -y`. If this solution does
-not resolve the issue, please feel free to open an issue on the
+running `conda install -c conda-forge libstdcxx-ng=12 -y`. Similarly, if you
+encounter the "GLIBCXX_3.4.32 not found" error during runtime, the recommended
+solution is to run `conda install -c conda-forge libstdcxx-ng=13 -y`. If this
+solution does not resolve the issue, please feel free to open an issue on the
 [GitHub issue page](https://github.com/triton-inference-server/server/issues)
 following the provided
 [instructions](https://github.com/triton-inference-server/server#reporting-problems-asking-questions).
