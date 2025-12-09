@@ -2417,6 +2417,26 @@ TRITONBACKEND_ModelInstanceExecute(
 }
 
 TRITONBACKEND_ISPEC TRITONSERVER_Error*
+TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
+{
+  void* vstate;
+  RETURN_IF_ERROR(TRITONBACKEND_ModelInstanceState(instance, &vstate));
+  ModelInstanceState* instance_state =
+      reinterpret_cast<ModelInstanceState*>(vstate);
+
+  // Check if the stub process is running
+  if (!instance_state->Stub()->StubActive()) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("Stub process '") + instance_state->Name() +
+         "' is not healthy.")
+            .c_str());
+  }
+
+  return nullptr;
+}
+
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceFinalize(TRITONBACKEND_ModelInstance* instance)
 {
   void* vstate;
