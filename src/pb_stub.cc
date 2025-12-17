@@ -433,11 +433,62 @@ Stub::RunCommand()
       }
 
       break;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_CheckIsModelReady:
+      CheckIsModelReady(ipc_message);
+      break;
     default:
       break;
   }
 
   return false;
+}
+
+void
+Stub::CheckIsModelReady(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  std::unique_ptr<IPCMessage> readiness_response_msg =
+      IPCMessage::Create(shm_pool_, false /* inline_response */);
+  readiness_response_msg->Command() = PYTHONSTUB_CheckIsModelReady;
+
+  AllocatedSharedMemory<ModelReadinessMessage> readiness_response =
+      shm_pool_->Construct<ModelReadinessMessage>();
+  readiness_response.data_->is_ready = true;
+  readiness_response.data_->has_error = false;
+  readiness_response.data_->is_error_set = false;
+  readiness_response.data_->waiting_on_stub = false;
+
+  readiness_response_msg->Args() = readiness_response.handle_;
+
+  ScopedDefer receive_finalize([this] { stub_message_queue_->Pop(); });
+  ScopedDefer _([this, &readiness_response_msg] {
+    SendIPCMessage(readiness_response_msg);
+  });
+
+  try {
+    if (py::hasattr(model_instance_, "is_model_ready")) {
+      py::object is_ready = model_instance_.attr("is_model_ready")();
+      if (py::isinstance<py::bool_>(is_ready)) {
+        readiness_response.data_->is_ready = is_ready.cast<bool>();
+      } else {
+        throw PythonBackendException(
+            "is_model_ready must return a boolean value.");
+      }
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    readiness_response.data_->has_error = true;
+    std::unique_ptr<PbString> error_message =
+        PbString::Create(shm_pool_, pb_exception.what());
+    readiness_response.data_->is_error_set = true;
+    readiness_response.data_->error = error_message->ShmHandle();
+  }
+  catch (const py::error_already_set& error) {
+    readiness_response.data_->has_error = true;
+    std::unique_ptr<PbString> error_message =
+        PbString::Create(shm_pool_, error.what());
+    readiness_response.data_->is_error_set = true;
+    readiness_response.data_->error = error_message->ShmHandle();
+  }
 }
 
 py::module

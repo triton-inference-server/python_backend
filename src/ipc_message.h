@@ -68,7 +68,8 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_UnloadModelRequest,
   PYTHONSTUB_ModelReadinessRequest,
   PYTHONSTUB_IsRequestCancelled,
-  PYTHONSTUB_CancelBLSInferRequest
+  PYTHONSTUB_CancelBLSInferRequest,
+  PYTHONSTUB_CheckIsModelReady
 } PYTHONSTUB_CommandType;
 
 ///
@@ -91,6 +92,16 @@ struct IPCMessageShm {
   bi::managed_external_buffer::handle_t response_handle;
   bi::managed_external_buffer::handle_t response_mutex;
   bi::managed_external_buffer::handle_t response_cond;
+};
+
+struct ModelReadinessMessage {
+  bool is_ready;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  bi::interprocess_mutex mu;
+  bi::interprocess_condition cv;
+  bool waiting_on_stub;
 };
 
 class IPCMessage {

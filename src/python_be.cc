@@ -1765,6 +1765,44 @@ ModelInstanceState::ShareCUDAMemoryPool(const int32_t device_id)
 #endif  // TRITON_ENABLE_GPU
 }
 
+TRITONSERVER_Error*
+ModelInstanceState::CheckPythonModelReadiness()
+{
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(Stub()->ShmPool(), false /* inline_response */);
+  ipc_message->Command() = PYTHONSTUB_CheckIsModelReady;
+
+  Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
+
+  bi::managed_external_buffer::handle_t response_message;
+  RETURN_IF_ERROR(Stub()->ReceiveMessageFromStub(response_message));
+
+  std::unique_ptr<IPCMessage> response =
+      IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), response_message);
+  auto readiness_response =
+      Stub()->ShmPool()->Load<ModelReadinessMessage>(response->Args());
+
+  if (readiness_response.data_->has_error) {
+    if (readiness_response.data_->is_error_set) {
+      std::unique_ptr<PbString> error_message = PbString::LoadFromSharedMemory(
+          Stub()->ShmPool(), readiness_response.data_->error);
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, error_message->String().c_str());
+    } else {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          "Failed to check readiness for Python model.");
+    }
+  }
+
+  if (!readiness_response.data_->is_ready) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "Python model is not ready.");
+  }
+
+  return nullptr;
+}
+
 ModelInstanceState::~ModelInstanceState()
 {
   Stub()->UpdateHealth();
@@ -2432,6 +2470,9 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
          "' is not healthy.")
             .c_str());
   }
+
+  // Check if the Python model is ready (user-defined check)
+  RETURN_IF_ERROR(instance_state->CheckPythonModelReadiness());
 
   return nullptr;
 }

@@ -173,6 +173,8 @@ class Stub {
 
   void LoadGPUBuffers(std::unique_ptr<IPCMessage>& ipc_message);
 
+  void CheckIsModelReady(std::unique_ptr<IPCMessage>& ipc_message);
+
   bool IsDecoupled();
   ~Stub();
 
