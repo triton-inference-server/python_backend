@@ -2416,6 +2416,57 @@ TRITONBACKEND_ModelInstanceExecute(
   return nullptr;
 }
 
+TRITONSERVER_Error*
+ModelInstanceState::IsModelReady()
+{
+  std::unique_ptr<IPCMessage> ipc_message =
+      IPCMessage::Create(Stub()->ShmPool(), false /* inline_response */);
+  ipc_message->Command() = PYTHONSTUB_IsModelReadyRequest;
+
+  AllocatedSharedMemory<IsModelReadyResponseShm> is_model_ready_response =
+      Stub()->ShmPool()->Construct<IsModelReadyResponseShm>();
+  is_model_ready_response.data_->is_ready = false;
+  is_model_ready_response.data_->has_error = false;
+  is_model_ready_response.data_->is_error_set = false;
+  is_model_ready_response.data_->is_done = false;
+
+  ipc_message->Args() = is_model_ready_response.handle_;
+
+  // Use ParentToStubMessageQueue to avoid race condition with main execution
+  // queue.
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    Stub()->ParentToStubMessageQueue()->Push(ipc_message->ShmHandle());
+    // Wait with timeout
+    boost::system_time timeout =
+        boost::get_system_time() + boost::posix_time::seconds(1);
+    if (!ipc_message->ResponseCondition()->timed_wait(lock, timeout, [&] {
+          return is_model_ready_response.data_->is_done;
+        })) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, "Timeout waiting for model readiness.");
+    }
+  }
+
+  if (is_model_ready_response.data_->has_error) {
+    if (is_model_ready_response.data_->is_error_set) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          is_model_ready_response.data_->error_message);
+    }
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "Model readiness check failed.");
+  }
+
+  if (!is_model_ready_response.data_->is_ready) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNAVAILABLE, "Model is not ready.");
+  }
+
+  return nullptr;
+}
+
 TRITONBACKEND_ISPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
 {
@@ -2432,6 +2483,8 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
          "' is not healthy.")
             .c_str());
   }
+
+  RETURN_IF_ERROR(instance_state->IsModelReady());
 
   return nullptr;
 }

@@ -1350,6 +1350,63 @@ Stub::ParentToStubMQMonitor()
       case PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecResponse: {
         ProcessBLSResponseDecoupled(ipc_message);
       } break;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_IsModelReadyRequest: {
+        bool has_exception = false;
+        std::string error_string;
+        bool is_ready = true;
+
+        AllocatedSharedMemory<IsModelReadyResponseShm> is_ready_response =
+            shm_pool_->Load<IsModelReadyResponseShm>(ipc_message->Args());
+
+        is_ready_response.data_->has_error = false;
+        is_ready_response.data_->is_error_set = false;
+        is_ready_response.data_->is_ready = false;
+        is_ready_response.data_->is_done = false;
+
+        {
+          // We need to acquire GIL to call Python code.
+          py::gil_scoped_acquire acquire;
+          try {
+            if (py::hasattr(model_instance_, "is_model_ready")) {
+              py::object ret = model_instance_.attr("is_model_ready")();
+              if (py::isinstance<py::bool_>(ret)) {
+                is_ready = ret.cast<bool>();
+              } else {
+                throw PythonBackendException(
+                    "is_model_ready must return a boolean value.");
+              }
+            }
+          }
+          catch (const PythonBackendException& pb_exception) {
+            has_exception = true;
+            error_string = pb_exception.what();
+          }
+          catch (const py::error_already_set& error) {
+            has_exception = true;
+            error_string = error.what();
+          }
+        }
+
+        if (has_exception) {
+          is_ready_response.data_->has_error = true;
+          is_ready_response.data_->is_error_set = true;
+          strncpy(
+              is_ready_response.data_->error_message, error_string.c_str(),
+              1023);
+          is_ready_response.data_->error_message[1023] = '\0';
+        } else {
+          is_ready_response.data_->is_ready = is_ready;
+        }
+
+        is_ready_response.data_->is_done = true;
+
+        // Notify the waiting thread
+        {
+          bi::scoped_lock<bi::interprocess_mutex> lock{
+              *(ipc_message->ResponseMutex())};
+          ipc_message->ResponseCondition()->notify_all();
+        }
+      } break;
       default:
         break;
     }

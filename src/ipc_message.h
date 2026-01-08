@@ -68,6 +68,8 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_UnloadModelRequest,
   PYTHONSTUB_ModelReadinessRequest,
   PYTHONSTUB_IsRequestCancelled,
+  PYTHONSTUB_IsModelReadyRequest,
+  PYTHONSTUB_IsModelReadyResponse,
   PYTHONSTUB_CancelBLSInferRequest
 } PYTHONSTUB_CommandType;
 

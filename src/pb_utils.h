@@ -121,6 +121,19 @@ struct InitializeResponseShm {
   bi::managed_external_buffer::handle_t response_error;
 };
 
+struct IsModelReadyResponseShm {
+  // Indicates whether the model is ready or not.
+  bool is_ready;
+  // Indicates whether the response has an error or not.
+  bool has_error;
+  // Indicates whether the response error is set or not.
+  bool is_error_set;
+  // Indicates whether the stub has finished processing the request.
+  bool is_done;
+  // Contains the error message.
+  char error_message[1024];
+};
+
 struct AutoCompleteResponseShm {
   // Indicates whether the response has an error or not.
   bool response_has_error;

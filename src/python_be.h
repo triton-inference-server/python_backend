@@ -429,5 +429,8 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Attempt to share CUDA memory pool with the stub process
   void ShareCUDAMemoryPool(const int32_t device_id);
+
+  // Check if model is ready
+  TRITONSERVER_Error* IsModelReady();
 };
 }}}  // namespace triton::backend::python
