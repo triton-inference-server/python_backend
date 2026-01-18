@@ -40,9 +40,9 @@ extern char** environ;
 namespace triton { namespace backend { namespace python {
 
 StubLauncher::StubLauncher(const std::string stub_process_kind)
-    : parent_pid_(0), is_initialized_(false),
-      stub_process_kind_(stub_process_kind), model_instance_name_(""),
-      device_id_(0), kind_("")
+    : is_initialized_(false), stub_process_kind_(stub_process_kind),
+      model_instance_name_(""), device_id_(0), kind_(""),
+      has_is_model_ready_(false)
 {
 }
 
@@ -51,7 +51,7 @@ StubLauncher::StubLauncher(
     const int32_t device_id, const std::string kind)
     : is_initialized_(false), stub_process_kind_(stub_process_kind),
       model_instance_name_(model_instance_name), device_id_(device_id),
-      kind_(kind)
+      kind_(kind), has_is_model_ready_(false)
 {
 }
 
@@ -731,6 +731,8 @@ StubLauncher::ModelInstanceStubProcess()
               .c_str());
     }
   }
+
+  has_is_model_ready_ = initialize_response->has_is_model_ready;
 
   return nullptr;
 }

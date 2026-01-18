@@ -2433,6 +2433,64 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
             .c_str());
   }
 
+  // If the Python model implements 'is_model_ready', we need to check if the
+  // model is ready.
+  if (instance_state->Stub()->HasIsModelReady()) {
+    // Send ModelIsReadyRequest to stub
+    std::unique_ptr<IPCMessage> ipc_message = IPCMessage::Create(
+        instance_state->Stub()->ShmPool(), false /* inline_response */);
+    ipc_message->Command() = PYTHONSTUB_ModelIsReadyRequest;
+    instance_state->Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
+
+    bi::managed_external_buffer::handle_t response_message;
+    // Wait for the response from the stub process.
+    auto err = instance_state->Stub()->ReceiveMessageFromStub(response_message);
+    if (err != nullptr) {
+      return err;
+    }
+
+    std::unique_ptr<IPCMessage> response = IPCMessage::LoadFromSharedMemory(
+        instance_state->Stub()->ShmPool(), response_message);
+
+    if (response->Command() != PYTHONSTUB_ModelIsReadyResponse) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string(
+               "Received unexpected response from Python backend stub: ") +
+           instance_state->Name())
+              .c_str());
+    }
+
+    auto model_ready_response =
+        instance_state->Stub()->ShmPool()->Load<ModelIsReadyResponseShm>(
+            response->Args());
+
+    if (model_ready_response.data_->response_has_error) {
+      if (model_ready_response.data_->response_is_error_set) {
+        std::unique_ptr<PbString> error_message =
+            PbString::LoadFromSharedMemory(
+                instance_state->Stub()->ShmPool(),
+                model_ready_response.data_->response_error);
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, error_message->String().c_str());
+      } else {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            (std::string("Model readiness check failed for ") +
+             instance_state->Name())
+                .c_str());
+      }
+    }
+
+    if (!model_ready_response.data_->is_ready) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_UNAVAILABLE,
+          (std::string("Model '") + instance_state->Name() +
+           "' is not ready.")
+              .c_str());
+    }
+  }
+
   return nullptr;
 }
 

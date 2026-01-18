@@ -80,6 +80,9 @@ class StubLauncher {
   // Check if Stub PID is active
   bool StubActive();
 
+  // Check if the model has implemented 'is_model_ready'
+  bool HasIsModelReady() { return has_is_model_ready_; }
+
   // Health mutex
   bi::interprocess_mutex* HealthMutex() { return health_mutex_; }
 
@@ -176,6 +179,7 @@ class StubLauncher {
   bool is_initialized_;
   bool is_decoupled_;
   bool is_healthy_;
+  bool has_is_model_ready_;
   std::string shm_region_name_;
   std::string model_repository_path_;
   std::string model_path_;

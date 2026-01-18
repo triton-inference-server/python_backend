@@ -368,10 +368,14 @@ Stub::RunCommand()
 
       initialize_response.data_->response_has_error = false;
       initialize_response.data_->response_is_error_set = false;
+      initialize_response.data_->has_is_model_ready = false;
       initialize_response_msg->Args() = initialize_response.handle_;
 
       try {
         Initialize(ipc_message->Args());
+        if (py::hasattr(model_instance_, "is_model_ready")) {
+          initialize_response.data_->has_is_model_ready = true;
+        }
       }
       catch (const PythonBackendException& pb_exception) {
         has_exception = true;
@@ -433,6 +437,59 @@ Stub::RunCommand()
       }
 
       break;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_ModelIsReadyRequest: {
+      bool is_ready = true;
+      bool has_exception = false;
+      std::string error_string;
+
+      std::unique_ptr<IPCMessage> model_ready_response_msg =
+          IPCMessage::Create(shm_pool_, false /* inline_response */);
+      model_ready_response_msg->Command() = PYTHONSTUB_ModelIsReadyResponse;
+
+      AllocatedSharedMemory<ModelIsReadyResponseShm> model_ready_response =
+          shm_pool_->Construct<ModelIsReadyResponseShm>();
+      model_ready_response.data_->response_has_error = false;
+      model_ready_response.data_->response_is_error_set = false;
+
+      ScopedDefer _([this, &model_ready_response_msg] {
+        SendIPCMessage(model_ready_response_msg);
+      });
+
+      model_ready_response_msg->Args() = model_ready_response.handle_;
+
+      try {
+        if (py::hasattr(model_instance_, "is_model_ready")) {
+          py::object ret = model_instance_.attr("is_model_ready")();
+          if (!py::isinstance<py::bool_>(ret)) {
+            throw PythonBackendException("is_model_ready must return a boolean");
+          }
+          is_ready = ret.cast<bool>();
+        }
+      }
+      catch (const PythonBackendException& pb_exception) {
+        has_exception = true;
+        error_string = pb_exception.what();
+      }
+      catch (const py::error_already_set& error) {
+        has_exception = true;
+        error_string = error.what();
+      }
+
+      if (has_exception) {
+        model_ready_response.data_->response_has_error = true;
+        std::unique_ptr<PbString> error_string_shm;
+        LOG_IF_EXCEPTION(
+            error_string_shm = PbString::Create(shm_pool_, error_string));
+        if (error_string_shm != nullptr) {
+          model_ready_response.data_->response_is_error_set = true;
+          model_ready_response.data_->response_error =
+              error_string_shm->ShmHandle();
+        }
+        model_ready_response.data_->is_ready = false;
+      } else {
+        model_ready_response.data_->is_ready = is_ready;
+      }
+    } break;
     default:
       break;
   }
