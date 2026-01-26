@@ -206,10 +206,6 @@ class StubLauncher {
 
   common::TritonJson::WriteBuffer model_config_buffer_;
   common::TritonJson::Value auto_complete_config_;
-  
-  // Cache whether user defined is_model_ready() 
-  // Set during stub initialization, read during health checks
-  bool stub_has_is_model_ready_fn_;
 
   bi::interprocess_mutex* health_mutex_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>

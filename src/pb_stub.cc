@@ -433,6 +433,30 @@ Stub::RunCommand()
       }
 
       break;
+    case PYTHONSTUB_CommandType::PYTHONSTUB_UserModelReadyRequest:
+      std::cerr << "[STUB] Received PYTHONSTUB_UserModelReadyRequest"
+                << std::endl;
+      std::cerr << "[Stub::RunCommand] Processing user model ready request"
+                << std::endl;
+      try {
+        ProcessUserModelReadyRequest(ipc_message);
+      }
+      catch (const PythonBackendException& pb_exception) {
+        LOG_ERROR << "An error occurred while trying to run "
+                     "ProcessUserModelReadyRequest: "
+                  << pb_exception.what();
+      }
+      catch (const py::error_already_set& py_error) {
+        LOG_ERROR << "An error occurred while trying to run "
+                     "ProcessUserModelReadyRequest: "
+                  << py_error.what();
+      }
+      catch (const std::exception& ex) {
+        LOG_ERROR << "Unexpected exception in "
+                     "ProcessUserModelReadyRequest: "
+                  << ex.what();
+      }
+      break;
     default:
       break;
   }
@@ -595,14 +619,17 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_instance_.attr("initialize")(model_config_params);
   }
 
-  // Cache whether user defined is_model_ready() in shared memory
-  // GIL is already held during Initialize (pybind11 automatic)
-  // Check once, store in shared memory, read directly when needed
-  ipc_control_->stub_has_is_model_ready_fn = py::hasattr(model_instance_, "is_model_ready");
-  
-  LOG_INFO << (ipc_control_->stub_has_is_model_ready_fn 
-      ? "User is_model_ready() detected - health checks will call it"
-      : "No is_model_ready() - health checks will skip IPC (instant)");
+  // Cache whether user defined is_model_ready() in python model.
+  ipc_control_->stub_has_is_model_ready_fn =
+      py::hasattr(model_instance_, "is_model_ready");
+
+  std::cerr <<
+      (ipc_control_->stub_has_is_model_ready_fn
+           ? " ----- User is_model_ready() detected - health checks will "
+             "call it"
+           : " ----- No is_model_ready() - health checks will skip IPC "
+             "(instant)")
+          << std::endl;
 
   initialized_ = true;
 }
@@ -1345,9 +1372,10 @@ Stub::ParentToStubMQMonitor()
 {
   std::cerr << "[STUB] ParentToStubMQMonitor thread started" << std::endl;
   LOG_INFO << "[ParentToStubMQMonitor] Thread started";
-  
+
   while (parent_to_stub_thread_) {
-    std::cerr << "[STUB] Waiting for message on parent_to_stub queue..." << std::endl;
+    std::cerr << "[STUB] Waiting for message on parent_to_stub queue..."
+              << std::endl;
     LOG_VERBOSE << "[ParentToStubMQMonitor] Waiting for message...";
     bi::managed_external_buffer::handle_t handle = parent_to_stub_mq_->Pop();
     if (handle == DUMMY_MESSAGE) {
@@ -1362,8 +1390,10 @@ Stub::ParentToStubMQMonitor()
     std::unique_ptr<IPCMessage> ipc_message =
         IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
 
-    std::cerr << "[STUB] Message command type: " << ipc_message->Command() << std::endl;
-    LOG_INFO << "[ParentToStubMQMonitor] Message command type: " << ipc_message->Command();
+    std::cerr << "[STUB] Message command type: " << ipc_message->Command()
+              << std::endl;
+    std::cerr << "[ParentToStubMQMonitor] Message command type: "
+              << ipc_message->Command() << std::endl;
 
     switch (ipc_message->Command()) {
       case PYTHONSTUB_CommandType::PYTHONSTUB_CUDAPoolInitializeRequest: {
@@ -1374,19 +1404,14 @@ Stub::ParentToStubMQMonitor()
         LOG_INFO << "[ParentToStubMQMonitor] Processing BLS decoupled response";
         ProcessBLSResponseDecoupled(ipc_message);
       } break;
-      case PYTHONSTUB_CommandType::PYTHONSTUB_UserModelReadyRequest: {
-        std::cerr << "[STUB] *** Processing USER MODEL READY request ***" << std::endl;
-        LOG_INFO << "[ParentToStubMQMonitor] Processing USER MODEL READY request";
-        ProcessUserModelReadyRequest(ipc_message);
-        std::cerr << "[STUB] *** USER MODEL READY request completed ***" << std::endl;
-      } break;
       default:
-        LOG_WARN << "[ParentToStubMQMonitor] Unknown command type: " << ipc_message->Command();
+        std::cerr << "[ParentToStubMQMonitor] Unknown command type: "
+                  << ipc_message->Command() << std::endl;
         break;
     }
   }
-  
-  LOG_INFO << "[ParentToStubMQMonitor] Thread exiting";
+
+  std::cerr << "[ParentToStubMQMonitor] Thread exiting" << std::endl;
 }
 
 bool
@@ -1609,137 +1634,89 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
 void
 Stub::ProcessUserModelReadyRequest(std::unique_ptr<IPCMessage>& ipc_message)
 {
-  std::cerr << "[STUB] *** ProcessUserModelReadyRequest ENTERED ***" << std::endl;
-  LOG_INFO << "[Stub::ProcessUserModelReadyRequest] ENTERED - Processing user model ready request";
+  std::cerr << "[STUB] *** ProcessUserModelReadyRequest ENTERED ***"
+            << std::endl;
+  std::cerr << "[Stub::ProcessUserModelReadyRequest] ENTERED - Processing user "
+               "model ready request"
+            << std::endl;
 
-  std::cerr << "[STUB] Loading message from shared memory..." << std::endl;
-  AllocatedSharedMemory<UserModelReadyMessage> ready_message =
+  // Load the response structure from shared memory
+  AllocatedSharedMemory<UserModelReadyMessage> response_shm =
       shm_pool_->Load<UserModelReadyMessage>(ipc_message->Args());
-  UserModelReadyMessage* message_payload = ready_message.data_.get();
+  UserModelReadyMessage* response_payload = response_shm.data_.get();
 
-  bool has_exception = false;
-  std::string error_string;
-  std::unique_ptr<PbString> error_string_shm;
+  // Helper lambda to set error in response with proper cleanup
+  auto set_error_response = [&](const std::string& error_msg) {
+    std::cerr << "[Stub::ProcessUserModelReadyRequest] " << error_msg
+              << std::endl;
+    response_payload->has_error = true;
+    response_payload->is_error_set = false;
 
-  // Default values
-  message_payload->is_ready = true;
-  message_payload->function_exists = false;
-  message_payload->has_error = false;
-  message_payload->is_error_set = false;
+    try {
+      std::unique_ptr<PbString> error_string_shm =
+          PbString::Create(shm_pool_, error_msg);
+      if (error_string_shm != nullptr) {
+        response_payload->is_error_set = true;
+        response_payload->error = error_string_shm->ShmHandle();
+      }
+    }
+    catch (const PythonBackendException& ex) {
+      LOG_ERROR << "Failed to create "
+                   "error string: "
+                << ex.what();
+    }
+  };
 
-  // Read from shared memory (single source of truth)
-  bool has_function = ipc_control_->stub_has_is_model_ready_fn;
-  
-  std::cerr << "[STUB] initialized=" << initialized_ 
-            << ", stub_has_is_model_ready_fn=" << has_function << " (from shared memory)" << std::endl;
-  LOG_INFO << "[Stub::ProcessUserModelReadyRequest] Processing request, initialized=" 
-           << initialized_;
+  bi::interprocess_mutex* response_mutex = ipc_message->ResponseMutex();
+  bi::interprocess_condition* response_cond = ipc_message->ResponseCondition();
+  bi::managed_external_buffer::handle_t& response_handle_ref =
+      ipc_message->ResponseHandle();
+
+  // Ensure we always signal completion to backend
+  ScopedDefer signal_completion(
+      [response_mutex, response_cond, &response_handle_ref] {
+        bi::scoped_lock<bi::interprocess_mutex> lock{*response_mutex};
+        response_handle_ref = 1;
+        response_cond->notify_all();
+      });
 
   try {
-    // Check if model is ready to process request
-    if (!initialized_) {
-      std::cerr << "[STUB] Model not initialized yet, defaulting to ready" << std::endl;
-      message_payload->function_exists = false;
-      message_payload->is_ready = true;
-    } 
-    // FAST PATH: No user function - no GIL needed
-    else if (!has_function) {
-      std::cerr << "[STUB] FAST PATH: No user function (SHM), ready=true, NO GIL" << std::endl;
-      LOG_INFO << "[Stub::ProcessUserModelReadyRequest] No user function, returning ready";
-      message_payload->function_exists = false;
-      message_payload->is_ready = true;
+    // Check if is_model_ready function exists
+    if (!py::hasattr(model_instance_, "is_model_ready")) {
+      response_payload->is_ready = true;
+      response_payload->function_exists = false;
+      return;
     }
-    // SLOW PATH: User function exists - call it
-    else {
-      std::cerr << "[STUB] SLOW PATH: User function exists (SHM), acquiring GIL..." << std::endl;
-      LOG_INFO << "[Stub::ProcessUserModelReadyRequest] Calling user function";
-      
-      // Only acquire GIL when we KNOW user defined the function
-      py::gil_scoped_acquire acquire;
-      std::cerr << "[STUB] GIL acquired, calling user function..." << std::endl;
-      
-      message_payload->function_exists = true;
-      
-      py::object is_model_ready_fn = model_instance_.attr("is_model_ready");
-      
-      // Call the user's is_model_ready function
-      py::object result = is_model_ready_fn();
 
-      LOG_INFO << "[Stub::ProcessUserModelReadyRequest] User function returned, checking type";
+    response_payload->function_exists = true;
 
-      // Validate return type
-      if (!py::isinstance<py::bool_>(result)) {
-        has_exception = true;
-        error_string =
-            "is_model_ready() must return a boolean value, got: " +
-            std::string(py::str(result.get_type()));
-        LOG_ERROR << "[Stub::ProcessUserModelReadyRequest] " << error_string;
-      } else {
-        message_payload->is_ready = result.cast<bool>();
-        std::cerr << "[STUB] User function returned: " << (message_payload->is_ready ? "true" : "false") << std::endl;
-        LOG_INFO << "[Stub::ProcessUserModelReadyRequest] User function returned: " 
-                 << (message_payload->is_ready ? "true" : "false");
-      }
-      
-      std::cerr << "[STUB] GIL will be released now (scope exit)" << std::endl;
-      // GIL released here
+    // Call user's is_model_ready() function
+    std::cerr << "[Stub::ProcessUserModelReadyRequest] Calling user's "
+                 "is_model_ready()"
+              << std::endl;
+    py::object result = model_instance_.attr("is_model_ready")();
+
+    // Validate return type
+    if (!py::isinstance<py::bool_>(result)) {
+      std::string type_name = py::str(result.get_type().attr("__name__"));
+      std::string error_msg =
+          "is_model_ready() must return a boolean, got " + type_name;
+      set_error_response(error_msg);
+      return;
     }
+
+    response_payload->is_ready = result.cast<bool>();
+
+    std::cerr << "[STUB] is_model_ready() returned: "
+              << (is_ready ? "True" : "False") << std::endl;
   }
   catch (const PythonBackendException& pb_exception) {
-    std::cerr << "[STUB] PythonBackendException caught: " << pb_exception.what() << std::endl;
-    has_exception = true;
-    error_string = pb_exception.what();
-    LOG_ERROR << "[Stub::ProcessUserModelReadyRequest] PythonBackendException: " << error_string;
+    set_error_response(
+        std::string("PythonBackendException: ") + pb_exception.what());
   }
-  catch (const py::error_already_set& error) {
-    has_exception = true;
-    error_string = error.what();
-    LOG_ERROR << "[Stub::ProcessUserModelReadyRequest] Python error: " << error_string;
+  catch (const py::error_already_set& py_error) {
+    set_error_response(std::string("Python exception: ") + py_error.what());
   }
-
-  if (has_exception) {
-    LOG_INFO << "[Stub::ProcessUserModelReadyRequest] Setting error in response";
-    message_payload->has_error = true;
-    message_payload->is_error_set = false;
-    message_payload->is_ready = false;  // Fail closed on error
-
-    LOG_IF_EXCEPTION(
-        error_string_shm = PbString::Create(shm_pool_, error_string));
-    if (error_string_shm != nullptr) {
-      message_payload->is_error_set = true;
-      message_payload->error = error_string_shm->ShmHandle();
-    }
-  }
-
-  std::cerr << "[STUB] Preparation complete, notifying parent..." << std::endl;
-  std::cerr << "[STUB] is_ready=" << (message_payload->is_ready ? "true" : "false")
-            << ", function_exists=" << (message_payload->function_exists ? "true" : "false")
-            << ", has_error=" << (message_payload->has_error ? "true" : "false") << std::endl;
-  
-  LOG_INFO << "[Stub::ProcessUserModelReadyRequest] Notifying parent, is_ready=" 
-           << (message_payload->is_ready ? "true" : "false")
-           << ", function_exists=" << (message_payload->function_exists ? "true" : "false");
-
-  // Notify parent that processing is complete
-  {
-    std::cerr << "[STUB] Acquiring ResponseMutex..." << std::endl;
-    bi::scoped_lock<bi::interprocess_mutex> lock{
-        *(ipc_message->ResponseMutex())};
-    std::cerr << "[STUB] Lock acquired, setting waiting_on_stub=true and notifying" << std::endl;
-    message_payload->waiting_on_stub = true;
-    ipc_message->ResponseCondition()->notify_all();
-    std::cerr << "[STUB] notify_all() called, waiting for parent acknowledge..." << std::endl;
-    LOG_INFO << "[Stub::ProcessUserModelReadyRequest] Notified parent, waiting for acknowledge";
-    
-    // Wait for parent to acknowledge
-    while (message_payload->waiting_on_stub) {
-      ipc_message->ResponseCondition()->wait(lock);
-    }
-    std::cerr << "[STUB] Parent acknowledged!" << std::endl;
-    LOG_INFO << "[Stub::ProcessUserModelReadyRequest] Parent acknowledged, exiting";
-  }
-  
-  std::cerr << "[STUB] *** ProcessUserModelReadyRequest COMPLETED ***" << std::endl;
 }
 
 PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)

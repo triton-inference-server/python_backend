@@ -53,6 +53,9 @@ namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
 
+// Timeout for user-defined is_model_ready() health check function (milliseconds)
+constexpr uint64_t kUserModelReadyTimeoutMs = 5000;
+
 #define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
   do {                                                             \
     try {                                                          \
