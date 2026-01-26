@@ -436,9 +436,8 @@ ModelInstanceState::GetInputTensor(
           TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
     } else {
       size_t byte_size = input_byte_size;
-      RETURN_IF_ERROR(
-          backend::ReadInputTensor(
-              request, input_name, input_buffer, &byte_size));
+      RETURN_IF_ERROR(backend::ReadInputTensor(
+          request, input_name, input_buffer, &byte_size));
     }
 
     if (input_dtype == TRITONSERVER_TYPE_BYTES) {
@@ -508,16 +507,15 @@ ModelInstanceState::GetInputTensor(
       void* dev_ptr;
       BackendMemory* backend_memory;
       std::unique_ptr<BackendMemory> lbackend_memory;
-      RETURN_IF_ERROR(
-          BackendMemory::Create(
-              reinterpret_cast<TRITONBACKEND_MemoryManager*>(
-                  Stub()
-                      ->ShmPool()
-                      ->GetCUDAMemoryPoolManager()
-                      ->TritonMemoryManager()),
-              {BackendMemory::AllocationType::GPU_POOL,
-               BackendMemory::AllocationType::GPU},
-              src_memory_type_id, input_byte_size, &backend_memory));
+      RETURN_IF_ERROR(BackendMemory::Create(
+          reinterpret_cast<TRITONBACKEND_MemoryManager*>(
+              Stub()
+                  ->ShmPool()
+                  ->GetCUDAMemoryPoolManager()
+                  ->TritonMemoryManager()),
+          {BackendMemory::AllocationType::GPU_POOL,
+           BackendMemory::AllocationType::GPU},
+          src_memory_type_id, input_byte_size, &backend_memory));
 
       dev_ptr = backend_memory->MemoryPtr();
       lbackend_memory.reset(backend_memory);
@@ -525,11 +523,10 @@ ModelInstanceState::GetInputTensor(
       size_t byte_size = input_byte_size;
 
       bool cuda_used = false;
-      RETURN_IF_ERROR(
-          backend::ReadInputTensor(
-              request, input_name, reinterpret_cast<char*>(dev_ptr), &byte_size,
-              TRITONSERVER_MEMORY_GPU, src_memory_type_id, CudaStream(),
-              &cuda_used));
+      RETURN_IF_ERROR(backend::ReadInputTensor(
+          request, input_name, reinterpret_cast<char*>(dev_ptr), &byte_size,
+          TRITONSERVER_MEMORY_GPU, src_memory_type_id, CudaStream(),
+          &cuda_used));
 
       if (cuda_used) {
 #ifdef TRITON_ENABLE_GPU
@@ -544,9 +541,8 @@ ModelInstanceState::GetInputTensor(
           const_cast<void*>(dev_ptr), input_byte_size,
           nullptr /* DLManagedTensor */);
 
-      input_tensor->SetMemory(
-          std::move(
-              PbMemory::Create(Stub()->ShmPool(), std::move(lbackend_memory))));
+      input_tensor->SetMemory(std::move(
+          PbMemory::Create(Stub()->ShmPool(), std::move(lbackend_memory))));
 
       RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
           Stub()->ShmPool(), true /* copy_gpu */));
@@ -628,11 +624,8 @@ ModelInstanceState::ExecuteBLSRequest(
               break;
             }
             lbackend_memory.reset(backend_memory);
-            input_tensor->SetMemory(
-                std::move(
-                    PbMemory::Create(
-                        Stub()->ShmPool(), std::move(lbackend_memory))));
-            gpu_buffer_helper.AddBuffer(input_tensor->Memory()->ShmHandle());
+            input_tensor->SetMemory(std::move(PbMemory::Create(
+                Stub()->ShmPool(), std::move(lbackend_memory))));
 #endif  // TRITON_ENABLE_GPU
           }
         }
@@ -1357,9 +1350,8 @@ ModelInstanceState::ResponseSendDecoupled(
               send_message_payload->response_factory_address);
       std::unique_ptr<
           TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-          lresponse_factory(
-              reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                  response_factory));
+          lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              response_factory));
     }
   });
   ScopedDefer _([send_message_payload] {
@@ -1565,9 +1557,8 @@ ModelInstanceState::ProcessRequests(
                 pb_infer_requests[r]->GetResponseFactoryAddress());
         std::unique_ptr<
             TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-            lresponse_factory(
-                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                    response_factory));
+            lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                response_factory));
       }
     }
     if (response_batch_shm_ptr->is_error_set) {
@@ -2046,10 +2037,9 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         force_cpu_only_input_tensors_ = false;
         LOG_MESSAGE(
             TRITONSERVER_LOG_INFO,
-            (std::string(
-                 "Input tensors can be both in CPU and GPU. "
-                 "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
-                .c_str());
+            (std::string("Input tensors can be both in CPU and GPU. "
+                         "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
+                .c_str())
       } else {
         throw BackendModelException(TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_UNSUPPORTED,
@@ -2472,9 +2462,8 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(instance_state->LaunchStubProcess());
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      (std::string(
-           "TRITONBACKEND_ModelInstanceInitialize: instance "
-           "initialization successful ") +
+      (std::string("TRITONBACKEND_ModelInstanceInitialize: instance "
+                   "initialization successful ") +
        name + " (device " + std::to_string(device_id) + ")")
           .c_str());
 

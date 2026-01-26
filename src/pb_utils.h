@@ -53,7 +53,8 @@ namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
 
-// Timeout for user-defined is_model_ready() health check function (milliseconds)
+// Timeout for user-defined is_model_ready() health check function
+// (milliseconds)
 constexpr uint64_t kUserModelReadyTimeoutMs = 5000;
 
 #define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
@@ -144,7 +145,7 @@ struct IPCControlShm {
   bool parent_health;
   bool uses_env;
   bool decoupled;
-  bool stub_has_is_model_ready_fn;  // Cached: user defined is_model_ready()
+  bool stub_has_is_model_ready_fn;
   bi::interprocess_mutex parent_health_mutex;
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
@@ -231,8 +232,8 @@ struct ModelLoaderMessage : SendMessageBase {
 };
 
 struct UserModelReadyMessage : SendMessageBase {
-  bool is_ready;        // Result from user's is_model_ready()
-  bool function_exists; // Whether is_model_ready() is defined
+  bool is_ready;
+  bool function_exists;
   bool has_error;
   bool is_error_set;
   bi::managed_external_buffer::handle_t error;

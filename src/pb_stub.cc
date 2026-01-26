@@ -623,13 +623,13 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   ipc_control_->stub_has_is_model_ready_fn =
       py::hasattr(model_instance_, "is_model_ready");
 
-  std::cerr <<
-      (ipc_control_->stub_has_is_model_ready_fn
-           ? " ----- User is_model_ready() detected - health checks will "
-             "call it"
-           : " ----- No is_model_ready() - health checks will skip IPC "
-             "(instant)")
-          << std::endl;
+  std::cerr
+      << (ipc_control_->stub_has_is_model_ready_fn
+              ? " ----- User is_model_ready() detected - health checks will "
+                "call it"
+              : " ----- No is_model_ready() - health checks will skip IPC "
+                "(instant)")
+      << std::endl;
 
   initialized_ = true;
 }
@@ -1371,7 +1371,6 @@ void
 Stub::ParentToStubMQMonitor()
 {
   std::cerr << "[STUB] ParentToStubMQMonitor thread started" << std::endl;
-  LOG_INFO << "[ParentToStubMQMonitor] Thread started";
 
   while (parent_to_stub_thread_) {
     std::cerr << "[STUB] Waiting for message on parent_to_stub queue..."
@@ -1380,12 +1379,10 @@ Stub::ParentToStubMQMonitor()
     bi::managed_external_buffer::handle_t handle = parent_to_stub_mq_->Pop();
     if (handle == DUMMY_MESSAGE) {
       std::cerr << "[STUB] Received DUMMY_MESSAGE" << std::endl;
-      LOG_INFO << "[ParentToStubMQMonitor] Received DUMMY_MESSAGE, exiting";
       break;
     }
 
     std::cerr << "[STUB] Received message handle: " << handle << std::endl;
-    LOG_INFO << "[ParentToStubMQMonitor] Received message handle: " << handle;
 
     std::unique_ptr<IPCMessage> ipc_message =
         IPCMessage::LoadFromSharedMemory(shm_pool_, handle);
@@ -1397,11 +1394,9 @@ Stub::ParentToStubMQMonitor()
 
     switch (ipc_message->Command()) {
       case PYTHONSTUB_CommandType::PYTHONSTUB_CUDAPoolInitializeRequest: {
-        LOG_INFO << "[ParentToStubMQMonitor] Processing CUDA pool init";
         GetCUDAMemoryPoolAddress(ipc_message);
       } break;
       case PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecResponse: {
-        LOG_INFO << "[ParentToStubMQMonitor] Processing BLS decoupled response";
         ProcessBLSResponseDecoupled(ipc_message);
       } break;
       default:
@@ -1681,7 +1676,7 @@ Stub::ProcessUserModelReadyRequest(std::unique_ptr<IPCMessage>& ipc_message)
       });
 
   try {
-    // Check if is_model_ready function exists
+    // Double-check if is_model_ready function exists
     if (!py::hasattr(model_instance_, "is_model_ready")) {
       response_payload->is_ready = true;
       response_payload->function_exists = false;
