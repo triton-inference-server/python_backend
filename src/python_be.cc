@@ -2039,7 +2039,7 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
             TRITONSERVER_LOG_INFO,
             (std::string("Input tensors can be both in CPU and GPU. "
                          "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
-                .c_str())
+                .c_str());
       } else {
         throw BackendModelException(TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_UNSUPPORTED,
