@@ -77,6 +77,9 @@ using cudaStream_t = void*;
 namespace triton { namespace backend { namespace python {
 
 std::atomic<bool> non_graceful_exit = {false};
+std::atomic<bool> should_exit{false};
+std::condition_variable exit_cv;
+std::mutex exit_mutex;
 
 void
 SignalHandler(int signum)
@@ -2058,7 +2061,11 @@ main(int argc, char** argv)
           // shared memory and will be set to false by the parent process.
           // The parent process expects that the stub process sets this
           // variable to true within 1 second.
-          std::this_thread::sleep_for(std::chrono::milliseconds(300));
+          std::unique_lock<std::mutex> lock(exit_mutex);
+          if (exit_cv.wait_for(lock, std::chrono::milliseconds(300), []{
+                  return should_exit.load();
+              })) {
+          }
 
           stub->UpdateHealth();
 
@@ -2099,6 +2106,8 @@ main(int argc, char** argv)
         stub->TerminateParentToStubQueueMonitor();
       }
       background_thread_running = false;
+      should_exit = true;
+      exit_cv.notify_all();
       background_thread.join();
       break;
     }
