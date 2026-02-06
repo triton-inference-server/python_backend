@@ -1,5 +1,5 @@
 <!--
-# Copyright 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -81,7 +81,7 @@ docker run --gpus all -it --rm -p 8000:8000 -v `pwd`:/jax nvcr.io/nvidia/tritons
 Inside the container, we need to install JAX to run this example.
 
 We recommend using the `pip` method mentioned in the
-[JAX documentation](https://github.com/google/jax#pip-installation-gpu-cuda).
+[JAX documentation](https://github.com/jax-ml/jax?tab=readme-ov-file#instructions).
 Make sure that JAX is available in the same Python environment as other
 dependencies.
 

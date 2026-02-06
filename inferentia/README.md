@@ -1,5 +1,5 @@
 <!--
-# Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -231,12 +231,12 @@ To enable dynamic batching, `--enable_dynamic_batching`
 flag needs to be specified. `gen_triton_model.py` supports following three
 options for configuring [Triton's dynamic batching](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md):
 
-1. `--preferred_batch_size`: Please refer to [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#preferred-batch-sizes) for details on preferred batch size. To optimize
+1. `--preferred_batch_size`: Please refer to [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md#preferred-batch-sizes) for details on preferred batch size. To optimize
    performance, this is recommended to be multiples of engaged neuron cores.
    For example, if each instance is using 2 neuron cores, `preferred_batch_size`
    could be 2, 4 or 6.
 2. `--max_queue_delay_microseconds`: Please refer to
-   [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#delayed-batching) for details.
+   [model configuration documentation](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md#delayed-batching) for details.
 3. `--disable_batch_requests_to_neuron`: Enable the non-default way for Triton to
    handle batched requests. Triton backend will send each request to neuron
    separately, irrespective of if the Triton server requests are batched.
