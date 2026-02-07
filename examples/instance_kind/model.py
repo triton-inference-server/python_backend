@@ -1,4 +1,4 @@
-# Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -24,10 +24,10 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
 import torch
 import triton_python_backend_utils as pb_utils
 from torch.utils.dlpack import to_dlpack
+from torchvision import models
 
 
 class TritonPythonModel:
@@ -49,18 +49,8 @@ class TritonPythonModel:
         device = "cuda" if args["model_instance_kind"] == "GPU" else "cpu"
         device_id = args["model_instance_device_id"]
         self.device = f"{device}:{device_id}"
-        # This example is configured to work with torch=1.13
-        # and torchvision=0.14. Thus, we need to provide a proper tag `0.14.1`
-        # to make sure loaded Resnet50 is compatible with
-        # installed `torchvision`.
-        # Refer to README for installation instructions.
         self.model = (
-            torch.hub.load(
-                "pytorch/vision:v0.14.1",
-                "resnet50",
-                weights="IMAGENET1K_V2",
-                skip_validation=True,
-            )
+            models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
             .to(self.device)
             .eval()
         )

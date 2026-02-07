@@ -1,4 +1,4 @@
-# Copyright 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -710,7 +710,7 @@ if __name__ == "__main__":
         action="store_true",
         help="""Enable dynamic batching. Please see model configuration
         documentation for details:
-        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#dynamic-batcher""",
+        https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md#dynamic-batcher""",
     )
     parser.add_argument(
         "--max_batch_size",
@@ -718,7 +718,7 @@ if __name__ == "__main__":
         default=0,
         help="""The maximum batch size for the model being generated.
         Please see model configuration documentation for details:
-        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#maximum-batch-size""",
+        https://github.com/triton-inference-server/server/blob/main/docs/user_guide/model_configuration.md#maximum-batch-size""",
     )
     parser.add_argument(
         "--preferred_batch_size",
@@ -729,7 +729,7 @@ if __name__ == "__main__":
         This flag is ignored if --enable_dynamic_batching is
         not specified. Please see model configuration
         documentation for details:
-        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#preferred-batch-sizes""",
+        https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md#preferred-batch-sizes""",
     )
     parser.add_argument(
         "--max_queue_delay_microseconds",
@@ -737,7 +737,7 @@ if __name__ == "__main__":
         help="""Max queue delay time(ms) for dynamic batching.
         This flag is ignored if --enable_dynamic_batching is not specified.
         Please see model configuration documentation for details:
-        https://github.com/triton-inference-server/server/blob/main/docs/model_configuration.md#delayed-batching""",
+        https://github.com/triton-inference-server/server/blob/main/docs/user_guide/batcher.md#delayed-batching""",
     )
     parser.add_argument(
         "--disable_batch_requests_to_neuron",
