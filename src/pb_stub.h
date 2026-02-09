@@ -267,7 +267,9 @@ class Stub {
 
   /// Process user-defined model ready check request from backend.
   /// Calls user's is_model_ready() Python method and sends response.
-  void ProcessUserModelReadyRequest(std::unique_ptr<IPCMessage>& ipc_message);
+  void ProcessUserModelReadyRequest(
+      std::unique_ptr<IPCMessage>& ipc_message,
+      UserModelReadyMessage* response_payload);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
