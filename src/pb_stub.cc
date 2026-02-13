@@ -1491,7 +1491,8 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
 }
 
 void
-Stub::DestroyPythonObjects() {
+Stub::DestroyPythonObjects()
+{
   // Ensure the interpreter is active before trying to clean up.
   if (Py_IsInitialized()) {
     py::gil_scoped_acquire acquire;
