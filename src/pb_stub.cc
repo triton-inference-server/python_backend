@@ -1491,6 +1491,18 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
 }
 
 void
+Stub::DestroyPythonObjects()
+{
+  // Ensure the interpreter is active before trying to clean up.
+  if (Py_IsInitialized()) {
+    py::gil_scoped_acquire acquire;
+    py::object async_event_loop_local(std::move(async_event_loop_));
+    py::object background_futures_local(std::move(background_futures_));
+    py::object model_instance_local(std::move(model_instance_));
+  }
+}
+
+void
 Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
 {
   ResponseBatch* response_batch = nullptr;
@@ -2077,6 +2089,7 @@ main(int argc, char** argv)
             non_graceful_exit = true;
 
             // Destroy stub and exit.
+            stub->DestroyPythonObjects();
             logger.reset();
             stub.reset();
             exit(1);
@@ -2110,6 +2123,7 @@ main(int argc, char** argv)
   // objects. If the scoped_interpreter is destroyed before the stub object,
   // this process will no longer hold the GIL lock and destruction of the stub
   // will result in segfault.
+  stub->DestroyPythonObjects();
   logger.reset();
   stub.reset();
 
