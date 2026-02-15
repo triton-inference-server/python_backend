@@ -977,18 +977,18 @@ ModelInstanceState::UserModelReadinessCleanupTask(
 
 void
 ModelInstanceState::ScheduleUserModelReadinessCleanupTask(
-    std::unique_ptr<IPCMessage> ipc_message_cleanup,
-    AllocatedSharedMemory<UserModelReadinessMessage> readiness_message_cleanup)
+    std::unique_ptr<IPCMessage> ipc_message,
+    AllocatedSharedMemory<UserModelReadinessMessage> readiness_message)
 {
   auto cleanup_task = [this,
-                       ipc_message_cleanup = std::move(ipc_message_cleanup),
+                       ipc_message_cleanup = std::move(ipc_message),
                        readiness_message_cleanup =
-                           std::move(readiness_message_cleanup)]() mutable {
+                           std::move(readiness_message)]() mutable {
     UserModelReadinessCleanupTask(
         std::move(ipc_message_cleanup), std::move(readiness_message_cleanup));
   };
 
-  // Use the instance thread pool to avoid unbounded threads
+  // Use the instance thread pool if available
   if (thread_pool_ != nullptr) {
     boost::asio::post(*thread_pool_, std::move(cleanup_task));
   } else {
@@ -1006,19 +1006,21 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
 
   std::cerr << "[BACKEND] RunUserModelReadinessCheck() CALLED" << std::endl;
 
-  // FAST PATH: No user-defined function - return immediately (zero IPC
-  // overhead) This check uses cached value set during stub initialization
+  // FAST PATH: No user-defined function - return immediately
+  // (zero IPC overhead)
   if (!Stub()->HasUserModelReadyFunction()) {
     *is_ready = true;
     std::cerr << "[BACKEND] FAST PATH: No user function, returning ready=true "
                  "- NO IPC!"
               << std::endl;
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_VERBOSE,
-        "No user function, immediate return (ready=true)");
     return nullptr;
   }
 
+  // SLOW PATH: User-defined function exists - need to perform IPC call to stub
+
+  // If another request is already performing a readiness check, wait for it to
+  // finish and return the same result (to avoid multiple concurrent IPC calls
+  // to the stub).
   if (user_model_readiness_inflight_) {
     std::cerr << "[BACKEND] Readiness IPC already in-flight, waiting..."
               << std::endl;
@@ -1481,9 +1483,8 @@ ModelInstanceState::ResponseSendDecoupled(
               send_message_payload->response_factory_address);
       std::unique_ptr<
           TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-          lresponse_factory(
-              reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                  response_factory));
+          lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+              response_factory));
     }
   });
   ScopedDefer _([send_message_payload] {
@@ -1689,9 +1690,8 @@ ModelInstanceState::ProcessRequests(
                 pb_infer_requests[r]->GetResponseFactoryAddress());
         std::unique_ptr<
             TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-            lresponse_factory(
-                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                    response_factory));
+            lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                response_factory));
       }
     }
     if (response_batch_shm_ptr->is_error_set) {
@@ -2170,9 +2170,8 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         force_cpu_only_input_tensors_ = false;
         LOG_MESSAGE(
             TRITONSERVER_LOG_INFO,
-            (std::string(
-                 "Input tensors can be both in CPU and GPU. "
-                 "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
+            (std::string("Input tensors can be both in CPU and GPU. "
+                         "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
                 .c_str());
       } else {
         throw BackendModelException(TRITONSERVER_ErrorNew(
@@ -2596,9 +2595,8 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(instance_state->LaunchStubProcess());
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      (std::string(
-           "TRITONBACKEND_ModelInstanceInitialize: instance "
-           "initialization successful ") +
+      (std::string("TRITONBACKEND_ModelInstanceInitialize: instance "
+                   "initialization successful ") +
        name + " (device " + std::to_string(device_id) + ")")
           .c_str());
 
