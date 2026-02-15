@@ -55,7 +55,7 @@ namespace bi = boost::interprocess;
 
 // Timeout for user-defined is_model_ready() health check function
 // (milliseconds)
-constexpr uint64_t kUserModelReadyTimeoutMs = 5000;
+constexpr uint64_t kUserModelReadinessTimeoutMs = 5000;
 
 #define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
   do {                                                             \
@@ -145,7 +145,7 @@ struct IPCControlShm {
   bool parent_health;
   bool uses_env;
   bool decoupled;
-  bool stub_has_is_model_ready_fn;
+  bool stub_has_user_model_readiness_fn;
   bi::interprocess_mutex parent_health_mutex;
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
@@ -231,7 +231,7 @@ struct ModelLoaderMessage : SendMessageBase {
   bool is_model_ready;
 };
 
-struct UserModelReadyMessage : SendMessageBase {
+struct UserModelReadinessMessage : SendMessageBase {
   bool is_ready;
   bool function_exists;
   bool has_error;

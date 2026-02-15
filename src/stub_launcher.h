@@ -139,8 +139,10 @@ class StubLauncher {
   // Check if user defined is_model_ready() in their Python model
   // Reads directly from shared memory (set by stub during initialization)
   // Returns false if not set yet (safe default)
-  bool HasUserReadyFunction() const { 
-    return ipc_control_ ? ipc_control_->stub_has_is_model_ready_fn : false; 
+  bool HasUserModelReadinessFunction() const
+  {
+    return ipc_control_ ? ipc_control_->stub_has_user_model_readiness_fn
+                        : false;
   }
 
   // Destruct Stub process

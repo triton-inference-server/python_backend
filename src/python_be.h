@@ -431,26 +431,28 @@ class ModelInstanceState : public BackendModelInstance {
   void ShareCUDAMemoryPool(const int32_t device_id);
 
   // Check user-defined model readiness function
-  TRITONSERVER_Error* CheckUserModelReady(bool* is_ready);
+  TRITONSERVER_Error* CheckUserModelReadiness(bool* is_ready);
 
-  // Mutex to serialize concurrent ModelIsReady calls
-  std::mutex readiness_mutex_;
-  std::condition_variable readiness_cv_;
-  bool readiness_inflight_{false};
-  bool readiness_last_ready_{true};
-  bool readiness_last_has_error_{false};
-  TRITONSERVER_Error_Code readiness_last_error_code_{
-      TRITONSERVER_ERROR_INTERNAL};
-  std::string readiness_last_error_;
-  void ReadySetResult(
-      const bool ready, const bool has_error,
-      const TRITONSERVER_Error_Code error_code,
-      const std::string& error_message);
-  void ReadyCleanupTask(
+  // Mutex to serialize concurrent model readiness check requests
+  std::mutex user_model_readiness_mutex_;
+
+  // Condition variable and related members to run only one user model readiness
+  // IPC at a time and cleanup IPC after completion.
+  std::condition_variable user_model_readiness_cv_;
+  bool user_model_readiness_inflight_{false};
+  bool user_model_readiness_result_{true};
+  bool user_model_readiness_has_error_{false};
+  std::string user_model_readiness_error_;
+
+  void SetUserModelReadinessResult(
+      const bool ready, const bool has_error, const std::string& error_message);
+  void UserModelReadinessCleanupTask(
       std::unique_ptr<IPCMessage> ipc_message_cleanup,
-      AllocatedSharedMemory<UserModelReadyMessage> ready_message_cleanup);
-  void ScheduleReadyCleanup(
+      AllocatedSharedMemory<UserModelReadinessMessage>
+          readiness_message_cleanup);
+  void ScheduleUserModelReadinessCleanupTask(
       std::unique_ptr<IPCMessage> ipc_message_cleanup,
-      AllocatedSharedMemory<UserModelReadyMessage> ready_message_cleanup);
+      AllocatedSharedMemory<UserModelReadinessMessage>
+          readiness_message_cleanup);
 };
 }}}  // namespace triton::backend::python

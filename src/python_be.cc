@@ -436,8 +436,9 @@ ModelInstanceState::GetInputTensor(
           TRITONSERVER_MEMORY_CPU /* memory_type */, 0 /* memory_type_id */);
     } else {
       size_t byte_size = input_byte_size;
-      RETURN_IF_ERROR(backend::ReadInputTensor(
-          request, input_name, input_buffer, &byte_size));
+      RETURN_IF_ERROR(
+          backend::ReadInputTensor(
+              request, input_name, input_buffer, &byte_size));
     }
 
     if (input_dtype == TRITONSERVER_TYPE_BYTES) {
@@ -507,15 +508,16 @@ ModelInstanceState::GetInputTensor(
       void* dev_ptr;
       BackendMemory* backend_memory;
       std::unique_ptr<BackendMemory> lbackend_memory;
-      RETURN_IF_ERROR(BackendMemory::Create(
-          reinterpret_cast<TRITONBACKEND_MemoryManager*>(
-              Stub()
-                  ->ShmPool()
-                  ->GetCUDAMemoryPoolManager()
-                  ->TritonMemoryManager()),
-          {BackendMemory::AllocationType::GPU_POOL,
-           BackendMemory::AllocationType::GPU},
-          src_memory_type_id, input_byte_size, &backend_memory));
+      RETURN_IF_ERROR(
+          BackendMemory::Create(
+              reinterpret_cast<TRITONBACKEND_MemoryManager*>(
+                  Stub()
+                      ->ShmPool()
+                      ->GetCUDAMemoryPoolManager()
+                      ->TritonMemoryManager()),
+              {BackendMemory::AllocationType::GPU_POOL,
+               BackendMemory::AllocationType::GPU},
+              src_memory_type_id, input_byte_size, &backend_memory));
 
       dev_ptr = backend_memory->MemoryPtr();
       lbackend_memory.reset(backend_memory);
@@ -523,10 +525,11 @@ ModelInstanceState::GetInputTensor(
       size_t byte_size = input_byte_size;
 
       bool cuda_used = false;
-      RETURN_IF_ERROR(backend::ReadInputTensor(
-          request, input_name, reinterpret_cast<char*>(dev_ptr), &byte_size,
-          TRITONSERVER_MEMORY_GPU, src_memory_type_id, CudaStream(),
-          &cuda_used));
+      RETURN_IF_ERROR(
+          backend::ReadInputTensor(
+              request, input_name, reinterpret_cast<char*>(dev_ptr), &byte_size,
+              TRITONSERVER_MEMORY_GPU, src_memory_type_id, CudaStream(),
+              &cuda_used));
 
       if (cuda_used) {
 #ifdef TRITON_ENABLE_GPU
@@ -541,8 +544,9 @@ ModelInstanceState::GetInputTensor(
           const_cast<void*>(dev_ptr), input_byte_size,
           nullptr /* DLManagedTensor */);
 
-      input_tensor->SetMemory(std::move(
-          PbMemory::Create(Stub()->ShmPool(), std::move(lbackend_memory))));
+      input_tensor->SetMemory(
+          std::move(
+              PbMemory::Create(Stub()->ShmPool(), std::move(lbackend_memory))));
 
       RETURN_IF_EXCEPTION(input_tensor->SaveToSharedMemory(
           Stub()->ShmPool(), true /* copy_gpu */));
@@ -624,8 +628,10 @@ ModelInstanceState::ExecuteBLSRequest(
               break;
             }
             lbackend_memory.reset(backend_memory);
-            input_tensor->SetMemory(std::move(PbMemory::Create(
-                Stub()->ShmPool(), std::move(lbackend_memory))));
+            input_tensor->SetMemory(
+                std::move(
+                    PbMemory::Create(
+                        Stub()->ShmPool(), std::move(lbackend_memory))));
             gpu_buffer_helper.AddBuffer(input_tensor->Memory()->ShmHandle());
 #endif  // TRITON_ENABLE_GPU
           }
@@ -742,7 +748,7 @@ ModelInstanceState::StubToParentMQMonitor()
         ProcessMetricRequest(message);
         break;
       }
-      case PYTHONSTUB_ModelReadinessRequest:
+      case PYTHONSTUB_UserModelReadinessRequest:
       case PYTHONSTUB_LoadModelRequest:
       case PYTHONSTUB_UnloadModelRequest: {
         ProcessModelControlRequest(message);
@@ -896,32 +902,29 @@ ModelInstanceState::ProcessCancelBLSRequest(
 }
 
 void
-ModelInstanceState::ReadySetResult(
-    const bool ready, const bool has_error,
-    const TRITONSERVER_Error_Code error_code,
-    const std::string& error_message)
+ModelInstanceState::SetUserModelReadinessResult(
+    const bool ready, const bool has_error, const std::string& error_message)
 {
-  std::lock_guard<std::mutex> guard(readiness_mutex_);
-  readiness_last_ready_ = ready;
-  readiness_last_has_error_ = has_error;
-  readiness_last_error_code_ = error_code;
-  readiness_last_error_ = error_message;
-  readiness_inflight_ = false;
-  readiness_cv_.notify_all();
+  std::lock_guard<std::mutex> guard(user_model_readiness_mutex_);
+  user_model_readiness_result_ = ready;
+  user_model_readiness_has_error_ = has_error;
+  user_model_readiness_error_ = error_message;
+  user_model_readiness_inflight_ = false;
+  user_model_readiness_cv_.notify_all();
 }
 
 void
-ModelInstanceState::ReadyCleanupTask(
+ModelInstanceState::UserModelReadinessCleanupTask(
     std::unique_ptr<IPCMessage> ipc_message_cleanup,
-    AllocatedSharedMemory<UserModelReadyMessage> ready_message_cleanup)
+    AllocatedSharedMemory<UserModelReadinessMessage> readiness_message_cleanup)
 {
-  UserModelReadyMessage* payload = ready_message_cleanup.data_.get();
-  std::cerr << "[BACKEND] Cleanup task waiting for is_model_ready() completion..."
-            << std::endl;
+  UserModelReadinessMessage* payload = readiness_message_cleanup.data_.get();
+  std::cerr
+      << "[BACKEND] Cleanup task waiting for is_model_ready() completion..."
+      << std::endl;
 
   bool result_ready = false;
   bool result_has_error = false;
-  TRITONSERVER_Error_Code result_error_code = TRITONSERVER_ERROR_INTERNAL;
   std::string result_error_message;
   bool abort_wait = false;
 
@@ -944,8 +947,7 @@ ModelInstanceState::ReadyCleanupTask(
         result_has_error = true;
         if (payload->is_error_set) {
           std::unique_ptr<PbString> error_message =
-              PbString::LoadFromSharedMemory(
-                  Stub()->ShmPool(), payload->error);
+              PbString::LoadFromSharedMemory(Stub()->ShmPool(), payload->error);
           result_error_message = error_message->String();
         } else {
           result_error_message =
@@ -962,14 +964,13 @@ ModelInstanceState::ReadyCleanupTask(
   }
 
   if (abort_wait) {
-    ReadySetResult(
-        false, true, TRITONSERVER_ERROR_UNAVAILABLE,
-        "Stub process is not healthy during readiness cleanup");
+    SetUserModelReadinessResult(
+        false, true, "Stub process is not healthy during readiness cleanup");
     return;
   }
 
-  ReadySetResult(
-      result_ready, result_has_error, result_error_code, result_error_message);
+  SetUserModelReadinessResult(
+      result_ready, result_has_error, result_error_message);
 
   {
     bi::scoped_lock<bi::interprocess_mutex> cleanup_lock{
@@ -981,16 +982,17 @@ ModelInstanceState::ReadyCleanupTask(
 }
 
 void
-ModelInstanceState::ScheduleReadyCleanup(
+ModelInstanceState::ScheduleUserModelReadinessCleanupTask(
     std::unique_ptr<IPCMessage> ipc_message_cleanup,
-    AllocatedSharedMemory<UserModelReadyMessage> ready_message_cleanup)
+    AllocatedSharedMemory<UserModelReadinessMessage> readiness_message_cleanup)
 {
-  auto cleanup_task =
-      [this, ipc_message_cleanup = std::move(ipc_message_cleanup),
-       ready_message_cleanup = std::move(ready_message_cleanup)]() mutable {
-        ReadyCleanupTask(
-            std::move(ipc_message_cleanup), std::move(ready_message_cleanup));
-      };
+  auto cleanup_task = [this,
+                       ipc_message_cleanup = std::move(ipc_message_cleanup),
+                       readiness_message_cleanup =
+                           std::move(readiness_message_cleanup)]() mutable {
+    UserModelReadinessCleanupTask(
+        std::move(ipc_message_cleanup), std::move(readiness_message_cleanup));
+  };
 
   // Use the instance thread pool to avoid unbounded threads
   if (thread_pool_ != nullptr) {
@@ -1004,15 +1006,15 @@ ModelInstanceState::ScheduleReadyCleanup(
 }
 
 TRITONSERVER_Error*
-ModelInstanceState::CheckUserModelReady(bool* is_ready)
+ModelInstanceState::CheckUserModelReadiness(bool* is_ready)
 {
-  std::unique_lock<std::mutex> lock(readiness_mutex_);
+  std::unique_lock<std::mutex> lock(user_model_readiness_mutex_);
 
-  std::cerr << "[BACKEND] CheckUserModelReady() CALLED" << std::endl;
+  std::cerr << "[BACKEND] CheckUserModelReadiness() CALLED" << std::endl;
 
-  // FAST PATH: No user-defined function - return immediately (zero IPC overhead)
-  // This check uses cached value set during stub initialization
-  if (!Stub()->HasUserReadyFunction()) {
+  // FAST PATH: No user-defined function - return immediately (zero IPC
+  // overhead) This check uses cached value set during stub initialization
+  if (!Stub()->HasUserModelReadinessFunction()) {
     *is_ready = true;
     std::cerr << "[BACKEND] FAST PATH: No user function, returning ready=true "
                  "- NO IPC!"
@@ -1023,14 +1025,13 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
     return nullptr;
   }
 
-  if (readiness_inflight_) {
+  if (user_model_readiness_inflight_) {
     std::cerr << "[BACKEND] Readiness IPC already in-flight, waiting..."
               << std::endl;
-    auto deadline =
-        std::chrono::steady_clock::now() +
-        std::chrono::milliseconds(kUserModelReadyTimeoutMs);
-    while (readiness_inflight_) {
-      if (readiness_cv_.wait_until(lock, deadline) ==
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(kUserModelReadinessTimeoutMs);
+    while (user_model_readiness_inflight_) {
+      if (user_model_readiness_cv_.wait_until(lock, deadline) ==
           std::cv_status::timeout) {
         std::cerr << "[BACKEND] Timed out waiting for in-flight "
                      "is_model_ready() response"
@@ -1041,24 +1042,24 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
       }
     }
 
-    if (readiness_last_has_error_) {
+    if (user_model_readiness_has_error_) {
       return TRITONSERVER_ErrorNew(
-          readiness_last_error_code_, readiness_last_error_.c_str());
+          TRITONSERVER_ERROR_INTERNAL, user_model_readiness_error_.c_str());
     }
 
-    *is_ready = readiness_last_ready_;
+    *is_ready = user_model_readiness_result_;
     return nullptr;
   }
 
-  readiness_inflight_ = true;
-  readiness_last_has_error_ = false;
-  readiness_last_error_.clear();
+  user_model_readiness_inflight_ = true;
+  user_model_readiness_has_error_ = false;
+  user_model_readiness_error_.clear();
   lock.unlock();
 
   // User-defined function exists
-  std::cerr
-      << "[BACKEND] SLOW PATH: User function is_model_ready() exists, initiating IPC..."
-      << std::endl;
+  std::cerr << "[BACKEND] SLOW PATH: User function is_model_ready() exists, "
+               "initiating IPC..."
+            << std::endl;
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       "Calling user-defined is_model_ready() function via IPC");
@@ -1067,40 +1068,40 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
   *is_ready = false;
 
   std::unique_ptr<IPCMessage> ipc_message;
-  AllocatedSharedMemory<UserModelReadyMessage> ready_message;
-  UserModelReadyMessage* ready_payload = nullptr;
+  AllocatedSharedMemory<UserModelReadinessMessage> readiness_message;
+  UserModelReadinessMessage* readiness_payload = nullptr;
 
   try {
-    std::cerr << "[BACKEND] Creating UserModelReady IPC message..."
+    std::cerr << "[BACKEND] Creating UserModelReadiness IPC message..."
               << std::endl;
-    ipc_message = IPCMessage::Create(
-        Stub()->ShmPool(), true /* inline_response */);
-    ready_message = Stub()->ShmPool()->Construct<UserModelReadyMessage>();
-    ready_payload = ready_message.data_.get();
+    ipc_message =
+        IPCMessage::Create(Stub()->ShmPool(), true /* inline_response */);
+    readiness_message =
+        Stub()->ShmPool()->Construct<UserModelReadinessMessage>();
+    readiness_payload = readiness_message.data_.get();
 
     // Initialize payload fields
-    new (&(ready_payload->mu)) bi::interprocess_mutex;
-    new (&(ready_payload->cv)) bi::interprocess_condition;
-    ready_payload->waiting_on_stub = false;
-    ready_payload->has_error = false;
-    ready_payload->is_error_set = false;
-    ready_payload->function_exists = false;
-    ready_payload->is_ready = false;
-    ready_payload->error = 0;
+    new (&(readiness_payload->mu)) bi::interprocess_mutex;
+    new (&(readiness_payload->cv)) bi::interprocess_condition;
+    readiness_payload->waiting_on_stub = false;
+    readiness_payload->has_error = false;
+    readiness_payload->is_error_set = false;
+    readiness_payload->function_exists = false;
+    readiness_payload->is_ready = false;
+    readiness_payload->error = 0;
 
-    ipc_message->Command() = PYTHONSTUB_UserModelReadyRequest;
-    ipc_message->Args() = ready_message.handle_;
+    ipc_message->Command() = PYTHONSTUB_UserModelReadinessRequest;
+    ipc_message->Args() = readiness_message.handle_;
   }
   catch (const PythonBackendException& pb_exception) {
-    std::cerr << "[BACKEND] Failed to create UserModelReady IPC message: "
+    std::cerr << "[BACKEND] Failed to create UserModelReadiness IPC message: "
               << pb_exception.what() << std::endl;
-    ReadySetResult(
-        false, true, TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+    SetUserModelReadinessResult(false, true, pb_exception.what());
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
   }
 
-  std::cerr << "[BACKEND] Sending UserModelReady IPC message to stub..."
+  std::cerr << "[BACKEND] Sending UserModelReadiness IPC message to stub..."
             << std::endl;
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
@@ -1110,19 +1111,19 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
     // Wait for stub response with timeout
     boost::posix_time::ptime timeout =
         boost::get_system_time() +
-        boost::posix_time::milliseconds(kUserModelReadyTimeoutMs);
+        boost::posix_time::milliseconds(kUserModelReadinessTimeoutMs);
 
-    while (!ready_payload->waiting_on_stub) {
+    while (!readiness_payload->waiting_on_stub) {
       if (!ipc_message->ResponseCondition()->timed_wait(lock, timeout)) {
-        if (!ready_payload->waiting_on_stub) {
+        if (!readiness_payload->waiting_on_stub) {
           std::cerr
               << "[BACKEND] Timed out waiting for is_model_ready() response"
               << std::endl;
 
           // IMPORTANT: Keep IPC message/payload alive until stub finishes,
           // otherwise shared-memory may be deallocated before stub reads it.
-          ScheduleReadyCleanup(
-              std::move(ipc_message), std::move(ready_message));
+          ScheduleUserModelReadinessCleanupTask(
+              std::move(ipc_message), std::move(readiness_message));
 
           return TRITONSERVER_ErrorNew(
               TRITONSERVER_ERROR_UNAVAILABLE,
@@ -1132,19 +1133,19 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
     }
   }
 
-  std::cerr << "[BACKEND] Received UserModelReady response from stub" << std::endl;
+  std::cerr << "[BACKEND] Received UserModelReadiness response from stub"
+            << std::endl;
 
   bool result_ready = false;
   bool result_has_error = false;
-  TRITONSERVER_Error_Code result_error_code = TRITONSERVER_ERROR_INTERNAL;
   std::string result_error_message;
 
-  if (ready_payload->has_error) {
-    std::cerr << "[BACKEND] UserModelReady returned error" << std::endl;
+  if (readiness_payload->has_error) {
+    std::cerr << "[BACKEND] UserModelReadiness returned error" << std::endl;
     result_has_error = true;
-    if (ready_payload->is_error_set) {
-      std::unique_ptr<PbString> error_message =
-          PbString::LoadFromSharedMemory(Stub()->ShmPool(), ready_payload->error);
+    if (readiness_payload->is_error_set) {
+      std::unique_ptr<PbString> error_message = PbString::LoadFromSharedMemory(
+          Stub()->ShmPool(), readiness_payload->error);
       result_error_message = error_message->String();
       std::cerr << "[BACKEND] Error details: " << result_error_message
                 << std::endl;
@@ -1153,13 +1154,13 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
           "User-defined is_model_ready() failed with unknown error";
     }
   } else {
-    if (!ready_payload->function_exists) {
-      std::cerr
-          << "[BACKEND] Stub reports no is_model_ready() function, default ready=true"
-          << std::endl;
+    if (!readiness_payload->function_exists) {
+      std::cerr << "[BACKEND] Stub reports no is_model_ready() function, "
+                   "default ready=true"
+                << std::endl;
       result_ready = true;
     } else {
-      result_ready = ready_payload->is_ready;
+      result_ready = readiness_payload->is_ready;
       std::cerr << "[BACKEND] is_model_ready() returned "
                 << (result_ready ? "true" : "false") << std::endl;
     }
@@ -1168,16 +1169,16 @@ ModelInstanceState::CheckUserModelReady(bool* is_ready)
   {
     bi::scoped_lock<bi::interprocess_mutex> lock{
         *(ipc_message->ResponseMutex())};
-    ready_payload->waiting_on_stub = false;
+    readiness_payload->waiting_on_stub = false;
     ipc_message->ResponseCondition()->notify_all();
   }
 
-  ReadySetResult(
-      result_ready, result_has_error, result_error_code, result_error_message);
+  SetUserModelReadinessResult(
+      result_ready, result_has_error, result_error_message);
 
   if (result_has_error) {
     return TRITONSERVER_ErrorNew(
-        result_error_code, result_error_message.c_str());
+        TRITONSERVER_ERROR_INTERNAL, result_error_message.c_str());
   }
 
   *is_ready = result_ready;
@@ -1486,8 +1487,9 @@ ModelInstanceState::ResponseSendDecoupled(
               send_message_payload->response_factory_address);
       std::unique_ptr<
           TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-          lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-              response_factory));
+          lresponse_factory(
+              reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                  response_factory));
     }
   });
   ScopedDefer _([send_message_payload] {
@@ -1693,8 +1695,9 @@ ModelInstanceState::ProcessRequests(
                 pb_infer_requests[r]->GetResponseFactoryAddress());
         std::unique_ptr<
             TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-            lresponse_factory(reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                response_factory));
+            lresponse_factory(
+                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
+                    response_factory));
       }
     }
     if (response_batch_shm_ptr->is_error_set) {
@@ -2173,8 +2176,9 @@ ModelState::ModelState(TRITONBACKEND_Model* triton_model)
         force_cpu_only_input_tensors_ = false;
         LOG_MESSAGE(
             TRITONSERVER_LOG_INFO,
-            (std::string("Input tensors can be both in CPU and GPU. "
-                         "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
+            (std::string(
+                 "Input tensors can be both in CPU and GPU. "
+                 "FORCE_CPU_ONLY_INPUT_TENSORS is off."))
                 .c_str());
       } else {
         throw BackendModelException(TRITONSERVER_ErrorNew(
@@ -2598,8 +2602,9 @@ TRITONBACKEND_ModelInstanceInitialize(TRITONBACKEND_ModelInstance* instance)
   RETURN_IF_ERROR(instance_state->LaunchStubProcess());
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      (std::string("TRITONBACKEND_ModelInstanceInitialize: instance "
-                   "initialization successful ") +
+      (std::string(
+           "TRITONBACKEND_ModelInstanceInitialize: instance "
+           "initialization successful ") +
        name + " (device " + std::to_string(device_id) + ")")
           .c_str());
 
@@ -2733,15 +2738,16 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
 
   // Check user-defined model readiness function
   bool user_ready = true;
-  TRITONSERVER_Error* err = instance_state->CheckUserModelReady(&user_ready);
+  TRITONSERVER_Error* err =
+      instance_state->CheckUserModelReadiness(&user_ready);
 
   if (err != nullptr) {
-    std::cerr << "[BACKEND] CheckUserModelReady returned error: "
+    std::cerr << "[BACKEND] CheckUserModelReadiness returned error: "
               << TRITONSERVER_ErrorMessage(err) << std::endl;
     return err;
   }
 
-  std::cerr << "[BACKEND] CheckUserModelReady completed, user_ready="
+  std::cerr << "[BACKEND] CheckUserModelReadiness completed, user_ready="
             << (user_ready ? "true" : "false") << std::endl;
 
   if (!user_ready) {

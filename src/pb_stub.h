@@ -265,11 +265,10 @@ class Stub {
   /// Get the CUDA memory pool address from the parent process.
   void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
-  /// Process user-defined model ready check request from backend.
+  /// Process user-defined model readiness check request from backend.
   /// Calls user's is_model_ready() Python method and sends response.
-  void ProcessUserModelReadyRequest(
-      std::unique_ptr<IPCMessage>& ipc_message,
-      UserModelReadyMessage* response_payload);
+  void ProcessUserModelReadinessRequest(
+      std::unique_ptr<IPCMessage>& ipc_message);
 
  private:
   bi::interprocess_mutex* stub_mutex_;
