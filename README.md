@@ -1522,6 +1522,8 @@ to load the model after the server has been started. The model loading API is
 currently not supported during the `auto_complete_config` and `finalize`
 functions.
 
+The model loading API applies to repository-managed backends.
+TensorRT-LLM models must be launched via the TensorRT-LLM launcher and cannot be instantiated via pb_utils.load_model(files=...).
 ## Using BLS with Stateful Models
 
 [Stateful models](https://github.com/triton-inference-server/server/blob/main/docs/user_guide/architecture.md#stateful-models)
