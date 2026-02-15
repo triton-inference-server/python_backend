@@ -177,8 +177,8 @@ StubLauncher::Setup()
       memory_manager_message_queue->ShmHandle();
   ipc_control_->decoupled = is_decoupled_;
 
-  // Will be set by stub during Initialize
-  ipc_control_->stub_has_user_model_readiness_fn = false;
+  // Will be set by the stub during initialization
+  ipc_control_->stub_has_model_ready_fn = false;
 
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));

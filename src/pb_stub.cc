@@ -595,12 +595,12 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_instance_.attr("initialize")(model_config_params);
   }
 
-  // Cache whether user defined is_model_ready() in python model.
-  ipc_control_->stub_has_user_model_readiness_fn =
+  // Cache whether is_model_ready() function defined in the Python model.
+  ipc_control_->stub_has_model_ready_fn =
       py::hasattr(model_instance_, "is_model_ready");
 
   std::cerr
-      << (ipc_control_->stub_has_user_model_readiness_fn
+      << (ipc_control_->stub_has_model_ready_fn
               ? " ----- User is_model_ready() detected - health checks will "
                 "call it"
               : " ----- No is_model_ready() - health checks will skip IPC "
@@ -1677,12 +1677,6 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
     error_string = pb_exception.what();
     std::cerr << "[STUB] PythonBackendException in is_model_ready(): "
               << error_string << std::endl;
-  }
-  catch (const py::cast_error& error) {
-    has_exception = true;
-    error_string = error.what();
-    std::cerr << "[STUB] py::cast_error in is_model_ready(): " << error_string
-              << std::endl;
   }
   catch (const py::error_already_set& error) {
     has_exception = true;

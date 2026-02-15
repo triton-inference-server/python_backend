@@ -1006,15 +1006,15 @@ ModelInstanceState::ScheduleUserModelReadinessCleanupTask(
 }
 
 TRITONSERVER_Error*
-ModelInstanceState::CheckUserModelReadiness(bool* is_ready)
+ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
 {
   std::unique_lock<std::mutex> lock(user_model_readiness_mutex_);
 
-  std::cerr << "[BACKEND] CheckUserModelReadiness() CALLED" << std::endl;
+  std::cerr << "[BACKEND] RunUserModelReadinessCheck() CALLED" << std::endl;
 
   // FAST PATH: No user-defined function - return immediately (zero IPC
   // overhead) This check uses cached value set during stub initialization
-  if (!Stub()->HasUserModelReadinessFunction()) {
+  if (!Stub()->HasUserModelReadyFunction()) {
     *is_ready = true;
     std::cerr << "[BACKEND] FAST PATH: No user function, returning ready=true "
                  "- NO IPC!"
@@ -2739,15 +2739,15 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
   // Check user-defined model readiness function
   bool user_ready = true;
   TRITONSERVER_Error* err =
-      instance_state->CheckUserModelReadiness(&user_ready);
+      instance_state->RunUserModelReadinessCheck(&user_ready);
 
   if (err != nullptr) {
-    std::cerr << "[BACKEND] CheckUserModelReadiness returned error: "
+    std::cerr << "[BACKEND] RunUserModelReadinessCheck returned error: "
               << TRITONSERVER_ErrorMessage(err) << std::endl;
     return err;
   }
 
-  std::cerr << "[BACKEND] CheckUserModelReadiness completed, user_ready="
+  std::cerr << "[BACKEND] RunUserModelReadinessCheck completed, user_ready="
             << (user_ready ? "true" : "false") << std::endl;
 
   if (!user_ready) {

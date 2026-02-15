@@ -265,8 +265,8 @@ class Stub {
   /// Get the CUDA memory pool address from the parent process.
   void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
-  /// Process user-defined model readiness check request from backend.
-  /// Calls user's is_model_ready() Python method and sends response.
+  /// Handles user-defined model readiness check requests from the backend.
+  /// Invokes the user's is_model_ready() Python method and returns the response.
   void ProcessUserModelReadinessRequest(
       std::unique_ptr<IPCMessage>& ipc_message);
 
