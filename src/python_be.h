@@ -1,4 +1,4 @@
-// Copyright 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -429,5 +429,30 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Attempt to share CUDA memory pool with the stub process
   void ShareCUDAMemoryPool(const int32_t device_id);
+
+  // Check user-defined model readiness function
+  TRITONSERVER_Error* RunUserModelReadinessCheck(bool* is_ready);
+
+  // Mutex to serialize concurrent model readiness check requests
+  std::mutex user_model_readiness_mutex_;
+
+  // Condition variable and related members to ensure only one user model readiness
+  // IPC runs at a time, and to clean up IPC resources after completion.
+  std::condition_variable user_model_readiness_cv_;
+  bool user_model_readiness_inflight_{false};
+  bool user_model_readiness_result_{true};
+  bool user_model_readiness_has_error_{false};
+  std::string user_model_readiness_error_;
+
+  void SetUserModelReadinessResult(
+      const bool ready, const bool has_error, const std::string& error_message);
+  void UserModelReadinessCleanupTask(
+      std::unique_ptr<IPCMessage> ipc_message_cleanup,
+      AllocatedSharedMemory<UserModelReadinessMessage>
+          readiness_message_cleanup);
+  void ScheduleUserModelReadinessCleanupTask(
+      std::unique_ptr<IPCMessage> ipc_message_cleanup,
+      AllocatedSharedMemory<UserModelReadinessMessage>
+          readiness_message_cleanup);
 };
 }}}  // namespace triton::backend::python

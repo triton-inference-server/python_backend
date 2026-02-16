@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -594,6 +594,10 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   if (py::hasattr(model_instance_, "initialize")) {
     model_instance_.attr("initialize")(model_config_params);
   }
+
+  // Cache whether is_model_ready() function defined in the Python model.
+  ipc_control_->stub_has_model_ready_fn =
+      py::hasattr(model_instance_, "is_model_ready");
 
   initialized_ = true;
 }
@@ -1350,6 +1354,9 @@ Stub::ParentToStubMQMonitor()
       case PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecResponse: {
         ProcessBLSResponseDecoupled(ipc_message);
       } break;
+      case PYTHONSTUB_CommandType::PYTHONSTUB_UserModelReadinessRequest: {
+        ProcessUserModelReadinessRequest(ipc_message);
+      } break;
       default:
         break;
     }
@@ -1570,6 +1577,99 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
         *(ipc_message->ResponseMutex())};
     response_batch->waiting_on_stub = true;
     ipc_message->ResponseCondition()->notify_all();
+  }
+}
+
+void
+Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
+{
+  AllocatedSharedMemory<UserModelReadinessMessage> readiness_message;
+  UserModelReadinessMessage* readiness_payload = nullptr;
+  try {
+    readiness_message =
+        shm_pool_->Load<UserModelReadinessMessage>(ipc_message->Args());
+    readiness_payload = readiness_message.data_.get();
+  }
+  catch (const PythonBackendException& pb_exception) {
+    return;
+  }
+
+  if (ipc_message->ResponseMutex() == nullptr) {
+    return;
+  }
+
+  bool is_ready = true;
+  bool function_exists = false;
+  bool has_exception = false;
+  std::string error_string;
+
+  try {
+    py::gil_scoped_acquire acquire;
+
+    function_exists = py::hasattr(model_instance_, "is_model_ready");
+    if (!function_exists) {
+      is_ready = true;
+    } else {
+      py::object result = model_instance_.attr("is_model_ready")();
+
+      bool is_coroutine = py::module::import("asyncio")
+                              .attr("iscoroutine")(result)
+                              .cast<bool>();
+      if (is_coroutine) {
+        result = RunCoroutine(result, false /* in_background */);
+      }
+
+      if (!py::isinstance<py::bool_>(result)) {
+        throw PythonBackendException(
+            "is_model_ready() must return a boolean value");
+      }
+
+      is_ready = result.cast<bool>();
+    }
+  }
+  catch (const PythonBackendException& pb_exception) {
+    has_exception = true;
+    error_string = pb_exception.what();
+  }
+  catch (const py::error_already_set& error) {
+    has_exception = true;
+    error_string = error.what();
+  }
+
+  // Populate response payload
+  readiness_payload->function_exists = function_exists;
+  readiness_payload->is_ready = has_exception ? false : is_ready;
+  readiness_payload->has_error = has_exception;
+  readiness_payload->is_error_set = false;
+  readiness_payload->error = 0;
+
+  if (has_exception) {
+    std::unique_ptr<PbString> error_string_shm;
+    LOG_IF_EXCEPTION(
+        error_string_shm = PbString::Create(shm_pool_, error_string));
+    if (error_string_shm != nullptr) {
+      readiness_payload->is_error_set = true;
+      readiness_payload->error = error_string_shm->ShmHandle();
+    }
+  }
+
+  // Signal parent process that response is ready
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    readiness_payload->waiting_on_stub = true;
+    ipc_message->ResponseCondition()->notify_all();
+
+    // Wait for parent ack with timeout to avoid deadlock
+    boost::posix_time::ptime timeout =
+        boost::get_system_time() +
+        boost::posix_time::milliseconds(kUserModelReadinessTimeoutMs);
+    while (readiness_payload->waiting_on_stub) {
+      if (!ipc_message->ResponseCondition()->timed_wait(lock, timeout)) {
+        readiness_payload->waiting_on_stub = false;
+        break;
+      }
+    }
   }
 }
 

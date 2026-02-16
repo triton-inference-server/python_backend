@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -135,6 +135,14 @@ class StubLauncher {
 
   // Is Healthy
   bool IsHealthy() { return is_healthy_; }
+
+  // Returns true if is_model_ready() is defined in the Python model.
+  // Reads directly from shared memory (set by the stub during initialization).
+  // Returns false if not set yet (safe default).
+  bool HasUserModelReadyFunction() const
+  {
+    return ipc_control_ ? ipc_control_->stub_has_model_ready_fn : false;
+  }
 
   // Destruct Stub process
   void TerminateStub();

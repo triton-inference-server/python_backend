@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -52,6 +52,10 @@
 namespace triton { namespace backend { namespace python {
 
 namespace bi = boost::interprocess;
+
+// Timeout for user-defined model readiness requests
+// and mutex locks (in milliseconds)
+constexpr uint64_t kUserModelReadinessTimeoutMs = 5000;
 
 #define STUB_SET_RESPONSE_ERROR_IF_ERROR(SHM_POOL, RESPONSE, R, X) \
   do {                                                             \
@@ -141,6 +145,7 @@ struct IPCControlShm {
   bool parent_health;
   bool uses_env;
   bool decoupled;
+  bool stub_has_model_ready_fn;
   bi::interprocess_mutex parent_health_mutex;
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
@@ -224,6 +229,14 @@ struct ModelLoaderMessage : SendMessageBase {
   bool is_error_set;
   bi::managed_external_buffer::handle_t error;
   bool is_model_ready;
+};
+
+struct UserModelReadinessMessage : SendMessageBase {
+  bool is_ready;
+  bool function_exists;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
 };
 
 struct ResponseSenderBase {

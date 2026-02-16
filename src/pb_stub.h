@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -264,6 +264,11 @@ class Stub {
 
   /// Get the CUDA memory pool address from the parent process.
   void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
+
+  /// Calls the user's is_model_ready() Python method and returns its response
+  /// when handling model readiness check requests.
+  void ProcessUserModelReadinessRequest(
+      std::unique_ptr<IPCMessage>& ipc_message);
 
  private:
   bi::interprocess_mutex* stub_mutex_;

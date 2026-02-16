@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -176,6 +176,9 @@ StubLauncher::Setup()
   ipc_control_->memory_manager_message_queue =
       memory_manager_message_queue->ShmHandle();
   ipc_control_->decoupled = is_decoupled_;
+
+  // Will be set by the stub during initialization
+  ipc_control_->stub_has_model_ready_fn = false;
 
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
