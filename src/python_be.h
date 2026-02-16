@@ -436,8 +436,9 @@ class ModelInstanceState : public BackendModelInstance {
   // Mutex to serialize concurrent model readiness check requests
   std::mutex user_model_readiness_mutex_;
 
-  // Condition variable and related members to ensure only one user model readiness
-  // IPC runs at a time, and to clean up IPC resources after completion.
+  // Condition variable and related members to ensure only one user model
+  // readiness IPC runs at a time, and to clean up IPC resources after
+  // completion.
   std::condition_variable user_model_readiness_cv_;
   bool user_model_readiness_inflight_{false};
   bool user_model_readiness_result_{true};
