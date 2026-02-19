@@ -1074,17 +1074,28 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
         boost::posix_time::milliseconds(kUserModelReadinessTimeoutMs);
 
     while (!readiness_payload->waiting_on_stub) {
-      if (!ipc_message->ResponseCondition()->timed_wait(lock, timeout)) {
-        if (!readiness_payload->waiting_on_stub) {
-          // IMPORTANT: Keep IPC message/payload alive until stub finishes,
-          // otherwise shared-memory may be deallocated before stub reads it.
-          ScheduleUserModelReadinessCleanupTask(
-              std::move(ipc_message), std::move(readiness_message));
+      bool wait_success =
+          ipc_message->ResponseCondition()->timed_wait(lock, timeout);
 
-          return TRITONSERVER_ErrorNew(
-              TRITONSERVER_ERROR_UNAVAILABLE,
-              "Timed out waiting for user-defined is_model_ready() response");
-        }
+      if (!readiness_payload->waiting_on_stub && !IsStubProcessAlive()) {
+        SetUserModelReadinessResult(
+            false, true,
+            "Stub process is not healthy while waiting for is_model_ready()");
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            "Stub process is not healthy while waiting for user-defined "
+            "is_model_ready() response");
+      }
+
+      if (!wait_success && !readiness_payload->waiting_on_stub) {
+        // IMPORTANT: Keep IPC message/payload alive until stub finishes,
+        // otherwise shared-memory may be deallocated before stub reads it.
+        ScheduleUserModelReadinessCleanupTask(
+            std::move(ipc_message), std::move(readiness_message));
+
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_UNAVAILABLE,
+            "Timed out waiting for user-defined is_model_ready() response");
       }
     }
   }

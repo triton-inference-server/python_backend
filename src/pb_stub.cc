@@ -1591,10 +1591,15 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
     readiness_payload = readiness_message.data_.get();
   }
   catch (const PythonBackendException& pb_exception) {
+    LOG_ERROR
+        << "Failed to process model readiness request: "
+        << pb_exception.what();
     return;
   }
 
   if (ipc_message->ResponseMutex() == nullptr) {
+    LOG_ERROR
+        << "Failed to process model readiness request";
     return;
   }
 
