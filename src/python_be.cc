@@ -1,4 +1,4 @@
-// Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -893,6 +893,252 @@ ModelInstanceState::ProcessCancelBLSRequest(
       message_payload->cv.wait(lk);
     }
   }
+}
+
+void
+ModelInstanceState::SetUserModelReadinessResult(
+    const bool ready, const bool has_error, const std::string& error_message)
+{
+  std::lock_guard<std::mutex> guard(user_model_readiness_mutex_);
+  user_model_readiness_result_ = ready;
+  user_model_readiness_has_error_ = has_error;
+  user_model_readiness_error_ = error_message;
+  user_model_readiness_inflight_ = false;
+  user_model_readiness_cv_.notify_all();
+}
+
+void
+ModelInstanceState::UserModelReadinessCleanupTask(
+    std::unique_ptr<IPCMessage> ipc_message_cleanup,
+    AllocatedSharedMemory<UserModelReadinessMessage> readiness_message_cleanup)
+{
+  UserModelReadinessMessage* payload = readiness_message_cleanup.data_.get();
+  bool result_ready = false;
+  bool result_has_error = false;
+  std::string result_error_message;
+  bool abort_wait = false;
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> cleanup_lock{
+        *(ipc_message_cleanup->ResponseMutex())};
+    while (!payload->waiting_on_stub) {
+      ipc_message_cleanup->ResponseCondition()->wait(cleanup_lock);
+      if (!payload->waiting_on_stub && !IsStubProcessAlive()) {
+        abort_wait = true;
+        break;
+      }
+    }
+
+    if (!abort_wait) {
+      if (payload->has_error) {
+        result_has_error = true;
+        if (payload->is_error_set) {
+          std::unique_ptr<PbString> error_message =
+              PbString::LoadFromSharedMemory(Stub()->ShmPool(), payload->error);
+          result_error_message = error_message->String();
+        } else {
+          result_error_message =
+              "User-defined is_model_ready() failed with unknown error";
+        }
+      } else {
+        if (!payload->function_exists) {
+          result_ready = true;
+        } else {
+          result_ready = payload->is_ready;
+        }
+      }
+    }
+  }
+
+  if (abort_wait) {
+    SetUserModelReadinessResult(
+        false, true, "Stub process is not healthy during readiness cleanup");
+    return;
+  }
+
+  SetUserModelReadinessResult(
+      result_ready, result_has_error, result_error_message);
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> cleanup_lock{
+        *(ipc_message_cleanup->ResponseMutex())};
+    payload->waiting_on_stub = false;
+    ipc_message_cleanup->ResponseCondition()->notify_all();
+  }
+}
+
+void
+ModelInstanceState::ScheduleUserModelReadinessCleanupTask(
+    std::unique_ptr<IPCMessage> ipc_message,
+    AllocatedSharedMemory<UserModelReadinessMessage> readiness_message)
+{
+  auto cleanup_task = [this, ipc_message_cleanup = std::move(ipc_message),
+                       readiness_message_cleanup =
+                           std::move(readiness_message)]() mutable {
+    UserModelReadinessCleanupTask(
+        std::move(ipc_message_cleanup), std::move(readiness_message_cleanup));
+  };
+
+  // Use the instance thread pool if available
+  if (thread_pool_ != nullptr) {
+    boost::asio::post(*thread_pool_, std::move(cleanup_task));
+  } else {
+    cleanup_task();
+  }
+}
+
+TRITONSERVER_Error*
+ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
+{
+  std::unique_lock<std::mutex> lock(user_model_readiness_mutex_);
+
+  // FAST PATH: No user-defined function - return immediately
+  // (zero IPC overhead)
+  if (!Stub()->HasUserModelReadinessFunction()) {
+    *is_ready = true;
+    return nullptr;
+  }
+
+  // SLOW PATH: User-defined function exists - need to perform IPC call to stub
+
+  // If another request is already performing a readiness check, wait for it to
+  // finish and return the same result (to avoid multiple concurrent IPC calls
+  // to the stub).
+  if (user_model_readiness_inflight_) {
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(kUserModelReadinessTimeoutMs);
+    while (user_model_readiness_inflight_) {
+      if (user_model_readiness_cv_.wait_until(lock, deadline) ==
+          std::cv_status::timeout) {
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_UNAVAILABLE,
+            "Timed out waiting for in-flight is_model_ready() response");
+      }
+    }
+
+    if (user_model_readiness_has_error_) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL, user_model_readiness_error_.c_str());
+    }
+
+    *is_ready = user_model_readiness_result_;
+    return nullptr;
+  }
+
+  user_model_readiness_inflight_ = true;
+  user_model_readiness_has_error_ = false;
+  user_model_readiness_error_.clear();
+  lock.unlock();
+
+  // Default to not ready for error cases
+  *is_ready = false;
+
+  std::unique_ptr<IPCMessage> ipc_message;
+  AllocatedSharedMemory<UserModelReadinessMessage> readiness_message;
+  UserModelReadinessMessage* readiness_payload = nullptr;
+
+  try {
+    ipc_message =
+        IPCMessage::Create(Stub()->ShmPool(), true /* inline_response */);
+    readiness_message =
+        Stub()->ShmPool()->Construct<UserModelReadinessMessage>();
+    readiness_payload = readiness_message.data_.get();
+
+    // Initialize payload fields
+    new (&(readiness_payload->mu)) bi::interprocess_mutex;
+    new (&(readiness_payload->cv)) bi::interprocess_condition;
+    readiness_payload->waiting_on_stub = false;
+    readiness_payload->has_error = false;
+    readiness_payload->is_error_set = false;
+    readiness_payload->function_exists = false;
+    readiness_payload->is_ready = false;
+    readiness_payload->error = 0;
+
+    ipc_message->Command() = PYTHONSTUB_UserModelReadinessRequest;
+    ipc_message->Args() = readiness_message.handle_;
+  }
+  catch (const PythonBackendException& pb_exception) {
+    SetUserModelReadinessResult(false, true, pb_exception.what());
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    Stub()->ParentToStubMessageQueue()->Push(ipc_message->ShmHandle());
+
+    // Wait for stub response with timeout
+    boost::posix_time::ptime timeout =
+        boost::get_system_time() +
+        boost::posix_time::milliseconds(kUserModelReadinessTimeoutMs);
+
+    while (!readiness_payload->waiting_on_stub) {
+      bool wait_success =
+          ipc_message->ResponseCondition()->timed_wait(lock, timeout);
+
+      if (!readiness_payload->waiting_on_stub && !IsStubProcessAlive()) {
+        SetUserModelReadinessResult(
+            false, true,
+            "Stub process is not healthy while waiting for is_model_ready()");
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL,
+            "Stub process is not healthy while waiting for user-defined "
+            "is_model_ready() response");
+      }
+
+      if (!wait_success && !readiness_payload->waiting_on_stub) {
+        // IMPORTANT: Keep IPC message/payload alive until stub finishes,
+        // otherwise shared-memory may be deallocated before stub reads it.
+        ScheduleUserModelReadinessCleanupTask(
+            std::move(ipc_message), std::move(readiness_message));
+
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_UNAVAILABLE,
+            "Timed out waiting for user-defined is_model_ready() response");
+      }
+    }
+  }
+
+  bool result_ready = false;
+  bool result_has_error = false;
+  std::string result_error_message;
+
+  if (readiness_payload->has_error) {
+    result_has_error = true;
+    if (readiness_payload->is_error_set) {
+      std::unique_ptr<PbString> error_message = PbString::LoadFromSharedMemory(
+          Stub()->ShmPool(), readiness_payload->error);
+      result_error_message = error_message->String();
+    } else {
+      result_error_message =
+          "User-defined is_model_ready() failed with unknown error";
+    }
+  } else {
+    if (!readiness_payload->function_exists) {
+      result_ready = true;
+    } else {
+      result_ready = readiness_payload->is_ready;
+    }
+  }
+
+  {
+    bi::scoped_lock<bi::interprocess_mutex> lock{
+        *(ipc_message->ResponseMutex())};
+    readiness_payload->waiting_on_stub = false;
+    ipc_message->ResponseCondition()->notify_all();
+  }
+
+  SetUserModelReadinessResult(
+      result_ready, result_has_error, result_error_message);
+
+  if (result_has_error) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, result_error_message.c_str());
+  }
+
+  *is_ready = result_ready;
+  return nullptr;
 }
 
 void
@@ -2430,6 +2676,18 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
         TRITONSERVER_ERROR_INTERNAL,
         (std::string("Stub process '") + instance_state->Name() +
          "' is not healthy.")
+            .c_str());
+  }
+
+  // Run user-defined model readiness function is_model_ready if it exists.
+  bool is_ready = true;
+  RETURN_IF_ERROR(instance_state->RunUserModelReadinessCheck(&is_ready));
+
+  if (!is_ready) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_UNAVAILABLE,
+        (std::string("Model '") + instance_state->Name() +
+         "' is not ready (user-defined check failed).")
             .c_str());
   }
 
