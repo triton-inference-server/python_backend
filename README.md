@@ -367,9 +367,25 @@ class TritonPythonModel:
         """
         print('Cleaning up...')
 
+    def is_model_ready(self):
+        """`is_model_ready` is called whenever the model readiness is checked
+        via the health endpoint (v2/models/<model>/ready). Implementing
+        `is_model_ready` is optional. If not implemented, the model is
+        considered ready as long as the stub process is healthy. This
+        function must return a boolean value. Both sync and async
+        implementations are supported.
+
+        Returns
+        -------
+        bool
+          True if the model is ready to serve inference requests,
+          False otherwise.
+        """
+        return True
+
 ```
 
-Every Python backend can implement four main functions:
+Every Python backend can implement the following main functions:
 
 ### `auto_complete_config`
 
@@ -747,6 +763,50 @@ class TritonPythonModel:
 
 Implementing `finalize` is optional. This function allows you to do any clean
 ups necessary before the model is unloaded from Triton server.
+
+### `is_model_ready`
+
+Implementing `is_model_ready` is optional. When defined, this function is invoked whenever the model’s readiness is verified through the
+`v2/models/<model>/ready` health endpoint. It must return a **boolean** value
+(`True` or `False`). Both synchronous and asynchronous (`async def`)
+implementations are supported.
+
+If `is_model_ready` is not implemented, the model is considered ready as long as the stub process remains healthy (the default behavior). In this case, no IPC overhead is incurred.
+
+When `is_model_ready` is implemented, a readiness check timeout of five seconds is enforced. If the function fails to return within this period, the model is reported as not ready for that check. Only one internal readiness IPC call is executed per model instance at a given time. Concurrent readiness requests wait for the ongoing call to complete and reuse its result.
+
+**Note:** The `is_model_ready` function should be kept as lightweight and efficient as possible. It shares an internal message queue with BLS decoupled response delivery. Although a slow readiness check does not affect standard (non‑decoupled) inference directly, it can delay the delivery of BLS decoupled streaming responses while both requests are processed. Avoid blocking operations such as long-running network calls or heavy computations inside this function.
+
+```python
+import triton_python_backend_utils as pb_utils
+
+
+class TritonPythonModel:
+    def initialize(self, args):
+        # Load model resources, establish connections, etc.
+        self.resource = connect_to_resource()
+
+    def is_model_ready(self):
+        # Perform custom readiness checks such as verifying
+        # that dependent resources are available.
+        return self.resource.is_available()
+
+    def execute(self, requests):
+        ...
+
+    def finalize(self):
+        self.resource.close()
+```
+
+An asynchronous implementation is also supported:
+
+```python
+class TritonPythonModel:
+    async def is_model_ready(self):
+        status = await self.check_dependency_health()
+        return status.ok
+    ...
+```
 
 You can look at the [add_sub example](examples/add_sub/model.py) which contains
 a complete example of implementing all these functions for a Python model
