@@ -596,7 +596,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   }
 
   // Cache whether is_model_ready() function defined in the Python model.
-  ipc_control_->stub_has_model_ready_fn =
+  ipc_control_->stub_has_user_model_readiness_fn =
       py::hasattr(model_instance_, "is_model_ready");
 
   initialized_ = true;

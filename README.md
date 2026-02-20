@@ -52,6 +52,7 @@ any C++ code.
         - [Async Execute](#async-execute)
       - [Request Rescheduling](#request-rescheduling)
     - [`finalize`](#finalize)
+    - [`is_model_ready`](#is_model_ready)
   - [Model Config File](#model-config-file)
   - [Inference Request Parameters](#inference-request-parameters)
   - [Inference Response Parameters](#inference-response-parameters)

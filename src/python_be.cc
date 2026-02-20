@@ -994,7 +994,7 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
 
   // FAST PATH: No user-defined function - return immediately
   // (zero IPC overhead)
-  if (!Stub()->HasUserModelReadyFunction()) {
+  if (!Stub()->HasUserModelReadinessFunction()) {
     *is_ready = true;
     return nullptr;
   }
