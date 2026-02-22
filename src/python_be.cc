@@ -346,6 +346,45 @@ ModelInstanceState::LaunchStubProcess()
 }
 
 TRITONSERVER_Error*
+ModelInstanceState::RestartStubProcess()
+{
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_INFO,
+      (std::string("Restarting unhealthy stub process for instance ") + Name())
+          .c_str());
+
+  try {
+    // Terminate the existing stub and cleanup
+    if (Stub()) {
+      TerminateMonitor();
+      Stub()->UpdateHealth();
+      if (Stub()->IsHealthy()) {
+        // Wait for all the pending tasks to finish.
+        thread_pool_->wait();
+      }
+      Stub()->TerminateStub();
+      Stub()->ClearQueues();
+      Stub().reset();
+    }
+
+    // Launch a new stub process
+    RETURN_IF_ERROR(LaunchStubProcess());
+
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO,
+        (std::string("Successfully restarted stub process for instance ") + Name())
+            .c_str());
+
+    return nullptr;  // success
+  }
+  catch (const std::exception& ex) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("Failed to restart stub process: ") + ex.what()).c_str());
+  }
+}
+
+TRITONSERVER_Error*
 ModelInstanceState::GetInputTensor(
     const uint32_t input_idx, std::shared_ptr<PbTensor>& input_tensor,
     TRITONBACKEND_Request* request,
@@ -2328,10 +2367,6 @@ TRITONBACKEND_ModelInstanceExecute(
 
   TRITONSERVER_Error* error = nullptr;
 
-  // If restart is equal to true, it indicates that the stub process is
-  // unhealthy and needs a restart.
-  // TODO: Implement restart on decoupled
-
   std::vector<std::unique_ptr<InferRequest>> infer_requests;
   {
     uint64_t exec_start_ns = 0;
@@ -2344,6 +2379,32 @@ TRITONBACKEND_ModelInstanceExecute(
 
     error = instance_state->ProcessRequests(
         requests, request_count, infer_requests, reporter);
+
+    // If ProcessRequests failed due to unhealthy stub, attempt restart once
+    if (error != nullptr) {
+      const char* error_msg = TRITONSERVER_ErrorMessage(error);
+      if (error_msg && std::string(error_msg).find("Stub process is not healthy") != std::string::npos) {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_WARN,
+            (std::string("Detected unhealthy stub for instance ") + 
+             instance_state->Name() + ", attempting restart").c_str());
+
+        // Clear the previous error and attempt restart
+        TRITONSERVER_ErrorDelete(error);
+        error = instance_state->RestartStubProcess();
+
+        if (error == nullptr) {
+          // Restart succeeded, retry the request processing
+          LOG_MESSAGE(
+              TRITONSERVER_LOG_INFO,
+              (std::string("Retrying request processing after restart for instance ") + 
+               instance_state->Name()).c_str());
+          
+          error = instance_state->ProcessRequests(
+              requests, request_count, infer_requests, reporter);
+        }
+      }
+    }
 
     uint64_t exec_end_ns = 0;
     SET_TIMESTAMP(exec_end_ns);
