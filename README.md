@@ -772,6 +772,13 @@ Implementing `is_model_ready` is optional. When defined, this function is invoke
 (`True` or `False`). Both synchronous and asynchronous (`async def`)
 implementations are supported.
 
+Common use cases include:
+
+- **External dependency checks** — Verify that required databases, remote APIs, feature stores, or downstream services are reachable before accepting requests.
+- **Lazy resource loading** — Return `False` until model weights or large artifacts being downloaded or initialized in the background are fully available.
+- **Graceful drain** — Use an external signal (such as a file flag, environment variable, or admin endpoint) to mark the model as not ready, allowing orchestrators like Kubernetes to stop routing traffic before shutdown or maintenance.
+- **Internal state validation** — Confirm that caches, connection pools, and other runtime state required for inference are healthy.
+
 If `is_model_ready` is not implemented, the model is considered ready as long as the stub process remains healthy (the default behavior). In this case, no IPC overhead is incurred.
 
 When `is_model_ready` is implemented, a readiness check timeout of five seconds is enforced. If the function fails to return within this period, the model is reported as not ready for that check. Only one internal readiness IPC call is executed per model instance at a given time. Concurrent readiness requests wait for the ongoing call to complete and reuse its result.
