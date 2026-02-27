@@ -595,9 +595,9 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
     model_instance_.attr("initialize")(model_config_params);
   }
 
-  // Cache whether is_model_ready() function defined in the Python model.
+  // Cache whether is_ready() function defined in the Python model.
   ipc_control_->stub_has_user_model_readiness_fn =
-      py::hasattr(model_instance_, "is_model_ready");
+      py::hasattr(model_instance_, "is_ready");
 
   initialized_ = true;
 }
@@ -1609,11 +1609,11 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
   try {
     py::gil_scoped_acquire acquire;
 
-    function_exists = py::hasattr(model_instance_, "is_model_ready");
+    function_exists = py::hasattr(model_instance_, "is_ready");
     if (!function_exists) {
       is_ready = true;
     } else {
-      py::object result = model_instance_.attr("is_model_ready")();
+      py::object result = model_instance_.attr("is_ready")();
 
       bool is_coroutine = py::module::import("asyncio")
                               .attr("iscoroutine")(result)
@@ -1624,7 +1624,7 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
 
       if (!py::isinstance<py::bool_>(result)) {
         throw PythonBackendException(
-            "is_model_ready() must return a boolean value");
+            "is_ready() must return a boolean value");
       }
 
       is_ready = result.cast<bool>();

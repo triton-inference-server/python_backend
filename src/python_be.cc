@@ -938,7 +938,7 @@ ModelInstanceState::UserModelReadinessCleanupTask(
           result_error_message = error_message->String();
         } else {
           result_error_message =
-              "User-defined is_model_ready() failed with unknown error";
+              "User-defined is_ready() failed with unknown error";
         }
       } else {
         if (!payload->function_exists) {
@@ -1012,7 +1012,7 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
           std::cv_status::timeout) {
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_UNAVAILABLE,
-            "Timed out waiting for in-flight is_model_ready() response");
+            "Timed out waiting for in-flight is_ready() response");
       }
     }
 
@@ -1080,11 +1080,11 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
       if (!readiness_payload->waiting_on_stub && !IsStubProcessAlive()) {
         SetUserModelReadinessResult(
             false, true,
-            "Stub process is not healthy while waiting for is_model_ready()");
+            "Stub process is not healthy while waiting for is_ready()");
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL,
             "Stub process is not healthy while waiting for user-defined "
-            "is_model_ready() response");
+            "is_ready() response");
       }
 
       if (!wait_success && !readiness_payload->waiting_on_stub) {
@@ -1095,7 +1095,7 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
 
         return TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_UNAVAILABLE,
-            "Timed out waiting for user-defined is_model_ready() response");
+            "Timed out waiting for user-defined is_ready() response");
       }
     }
   }
@@ -1112,7 +1112,7 @@ ModelInstanceState::RunUserModelReadinessCheck(bool* is_ready)
       result_error_message = error_message->String();
     } else {
       result_error_message =
-          "User-defined is_model_ready() failed with unknown error";
+          "User-defined is_ready() failed with unknown error";
     }
   } else {
     if (!readiness_payload->function_exists) {
@@ -2679,7 +2679,7 @@ TRITONBACKEND_ModelInstanceReady(TRITONBACKEND_ModelInstance* instance)
             .c_str());
   }
 
-  // Run user-defined model readiness function is_model_ready if it exists.
+  // Run user-defined model readiness function is_ready if it exists.
   bool is_ready = true;
   RETURN_IF_ERROR(instance_state->RunUserModelReadinessCheck(&is_ready));
 

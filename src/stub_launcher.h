@@ -136,7 +136,7 @@ class StubLauncher {
   // Is Healthy
   bool IsHealthy() { return is_healthy_; }
 
-  // Returns true if is_model_ready() is defined in the Python model.
+  // Returns true if is_ready() is defined in the Python model.
   // Reads directly from shared memory (set by the stub during initialization).
   // Returns false if not set yet (safe default).
   bool HasUserModelReadinessFunction() const
