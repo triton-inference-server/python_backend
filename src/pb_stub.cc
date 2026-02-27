@@ -1623,8 +1623,7 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
       }
 
       if (!py::isinstance<py::bool_>(result)) {
-        throw PythonBackendException(
-            "is_ready() must return a boolean value");
+        throw PythonBackendException("is_ready() must return a boolean value");
       }
 
       is_ready = result.cast<bool>();
