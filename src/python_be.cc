@@ -921,8 +921,15 @@ ModelInstanceState::UserModelReadinessCleanupTask(
   {
     bi::scoped_lock<bi::interprocess_mutex> cleanup_lock{
         *(ipc_message_cleanup->ResponseMutex())};
+    // Use bounded waits so cleanup can periodically re-check stub liveness
+    // and avoid blocking forever if no notification arrives.
+    constexpr int64_t kCleanupLivenessPollMs = 100;
     while (!payload->waiting_on_stub) {
-      ipc_message_cleanup->ResponseCondition()->wait(cleanup_lock);
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() +
+          boost::posix_time::milliseconds(kCleanupLivenessPollMs);
+      ipc_message_cleanup->ResponseCondition()->timed_wait(
+          cleanup_lock, timeout);
       if (!payload->waiting_on_stub && !IsStubProcessAlive()) {
         abort_wait = true;
         break;
