@@ -1086,6 +1086,12 @@ Stub::GetOrCreateInstance()
 }
 
 void
+Stub::DestroyInstance()
+{
+  stub_instance.reset();
+}
+
+void
 Stub::LaunchStubToParentQueueMonitor()
 {
   stub_to_parent_thread_ = true;
@@ -2135,7 +2141,7 @@ main(int argc, char** argv)
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
     logger.reset();
-    stub.reset();
+    Stub::DestroyInstance();
     exit(1);
   }
 
@@ -2180,6 +2186,7 @@ main(int argc, char** argv)
 
             // Destroy stub and exit.
             logger.reset();
+            Stub::DestroyInstance();
             exit(1);
           }
         }
@@ -2212,7 +2219,7 @@ main(int argc, char** argv)
   // this process will no longer hold the GIL lock and destruction of the stub
   // will result in segfault.
   logger.reset();
-  stub.reset();
+  Stub::DestroyInstance();
 
   return 0;
 }

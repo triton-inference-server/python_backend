@@ -98,6 +98,8 @@ class Stub {
   Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
   static std::shared_ptr<Stub> GetOrCreateInstance();
 
+  static void DestroyInstance();
+
   /// Instantiate a new Python backend Stub.
   void Instantiate(
       int64_t shm_growth_size, int64_t shm_default_size,
