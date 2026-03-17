@@ -67,7 +67,7 @@ PbBLSCancel::Cancel()
     return;
   }
   if (!updating_) {
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    auto stub = Stub::GetOrCreateInstance();
     if (!stub->StubToParentServiceActive()) {
       LOG_ERROR << "Cannot communicate with parent service";
       return;

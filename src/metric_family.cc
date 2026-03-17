@@ -55,7 +55,7 @@ MetricFamily::~MetricFamily()
   }
 
   // Send the request to delete the MetricFamily to the parent process
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   try {
@@ -147,7 +147,7 @@ MetricFamily::CreateMetricFamily(
 void
 MetricFamily::SendCreateMetricFamilyRequest()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;

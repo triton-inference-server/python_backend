@@ -129,7 +129,7 @@ ResponseSender::Send(
     infer_response->PruneOutputTensors(requested_output_names_);
   }
 
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
 
   AllocatedSharedMemory<ResponseSendMessage> response_send_message =
       shm_pool_->Construct<ResponseSendMessage>(
@@ -279,7 +279,7 @@ ResponseSender::DeleteResponseFactory()
 {
   bool already_deleted = response_factory_deleted_.exchange(true);
   if (!already_deleted) {
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    auto stub = Stub::GetOrCreateInstance();
     stub->EnqueueCleanupId(
         reinterpret_cast<void*>(response_factory_address_),
         PYTHONSTUB_DecoupledResponseFactoryCleanup);

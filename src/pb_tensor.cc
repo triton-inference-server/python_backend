@@ -419,7 +419,7 @@ PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
 #ifdef TRITON_ENABLE_GPU
     int current_device;
     cudaError_t err = cudaGetDevice(&current_device);
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    auto stub = Stub::GetOrCreateInstance();
     if (err != cudaSuccess) {
       throw PythonBackendException("Failed to get current CUDA device id.");
     }

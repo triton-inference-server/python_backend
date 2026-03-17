@@ -133,7 +133,7 @@ ResponseIterator::Id()
 void
 ResponseIterator::Clear()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   stub->EnqueueCleanupId(id_, PYTHONSTUB_BLSDecoupledInferPayloadCleanup);
   {
     std::lock_guard<std::mutex> lock{mu_};

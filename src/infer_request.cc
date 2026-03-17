@@ -418,7 +418,7 @@ InferRequest::Exec(const bool is_decoupled)
   py::gil_scoped_release release;
 
   // BLS should not be used in "initialize" or "finalize" function.
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   if (!stub->IsInitialized() || stub->IsFinalizing()) {
     throw PythonBackendException(
         "BLS is only supported during the 'execute' function.");

@@ -96,7 +96,7 @@ struct UtilsMessagePayload {
 class Stub {
  public:
   Stub() : stub_to_parent_thread_(false), parent_to_stub_thread_(false){};
-  static std::unique_ptr<Stub>& GetOrCreateInstance();
+  static std::shared_ptr<Stub> GetOrCreateInstance();
 
   /// Instantiate a new Python backend Stub.
   void Instantiate(
