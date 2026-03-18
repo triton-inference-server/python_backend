@@ -298,7 +298,6 @@ class Stub {
   std::unique_ptr<MessageQueue<uint64_t>> memory_manager_message_queue_;
   bool initialized_;
   bool finalizing_;
-  static std::unique_ptr<Stub> stub_instance_;
   std::vector<std::shared_ptr<PbTensor>> gpu_tensors_;
   std::queue<std::unique_ptr<UtilsMessagePayload>> stub_to_parent_buffer_;
   std::thread stub_to_parent_queue_monitor_;
