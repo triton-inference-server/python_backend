@@ -1,4 +1,4 @@
-// Copyright 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -51,7 +51,7 @@ Logger::GetOrCreateInstance()
 void
 Logger::Log(const std::string& message, LogLevel level)
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   py::object frame = py::module_::import("inspect").attr("currentframe");
   py::object caller_frame = frame();
   py::object info = py::module_::import("inspect").attr("getframeinfo");
@@ -110,7 +110,7 @@ Logger::Log(
 #endif
   } else {
     // Ensure we do not create a stub instance before it has initialized
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    auto stub = Stub::GetOrCreateInstance();
     std::unique_ptr<PbLog> log_msg(new PbLog(filename, lineno, message, level));
     stub->EnqueueLogRequest(log_msg);
   }

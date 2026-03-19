@@ -130,7 +130,7 @@ PyParametersToJSON(const py::dict& parameters)
 void
 AsyncEventFutureDoneCallback(const py::object& py_future)
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   stub->BackgroundFutureDone(py_future);
 }
 
@@ -514,7 +514,7 @@ Stub::AutoCompleteModelConfig(
   python_backend_utils.def(
       "get_model_dir",
       []() {
-        std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+        auto stub = Stub::GetOrCreateInstance();
         return stub->GetModelDir();
       },
       py::return_value_policy::reference);
@@ -568,7 +568,7 @@ Stub::Initialize(bi::managed_external_buffer::handle_t map_handle)
   python_backend_utils.def(
       "get_model_dir",
       []() {
-        std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+        auto stub = Stub::GetOrCreateInstance();
         return stub->GetModelDir();
       },
       py::return_value_policy::reference);
@@ -1073,16 +1073,22 @@ Stub::~Stub()
   memory_manager_message_queue_.reset();
 }
 
-std::unique_ptr<Stub> Stub::stub_instance_;
+static std::shared_ptr<triton::backend::python::Stub> stub_instance{nullptr};
 
-std::unique_ptr<Stub>&
+std::shared_ptr<triton::backend::python::Stub>
 Stub::GetOrCreateInstance()
 {
-  if (Stub::stub_instance_.get() == nullptr) {
-    Stub::stub_instance_ = std::make_unique<Stub>();
+  if (!stub_instance) {
+    stub_instance.reset(new triton::backend::python::Stub());
   }
 
-  return Stub::stub_instance_;
+  return stub_instance;
+}
+
+void
+Stub::DestroyInstance()
+{
+  stub_instance.reset();
 }
 
 void
@@ -1822,7 +1828,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "exec",
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
-            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+            auto stub = Stub::GetOrCreateInstance();
             std::shared_ptr<InferResponse> response =
                 infer_request->Exec(decoupled);
             py::object response_object;
@@ -1840,7 +1846,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
           "async_exec",
           [](std::shared_ptr<InferRequest>& infer_request,
              const bool decoupled) {
-            std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+            auto stub = Stub::GetOrCreateInstance();
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
             py::cpp_function callback = [&stub, infer_request, decoupled]() {
@@ -2125,7 +2131,7 @@ main(int argc, char** argv)
   std::string name = argv[8];
   std::string runtime_modeldir = argv[9];
 
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   try {
     stub->Instantiate(
         shm_growth_size, shm_default_size, shm_region_name, model_path,
@@ -2135,7 +2141,7 @@ main(int argc, char** argv)
   catch (const PythonBackendException& pb_exception) {
     LOG_INFO << "Failed to preinitialize Python stub: " << pb_exception.what();
     logger.reset();
-    stub.reset();
+    Stub::DestroyInstance();
     exit(1);
   }
 
@@ -2148,7 +2154,7 @@ main(int argc, char** argv)
 #endif
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread =
-      std::thread([&parent_pid, &background_thread_running, &stub, &logger] {
+      std::thread([stub, &parent_pid, &background_thread_running, &logger] {
         // Send a dummy message after the stub process is launched to notify the
         // parent process that the health thread has started.
         std::unique_ptr<IPCMessage> ipc_message = IPCMessage::Create(
@@ -2180,7 +2186,7 @@ main(int argc, char** argv)
 
             // Destroy stub and exit.
             logger.reset();
-            stub.reset();
+            Stub::DestroyInstance();
             exit(1);
           }
         }
@@ -2213,7 +2219,7 @@ main(int argc, char** argv)
   // this process will no longer hold the GIL lock and destruction of the stub
   // will result in segfault.
   logger.reset();
-  stub.reset();
+  Stub::DestroyInstance();
 
   return 0;
 }

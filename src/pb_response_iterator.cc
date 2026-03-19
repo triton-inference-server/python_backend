@@ -1,4 +1,4 @@
-// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -133,7 +133,7 @@ ResponseIterator::Id()
 void
 ResponseIterator::Clear()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   stub->EnqueueCleanupId(id_, PYTHONSTUB_BLSDecoupledInferPayloadCleanup);
   {
     std::lock_guard<std::mutex> lock{mu_};
