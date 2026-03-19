@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -101,7 +101,7 @@ ModelLoader::ModelLoader(
 void
 ModelLoader::SendLoadModelRequest()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   AllocatedSharedMemory<ModelLoaderMessage> model_loader_msg_shm;
 
@@ -118,7 +118,7 @@ ModelLoader::SendLoadModelRequest()
 void
 ModelLoader::SendUnloadModelRequest()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   AllocatedSharedMemory<ModelLoaderMessage> model_loader_msg_shm;
   try {
@@ -134,7 +134,7 @@ ModelLoader::SendUnloadModelRequest()
 bool
 ModelLoader::SendModelReadinessRequest()
 {
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  auto stub = Stub::GetOrCreateInstance();
   SaveToSharedMemory(stub->ShmPool());
   ModelLoaderMessage* model_loader_msg = nullptr;
   AllocatedSharedMemory<ModelLoaderMessage> model_loader_msg_shm;

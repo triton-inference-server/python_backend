@@ -1,4 +1,4 @@
-// Copyright 2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -67,7 +67,7 @@ PbBLSCancel::Cancel()
     return;
   }
   if (!updating_) {
-    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    auto stub = Stub::GetOrCreateInstance();
     if (!stub->StubToParentServiceActive()) {
       LOG_ERROR << "Cannot communicate with parent service";
       return;
