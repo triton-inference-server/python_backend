@@ -1065,6 +1065,8 @@ Stub::~Stub()
     py::object async_event_loop_local(std::move(async_event_loop_));
     py::object background_futures_local(std::move(background_futures_));
     py::object model_instance_local(std::move(model_instance_));
+    py::object deserialize_bytes_local(std::move(deserialize_bytes_));
+    py::object serialize_bytes_local(std::move(serialize_bytes_));
   }
 
   stub_message_queue_.reset();
@@ -1517,6 +1519,8 @@ Stub::DestroyPythonObjects()
     py::object async_event_loop_local(std::move(async_event_loop_));
     py::object background_futures_local(std::move(background_futures_));
     py::object model_instance_local(std::move(model_instance_));
+    py::object deserialize_bytes_local(std::move(deserialize_bytes_));
+    py::object serialize_bytes_local(std::move(serialize_bytes_));
   }
 }
 
