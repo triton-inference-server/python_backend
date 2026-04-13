@@ -1088,6 +1088,11 @@ Stub::GetOrCreateInstance()
 void
 Stub::DestroyInstance()
 {
+  if (!stub_instance) {
+    return;
+  }
+
+  stub_instance->DestroyPythonObjects();
   stub_instance.reset();
 }
 
@@ -2197,7 +2202,6 @@ main(int argc, char** argv)
             non_graceful_exit = true;
 
             // Destroy stub and exit.
-            stub->DestroyPythonObjects();
             logger.reset();
             Stub::DestroyInstance();
             exit(1);
@@ -2231,7 +2235,6 @@ main(int argc, char** argv)
   // objects. If the scoped_interpreter is destroyed before the stub object,
   // this process will no longer hold the GIL lock and destruction of the stub
   // will result in segfault.
-  stub->DestroyPythonObjects();
   logger.reset();
   Stub::DestroyInstance();
 
