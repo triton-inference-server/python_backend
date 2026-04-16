@@ -936,10 +936,13 @@ Stub::RunCoroutine(py::object coroutine, bool in_background)
   py::object py_future = py::module_::import("asyncio").attr(
       "run_coroutine_threadsafe")(coroutine, loop);
   if (in_background) {
+    // We should add the future to background_futures_ before attaching a
+    // done callback to avoid the issue described here:
+    // https://github.com/triton-inference-server/server/issues/8537
+    background_futures_.attr("add")(py_future);
     py_future.attr("add_done_callback")(
         py::module_::import("c_python_backend_utils")
             .attr("async_event_future_done_callback"));
-    background_futures_.attr("add")(py_future);
     return py::none();
   }
   return py_future.attr("result")();
