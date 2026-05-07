@@ -27,8 +27,11 @@
 #pragma once
 #include <climits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
+
+#include "python_be.h"
 
 #ifdef WIN32
 #include <windows.h>
@@ -46,17 +49,37 @@ bool FileExists(std::string& path);
 //
 #ifndef _WIN32
 class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
+  public:
+    class Environment {
+      public: 
+      Environment(const std::string& source, const std::string& path);
+        ~Environment();
 
- public:
-  EnvironmentManager();
+        const std::string& Source() const {
+          return source_;
+        }
+        const std::string& Path() const {
+          return path_;
+        }
+        explicit operator std::string() const {
+          return Path();
+        }
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+      private:
+        std::string source_;
+        std::string path_;
+    };
+  
+    EnvironmentManager();
+    // Extracts the tar.gz file in the 'env_path' if it has not been
+    // already extracted.
+    std::shared_ptr<Environment> GetEnvironment(ModelState* model_state);
+    ~EnvironmentManager();
+
+  private:
+    std::map<std::string, std::pair<std::weak_ptr<Environment>, time_t>> env_map_;
+    char base_path_[PATH_MAX + 1];
+    std::mutex mutex_;
 };
 #endif
 

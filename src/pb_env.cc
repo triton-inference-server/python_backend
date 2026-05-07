@@ -228,6 +228,9 @@ RecursiveDirectoryDelete(const char* dir)
 
 EnvironmentManager::EnvironmentManager()
 {
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      "EnvironmentManager constructor: initializing Python env manager");
   char tmp_dir_template[PATH_MAX + 1];
   strcpy(tmp_dir_template, "/tmp/python_env_XXXXXX");
 
@@ -239,12 +242,18 @@ EnvironmentManager::EnvironmentManager()
   strcpy(base_path_, tmp_dir_template);
 }
 
-std::string
-EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
+std::shared_ptr<Environment> // TODO: write logic with shared and weak ptrs in this method
+EnvironmentManager::GetEnvironment(ModelState* model_state)
 {
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
+
+  std::string env_path = model_state.GetEnvironmentPath();
   char canonical_env_path[PATH_MAX + 1];
+
+  std::string env_key = env_path;
+  RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
+    "name", &env_key));
 
   char* err = realpath(env_path.c_str(), canonical_env_path);
   if (err == nullptr) {
@@ -272,21 +281,24 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
             .c_str());
     return canonical_env_path;
   }
-  const auto env_itr = env_map_.find(canonical_env_path);
+
+  std::string model_id = model_state.GetModelId();
+  const auto env_itr = env_map_.find(env_key);
   if (env_itr != env_map_.end()) {
     // Check if the environment has been modified and would
-    // need to be extracted again.
-    if (env_itr->second.second == last_modified_time) {
+    // need to be extracted again (or the current environment has no owners anymore).
+    if (env_itr->second.first.expired()) {
+      env_map_.erase(env_itr);
+    } else if (env_itr->second.second == last_modified_time) {
       env_extracted = true;
     } else {
       // Environment file has been updated. Need to clear
       // the previously extracted environment and extract
       // the environment to the same destination directory.
-      RecursiveDirectoryDelete(env_itr->second.first.c_str());
       re_extraction = true;
     }
   }
-
+  
   // Extract only if the env has not been extracted yet.
   if (!env_extracted) {
     LOG_MESSAGE(
@@ -295,7 +307,7 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
             .c_str());
     std::string dst_env_path;
     if (re_extraction) {
-      dst_env_path = env_map_[canonical_env_path].first;
+      dst_env_path = env_map_[env_key].first;
     } else {
       dst_env_path =
           std::string(base_path_) + "/" + std::to_string(env_map_.size());
@@ -314,21 +326,28 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
     }
     if (re_extraction) {
       // Just update the last modified timestamp
-      env_map_[canonical_env_path].second = last_modified_time;
+      env_map_[env_key].second = last_modified_time;
     } else {
       // Add the path to the list of environments
-      env_map_.insert({canonical_env_path, {dst_env_path, last_modified_time}});
+      env_map_.insert({env_key, {dst_env_path, last_modified_time}});
     }
     return dst_env_path;
-  } else {
-    return env_map_.find(canonical_env_path)->second.first;
   }
+  return env_map_.find(env_key)->second.first;
 }
 
 EnvironmentManager::~EnvironmentManager()
 {
   RecursiveDirectoryDelete(base_path_);
 }
+
+Environment::Environment(const std::string& source, const std::string& path) : source_(source), path_(path) {
+  ExtractTarFile(source, path);
+}
+Environment::~Environment() {
+  RecursiveDirectoryDelete(path_.c_str());
+}
+
 #endif
 
 }}}  // namespace triton::backend::python
