@@ -50,6 +50,8 @@
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
+#include "pb_env.h"
+
 namespace triton { namespace backend { namespace python {
 
 class ModelState;
@@ -203,7 +205,8 @@ class StubLauncher {
   // Path to python execution environment
   std::string path_to_libpython_;
   std::string path_to_activate_;
-  std::string python_execution_env_;
+  std::shared_ptr<EnvironmentManager::Environment> python_execution_env_;
+  std::string python_execution_env_source_;
 
   common::TritonJson::WriteBuffer model_config_buffer_;
   common::TritonJson::Value auto_complete_config_;
