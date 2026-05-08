@@ -594,16 +594,17 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
 {
   try {
     python_execution_env_ =
-        model_state->StateForBackend()->env_manager->GetEnvironment(model_state);
+        std::move(model_state->StateForBackend()->env_manager->GetEnvironment(model_state));
   }
   catch (PythonBackendException& pb_exception) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
   }
 
-  path_to_activate_ = python_execution_env_->Path() + "/bin/activate";
-  path_to_libpython_ = python_execution_env_->Path() + "/lib";
-  if (python_execution_env_->Path().length() > 0 && !FileExists(path_to_activate_)) {
+  std::string python_execution_env_path = python_execution_env_->Path();
+  path_to_activate_ = python_execution_env_path + "/bin/activate";
+  path_to_libpython_ = python_execution_env_path + "/lib";
+  if (python_execution_env_path.length() > 0 && !FileExists(path_to_activate_)) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         ("Path " + path_to_activate_ +
