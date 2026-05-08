@@ -248,12 +248,9 @@ EnvironmentManager::GetEnvironment(ModelState* model_state)
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
 
-  std::string env_path = model_state.GetEnvironmentPath();
+  std::string env_path = model_state->GetEnvironmentPath();
   char canonical_env_path[PATH_MAX + 1];
 
-  std::string env_key = env_path;
-  RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
-    "name", &env_key));
 
   char* err = realpath(env_path.c_str(), canonical_env_path);
   if (err == nullptr) {
@@ -279,10 +276,11 @@ EnvironmentManager::GetEnvironment(ModelState* model_state)
                      "not contain compressed path. Path: ") +
          canonical_env_path)
             .c_str());
-    return canonical_env_path;
+    return std::make_shared<Environment>(canonical_env_path, canonical_env_path);
   }
 
   std::string model_id = model_state.GetModelId();
+  std::string env_key =  model_state->Name() + "-" + model_id;
   const auto env_itr = env_map_.find(env_key);
   if (env_itr != env_map_.end()) {
     // Check if the environment has been modified and would
@@ -317,23 +315,24 @@ EnvironmentManager::GetEnvironment(ModelState* model_state)
 
     int status =
         mkdir(dst_env_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    if (status == 0) {
-      ExtractTarFile(canonical_env_path_str, dst_env_path);
-    } else {
+    if (status != 0) {
       throw PythonBackendException(
-          std::string("Failed to create environment directory for '") +
-          dst_env_path.c_str() + "'.");
+        std::string("Failed to create environment directory for '") +
+        dst_env_path.c_str() + "'.");
     }
+
     if (re_extraction) {
       // Just update the last modified timestamp
+      env_map_[env_key].first->Update();
       env_map_[env_key].second = last_modified_time;
     } else {
-      // Add the path to the list of environments
-      env_map_.insert({env_key, {dst_env_path, last_modified_time}});
+      // Add the environment to the list of environments
+      auto new_environment = std::make_shared<Environment>(canonical_env_path_str, dst_env_path);
+      env_map_.insert({env_key, {new_environment, last_modified_time}});
     }
-    return dst_env_path;
   }
-  return env_map_.find(env_key)->second.first;
+
+  return env_map_.find(env_key)->second.first.lock();
 }
 
 EnvironmentManager::~EnvironmentManager()
@@ -342,8 +341,20 @@ EnvironmentManager::~EnvironmentManager()
 }
 
 Environment::Environment(const std::string& source, const std::string& path) : source_(source), path_(path) {
-  ExtractTarFile(source, path);
+  if (source == path) {
+    return;
+  }
+  Extract();
 }
+
+void Environment::Extract() {
+  ExtractTarFile(source_, path_);
+}
+
+void Environment::Update() {
+  Extract();
+}
+
 Environment::~Environment() {
   RecursiveDirectoryDelete(path_.c_str());
 }

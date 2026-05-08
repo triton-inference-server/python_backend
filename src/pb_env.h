@@ -52,8 +52,8 @@ class EnvironmentManager {
   public:
     class Environment {
       public: 
-      Environment(const std::string& source, const std::string& path);
-        ~Environment();
+        Environment(const std::string& source, const std::string& path);
+        void Update();
 
         const std::string& Source() const {
           return source_;
@@ -66,11 +66,14 @@ class EnvironmentManager {
         }
 
       private:
+        void Extract();
+        
         std::string source_;
         std::string path_;
     };
   
     EnvironmentManager();
+    
     // Extracts the tar.gz file in the 'env_path' if it has not been
     // already extracted.
     std::shared_ptr<Environment> GetEnvironment(ModelState* model_state);
