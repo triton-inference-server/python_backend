@@ -242,12 +242,6 @@ EnvironmentManager::EnvironmentManager()
   strcpy(base_path_, tmp_dir_template);
 }
 
-void
-EnvironmentManager::EraseEnvironment(const std::string& canoniical_env_path)
-{
-  std::lock_guard<std::mutex> lk(mutex_);
-  env_map_.erase(canoniical_env_path);
-}
 
 std::shared_ptr<
     Environment>  // TODO: write logic with shared and weak ptrs in this method
@@ -290,10 +284,16 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   std::shared_ptr<Environment> env;
   if (env_itr != env_map_.end()) {
     env = env_itr->second.lock();
+
     // Check if the environment has been modified and would
     // need to be extracted again (or the current environment has no owners
     // anymore).
-    if (env->LastModifiedTime() == last_modified_time) {
+
+    if (env == nullptr) {
+      // refer to case when env was not loaded
+      env_map_.erase(env_itr);
+      env_itr = env_map_.end();
+    } else if (env->LastModifiedTime() == last_modified_time) {
       env_extracted = true;
     } else {
       // Environment file has been updated. Need to clear
@@ -319,7 +319,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
       ++env_path_counter_;
 
       env = std::make_shared<Environment>(
-          *this, canonical_env_path_str, dst_env_path, last_modified_time);
+          canonical_env_path_str, dst_env_path, last_modified_time);
       // Add the environment to the list of environments
       env_map_.insert({env_key, new_env});
     }
@@ -371,9 +371,6 @@ Environment::Delete()
 
 Environment::~Environment()
 {
-  if (manager_ != nullptr) {
-    manager_->EraseEnvironment(source_);
-  }
   Delete();
 }
 
