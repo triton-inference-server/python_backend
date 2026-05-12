@@ -54,14 +54,12 @@ class EnvironmentManager {
     Environment(
         const std::string& source, const std::string& path,
         const time_t& last_modified_time);
-    void SetManager(EnvironmentManager* manager) { manager_ = manager; }
 
     void Update(const time_t& last_modified_time);
 
     const std::string& Source() const { return source_; }
     const std::string& Path() const { return path_; }
     const time_t& LastModifiedTime() const { return last_modified_time_; }
-    explicit operator std::string() const { return Path(); }
 
    private:
     void Extract();
@@ -70,8 +68,6 @@ class EnvironmentManager {
     std::string source_;
     std::string path_;
     time_t last_modified_time_;
-
-    EnvironmentManager* manager_ = nullptr;
   };
 
   EnvironmentManager();
