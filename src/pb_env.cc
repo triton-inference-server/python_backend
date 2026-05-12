@@ -242,6 +242,13 @@ EnvironmentManager::EnvironmentManager()
   strcpy(base_path_, tmp_dir_template);
 }
 
+void
+EnvironmentManager::EraseEnvironment(const std::string& canoniical_env_path)
+{
+  std::lock_guard<std::mutex> lk(mutex_);
+  env_map_.erase(canoniical_env_path);
+}
+
 std::shared_ptr<
     Environment>  // TODO: write logic with shared and weak ptrs in this method
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
@@ -300,27 +307,20 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Extracting Python execution env ") +
-         canonical_env_path)
+        (std::string("Extracting Python execution env ") + canonical_env_path)
             .c_str());
 
-    std::string dst_env_path;
     if (re_extraction) {
-      dst_env_path = env->Path();
-    } else {
-      dst_env_path =
-          std::string(base_path_) + "/" + std::to_string(env_path_counter_);
-      ++env_path_counter_;
-    }
-
-    if (re_extraction ) {
       // Just replace with new environment (by updated source)
       env->Update(last_modified_time);
     } else {
-      // Add the environment to the list of environments
+      std::string dst_env_path =
+          std::string(base_path_) + "/" + std::to_string(env_path_counter_);
+      ++env_path_counter_;
+
       env = std::make_shared<Environment>(
-        canonical_env_path_str, dst_env_path, last_modified_time);
-      env->SetManager(this);
+          *this, canonical_env_path_str, dst_env_path, last_modified_time);
+      // Add the environment to the list of environments
       env_map_.insert({env_key, new_env});
     }
   }
@@ -334,9 +334,9 @@ EnvironmentManager::~EnvironmentManager()
 }
 
 Environment::Environment(
-    const std::string& source, const std::string& path,
-    const time_t& last_modified_time)
-    : source_(source), path_(path),
+    EnvironmentManager& manager, const std::string& source,
+    const std::string& path, const time_t& last_modified_time)
+    : manager_(manager), source_(source), path_(path),
       last_modified_time_(std::to_string(last_modified_time))
 {
   Extract();
@@ -372,7 +372,7 @@ Environment::Delete()
 Environment::~Environment()
 {
   if (manager_ != nullptr) {
-    manager_->env_map_.erase(source_);
+    manager_->EraseEnvironment(source_);
   }
   Delete();
 }
