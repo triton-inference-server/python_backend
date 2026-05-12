@@ -50,13 +50,17 @@ class EnvironmentManager {
  public:
   class Environment {
    public:
+    friend class EnvironmentManager;
     Environment(
         const std::string& source, const std::string& path,
         const time_t& last_modified_time);
+    void SetManager(EnvironmentManager* manager) { manager_ = manager; }
+
     void Update(const time_t& last_modified_time);
 
     const std::string& Source() const { return source_; }
     const std::string& Path() const { return path_; }
+    const time_t& LastModifiedTime() const { return last_modified_time_; }
     explicit operator std::string() const { return Path(); }
 
    private:
@@ -65,7 +69,9 @@ class EnvironmentManager {
 
     std::string source_;
     std::string path_;
-    std::string last_modified_time_;
+    time_t last_modified_time_;
+
+    EnvironmentManager* manager_ = nullptr;
   };
 
   EnvironmentManager();
@@ -73,11 +79,11 @@ class EnvironmentManager {
   // Extracts the tar.gz file in the 'env_path' if it has not been
   // already extracted.
   std::shared_ptr<Environment> ExtractIfNotExtracted(
-      const std::string& source_env_path);
+      const std::string& env_path);
   ~EnvironmentManager();
 
  private:
-  std::map<std::string, std::string> env_path_map_;
+  size_t env_path_counter_ = 0;
   std::map<std::string, std::weak_ptr<Environment>> env_map_;
   char base_path_[PATH_MAX + 1];
   std::mutex mutex_;
