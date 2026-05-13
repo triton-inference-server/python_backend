@@ -593,8 +593,10 @@ TRITONSERVER_Error*
 StubLauncher::GetPythonEnvironment(ModelState* model_state)
 {
   try {
+    auto python_execution_env_source = model_state->PythonExecutionEnv();
     python_execution_env_ =
-        model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(model_state);
+        model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
+            python_execution_env_source);
   }
   catch (PythonBackendException& pb_exception) {
     return TRITONSERVER_ErrorNew(
