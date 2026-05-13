@@ -335,7 +335,7 @@ EnvironmentManager::~EnvironmentManager()
   RecursiveDirectoryDelete(base_path_);
 }
 
-Environment::Environment(
+EnvironmentManager::Environment::Environment(
     EnvironmentManager& manager, const std::string& source,
     const std::string& path, const time_t& last_modified_time)
     : manager_(manager), source_(source), path_(path),
@@ -345,7 +345,7 @@ Environment::Environment(
 }
 
 void
-Environment::Extract()
+EnvironmentManager::Environment::Extract()
 {
   int status =
       mkdir(dst_env_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
@@ -358,7 +358,7 @@ Environment::Extract()
 }
 
 void
-Environment::Update(const time_t& last_modified_time)
+EnvironmentManager::Environment::Update(const time_t& last_modified_time)
 {
   Delete();
   Extract();
@@ -366,12 +366,12 @@ Environment::Update(const time_t& last_modified_time)
 }
 
 void
-Environment::Delete()
+EnvironmentManager::Environment::Delete()
 {
   RecursiveDirectoryDelete(path_.c_str());
 }
 
-Environment::~Environment()
+EnvironmentManager::Environment::~Environment()
 {
   Delete();
 }
