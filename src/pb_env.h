@@ -54,6 +54,7 @@ class EnvironmentManager {
     Environment(
         const std::string& source, const std::string& path,
         const time_t& last_modified_time);
+    ~Environment();
 
     void Update(const time_t& last_modified_time);
 
