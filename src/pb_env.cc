@@ -268,21 +268,21 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 
   // If the path is not a conda-packed file, then bypass the extraction process
   struct stat info;
-  if (stat(canonical_env_path, &info) != 0) {
+  if (stat(canonical_env_path.c_str(), &info) != 0) {
     throw PythonBackendException(
         "stat() of : " + canonical_env_path + " returned error.");
   } else if (S_ISDIR(info.st_mode)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         ("Returning canonical path since EXECUTION_ENV_PATH does "
-                     "not contain compressed path. Path: " +
+         "not contain compressed path. Path: " +
          canonical_env_path)
             .c_str());
     return nullptr;
   }
 
-  std::string& env_key = canonical_env_path;
-  const auto env_itr = env_map_[env_key];
+  const std::string& env_key = canonical_env_path;
+  auto env_itr = env_map_.find(env_key);
   std::shared_ptr<Environment> env;
   if (env_itr != env_map_.end()) {
     env = env_itr->second.lock();
@@ -309,8 +309,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Extracting Python execution env " + canonical_env_path)
-            .c_str());
+        ("Extracting Python execution env " + canonical_env_path).c_str());
 
     if (re_extraction) {
       // Just replace with new environment (by updated source)
@@ -323,7 +322,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
       env = std::make_shared<Environment>(
           canonical_env_path, dst_env_path, last_modified_time);
       // Add the environment to the list of environments
-      env_map_.insert({env_key, new_env});
+      env_map_.insert({env_key, env});
     }
   }
 
@@ -336,10 +335,9 @@ EnvironmentManager::~EnvironmentManager()
 }
 
 EnvironmentManager::Environment::Environment(
-    EnvironmentManager& manager, const std::string& source,
-    const std::string& path, const time_t& last_modified_time)
-    : manager_(manager), source_(source), path_(path),
-      last_modified_time_(std::to_string(last_modified_time))
+    const std::string& source, const std::string& path,
+    const time_t& last_modified_time)
+    : source_(source), path_(path), last_modified_time_(last_modified_time)
 {
   Extract();
 }
@@ -347,12 +345,11 @@ EnvironmentManager::Environment::Environment(
 void
 EnvironmentManager::Environment::Extract()
 {
-  int status =
-      mkdir(path_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  int status = mkdir(path_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if (status != 0) {
     throw PythonBackendException(
-        std::string("Failed to create environment directory for '") +
-        path_.c_str() + "'.");
+        "Failed to create environment directory for '" + path_ +
+        "'.");
   }
   ExtractTarFile(source_, path_);
 }
