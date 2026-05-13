@@ -243,19 +243,22 @@ EnvironmentManager::EnvironmentManager()
 }
 
 
-std::shared_ptr<
-    Environment>  // TODO: write logic with shared and weak ptrs in this method
+std::shared_ptr<Environment>
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
 
-  char canonical_env_path[PATH_MAX + 1];
-  char* err = realpath(env_path.c_str(), canonical_env_path);
-  if (err == nullptr) {
-    throw PythonBackendException(
-        std::string("Failed to get the canonical path for ") + env_path + ".");
-  }
+  std::string canonical_env_path = [&] {
+    char canonical_env_path[PATH_MAX + 1];
+    char* err = realpath(env_path.c_str(), canonical_env_path);
+    if (err == nullptr) {
+      throw PythonBackendException(
+          std::string("Failed to get the canonical path for ") + env_path +
+          ".");
+    }
+    return std::string(canonical_env_path);
+  }();
 
   time_t last_modified_time;
   LastModifiedTime(canonical_env_path, &last_modified_time);
@@ -267,19 +270,18 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   struct stat info;
   if (stat(canonical_env_path, &info) != 0) {
     throw PythonBackendException(
-        std::string("stat() of : ") + canonical_env_path + " returned error.");
+        "stat() of : " + canonical_env_path + " returned error.");
   } else if (S_ISDIR(info.st_mode)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
-                     "not contain compressed path. Path: ") +
+        ("Returning canonical path since EXECUTION_ENV_PATH does "
+                     "not contain compressed path. Path: " +
          canonical_env_path)
             .c_str());
     return nullptr;
   }
 
-  std::string canonical_env_path_str(canonical_env_path);
-  std::string env_key = canonical_env_path_str;
+  std::string& env_key = canonical_env_path;
   const auto env_itr = env_map_[env_key];
   std::shared_ptr<Environment> env;
   if (env_itr != env_map_.end()) {
@@ -307,7 +309,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Extracting Python execution env ") + canonical_env_path)
+        ("Extracting Python execution env " + canonical_env_path)
             .c_str());
 
     if (re_extraction) {
@@ -319,7 +321,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
       ++env_path_counter_;
 
       env = std::make_shared<Environment>(
-          canonical_env_path_str, dst_env_path, last_modified_time);
+          canonical_env_path, dst_env_path, last_modified_time);
       // Add the environment to the list of environments
       env_map_.insert({env_key, new_env});
     }
