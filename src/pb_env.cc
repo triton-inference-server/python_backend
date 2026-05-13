@@ -243,7 +243,7 @@ EnvironmentManager::EnvironmentManager()
 }
 
 
-std::shared_ptr<Environment>
+std::shared_ptr<EnvironmentManager::Environment>
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
   // Lock the mutex. Only a single thread should modify the map.
@@ -348,11 +348,11 @@ void
 EnvironmentManager::Environment::Extract()
 {
   int status =
-      mkdir(dst_env_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      mkdir(path_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if (status != 0) {
     throw PythonBackendException(
         std::string("Failed to create environment directory for '") +
-        dst_env_path.c_str() + "'.");
+        path_.c_str() + "'.");
   }
   ExtractTarFile(source_, path_);
 }
