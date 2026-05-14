@@ -74,16 +74,29 @@ class EnvironmentManager {
     size_t owners_counter_ = 0;
   };
 
+  class EnvironmentProxy {
+    public:
+     EnvironmentProxy(const Environment& env) : env_(env) {}
+     ~EnvironmentProxy();
+ 
+     const std::string& Source() const { return env_.Source(); }
+     const std::string& Path() const { return env_.Path(); }
+     const time_t& LastModifiedTime() const { return env_.LastModifiedTime(); }
+ 
+    private:
+     const Environment& env_;
+   };
+
   class EnvironmentGuard {
     public:
-      EnvironmentGuard(EnvironmentManager& manager, const Environment& environment);
+      EnvironmentGuard(EnvironmentManager& manager, const std::string& env_path);
+      EnvironmentProxy operator->() const { return EnvironmentProxy(environment_); }
       ~EnvironmentGuard();
-      const std::string& Path() const { return environment_.Path(); }
 
     private:
       EnvironmentManager& manager_;
       const Environment& environment_;
-  }
+  };
 
   EnvironmentManager();
   friend class EnvironmentGuard;
