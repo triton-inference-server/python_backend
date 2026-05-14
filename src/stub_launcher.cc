@@ -605,7 +605,7 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
 
   std::string python_execution_env_path = python_execution_env_source;
   if (python_execution_env_.has_value()) {
-    python_execution_env_path = (*python_execution_env)->Path();
+    python_execution_env_path = (*python_execution_env_)->Path();
   }
 
   path_to_activate_ = python_execution_env_path + "/bin/activate";
