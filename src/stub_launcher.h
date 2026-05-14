@@ -36,6 +36,7 @@
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/thread/thread_time.hpp>
 #include <future>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>

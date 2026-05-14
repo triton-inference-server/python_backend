@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #ifdef WIN32
@@ -89,21 +90,24 @@ class EnvironmentManager {
 
   class EnvironmentGuard {
     public:
-      EnvironmentGuard(EnvironmentManager& manager, const std::string& env_path);
-      EnvironmentProxy operator->() const { return EnvironmentProxy(environment_); }
+      EnvironmentGuard(EnvironmentManager& manager, const Environment& env);
+      const Environment* operator->() const { return &environment_; }
+      const Environment& operator*() const { return environment_; }
       ~EnvironmentGuard();
 
-    private:
-      EnvironmentManager& manager_;
-      const Environment& environment_;
+   private:
+    EnvironmentManager& manager_;
+    const Environment& environment_;
   };
 
   EnvironmentManager();
   friend class EnvironmentGuard;
 
   // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  EnvironmentGuard ExtractIfNotExtracted(const std::string& env_path);
+  // already extracted. Returns nullopt when env_path is an uncompressed
+  // directory (caller uses that path directly).
+  std::optional<EnvironmentGuard> ExtractIfNotExtracted(
+      const std::string& env_path);
 
   ~EnvironmentManager();
 

@@ -243,7 +243,7 @@ EnvironmentManager::EnvironmentManager()
 }
 
 
-EnvironmentManager::EnvironmentGuard
+std::optional<EnvironmentManager::EnvironmentGuard>
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
   std::string canonical_env_path = [&] {
@@ -269,9 +269,10 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
          "not contain compressed path. Path: " +
          canonical_env_path)
             .c_str());
-    return nullptr;
+    return std::nullopt;
   }
 
+  const auto& env = GetEnvironment(canonical_env_path);
   return EnvironmentGuard(*this, canonical_env_path);
 }
 
@@ -387,10 +388,11 @@ EnvironmentManager::Environment::~Environment()
 }
 
 EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
-    EnvironmentManager & manager, const std::string& env_path)
-    : manager_(manager), environment_(GetEnvironment(env_path)) {}
+    EnvironmentManager & manager, const Environment& env)
+    : manager_(manager), environment_(env) {}
 
-EnvironmentManager::EnvironmentGuard::~EnvironmentGuard() {
+EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
+{
   manager_.DropEnvironment(environment_);
 }
 
