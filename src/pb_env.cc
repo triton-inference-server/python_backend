@@ -272,11 +272,11 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
     return std::nullopt;
   }
 
-  const auto& env = GetEnvironment(canonical_env_path);
+  auto& env = GetEnvironment(canonical_env_path);
   return EnvironmentGuard(this, &env);
 }
 
-const EnvironmentManager::Environment&
+EnvironmentManager::Environment&
 EnvironmentManager::GetEnvironment(const std::string& env_path)
 {
   // Lock the mutex. Only a single thread should modify the map.
