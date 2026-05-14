@@ -328,10 +328,7 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
     }
   }
 
-  if (!re_extraction) {
-    env->AddOwner();
-  }
-
+  env->AddOwner();
   return *env;
 }
 
