@@ -78,7 +78,7 @@ class EnvironmentManager {
   class EnvironmentProxy {
     public:
      EnvironmentProxy(const Environment* env) : env_(env) {}
-     ~EnvironmentProxy();
+     ~EnvironmentProxy() {}
  
      const std::string& Source() const { return env_->Source(); }
      const std::string& Path() const { return env_->Path(); }
