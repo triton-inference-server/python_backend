@@ -273,7 +273,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   }
 
   const auto& env = GetEnvironment(canonical_env_path);
-  return EnvironmentGuard(*this, canonical_env_path);
+  return EnvironmentGuard(this, &canonical_env_path);
 }
 
 const EnvironmentManager::Environment&
@@ -388,8 +388,8 @@ EnvironmentManager::Environment::~Environment()
 }
 
 EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
-    EnvironmentManager & manager, const Environment& env)
-    : manager_(manager), environment_(env) {}
+    EnvironmentManager* manager, const Environment* env)
+    : manager_(manager), environment_(env), environment_proxy_(env) {}
 
 EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
 {

@@ -90,14 +90,15 @@ class EnvironmentManager {
 
   class EnvironmentGuard {
     public:
-      EnvironmentGuard(EnvironmentManager& manager, const Environment& env);
-      const Environment* operator->() const { return &environment_; }
-      const Environment& operator*() const { return environment_; }
+      EnvironmentGuard(EnvironmentManager* manager, const Environment* environment);
+      const EnvironmentProxy* operator->() const { return &environment_proxy_; }
+      const EnvironmentProxy& operator*() const { return environment_proxy_; }
       ~EnvironmentGuard();
 
-   private:
-    EnvironmentManager& manager_;
-    const Environment& environment_;
+   private:    
+    EnvironmentManager* manager_;
+    const Environment* environment_;
+    EnvironmentProxy environment_proxy_;
   };
 
   EnvironmentManager();
@@ -106,8 +107,7 @@ class EnvironmentManager {
   // Extracts the tar.gz file in the 'env_path' if it has not been
   // already extracted. Returns nullopt when env_path is an uncompressed
   // directory (caller uses that path directly).
-  std::optional<EnvironmentGuard> ExtractIfNotExtracted(
-      const std::string& env_path);
+  std::optional<EnvironmentGuard> ExtractIfNotExtracted(const std::string& env_path);
 
   ~EnvironmentManager();
 
