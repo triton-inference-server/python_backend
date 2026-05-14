@@ -603,7 +603,11 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
         TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
   }
 
-  std::string python_execution_env_path = python_execution_env_->Path();
+  std::string python_execution_env_path = python_execution_env_source;
+  if (python_execution_env_.has_value()) {
+    python_execution_env_path = python_execution_env_->Path();
+  }
+
   path_to_activate_ = python_execution_env_path + "/bin/activate";
   path_to_libpython_ = python_execution_env_path + "/lib";
   if (python_execution_env_path.length() > 0 &&
