@@ -112,7 +112,7 @@ class EnvironmentManager {
   ~EnvironmentManager();
 
  private:
-  void DropEnvironment(const Environment& environment);
+  void DropEnvironment(Environment& environment);
   const Environment& GetEnvironment(const std::string& env_path);
 
   size_t env_path_counter_ = 0;
