@@ -385,8 +385,6 @@ EnvironmentManager::Environment::~Environment()
   Delete();
 }
 
-EnvironmentManager::EnvironmentProxy::~EnvironmentProxy() = default;
-
 EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
     EnvironmentManager* manager, Environment* env)
     : manager_(manager), environment_(env), environment_proxy_(env) {}
