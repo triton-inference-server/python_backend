@@ -325,7 +325,7 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
       auto new_env =
           Environment(env_path, dst_env_path, last_modified_time);
       // Add the environment to the list of environments
-      insert({env_key, new_env});
+      env_map_.insert({env_key, new_env});
       env = &env_map_[env_key]
     }
   }

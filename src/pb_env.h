@@ -77,15 +77,15 @@ class EnvironmentManager {
 
   class EnvironmentProxy {
     public:
-     EnvironmentProxy(const Environment& env) : env_(env) {}
+     EnvironmentProxy(const Environment* env) : env_(env) {}
      ~EnvironmentProxy();
  
-     const std::string& Source() const { return env_.Source(); }
-     const std::string& Path() const { return env_.Path(); }
-     const time_t& LastModifiedTime() const { return env_.LastModifiedTime(); }
+     const std::string& Source() const { return env_->Source(); }
+     const std::string& Path() const { return env_->Path(); }
+     const time_t& LastModifiedTime() const { return env_->LastModifiedTime(); }
  
     private:
-     const Environment& env_;
+     const Environment* env_;
    };
 
   class EnvironmentGuard {
