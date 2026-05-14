@@ -592,8 +592,8 @@ StubLauncher::Launch()
 TRITONSERVER_Error*
 StubLauncher::GetPythonEnvironment(ModelState* model_state)
 {
+  auto python_execution_env_source = model_state->PythonExecutionEnv();
   try {
-    auto python_execution_env_source = model_state->PythonExecutionEnv();
     python_execution_env_ =
         model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
             python_execution_env_source);
@@ -605,7 +605,7 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
 
   std::string python_execution_env_path = python_execution_env_source;
   if (python_execution_env_.has_value()) {
-    python_execution_env_path = python_execution_env_->Path();
+    python_execution_env_path = (*python_execution_env)->Path();
   }
 
   path_to_activate_ = python_execution_env_path + "/bin/activate";
