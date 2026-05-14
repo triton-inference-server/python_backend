@@ -323,7 +323,7 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
       ++env_path_counter_;
 
       // Add the environment to the list of environments
-      env_itr = env_map_.try_emplace(env_key, env_path, dst_env_path, last_modified_time);
+      env_itr = env_map_.try_emplace(env_key, env_path, dst_env_path, last_modified_time).first;
       env = &env_itr->second;
     }
   }
@@ -335,7 +335,7 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
   return *env;
 }
 
-void EnvironmentManager::DropEnvironment(const Environment& env)
+void EnvironmentManager::DropEnvironment(Environment& env)
 {
   std::lock_guard<std::mutex> lk(mutex_);
 
