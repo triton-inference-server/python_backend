@@ -273,7 +273,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   }
 
   const auto& env = GetEnvironment(canonical_env_path);
-  return EnvironmentGuard(this, &canonical_env_path);
+  return EnvironmentGuard(this, &env);
 }
 
 const EnvironmentManager::Environment&
@@ -339,7 +339,7 @@ void EnvironmentManager::DropEnvironment(const Environment& env)
 {
   std::lock_guard<std::mutex> lk(mutex_);
 
-  size_t env_owners_counter = env->RemoveOwner();
+  size_t env_owners_counter = env.RemoveOwner();
   if (env_owners_counter == 0) {
     env_map_.erase(env.Source());
   }
@@ -391,7 +391,7 @@ EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
 
 EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
 {
-  manager_->DropEnvironment(environment_);
+  manager_->DropEnvironment(*environment_);
 }
 
 
