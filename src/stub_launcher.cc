@@ -614,10 +614,9 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
       !FileExists(path_to_activate_)) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
-        ("Path " + path_to_activate_ +
+        "Path " + path_to_activate_ +
          " does not exist. The Python environment should contain an "
-         "'activate' script.")
-            .c_str());
+         "'activate' script.");
   }
   return nullptr;
 }

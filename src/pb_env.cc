@@ -265,9 +265,10 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   } else if (S_ISDIR(info.st_mode)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        "Returning canonical path since EXECUTION_ENV_PATH does "
+        ("Returning canonical path since EXECUTION_ENV_PATH does "
          "not contain compressed path. Path: " +
-         canonical_env_path);
+         canonical_env_path)
+            .c_str());
     return std::nullopt;
   }
 
