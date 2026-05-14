@@ -205,7 +205,7 @@ class StubLauncher {
   // Path to python execution environment
   std::string path_to_libpython_;
   std::string path_to_activate_;
-  std::shared_ptr<EnvironmentManager::Environment> python_execution_env_;
+  EnvironmentManager::EnvironmentGuard python_execution_env_;
   std::string python_execution_env_source_;
 
   common::TritonJson::WriteBuffer model_config_buffer_;
