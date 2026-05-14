@@ -90,14 +90,14 @@ class EnvironmentManager {
 
   class EnvironmentGuard {
     public:
-      EnvironmentGuard(EnvironmentManager* manager, const Environment* environment);
+      EnvironmentGuard(EnvironmentManager* manager, Environment* environment);
       const EnvironmentProxy* operator->() const { return &environment_proxy_; }
       const EnvironmentProxy& operator*() const { return environment_proxy_; }
       ~EnvironmentGuard();
 
    private:    
     EnvironmentManager* manager_;
-    const Environment* environment_;
+    Environment* environment_;
     EnvironmentProxy environment_proxy_;
   };
 
@@ -113,7 +113,7 @@ class EnvironmentManager {
 
  private:
   void DropEnvironment(Environment& environment);
-  const Environment& GetEnvironment(const std::string& env_path);
+  Environment& GetEnvironment(const std::string& env_path);
 
   size_t env_path_counter_ = 0;
   std::map<std::string, Environment> env_map_;
