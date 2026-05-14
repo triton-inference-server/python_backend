@@ -322,11 +322,9 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
           std::string(base_path_) + "/" + std::to_string(env_path_counter_);
       ++env_path_counter_;
 
-      auto new_env =
-          Environment(env_path, dst_env_path, last_modified_time);
       // Add the environment to the list of environments
-      env_map_.insert({env_key, new_env});
-      env = &env_map_[env_key]
+      env_itr = env_map_.try_emplace({env_key, env_path, dst_env_path, last_modified_time});
+      env = &env_itr->second;
     }
   }
 
