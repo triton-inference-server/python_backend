@@ -386,7 +386,7 @@ EnvironmentManager::Environment::~Environment()
 }
 
 EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
-    EnvironmentManager* manager, const Environment* env)
+    EnvironmentManager* manager, Environment* env)
     : manager_(manager), environment_(env), environment_proxy_(env) {}
 
 EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
