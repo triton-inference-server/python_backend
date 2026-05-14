@@ -243,12 +243,9 @@ EnvironmentManager::EnvironmentManager()
 }
 
 
-std::shared_ptr<EnvironmentManager::Environment>
+EnvironmentManager::EnvironmentGuard
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
-  // Lock the mutex. Only a single thread should modify the map.
-  std::lock_guard<std::mutex> lk(mutex_);
-
   std::string canonical_env_path = [&] {
     char canonical_env_path[PATH_MAX + 1];
     char* err = realpath(env_path.c_str(), canonical_env_path);
@@ -259,12 +256,6 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
     }
     return std::string(canonical_env_path);
   }();
-
-  time_t last_modified_time;
-  LastModifiedTime(canonical_env_path, &last_modified_time);
-
-  bool env_extracted = false;
-  bool re_extraction = false;
 
   // If the path is not a conda-packed file, then bypass the extraction process
   struct stat info;
@@ -281,21 +272,32 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
     return nullptr;
   }
 
-  const std::string& env_key = canonical_env_path;
+  return EnvironmentGuard(*this, canonical_env_path);
+}
+
+const EnvironmentManager::Environment&
+EnvironmentManager::GetEnvironment(const std::string& env_path)
+{
+  // Lock the mutex. Only a single thread should modify the map.
+  std::lock_guard<std::mutex> lk(mutex_);
+
+  time_t last_modified_time;
+  LastModifiedTime(env_path, &last_modified_time);
+
+  bool env_extracted = false;
+  bool re_extraction = false;
+
+  const std::string& env_key = env_path;
   auto env_itr = env_map_.find(env_key);
-  std::shared_ptr<Environment> env;
+  Environment* env = nullptr;
   if (env_itr != env_map_.end()) {
-    env = env_itr->second.lock();
+    env = &env_itr->second;
 
     // Check if the environment has been modified and would
     // need to be extracted again (or the current environment has no owners
     // anymore).
 
-    if (env == nullptr) {
-      // refer to case when env was not loaded
-      env_map_.erase(env_itr);
-      env_itr = env_map_.end();
-    } else if (env->LastModifiedTime() == last_modified_time) {
+    if (env->LastModifiedTime() == last_modified_time) {
       env_extracted = true;
     } else {
       // Environment file has been updated. Need to clear
@@ -309,7 +311,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Extracting Python execution env " + canonical_env_path).c_str());
+        ("Extracting Python execution env " + env_path).c_str());
 
     if (re_extraction) {
       // Just replace with new environment (by updated source)
@@ -319,14 +321,29 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
           std::string(base_path_) + "/" + std::to_string(env_path_counter_);
       ++env_path_counter_;
 
-      env = std::make_shared<Environment>(
-          canonical_env_path, dst_env_path, last_modified_time);
+      auto new_env =
+          Environment(env_path, dst_env_path, last_modified_time);
       // Add the environment to the list of environments
-      env_map_.insert({env_key, env});
+      insert({env_key, new_env});
+      env = &env_map_[env_key]
     }
   }
 
-  return env;
+  if (!re_extraction) {
+    env->AddOwner();
+  }
+
+  return *env;
+}
+
+void EnvironmentManager::DropEnvironment(const EnvironmentManager::Environment&)
+{
+  std::lock_guard<std::mutex> lk(mutex_);
+
+  size_t env_owners_counter = env->RemoveOwner();
+  if (env_owners_counter == 0) {
+    env_map_.erase(env_key);
+  }
 }
 
 EnvironmentManager::~EnvironmentManager()
@@ -342,28 +359,24 @@ EnvironmentManager::Environment::Environment(
   Extract();
 }
 
-void
-EnvironmentManager::Environment::Extract()
+void EnvironmentManager::Environment::Extract()
 {
   int status = mkdir(path_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if (status != 0) {
     throw PythonBackendException(
-        "Failed to create environment directory for '" + path_ +
-        "'.");
+        "Failed to create environment directory for '" + path_ + "'.");
   }
   ExtractTarFile(source_, path_);
 }
 
-void
-EnvironmentManager::Environment::Update(const time_t& last_modified_time)
+void EnvironmentManager::Environment::Update(const time_t& last_modified_time)
 {
   Delete();
   Extract();
   last_modified_time_ = last_modified_time;
 }
 
-void
-EnvironmentManager::Environment::Delete()
+void EnvironmentManager::Environment::Delete()
 {
   RecursiveDirectoryDelete(path_.c_str());
 }
@@ -371,6 +384,14 @@ EnvironmentManager::Environment::Delete()
 EnvironmentManager::Environment::~Environment()
 {
   Delete();
+}
+
+EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
+    EnvironmentManager & manager, const std::string& env_path)
+    : manager_(manager), environment_(GetEnvironment(env_path)) {}
+
+EnvironmentManager::EnvironmentGuard::~EnvironmentGuard() {
+  manager_.DropEnvironment(environment_);
 }
 
 
