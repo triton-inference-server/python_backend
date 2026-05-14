@@ -50,7 +50,6 @@ class EnvironmentManager {
  public:
   class Environment {
    public:
-    friend class EnvironmentManager;
     Environment(
         const std::string& source, const std::string& path,
         const time_t& last_modified_time);
