@@ -96,11 +96,11 @@ class EnvironmentManager {
       EnvironmentGuard(EnvironmentGuard&&) = default;
 
       EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
-      EnvironmentGuard& operator=(EnvironmentGuard&&) = delete;
+      EnvironmentGuard& operator=(EnvironmentGuard&&) = default;
 
       const EnvironmentProxy* operator->() const { return &environment_proxy_; }
       const EnvironmentProxy& operator*() const { return environment_proxy_; }
-      
+
       ~EnvironmentGuard();
 
    private:    
