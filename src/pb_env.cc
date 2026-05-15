@@ -258,7 +258,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
       throw PythonBackendException(
           "Failed to get the canonical path for " + env_path + ".");
     }
-    return canonical_env_path;
+    return std::string(canonical_env_path);
   }();
 
   LOG_MESSAGE(
