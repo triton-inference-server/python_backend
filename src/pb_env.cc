@@ -247,10 +247,6 @@ EnvironmentManager::EnvironmentManager()
 std::optional<EnvironmentManager::EnvironmentGuard>
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] ExtractIfNotExtracted: env_path='" + env_path + "'").c_str());
-
   std::string canonical_env_path = [&] {
     char canonical_env_path[PATH_MAX + 1];
     char* err = realpath(env_path.c_str(), canonical_env_path);
@@ -260,12 +256,6 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
     }
     return std::string(canonical_env_path);
   }();
-
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] ExtractIfNotExtracted: canonical_env_path='" +
-       canonical_env_path + "'")
-          .c_str());
 
   // If the path is not a conda-packed file, then bypass the extraction process
   struct stat info;
@@ -282,22 +272,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
     return std::nullopt;
   }
 
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] ExtractIfNotExtracted: stat OK, st_mode=" +
-       std::to_string(static_cast<unsigned>(info.st_mode)) +
-       " S_ISDIR=0 S_ISREG=" + std::string(S_ISREG(info.st_mode) ? "1" : "0") +
-       " -> call GetEnvironment then return EnvironmentGuard")
-          .c_str());
-
   auto& env = GetEnvironment(canonical_env_path);
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] ExtractIfNotExtracted: GetEnvironment returned "
-       "Environment& Source='" +
-       env.Source() + "' Path='" + env.Path() + "' LastModifiedTime=" +
-       std::to_string(static_cast<long>(env.LastModifiedTime())))
-          .c_str());
   return EnvironmentGuard(this, &env);
 }
 
@@ -307,22 +282,8 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
 
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] GetEnvironment: enter env_path='" + env_path +
-       "' env_map_.size()=" + std::to_string(env_map_.size()) +
-       " base_path_='" + std::string(base_path_) +
-       "' env_path_counter_=" + std::to_string(env_path_counter_))
-          .c_str());
-
   time_t last_modified_time;
   LastModifiedTime(env_path, &last_modified_time);
-
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] GetEnvironment: LastModifiedTime ok mtime=" +
-       std::to_string(static_cast<long>(last_modified_time)))
-          .c_str());
 
   bool env_extracted = false;
   bool re_extraction = false;
@@ -345,23 +306,6 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
       // the environment to the same destination directory.
       re_extraction = true;
     }
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_INFO,
-        ("[pb_env] GetEnvironment: found existing env env_key='" + env_key +
-         "' cached_mtime=" +
-         std::to_string(static_cast<long>(env->LastModifiedTime())) +
-         " current_mtime=" +
-         std::to_string(static_cast<long>(last_modified_time)) +
-         " env_extracted=" + (env_extracted ? "true" : "false") +
-         " re_extraction=" + (re_extraction ? "true" : "false") +
-         " cached_Path='" + env->Path() + "'")
-            .c_str());
-  } else {
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_INFO,
-        ("[pb_env] GetEnvironment: no map entry for env_key='" + env_key +
-         "' env_extracted=false re_extraction=false")
-            .c_str());
   }
 
   // Extract only if the env has not been extracted yet.
@@ -371,11 +315,6 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
         ("Extracting Python execution env " + env_path).c_str());
 
     if (re_extraction) {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          ("[pb_env] GetEnvironment: re_extraction Update on Path='" +
-           env->Path() + "'")
-              .c_str());
       // Just replace with new environment (by updated source)
       env->Update(last_modified_time);
     } else {
@@ -383,33 +322,16 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
           std::string(base_path_) + "/" + std::to_string(env_path_counter_);
       ++env_path_counter_;
 
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          ("[pb_env] GetEnvironment: try_emplace new env env_key='" + env_key +
-           "' dst_env_path='" + dst_env_path + "' source='" + env_path +
-           "' mtime=" + std::to_string(last_modified_time))
-              .c_str());
-
       // Add the environment to the list of environments
       env_itr =
           env_map_
               .try_emplace(env_key, env_path, dst_env_path, last_modified_time)
               .first;
       env = &env_itr->second;
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          ("[pb_env] GetEnvironment: after try_emplace Path='" + env->Path() +
-           "' Source='" + env->Source() + "'")
-              .c_str());
     }
   }
 
   env->AddOwner();
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_INFO,
-      ("[pb_env] GetEnvironment: after AddOwner return Path='" + env->Path() +
-       "' Source='" + env->Source() + "'")
-          .c_str());
   return *env;
 }
 
