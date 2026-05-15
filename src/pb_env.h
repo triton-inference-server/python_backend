@@ -57,7 +57,7 @@ class EnvironmentManager {
     ~Environment();
 
     void Update(const time_t& last_modified_time);
-    void AddOwner()  { ++owners_counter_; }
+    void AddOwner() { ++owners_counter_; }
     size_t RemoveOwner() { return --owners_counter_; }
 
     const std::string& Source() const { return source_; }
@@ -76,34 +76,40 @@ class EnvironmentManager {
   };
 
   class EnvironmentProxy {
-    public:
-     EnvironmentProxy(const Environment* env) : env_(env) {}
-     ~EnvironmentProxy() = default;
- 
-     const std::string& Source() const { return env_->Source(); }
-     const std::string& Path() const { return env_->Path(); }
-     const time_t& LastModifiedTime() const { return env_->LastModifiedTime(); }
- 
-    private:
-     const Environment* env_;
-   };
+   public:
+    EnvironmentProxy(const Environment* env) : env_(env) {}
+
+    EnvironmentProxy(EnvironmentProxy&& other_proxy) : env_(other_proxy.env_)
+    {
+      other_proxy.env_ = nullptr;
+    }
+
+    ~EnvironmentProxy() = default;
+
+    const std::string& Source() const & { return env_->Source(); }
+    const std::string& Path() const & { return env_->Path(); }
+    const time_t& LastModifiedTime() const & { return env_->LastModifiedTime(); }
+
+   private:
+    const Environment* env_;
+  };
 
   class EnvironmentGuard {
-    public:
-      EnvironmentGuard(EnvironmentManager* manager, Environment* environment);
+   public:
+    EnvironmentGuard(EnvironmentManager* manager, Environment* environment);
 
-      EnvironmentGuard(const EnvironmentGuard&) = delete;
-      EnvironmentGuard(EnvironmentGuard&&) = default;
+    EnvironmentGuard(const EnvironmentGuard&) = delete;
+    EnvironmentGuard(EnvironmentGuard&&);
 
-      EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
-      EnvironmentGuard& operator=(EnvironmentGuard&&) = default;
+    EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
+    EnvironmentGuard& operator=(EnvironmentGuard&&);
 
-      const EnvironmentProxy* operator->() const { return &environment_proxy_; }
-      const EnvironmentProxy& operator*() const { return environment_proxy_; }
+    const EnvironmentProxy* operator->() const { return &environment_proxy_; }
+    const EnvironmentProxy& operator*() const { return environment_proxy_; }
 
-      ~EnvironmentGuard();
+    ~EnvironmentGuard();
 
-   private:    
+   private:
     EnvironmentManager* manager_;
     Environment* environment_;
     EnvironmentProxy environment_proxy_;
@@ -115,7 +121,8 @@ class EnvironmentManager {
   // Extracts the tar.gz file in the 'env_path' if it has not been
   // already extracted. Returns nullopt when env_path is an uncompressed
   // directory (caller uses that path directly).
-  std::optional<EnvironmentGuard> ExtractIfNotExtracted(const std::string& env_path);
+  std::optional<EnvironmentGuard> ExtractIfNotExtracted(
+      const std::string& env_path);
 
   ~EnvironmentManager();
 

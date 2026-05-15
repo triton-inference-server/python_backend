@@ -407,8 +407,8 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
   env->AddOwner();
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
-      ("[pb_env] GetEnvironment: after AddOwner return Path='" +
-       env->Path() + "' Source='" + env->Source() + "'")
+      ("[pb_env] GetEnvironment: after AddOwner return Path='" + env->Path() +
+       "' Source='" + env->Source() + "'")
           .c_str());
   return *env;
 }
@@ -473,9 +473,28 @@ EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
 {
 }
 
+EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
+    EnvironmentGuard&& other_guard)
+    : manager_(other_guard.manager_), environment_(other_guard.environment_),
+      environment_proxy_(std::move(other_guard.environment_proxy_))
+{
+  other_guard.manager_ = nullptr;
+  other_guard.environment_ = nullptr;
+}
+
+EnvironmentManager::EnvironmentGuard&
+EnvironmentManager::EnvironmentGuard::operator=(EnvironmentGuard&& other_guard)
+{
+  EnvironmentGuard new_guard(std::move(other_guard));
+  std::swap(*this, new_guard);
+  return *this;
+}
+
 EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
 {
-  manager_->DropEnvironment(*environment_);
+  if (environment_ != nullptr && manager_ != nullptr) {
+    manager_->DropEnvironment(*environment_);
+  }
 }
 
 
