@@ -91,8 +91,16 @@ class EnvironmentManager {
   class EnvironmentGuard {
     public:
       EnvironmentGuard(EnvironmentManager* manager, Environment* environment);
+
+      EnvironmentGuard(const EnvironmentGuard&) = delete;
+      EnvironmentGuard(EnvironmentGuard&&) = default;
+
+      EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
+      EnvironmentGuard& operator=(EnvironmentGuard&&) = delete;
+
       const EnvironmentProxy* operator->() const { return &environment_proxy_; }
       const EnvironmentProxy& operator*() const { return environment_proxy_; }
+      
       ~EnvironmentGuard();
 
    private:    
