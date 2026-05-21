@@ -27,7 +27,6 @@
 #pragma once
 #include <climits>
 #include <map>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -111,7 +110,6 @@ class EnvironmentManager {
 
    private:
     EnvironmentManager* manager_;
-    Environment* environment_;
     EnvironmentProxy environment_proxy_;
   };
 
@@ -127,10 +125,9 @@ class EnvironmentManager {
   ~EnvironmentManager();
 
  private:
-  void DropEnvironment(Environment& environment);
+  void DropEnvironment(EnvironmentProxy& environment);
   Environment& GetEnvironment(const std::string& env_path);
 
-  size_t env_path_counter_ = 0;
   std::map<std::string, Environment> env_map_;
   char base_path_[PATH_MAX + 1];
   std::mutex mutex_;

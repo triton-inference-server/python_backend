@@ -295,8 +295,7 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
     env = &env_itr->second;
 
     // Check if the environment has been modified and would
-    // need to be extracted again (or the current environment has no owners
-    // anymore).
+    // need to be extracted again
 
     if (env->LastModifiedTime() == last_modified_time) {
       env_extracted = true;
@@ -323,10 +322,8 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
       ++env_path_counter_;
 
       // Add the environment to the list of environments
-      env_itr =
-          env_map_
-              .try_emplace(env_key, env_path, dst_env_path, last_modified_time)
-              .first;
+      env_itr = env_map_.try_emplace(env_key, env_path,
+                                     dst_env_path, last_modified_time).first;
       env = &env_itr->second;
     }
   }
@@ -336,9 +333,13 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
 }
 
 void
-EnvironmentManager::DropEnvironment(Environment& env)
+EnvironmentManager::DropEnvironment(EnvironmentProxy& env_proxy)
 {
   std::lock_guard<std::mutex> lk(mutex_);
+
+  const std::string& env_key = env.Source();
+  auto env_itr = env_map_.find(env_key);
+  auto& env = env_itr->second;
 
   size_t env_owners_counter = env.RemoveOwner();
   if (env_owners_counter == 0) {
@@ -391,17 +392,16 @@ EnvironmentManager::Environment::~Environment()
 
 EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
     EnvironmentManager* manager, Environment* env)
-    : manager_(manager), environment_(env), environment_proxy_(env)
+    : manager_(manager), environment_proxy_(env)
 {
 }
 
 EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
     EnvironmentGuard&& other_guard)
-    : manager_(other_guard.manager_), environment_(other_guard.environment_),
+    : manager_(other_guard.manager_),
       environment_proxy_(std::move(other_guard.environment_proxy_))
 {
   other_guard.manager_ = nullptr;
-  other_guard.environment_ = nullptr;
 }
 
 EnvironmentManager::EnvironmentGuard&
