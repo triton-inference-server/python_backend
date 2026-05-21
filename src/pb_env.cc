@@ -333,11 +333,11 @@ EnvironmentManager::GetEnvironment(const std::string& env_path)
 }
 
 void
-EnvironmentManager::DropEnvironment(EnvironmentProxy& env_proxy)
+EnvironmentManager::DropEnvironment(const EnvironmentProxy& env_proxy)
 {
   std::lock_guard<std::mutex> lk(mutex_);
 
-  const std::string& env_key = env.Source();
+  const std::string& env_key = env_proxy.Source();
   auto env_itr = env_map_.find(env_key);
   auto& env = env_itr->second;
 
@@ -414,8 +414,8 @@ EnvironmentManager::EnvironmentGuard::operator=(EnvironmentGuard&& other_guard)
 
 EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
 {
-  if (environment_ != nullptr && manager_ != nullptr) {
-    manager_->DropEnvironment(*environment_);
+  if (manager_ != nullptr) {
+    manager_->DropEnvironment(environment_proxy_);
   }
 }
 
