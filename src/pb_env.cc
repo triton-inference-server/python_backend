@@ -229,9 +229,6 @@ RecursiveDirectoryDelete(const char* dir)
 
 EnvironmentManager::EnvironmentManager()
 {
-  LOG_MESSAGE(
-      TRITONSERVER_LOG_VERBOSE,
-      "EnvironmentManager constructor: initializing Python env manager");
   char tmp_dir_template[PATH_MAX + 1];
   strcpy(tmp_dir_template, "/tmp/python_env_XXXXXX");
 
@@ -242,7 +239,6 @@ EnvironmentManager::EnvironmentManager()
   }
   strcpy(base_path_, tmp_dir_template);
 }
-
 
 std::string
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
@@ -337,11 +333,11 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
 void
 EnvironmentManager::DropEnvironment(const std::string& env_source)
 {
-  std::lock_guard<std::mutex> lk(mutex_);
-
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       ("Trying to drop Python execution env " + env_source).c_str());
+
+  std::lock_guard<std::mutex> lk(mutex_);
 
   auto env_itr = env_map_.find(env_source);
   if (env_itr != env_map_.end()) {
@@ -354,7 +350,7 @@ EnvironmentManager::DropEnvironment(const std::string& env_source)
   } else {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Env with a key '" + env_source + "' not in the env_map").c_str());
+        ("Env with the key '" + env_source + "' isn't in the env_map").c_str());
   }
 }
 

@@ -27,7 +27,6 @@
 #pragma once
 #include <climits>
 #include <map>
-#include <memory>
 #include <mutex>
 #include <string>
 
@@ -77,8 +76,7 @@ class EnvironmentManager {
   EnvironmentManager();
 
   // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted. Returns nullopt when env_path is an uncompressed
-  // directory (caller uses that path directly).
+  // already extracted
   std::string ExtractIfNotExtracted(const std::string& env_source);
 
   ~EnvironmentManager();
