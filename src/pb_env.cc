@@ -349,16 +349,18 @@ EnvironmentManager::DropEnvironment(const std::string& env_source)
   } else {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Env with the key '" + env_source + "' isn't in the env_map").c_str());
+        ("The environment with the key '" + env_source +
+         "' is not presented the env_map")
+            .c_str());
   }
 }
 
 EnvironmentManager::~EnvironmentManager()
 {
   // All environments must be deleted before EnvironmentManager is called
-  if (env_map_.size() > 0) {
+  if (!env_map_.empty()) {
     LOG_MESSAGE(
-        TRITONSERVER_LOG_ERROR, "Environment mananager map isn't empty");
+        TRITONSERVER_LOG_ERROR, "Environment mananager map is not empty");
   }
 
   RecursiveDirectoryDelete(base_path_);
