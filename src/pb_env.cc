@@ -319,8 +319,8 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
     }
   }
 
-  // Refcounter must be increased on each ExtractIfNotExtracted call
-  env->IncreaseRefcount();
+  // Reference counter must be incremented on each ExtractIfNotExtracted call
+  env->IncrementRefCount();
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
@@ -340,7 +340,7 @@ EnvironmentManager::DropEnvironment(const std::string& env_source)
 
   auto env_itr = env_map_.find(env_source);
   if (env_itr != env_map_.end()) {
-    if (env_itr->second.DecreaseRefcount() == 0) {
+    if (env_itr->second.DecrementRefCount() == 0) {
       env_map_.erase(env_itr);
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
