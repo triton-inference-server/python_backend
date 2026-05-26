@@ -823,12 +823,13 @@ StubLauncher::TerminateStub(ModelState* model_state)
     } else {
       WaitForStubProcess();
     }
-
-#ifndef _WIN32
-    model_state->StateForBackend()->env_manager->DropEnvironment(
-        python_execution_env_);
-#endif
   }
+
+// Nothing will happen if python_execution_env_ doesn't exist
+#ifndef _WIN32
+  model_state->StateForBackend()->env_manager->DropEnvironment(
+      python_execution_env_);
+#endif
 
   // First destroy the IPCControl. This makes sure that IPCControl is
   // destroyed before the shared memory manager goes out of scope.
