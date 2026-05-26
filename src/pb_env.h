@@ -29,7 +29,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 
 #ifdef WIN32
@@ -57,8 +56,8 @@ class EnvironmentManager {
     ~Environment();
 
     void Update(const time_t& last_modified_time);
-    void AddOwner() { ++owners_counter_; }
-    size_t RemoveOwner() { return --owners_counter_; }
+    void IncreaseRefcount() { ++ref_count_; }
+    size_t DecreaseRefcount() { return --ref_count_; }
 
     const std::string& Source() const { return source_; }
     const std::string& Path() const { return path_; }
@@ -72,64 +71,23 @@ class EnvironmentManager {
     std::string path_;
     time_t last_modified_time_;
 
-    size_t owners_counter_ = 0;
-  };
-
-  class EnvironmentProxy {
-   public:
-    EnvironmentProxy(const Environment* env) : env_(env) {}
-
-    EnvironmentProxy(EnvironmentProxy&& other_proxy) : env_(other_proxy.env_)
-    {
-      other_proxy.env_ = nullptr;
-    }
-
-    ~EnvironmentProxy() = default;
-
-    const std::string& Source() const & { return env_->Source(); }
-    const std::string& Path() const & { return env_->Path(); }
-    const time_t& LastModifiedTime() const & { return env_->LastModifiedTime(); }
-
-   private:
-    const Environment* env_;
-  };
-
-  class EnvironmentGuard {
-   public:
-    EnvironmentGuard(EnvironmentManager* manager, Environment* environment);
-
-    EnvironmentGuard(const EnvironmentGuard&) = delete;
-    EnvironmentGuard(EnvironmentGuard&&);
-
-    EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
-    EnvironmentGuard& operator=(EnvironmentGuard&&);
-
-    const EnvironmentProxy* operator->() const { return &environment_proxy_; }
-    const EnvironmentProxy& operator*() const { return environment_proxy_; }
-
-    ~EnvironmentGuard();
-
-   private:
-    EnvironmentManager* manager_;
-    Environment* environment_;
-    EnvironmentProxy environment_proxy_;
+    size_t ref_count_ = 0;
   };
 
   EnvironmentManager();
-  friend class EnvironmentGuard;
 
   // Extracts the tar.gz file in the 'env_path' if it has not been
   // already extracted. Returns nullopt when env_path is an uncompressed
   // directory (caller uses that path directly).
-  std::optional<EnvironmentGuard> ExtractIfNotExtracted(
-      const std::string& env_path);
+  std::string ExtractIfNotExtracted(const std::string& env_source);
 
   ~EnvironmentManager();
 
- private:
-  void DropEnvironment(Environment& environment);
-  Environment& GetEnvironment(const std::string& env_path);
+  // Decreases the refcount for the environment identified by env_source.
+  // If the refcount reaches zero, the environment is removed from the map.
+  void DropEnvironment(const std::string& env_source);
 
+ private:
   size_t env_path_counter_ = 0;
   std::map<std::string, Environment> env_map_;
   char base_path_[PATH_MAX + 1];
