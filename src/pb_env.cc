@@ -273,60 +273,49 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
   time_t last_modified_time;
   LastModifiedTime(env_source, &last_modified_time);
 
-  bool env_extracted = false;
-  bool re_extraction = false;
-
-  Environment* env = nullptr;
-
   auto env_itr = env_map_.find(env_source);
-  if (env_itr != env_map_.end()) {
-    env = &env_itr->second;
-
-    // Check if the environment has been modified and would
-    // need to be extracted again (or the current environment has no owners
-    // anymore).
-    if (env->LastModifiedTime() == last_modified_time) {
-      env_extracted = true;
-    } else {
-      // Environment file has been updated. Need to clear
-      // the previously extracted environment and extract
-      // the environment to the same destination directory.
-      re_extraction = true;
-    }
-  }
-
   // Extract only if the env has not been extracted yet.
-  if (!env_extracted) {
+  if (env_itr == env_map_.end()) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
         ("Extracting Python execution env " + env_source).c_str());
 
-    if (re_extraction) {
-      // Just replace with new environment (by updated source)
-      env->Update(last_modified_time);
-    } else {
-      std::string dst_env_path =
-          std::string(base_path_) + "/" + std::to_string(env_path_counter_);
-      ++env_path_counter_;
+    std::string dst_env_path =
+        std::string(base_path_) + "/" + std::to_string(env_path_counter_);
+    ++env_path_counter_;
 
-      // Add the environment to the list of environments
-      env_itr =
-          env_map_
-              .try_emplace(
-                  env_source, env_source, dst_env_path, last_modified_time)
-              .first;
-      env = &env_itr->second;
+    // Add the environment to the list of environments
+    env_itr = env_map_
+                  .try_emplace(
+                      env_source, env_source, dst_env_path, last_modified_time)
+                  .first;
+  } else {
+    Environment& env = env_itr->second;
+
+    // Check if the environment has been modified and would
+    // need to be extracted again (or the current environment has no owners
+    // anymore).
+    if (env.LastModifiedTime() != last_modified_time) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_VERBOSE,
+          ("Re-extracting Python execution env " + env_source).c_str());
+      // Environment file has been updated. Need to clear
+      // the previously extracted environment and extract
+      // the environment to the same destination directory.
+      env.Update(last_modified_time);
     }
   }
 
+  Environment& env = env_itr->second;
+
   // Reference counter must be incremented on each ExtractIfNotExtracted call
-  env->IncrementRefCount();
+  env.IncrementRefCount();
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
       ("Successfully extracted Python execution env " + env_source).c_str());
 
-  return env->Path();
+  return env.Path();
 }
 
 void
