@@ -355,6 +355,12 @@ EnvironmentManager::DropEnvironment(const std::string& env_source)
 
 EnvironmentManager::~EnvironmentManager()
 {
+  // All environments must be deleted before EnvironmentManager is called
+  if (env_map_.size() > 0) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_ERROR, "Environment mananager map isn't empty");
+  }
+
   RecursiveDirectoryDelete(base_path_);
 }
 
