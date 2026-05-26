@@ -603,7 +603,6 @@ StubLauncher::GetPythonEnvironment(ModelState* model_state)
         TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
   }
 
-
   path_to_activate_ = python_execution_env + "/bin/activate";
   path_to_libpython_ = python_execution_env + "/lib";
   if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
