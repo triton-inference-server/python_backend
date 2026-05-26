@@ -55,8 +55,8 @@ class EnvironmentManager {
     ~Environment();
 
     void Update(const time_t& last_modified_time);
-    void IncreaseRefcount() { ++ref_count_; }
-    size_t DecreaseRefcount() { return --ref_count_; }
+    void IncrementRefCount() { ++ref_count_; }
+    size_t DecrementRefCount() { return --ref_count_; }
 
     const std::string& Source() const { return source_; }
     const std::string& Path() const { return path_; }
