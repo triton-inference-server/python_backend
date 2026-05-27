@@ -50,7 +50,7 @@ class EnvironmentManager {
   class Environment {
    public:
     Environment(
-        const std::string& source, const std::string& path,
+        const std::string& source, const std::string& destination,
         const time_t& last_modified_time);
     ~Environment();
 
@@ -59,7 +59,7 @@ class EnvironmentManager {
     size_t DecrementRefCount() { return --ref_count_; }
 
     const std::string& Source() const { return source_; }
-    const std::string& Path() const { return path_; }
+    const std::string& Destination() const { return destination_; }
     const time_t& LastModifiedTime() const { return last_modified_time_; }
 
    private:
@@ -67,7 +67,7 @@ class EnvironmentManager {
     void Delete();
 
     std::string source_;
-    std::string path_;
+    std::string destination_;
     time_t last_modified_time_;
 
     size_t ref_count_ = 0;
@@ -77,13 +77,14 @@ class EnvironmentManager {
 
   // Extracts the tar.gz file in the 'env_path' if it has not been
   // already extracted
-  std::string ExtractIfNotExtracted(const std::string& env_source);
+  std::string ExtractIfNotExtracted(const std::string& env_path);
 
   ~EnvironmentManager();
 
-  // Decreases the refcount for the environment identified by env_source.
-  // If the refcount reaches zero, the environment is removed from the map.
-  void DropEnvironment(const std::string& env_source);
+  // Decrement the refcount for the environment identified by
+  // canonical_env_path. If the refcount reaches zero, the environment is
+  // removed from the map.
+  void DropEnvironment(const std::string& canonical_env_path);
 
  private:
   size_t env_path_counter_ = 0;

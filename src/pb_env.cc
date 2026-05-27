@@ -240,14 +240,14 @@ EnvironmentManager::EnvironmentManager()
 }
 
 std::string
-EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
+EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
   std::string canonical_env_path = [&] {
     char canonical_env_path[PATH_MAX + 1];
-    char* err = realpath(env_source.c_str(), canonical_env_path);
+    char* err = realpath(env_path.c_str(), canonical_env_path);
     if (err == nullptr) {
       throw PythonBackendException(
-          "Failed to get the canonical path for " + env_source + ".");
+          "Failed to get the canonical path for " + env_path + ".");
     }
     return std::string(canonical_env_path);
   }();
@@ -271,34 +271,34 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
   std::lock_guard<std::mutex> lk(mutex_);
 
   time_t last_modified_time;
-  LastModifiedTime(env_source, &last_modified_time);
+  LastModifiedTime(canonical_env_path, &last_modified_time);
 
-  auto env_itr = env_map_.find(env_source);
+  auto env_itr = env_map_.find(canonical_env_path);
   // Extract only if the env has not been extracted yet.
   if (env_itr == env_map_.end()) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Extracting Python execution env " + env_source).c_str());
+        ("Extracting Python execution env " + canonical_env_path).c_str());
 
     std::string dst_env_path =
         std::string(base_path_) + "/" + std::to_string(env_path_counter_);
     ++env_path_counter_;
 
-    // Add the environment to the list of environments
+    // Add the environment to the list of environments.
     env_itr = env_map_
                   .try_emplace(
-                      env_source, env_source, dst_env_path, last_modified_time)
+                      canonical_env_path, canonical_env_path, dst_env_path,
+                      last_modified_time)
                   .first;
   } else {
     Environment& env = env_itr->second;
 
     // Check if the environment has been modified and would
-    // need to be extracted again (or the current environment has no owners
-    // anymore).
+    // need to be extracted again.
     if (env.LastModifiedTime() != last_modified_time) {
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
-          ("Re-extracting Python execution env " + env_source).c_str());
+          ("Re-extracting Python execution env " + canonical_env_path).c_str());
       // Environment file has been updated. Need to clear
       // the previously extracted environment and extract
       // the environment to the same destination directory.
@@ -308,37 +308,39 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_source)
 
   Environment& env = env_itr->second;
 
-  // Reference counter must be incremented on each ExtractIfNotExtracted call
+  // Reference counter must be incremented on each ExtractIfNotExtracted call.
   env.IncrementRefCount();
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      ("Successfully extracted Python execution env " + env_source).c_str());
+      ("Successfully extracted Python execution env " + canonical_env_path)
+          .c_str());
 
-  return env.Path();
+  return env.Destination();
 }
 
 void
-EnvironmentManager::DropEnvironment(const std::string& env_source)
+EnvironmentManager::DropEnvironment(const std::string& canonical_env_path)
 {
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      ("Trying to drop Python execution env " + env_source).c_str());
+      ("Trying to drop Python execution env " + canonical_env_path).c_str());
 
   std::lock_guard<std::mutex> lk(mutex_);
 
-  auto env_itr = env_map_.find(env_source);
+  auto env_itr = env_map_.find(canonical_env_path);
   if (env_itr != env_map_.end()) {
     if (env_itr->second.DecrementRefCount() == 0) {
       env_map_.erase(env_itr);
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
-          ("Successfully dropped Python execution env " + env_source).c_str());
+          ("Successfully dropped Python execution env " + canonical_env_path)
+              .c_str());
     }
   } else {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("The environment with the key '" + env_source +
+        ("The environment with the key '" + canonical_env_path +
          "' is not presented the env_map")
             .c_str());
   }
@@ -356,9 +358,10 @@ EnvironmentManager::~EnvironmentManager()
 }
 
 EnvironmentManager::Environment::Environment(
-    const std::string& source, const std::string& path,
+    const std::string& source, const std::string& destination,
     const time_t& last_modified_time)
-    : source_(source), path_(path), last_modified_time_(last_modified_time)
+    : source_(source), destination_(destination),
+      last_modified_time_(last_modified_time)
 {
   Extract();
 }
@@ -366,12 +369,13 @@ EnvironmentManager::Environment::Environment(
 void
 EnvironmentManager::Environment::Extract()
 {
-  int status = mkdir(path_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  int status =
+      mkdir(destination_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
   if (status != 0) {
     throw PythonBackendException(
-        "Failed to create environment directory for '" + path_ + "'.");
+        "Failed to create environment directory for '" + destination_ + "'.");
   }
-  ExtractTarFile(source_, path_);
+  ExtractTarFile(source_, destination_);
 }
 
 void
@@ -385,7 +389,7 @@ EnvironmentManager::Environment::Update(const time_t& last_modified_time)
 void
 EnvironmentManager::Environment::Delete()
 {
-  RecursiveDirectoryDelete(path_.c_str());
+  RecursiveDirectoryDelete(destination_.c_str());
 }
 
 EnvironmentManager::Environment::~Environment()
