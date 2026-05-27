@@ -82,9 +82,9 @@ class EnvironmentManager {
   ~EnvironmentManager();
 
   // Decrement the refcount for the environment identified by
-  // canonical_env_path. If the refcount reaches zero, the environment is
+  // env_path. If the refcount reaches zero, the environment is
   // removed from the map.
-  void DropEnvironment(const std::string& canonical_env_path);
+  void DropEnvironment(const std::string& env_path);
 
  private:
   size_t env_path_counter_ = 0;

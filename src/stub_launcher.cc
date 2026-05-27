@@ -106,6 +106,19 @@ StubLauncher::Initialize(ModelState* model_state)
   // are supported.
   if (python_execution_env_ != "") {
 #ifndef _WIN32
+    // Resolve symlinks to avoid duplicate environment entries.
+    char canonical_env_path[PATH_MAX + 1];
+    char* err = realpath(python_execution_env_.c_str(), canonical_env_path);
+    if (err == nullptr) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          ("Failed to get the canonical path for " + python_execution_env_ +
+           ".")
+              .c_str());
+    }
+
+    python_execution_env_ = canonical_env_path;
+
     RETURN_IF_ERROR(GetPythonEnvironment(model_state));
 #else
     return TRITONSERVER_ErrorNew(

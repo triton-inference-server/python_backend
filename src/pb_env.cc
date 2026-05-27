@@ -242,54 +242,43 @@ EnvironmentManager::EnvironmentManager()
 std::string
 EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 {
-  std::string canonical_env_path = [&] {
-    char canonical_env_path[PATH_MAX + 1];
-    char* err = realpath(env_path.c_str(), canonical_env_path);
-    if (err == nullptr) {
-      throw PythonBackendException(
-          "Failed to get the canonical path for " + env_path + ".");
-    }
-    return std::string(canonical_env_path);
-  }();
-
   // If the path is not a conda-packed file, then bypass the extraction process
   struct stat info;
-  if (stat(canonical_env_path.c_str(), &info) != 0) {
+  if (stat(env_path.c_str(), &info) != 0) {
     throw PythonBackendException(
-        "stat() of : " + canonical_env_path + " returned error.");
+        "stat() of : " + env_path + " returned error.");
   } else if (S_ISDIR(info.st_mode)) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Returning canonical path since EXECUTION_ENV_PATH does "
+        ("Returning path since EXECUTION_ENV_PATH does "
          "not contain compressed path. Path: " +
-         canonical_env_path)
+         env_path)
             .c_str());
-    return canonical_env_path;
+    return env_path;
   }
 
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
 
   time_t last_modified_time;
-  LastModifiedTime(canonical_env_path, &last_modified_time);
+  LastModifiedTime(env_path, &last_modified_time);
 
-  auto env_itr = env_map_.find(canonical_env_path);
+  auto env_itr = env_map_.find(env_path);
   // Extract only if the env has not been extracted yet.
   if (env_itr == env_map_.end()) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        ("Extracting Python execution env " + canonical_env_path).c_str());
+        ("Extracting Python execution env " + env_path).c_str());
 
     std::string dst_env_path =
         std::string(base_path_) + "/" + std::to_string(env_path_counter_);
     ++env_path_counter_;
 
     // Add the environment to the list of environments.
-    env_itr = env_map_
-                  .try_emplace(
-                      canonical_env_path, canonical_env_path, dst_env_path,
-                      last_modified_time)
-                  .first;
+    env_itr =
+        env_map_
+            .try_emplace(env_path, env_path, dst_env_path, last_modified_time)
+            .first;
   } else {
     Environment& env = env_itr->second;
 
@@ -298,7 +287,7 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
     if (env.LastModifiedTime() != last_modified_time) {
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
-          ("Re-extracting Python execution env " + canonical_env_path).c_str());
+          ("Re-extracting Python execution env " + env_path).c_str());
       // Environment file has been updated. Need to clear
       // the previously extracted environment and extract
       // the environment to the same destination directory.
@@ -313,36 +302,33 @@ EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      ("Successfully extracted Python execution env " + canonical_env_path)
-          .c_str());
+      ("Successfully extracted Python execution env " + env_path).c_str());
 
   return env.Destination();
 }
 
 void
-EnvironmentManager::DropEnvironment(const std::string& canonical_env_path)
+EnvironmentManager::DropEnvironment(const std::string& env_path)
 {
   LOG_MESSAGE(
       TRITONSERVER_LOG_VERBOSE,
-      ("Trying to drop Python execution env " + canonical_env_path).c_str());
+      ("Trying to drop Python execution env " + env_path).c_str());
 
   std::lock_guard<std::mutex> lk(mutex_);
 
-  auto env_itr = env_map_.find(canonical_env_path);
+  auto env_itr = env_map_.find(env_path);
   if (env_itr != env_map_.end()) {
     if (env_itr->second.DecrementRefCount() == 0) {
       env_map_.erase(env_itr);
       LOG_MESSAGE(
           TRITONSERVER_LOG_VERBOSE,
-          ("Successfully dropped Python execution env " + canonical_env_path)
-              .c_str());
+          ("Successfully dropped Python execution env " + env_path).c_str());
     }
   } else {
     LOG_MESSAGE(
-        TRITONSERVER_LOG_VERBOSE,
-        ("The environment with the key '" + canonical_env_path +
-         "' is not presented the env_map")
-            .c_str());
+        TRITONSERVER_LOG_VERBOSE, ("The environment with the key '" + env_path +
+                                   "' is not presented the env_map")
+                                      .c_str());
   }
 }
 
