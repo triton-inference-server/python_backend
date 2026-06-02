@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright (c) 2021-2026, NVIDIA CORPORATION. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -115,11 +115,24 @@ ExtractTarFile(std::string& archive_path, std::string& dst_path)
   }
 
   struct archive_entry* entry;
-  int flags = ARCHIVE_EXTRACT_TIME;
+  // Reject archive entries that could write outside of `dst_path`.
+  // This includes:
+  // - Parent directory traversal (e.g., "../")
+  // - Absolute paths
+  // - Writes through symlinks present in the archive
+  int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+              ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS |
+              ARCHIVE_EXTRACT_SECURE_SYMLINKS;
 
   struct archive* input_archive = archive_read_new();
   struct archive* output_archive = archive_write_disk_new();
-  archive_write_disk_set_options(output_archive, flags);
+  if (archive_write_disk_set_options(output_archive, flags) != ARCHIVE_OK) {
+    std::string err = std::string("archive_write_disk_set_options() failed: ") +
+                      archive_error_string(output_archive);
+    archive_read_free(input_archive);
+    archive_write_free(output_archive);
+    throw PythonBackendException(err);
+  }
 
   archive_read_support_filter_gzip(input_archive);
   archive_read_support_format_tar(input_archive);
