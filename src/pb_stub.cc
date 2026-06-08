@@ -1849,7 +1849,13 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             auto stub = Stub::GetOrCreateInstance();
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [&stub, infer_request, decoupled]() {
+            // Capture 'stub' by value (it is a shared_ptr). The callback is run
+            // later on an executor thread via run_in_executor, after this
+            // function has returned and the local 'stub' has gone out of scope.
+            // Capturing by reference here would dangle and cause a
+            // use-after-free (stub crash) in the decoupled branch below, which
+            // dereferences 'stub'.
+            py::cpp_function callback = [stub, infer_request, decoupled]() {
               std::shared_ptr<InferResponse> response =
                   infer_request->Exec(decoupled);
               py::object response_object;
