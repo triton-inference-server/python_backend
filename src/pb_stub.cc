@@ -1496,8 +1496,20 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
         *(ipc_message->ResponseMutex())};
     cuda_pool_message_ptr->waiting_on_stub = true;
     ipc_message->ResponseCondition()->notify_all();
-    while (cuda_pool_message_ptr->waiting_on_stub) {
-      ipc_message->ResponseCondition()->wait(lock);
+    // This handler runs on the single 'ParentToStubMQMonitor' thread, which is
+    // also the only thread that delivers decoupled BLS responses
+    // (ProcessBLSResponseDecoupled). It must not block here on the success
+    // path: the parent only needs the notification above to learn that the
+    // CUDA pool handle has been opened, and on success the stub writes nothing
+    // that the parent keeps reading afterwards. Blocking until the parent acks
+    // would freeze response delivery and can deadlock a BLS model that is
+    // waiting on ResponseIterator::Next(). Only wait when an error message was
+    // placed in stub-owned shared memory ('error_string_shm'), which the parent
+    // must finish reading before this function returns and frees it.
+    if (has_exception) {
+      while (cuda_pool_message_ptr->waiting_on_stub) {
+        ipc_message->ResponseCondition()->wait(lock);
+      }
     }
   }
 #endif
