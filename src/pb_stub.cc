@@ -1849,7 +1849,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             auto stub = Stub::GetOrCreateInstance();
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [&stub, infer_request, decoupled]() {
+            py::cpp_function callback = [stub, infer_request, decoupled]() {
               std::shared_ptr<InferResponse> response =
                   infer_request->Exec(decoupled);
               py::object response_object;
