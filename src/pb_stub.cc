@@ -1500,7 +1500,7 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
     // which also delivers decoupled BLS responses,
     // so it must not block on the success path.
     // It should only wait when an error message has been written to
-    // error_string_shm, so the parent can finish reading it before 
+    // error_string_shm, so the parent can finish reading it before
     // this function returns and frees that shared memory.
     if (has_exception) {
       while (cuda_pool_message_ptr->waiting_on_stub) {
