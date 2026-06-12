@@ -1497,7 +1497,7 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
     cuda_pool_message_ptr->waiting_on_stub = true;
     ipc_message->ResponseCondition()->notify_all();
     // This handler runs on the single ParentToStubMQMonitor thread,
-    // which is also the only thread that delivers decoupled BLS responses,
+    // which also delivers decoupled BLS responses,
     // so it must not block on the success path.
     // It should only wait when an error message has been written to
     // error_string_shm, so the parent can finish reading it before 
