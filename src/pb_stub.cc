@@ -1496,8 +1496,16 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
         *(ipc_message->ResponseMutex())};
     cuda_pool_message_ptr->waiting_on_stub = true;
     ipc_message->ResponseCondition()->notify_all();
-    while (cuda_pool_message_ptr->waiting_on_stub) {
-      ipc_message->ResponseCondition()->wait(lock);
+    // This handler runs on the single ParentToStubMQMonitor thread,
+    // which also delivers decoupled BLS responses,
+    // so it must not block on the success path.
+    // It should only wait when an error message has been written to
+    // error_string_shm, so the parent can finish reading it before
+    // this function returns and frees that shared memory.
+    if (has_exception) {
+      while (cuda_pool_message_ptr->waiting_on_stub) {
+        ipc_message->ResponseCondition()->wait(lock);
+      }
     }
   }
 #endif
@@ -1849,7 +1857,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
             auto stub = Stub::GetOrCreateInstance();
             py::object loop =
                 py::module_::import("asyncio").attr("get_running_loop")();
-            py::cpp_function callback = [&stub, infer_request, decoupled]() {
+            py::cpp_function callback = [stub, infer_request, decoupled]() {
               std::shared_ptr<InferResponse> response =
                   infer_request->Exec(decoupled);
               py::object response_object;
