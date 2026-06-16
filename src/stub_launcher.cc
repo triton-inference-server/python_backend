@@ -106,6 +106,19 @@ StubLauncher::Initialize(ModelState* model_state)
   // are supported.
   if (python_execution_env_ != "") {
 #ifndef _WIN32
+    // Resolve symlinks to avoid duplicate environment entries.
+    char canonical_env_path[PATH_MAX + 1];
+    char* err = realpath(python_execution_env_.c_str(), canonical_env_path);
+    if (err == nullptr) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          ("Failed to get the canonical path for " + python_execution_env_ +
+           ".")
+              .c_str());
+    }
+
+    python_execution_env_ = canonical_env_path;
+
     RETURN_IF_ERROR(GetPythonEnvironment(model_state));
 #else
     return TRITONSERVER_ErrorNew(
@@ -798,7 +811,7 @@ StubLauncher::UpdateHealth()
 }
 
 void
-StubLauncher::TerminateStub()
+StubLauncher::TerminateStub(ModelState* model_state)
 {
   if (is_initialized_) {
     bool force_kill = false;
@@ -824,6 +837,12 @@ StubLauncher::TerminateStub()
       WaitForStubProcess();
     }
   }
+
+// Nothing will happen if python_execution_env_ doesn't exist
+#ifndef _WIN32
+  model_state->StateForBackend()->env_manager->DropEnvironment(
+      python_execution_env_);
+#endif
 
   // First destroy the IPCControl. This makes sure that IPCControl is
   // destroyed before the shared memory manager goes out of scope.

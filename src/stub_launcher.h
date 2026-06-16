@@ -145,7 +145,7 @@ class StubLauncher {
   }
 
   // Destruct Stub process
-  void TerminateStub();
+  void TerminateStub(ModelState* model_state);
 
   // Reset log queue and bls decoupled queue pointers
   void ClearQueues();
