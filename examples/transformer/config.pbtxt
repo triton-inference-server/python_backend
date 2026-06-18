@@ -1,0 +1,47 @@
+name: "transformer"
+backend: "python"
+max_batch_size: 8 # maximum batch size that model supports for the types of batching on Triton
+
+# Input tensor specifications
+input [
+  {
+    name: "INPUT_IDS"
+    data_type: TYPE_INT64
+    dims: [ 128 ]  # max_seq_length
+  },
+  {
+    name: "ATTENTION_MASK"
+    data_type: TYPE_INT64
+    dims: [ 128 ]  # max_seq_length
+  }
+]
+
+# Output tensor specifications
+output [
+  {
+    name: "OUTPUT"
+    data_type: TYPE_FP32
+    dims: [ 3 ]  # num_classes (Negative, Neutral, Positive)
+  }
+]
+
+# Instance group configuration
+# For GPUs: Use KIND_GPU
+# For CPU-only: Use KIND_CPU
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+    gpus: [ 0 ]
+  }
+]
+
+# Dynamic batching configuration for better throughput
+dynamic_batching {
+  preferred_batch_size: [ 4, 8 ]
+  max_queue_delay_microseconds: 100
+}
+
+# Model version policy - serve the latest version
+version_policy: { latest: { num_versions: 1 } }
+
