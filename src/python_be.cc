@@ -2419,6 +2419,16 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
 #else
   const std::string stub_executable_name = "triton_python_backend_stub";
 #endif
+  // Remove any trailing path separators from the backend directory. Otherwise a
+  // value such as `--backend-directory=/opt/tritonserver/backends/` yields
+  // `/opt/tritonserver/backends//python`, which fails the equality check with
+  // the resolved backend `location` below and prevents the default Python
+  // backend from being detected.
+  // See: https://github.com/triton-inference-server/server/issues/6730
+  while (default_backend_dir_string.size() > 1 &&
+         default_backend_dir_string.back() == os_slash) {
+    default_backend_dir_string.pop_back();
+  }
   // Check if `triton_python_backend_stub` and `triton_python_backend_utils.py`
   // are located under `location`.
   std::string default_python_backend_dir =
