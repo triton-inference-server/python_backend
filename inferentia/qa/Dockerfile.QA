@@ -61,7 +61,7 @@ RUN rm -f /usr/bin/python && \
     ln -s /usr/bin/python3 /usr/bin/python
 
 RUN pip3 install --upgrade wheel setuptools && \
-    pip3 install --upgrade numpy pillow attrdict future grpcio requests gsutil awscli six grpcio-channelz
+    pip3 install --upgrade numpy pillow attrdict future "grpcio>=1.81.1" requests gsutil awscli six grpcio-channelz
 
 WORKDIR /opt/tritonserver
 # Copy the entire qa repo to the /opt/tritonserver/qa repo
