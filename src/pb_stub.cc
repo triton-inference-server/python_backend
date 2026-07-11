@@ -61,6 +61,7 @@
 #include <windows.h>
 #else
 #include <sys/wait.h>
+#include <unistd.h>  // _exit
 #endif
 
 #ifdef TRITON_ENABLE_GPU
@@ -75,8 +76,6 @@ using cudaStream_t = void*;
 #endif
 
 namespace triton { namespace backend { namespace python {
-
-std::atomic<bool> non_graceful_exit = {false};
 
 void
 SignalHandler(int signum)
@@ -2162,7 +2161,7 @@ main(int argc, char** argv)
 #endif
   std::atomic<bool> background_thread_running = {true};
   std::thread background_thread =
-      std::thread([stub, &parent_pid, &background_thread_running, &logger] {
+      std::thread([stub, &parent_pid, &background_thread_running] {
         // Send a dummy message after the stub process is launched to notify the
         // parent process that the health thread has started.
         std::unique_ptr<IPCMessage> ipc_message = IPCMessage::Create(
@@ -2179,23 +2178,22 @@ main(int argc, char** argv)
           stub->UpdateHealth();
 
           if (!ParentProcessActive(parent_pid)) {
-            // When unhealthy, we should stop attempting to send
-            // messages to the backend ASAP.
-            if (stub->StubToParentServiceActive()) {
-              stub->TerminateStubToParentQueueMonitor();
-            }
-            if (stub->ParentToStubServiceActive()) {
-              stub->TerminateParentToStubQueueMonitor();
-            }
-            // Destroy Stub
+            // The parent process (tritonserver) died abruptly (e.g. SIGKILL
+            // after the termination grace period, an OOM-kill, or a crash) and
+            // could not send a Finalize command. The RunCommand loop and the
+            // model instance threads are still operating on the shared memory
+            // region and its process-shared mutexes. Running the normal
+            // teardown from this background thread is unsafe: DestroyInstance()
+            // unmaps the region (~SharedMemoryManager -> ~mapped_region ->
+            // munmap), and exit() would unmap it as well via static
+            // destructors. Doing so while those threads are still using the
+            // region is a data race that faults them with SIGSEGV inside the
+            // shm mutex (SEGV_MAPERR on the lock word). Since the process is
+            // going away and the region is owned and reclaimed by the parent
+            // (the kernel reclaims all mappings on process exit), terminate
+            // immediately with _exit() so that no destructors run.
             LOG_INFO << "Non-graceful termination detected. ";
-            background_thread_running = false;
-            non_graceful_exit = true;
-
-            // Destroy stub and exit.
-            logger.reset();
-            Stub::DestroyInstance();
-            exit(1);
+            _exit(1);
           }
         }
       });
