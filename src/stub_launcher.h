@@ -161,6 +161,9 @@ class StubLauncher {
   // Wait for stub process
   void WaitForStubProcess();
 
+  // Wait for stub process with timeout. Returns true if the stub exited.
+  bool WaitForStubProcessWithTimeout(int64_t timeout_seconds);
+
 #ifndef _WIN32
   // FIXME [DLIS-5969]: Enable for Windows when custom execution environments
   // are supported.
@@ -199,6 +202,7 @@ class StubLauncher {
   int64_t shm_default_byte_size_;
   int64_t shm_growth_byte_size_;
   int64_t shm_message_queue_size_;
+  int64_t stub_timeout_seconds_;
 
   // Path to python execution environment
   std::string path_to_libpython_;
