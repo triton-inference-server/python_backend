@@ -267,6 +267,11 @@ class Stub {
   /// Get the CUDA memory pool address from the parent process.
   void GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message);
 
+  /// Cleans up Python objects and must be called before the destructor.
+  /// This prevents problems that occur when Python object destructors
+  /// call Stub::GetOrCreateInstance.
+  void DestroyPythonObjects();
+
   /// Calls the user's is_ready() Python method and returns its response
   /// when handling model readiness check requests.
   void ProcessUserModelReadinessRequest(

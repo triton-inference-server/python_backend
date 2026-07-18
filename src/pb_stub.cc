@@ -1059,13 +1059,7 @@ Stub::~Stub()
   }
 #endif
 
-  // Ensure the interpreter is active before trying to clean up.
-  if (Py_IsInitialized()) {
-    py::gil_scoped_acquire acquire;
-    py::object async_event_loop_local(std::move(async_event_loop_));
-    py::object background_futures_local(std::move(background_futures_));
-    py::object model_instance_local(std::move(model_instance_));
-  }
+  DestroyPythonObjects();
 
   stub_message_queue_.reset();
   parent_message_queue_.reset();
@@ -1088,6 +1082,11 @@ Stub::GetOrCreateInstance()
 void
 Stub::DestroyInstance()
 {
+  if (!stub_instance) {
+    return;
+  }
+
+  stub_instance->DestroyPythonObjects();
   stub_instance.reset();
 }
 
@@ -1509,6 +1508,20 @@ Stub::GetCUDAMemoryPoolAddress(std::unique_ptr<IPCMessage>& ipc_message)
     }
   }
 #endif
+}
+
+void
+Stub::DestroyPythonObjects()
+{
+  // Ensure the interpreter is active before trying to clean up.
+  if (Py_IsInitialized()) {
+    py::gil_scoped_acquire acquire;
+    py::object async_event_loop_local(std::move(async_event_loop_));
+    py::object background_futures_local(std::move(background_futures_));
+    py::object model_instance_local(std::move(model_instance_));
+    py::object deserialize_bytes_local(std::move(deserialize_bytes_));
+    py::object serialize_bytes_local(std::move(serialize_bytes_));
+  }
 }
 
 void
