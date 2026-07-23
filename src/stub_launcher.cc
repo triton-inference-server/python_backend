@@ -64,8 +64,7 @@ StubLauncher::Initialize(ModelState* model_state)
   shm_growth_byte_size_ = model_state->StateForBackend()->shm_growth_byte_size;
   shm_message_queue_size_ =
       model_state->StateForBackend()->shm_message_queue_size;
-  stub_timeout_seconds_ =
-      model_state->StateForBackend()->stub_timeout_seconds;
+  stub_timeout_seconds_ = model_state->StateForBackend()->stub_timeout_seconds;
   python_execution_env_ = model_state->PythonExecutionEnv();
   python_lib_ = model_state->StateForBackend()->python_lib;
   model_state->ModelConfig().Write(&model_config_buffer_);
