@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -193,6 +193,9 @@ class SharedMemoryManager {
   bi::interprocess_mutex* Mutex() { return shm_mutex_; }
 
   void SetDeleteRegion(bool delete_region);
+
+  // Idempotent: removes the parent-owned shm region and clears delete_region_.
+  void RemoveShmRegion();
 
   std::unique_ptr<CUDAMemoryPoolManager>& GetCUDAMemoryPoolManager()
   {

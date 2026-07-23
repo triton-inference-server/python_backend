@@ -26,7 +26,10 @@
 
 #include "stub_launcher.h"
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <limits>
 
 #include "pb_utils.h"
 #include "python_be.h"
@@ -42,7 +45,7 @@ namespace triton { namespace backend { namespace python {
 StubLauncher::StubLauncher(const std::string stub_process_kind)
     : parent_pid_(0), is_initialized_(false),
       stub_process_kind_(stub_process_kind), model_instance_name_(""),
-      device_id_(0), kind_("")
+      device_id_(0), kind_(""), stub_timeout_seconds_(30)
 {
 }
 
@@ -51,7 +54,7 @@ StubLauncher::StubLauncher(
     const int32_t device_id, const std::string kind)
     : is_initialized_(false), stub_process_kind_(stub_process_kind),
       model_instance_name_(model_instance_name), device_id_(device_id),
-      kind_(kind)
+      kind_(kind), stub_timeout_seconds_(30)
 {
 }
 
@@ -64,6 +67,7 @@ StubLauncher::Initialize(ModelState* model_state)
   shm_growth_byte_size_ = model_state->StateForBackend()->shm_growth_byte_size;
   shm_message_queue_size_ =
       model_state->StateForBackend()->shm_message_queue_size;
+  stub_timeout_seconds_ = model_state->StateForBackend()->stub_timeout_seconds;
   python_execution_env_ = model_state->PythonExecutionEnv();
   python_lib_ = model_state->StateForBackend()->python_lib;
   model_state->ModelConfig().Write(&model_config_buffer_);
@@ -801,15 +805,33 @@ void
 StubLauncher::TerminateStub()
 {
   if (is_initialized_) {
+    // Single teardown budget: finalize + wait share stub_timeout_seconds_.
     bool force_kill = false;
+    int64_t remaining_seconds = stub_timeout_seconds_;
     if (is_healthy_) {
+      const int64_t total_timeout_ms = stub_timeout_seconds_ * 1000;
+      // Clamp to INT_MAX; MessageQueue::Pop takes int.
+      const int pop_timeout_ms = static_cast<int>(std::min<int64_t>(
+          total_timeout_ms,
+          static_cast<int64_t>(std::numeric_limits<int>::max())));
       // Finalize command does not have any arguments.
       std::unique_ptr<IPCMessage> ipc_message =
           IPCMessage::Create(shm_pool_, false /* inline_response */);
 
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
       stub_message_queue_->Push(ipc_message->ShmHandle());
-      parent_message_queue_->Pop();
+      bool success = false;
+      const auto pop_start = std::chrono::steady_clock::now();
+      parent_message_queue_->Pop(pop_timeout_ms, success);
+      const int64_t pop_elapsed_s =
+          std::chrono::duration_cast<std::chrono::seconds>(
+              std::chrono::steady_clock::now() - pop_start)
+              .count();
+      remaining_seconds =
+          std::max<int64_t>(0, stub_timeout_seconds_ - pop_elapsed_s);
+      if (!success) {
+        force_kill = true;
+      }
 
       stub_message_queue_.reset();
       parent_message_queue_.reset();
@@ -820,9 +842,13 @@ StubLauncher::TerminateStub()
 
     if (force_kill) {
       KillStubProcess();
-    } else {
-      WaitForStubProcess();
+    } else if (!WaitForStubProcessWithTimeout(remaining_seconds)) {
+      KillStubProcess();
     }
+  }
+
+  if (shm_pool_ != nullptr) {
+    shm_pool_->RemoveShmRegion();
   }
 
   // First destroy the IPCControl. This makes sure that IPCControl is
@@ -924,7 +950,47 @@ StubLauncher::WaitForStubProcess()
     // Added this check to ensure server doesn't hang waiting after stub
     // process has already be killed and cannot be waited on
     waitpid(stub_pid_, &status, 0);
+    stub_pid_ = 0;
   }
+#endif
+}
+
+bool
+StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
+{
+#ifdef _WIN32
+  WaitForStubProcess();
+  return true;
+#else
+  if (stub_pid_ == 0) {
+    return true;
+  }
+
+  for (int64_t elapsed = 0; elapsed < timeout_seconds; ++elapsed) {
+    int status;
+    pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
+    if (ret == stub_pid_) {
+      stub_pid_ = 0;
+      return true;
+    }
+    if (ret == -1) {
+      stub_pid_ = 0;
+      return true;
+    }
+    sleep(1);
+  }
+
+  // Stub may have exited during the last sleep(1); recheck before killing.
+  {
+    int status;
+    pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
+    if (ret == stub_pid_ || ret == -1) {
+      stub_pid_ = 0;
+      return true;
+    }
+  }
+
+  return false;
 #endif
 }
 

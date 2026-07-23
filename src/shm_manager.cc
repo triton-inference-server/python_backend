@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,12 +26,57 @@
 
 #include "shm_manager.h"
 
+#include <atomic>
 #include <boost/interprocess/managed_external_buffer.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/interprocess/shared_memory_object.hpp>
+#include <cstdlib>
 #include <iostream>
+#include <mutex>
+#include <unordered_set>
 
 namespace triton { namespace backend { namespace python {
+
+namespace {
+
+std::mutex parent_shm_regions_mu;
+std::unordered_set<std::string> parent_shm_regions;
+std::atomic<bool> parent_shm_atexit_registered{false};
+
+void
+CleanupParentShmRegions()
+{
+  std::lock_guard<std::mutex> lock(parent_shm_regions_mu);
+  for (const auto& region : parent_shm_regions) {
+    bi::shared_memory_object::remove(region.c_str());
+  }
+  parent_shm_regions.clear();
+}
+
+void
+RegisterParentShmRegion(const std::string& shm_region_name)
+{
+  {
+    std::lock_guard<std::mutex> lock(parent_shm_regions_mu);
+    parent_shm_regions.insert(shm_region_name);
+  }
+  if (!parent_shm_atexit_registered.exchange(true)) {
+    if (std::atexit(CleanupParentShmRegions) != 0) {
+      std::cerr << "python_backend: failed to register atexit shm cleanup "
+                   "handler; relying on TerminateStub for cleanup"
+                << std::endl;
+    }
+  }
+}
+
+void
+UnregisterParentShmRegion(const std::string& shm_region_name)
+{
+  std::lock_guard<std::mutex> lock(parent_shm_regions_mu);
+  parent_shm_regions.erase(shm_region_name);
+}
+
+}  // namespace
 
 void
 CUDAMemoryPoolManager::SetCUDAPoolAddress(
@@ -139,6 +184,7 @@ SharedMemoryManager::SharedMemoryManager(
   if (create) {
     *total_size_ = current_capacity_;
     new (shm_mutex_) bi::interprocess_mutex;
+    RegisterParentShmRegion(shm_region_name_);
   }
 }
 
@@ -227,8 +273,16 @@ SharedMemoryManager::FreeMemory()
 
 SharedMemoryManager::~SharedMemoryManager() noexcept(false)
 {
+  RemoveShmRegion();
+}
+
+void
+SharedMemoryManager::RemoveShmRegion()
+{
   if (delete_region_) {
     bi::shared_memory_object::remove(shm_region_name_.c_str());
+    UnregisterParentShmRegion(shm_region_name_);
+    delete_region_ = false;
   }
 }
 
