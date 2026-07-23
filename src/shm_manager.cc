@@ -61,7 +61,11 @@ RegisterParentShmRegion(const std::string& shm_region_name)
     parent_shm_regions.insert(shm_region_name);
   }
   if (!parent_shm_atexit_registered.exchange(true)) {
-    std::atexit(CleanupParentShmRegions);
+    if (std::atexit(CleanupParentShmRegions) != 0) {
+      std::cerr << "python_backend: failed to register atexit shm cleanup "
+                   "handler; relying on TerminateStub for cleanup"
+                << std::endl;
+    }
   }
 }
 

@@ -194,7 +194,7 @@ class SharedMemoryManager {
 
   void SetDeleteRegion(bool delete_region);
 
-  // Remove the parent-owned shared memory region from the filesystem.
+  // Idempotent: removes the parent-owned shm region and clears delete_region_.
   void RemoveShmRegion();
 
   std::unique_ptr<CUDAMemoryPoolManager>& GetCUDAMemoryPoolManager()

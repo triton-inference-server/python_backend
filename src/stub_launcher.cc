@@ -805,15 +805,12 @@ void
 StubLauncher::TerminateStub()
 {
   if (is_initialized_) {
-    // Enforce stub_timeout_seconds_ as a single total budget across the
-    // finalize wait and the subsequent process-exit wait; without this the
-    // healthy teardown path could take up to 2 * stub_timeout_seconds_.
+    // Single teardown budget: finalize + wait share stub_timeout_seconds_.
     bool force_kill = false;
     int64_t remaining_seconds = stub_timeout_seconds_;
     if (is_healthy_) {
       const int64_t total_timeout_ms = stub_timeout_seconds_ * 1000;
-      // MessageQueue::Pop takes `int const&`; clamp to INT_MAX so a large
-      // stub_timeout_seconds_ cannot silently narrow to a negative value.
+      // Clamp to INT_MAX; MessageQueue::Pop takes int.
       const int pop_timeout_ms = static_cast<int>(std::min<int64_t>(
           total_timeout_ms,
           static_cast<int64_t>(std::numeric_limits<int>::max())));
@@ -983,8 +980,7 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
     sleep(1);
   }
 
-  // The process may have exited during the final sleep window; re-check once
-  // more so we don't force-kill an already-dead process.
+  // Stub may have exited during the last sleep(1); recheck before killing.
   {
     int status;
     pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
