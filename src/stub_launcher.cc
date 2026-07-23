@@ -26,7 +26,10 @@
 
 #include "stub_launcher.h"
 
+#include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <limits>
 
 #include "pb_utils.h"
 #include "python_be.h"
@@ -802,9 +805,18 @@ void
 StubLauncher::TerminateStub()
 {
   if (is_initialized_) {
+    // Enforce stub_timeout_seconds_ as a single total budget across the
+    // finalize wait and the subsequent process-exit wait; without this the
+    // healthy teardown path could take up to 2 * stub_timeout_seconds_.
     bool force_kill = false;
+    int64_t remaining_seconds = stub_timeout_seconds_;
     if (is_healthy_) {
-      const int64_t timeout_ms = stub_timeout_seconds_ * 1000;
+      const int64_t total_timeout_ms = stub_timeout_seconds_ * 1000;
+      // MessageQueue::Pop takes `int const&`; clamp to INT_MAX so a large
+      // stub_timeout_seconds_ cannot silently narrow to a negative value.
+      const int pop_timeout_ms = static_cast<int>(std::min<int64_t>(
+          total_timeout_ms,
+          static_cast<int64_t>(std::numeric_limits<int>::max())));
       // Finalize command does not have any arguments.
       std::unique_ptr<IPCMessage> ipc_message =
           IPCMessage::Create(shm_pool_, false /* inline_response */);
@@ -812,7 +824,14 @@ StubLauncher::TerminateStub()
       ipc_message->Command() = PYTHONSTUB_FinalizeRequest;
       stub_message_queue_->Push(ipc_message->ShmHandle());
       bool success = false;
-      parent_message_queue_->Pop(timeout_ms, success);
+      const auto pop_start = std::chrono::steady_clock::now();
+      parent_message_queue_->Pop(pop_timeout_ms, success);
+      const int64_t pop_elapsed_s =
+          std::chrono::duration_cast<std::chrono::seconds>(
+              std::chrono::steady_clock::now() - pop_start)
+              .count();
+      remaining_seconds =
+          std::max<int64_t>(0, stub_timeout_seconds_ - pop_elapsed_s);
       if (!success) {
         force_kill = true;
       }
@@ -826,7 +845,7 @@ StubLauncher::TerminateStub()
 
     if (force_kill) {
       KillStubProcess();
-    } else if (!WaitForStubProcessWithTimeout(stub_timeout_seconds_)) {
+    } else if (!WaitForStubProcessWithTimeout(remaining_seconds)) {
       KillStubProcess();
     }
   }
@@ -962,6 +981,17 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
       return true;
     }
     sleep(1);
+  }
+
+  // The process may have exited during the final sleep window; re-check once
+  // more so we don't force-kill an already-dead process.
+  {
+    int status;
+    pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
+    if (ret == stub_pid_ || ret == -1) {
+      stub_pid_ = 0;
+      return true;
+    }
   }
 
   return false;
