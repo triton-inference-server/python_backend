@@ -2027,7 +2027,8 @@ ModelInstanceState::~ModelInstanceState()
   }
   // Terminate stub first to allow any last messages to be received by the back
   // end before deallocating the queue memory
-  Stub()->TerminateStub();
+  ModelState* model_state = reinterpret_cast<ModelState*>(Model());
+  Stub()->TerminateStub(model_state);
   TerminateMonitor();
   Stub()->ClearQueues();
   Stub().reset();
@@ -2056,7 +2057,7 @@ ModelState::Create(TRITONBACKEND_Model* triton_model, ModelState** state)
     RETURN_IF_ERROR((*state)->SetModelConfig());
 
     (*state)->Stub()->UpdateHealth();
-    (*state)->Stub()->TerminateStub();
+    (*state)->Stub()->TerminateStub(*state);
     (*state)->Stub()->ClearQueues();
     (*state)->Stub().reset();
   }
@@ -2172,7 +2173,7 @@ ModelState::LaunchAutoCompleteStubProcess()
   }
   catch (const BackendModelException& ex) {
     Stub()->UpdateHealth();
-    Stub()->TerminateStub();
+    Stub()->TerminateStub(this);
     Stub()->ClearQueues();
     Stub().reset();
     RETURN_ERROR_IF_TRUE(

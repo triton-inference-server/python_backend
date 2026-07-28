@@ -46,17 +46,51 @@ bool FileExists(std::string& path);
 //
 #ifndef _WIN32
 class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
-
  public:
+  class Environment {
+   public:
+    Environment(
+        const std::string& source, const std::string& destination,
+        const time_t& last_modified_time);
+    ~Environment();
+
+    void Update(const time_t& last_modified_time);
+    void IncrementRefCount() { ++ref_count_; }
+    size_t DecrementRefCount() { return --ref_count_; }
+
+    const std::string& Source() const { return source_; }
+    const std::string& Destination() const { return destination_; }
+    const time_t& LastModifiedTime() const { return last_modified_time_; }
+
+   private:
+    void Extract();
+    void Delete();
+
+    std::string source_;
+    std::string destination_;
+    time_t last_modified_time_;
+
+    size_t ref_count_ = 0;
+  };
+
   EnvironmentManager();
 
   // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
+  // already extracted
+  std::string ExtractIfNotExtracted(const std::string& env_path);
+
   ~EnvironmentManager();
+
+  // Decrement the refcount for the environment identified by
+  // env_path. If the refcount reaches zero, the environment is
+  // removed from the map.
+  void DropEnvironment(const std::string& env_path);
+
+ private:
+  size_t env_path_counter_ = 0;
+  std::map<std::string, Environment> env_map_;
+  char base_path_[PATH_MAX + 1];
+  std::mutex mutex_;
 };
 #endif
 
