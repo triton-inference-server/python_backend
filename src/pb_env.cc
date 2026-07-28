@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 #include "pb_utils.h"
 
@@ -241,6 +242,9 @@ RecursiveDirectoryDelete(const char* dir)
 
 EnvironmentManager::EnvironmentManager()
 {
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      "EnvironmentManager constructor: initializing Python env manager");
   char tmp_dir_template[PATH_MAX + 1];
   strcpy(tmp_dir_template, "/tmp/python_env_XXXXXX");
 
@@ -252,50 +256,66 @@ EnvironmentManager::EnvironmentManager()
   strcpy(base_path_, tmp_dir_template);
 }
 
-std::string
-EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
+
+std::optional<EnvironmentManager::EnvironmentGuard>
+EnvironmentManager::ExtractIfNotExtracted(const std::string& env_path)
+{
+  std::string canonical_env_path = [&] {
+    char canonical_env_path[PATH_MAX + 1];
+    char* err = realpath(env_path.c_str(), canonical_env_path);
+    if (err == nullptr) {
+      throw PythonBackendException(
+          "Failed to get the canonical path for " + env_path + ".");
+    }
+    return std::string(canonical_env_path);
+  }();
+
+  // If the path is not a conda-packed file, then bypass the extraction process
+  struct stat info;
+  if (stat(canonical_env_path.c_str(), &info) != 0) {
+    throw PythonBackendException(
+        "stat() of : " + canonical_env_path + " returned error.");
+  } else if (S_ISDIR(info.st_mode)) {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_VERBOSE,
+        ("Returning canonical path since EXECUTION_ENV_PATH does "
+         "not contain compressed path. Path: " +
+         canonical_env_path)
+            .c_str());
+    return std::nullopt;
+  }
+
+  auto& env = GetEnvironment(canonical_env_path);
+  return EnvironmentGuard(this, &env);
+}
+
+EnvironmentManager::Environment&
+EnvironmentManager::GetEnvironment(const std::string& env_path)
 {
   // Lock the mutex. Only a single thread should modify the map.
   std::lock_guard<std::mutex> lk(mutex_);
-  char canonical_env_path[PATH_MAX + 1];
-
-  char* err = realpath(env_path.c_str(), canonical_env_path);
-  if (err == nullptr) {
-    throw PythonBackendException(
-        std::string("Failed to get the canonical path for ") + env_path + ".");
-  }
 
   time_t last_modified_time;
-  LastModifiedTime(canonical_env_path, &last_modified_time);
+  LastModifiedTime(env_path, &last_modified_time);
 
   bool env_extracted = false;
   bool re_extraction = false;
 
-  // If the path is not a conda-packed file, then bypass the extraction process
-  struct stat info;
-  if (stat(canonical_env_path, &info) != 0) {
-    throw PythonBackendException(
-        std::string("stat() of : ") + canonical_env_path + " returned error.");
-  } else if (S_ISDIR(info.st_mode)) {
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_VERBOSE,
-        (std::string("Returning canonical path since EXECUTION_ENV_PATH does "
-                     "not contain compressed path. Path: ") +
-         canonical_env_path)
-            .c_str());
-    return canonical_env_path;
-  }
-  const auto env_itr = env_map_.find(canonical_env_path);
+  const std::string& env_key = env_path;
+  auto env_itr = env_map_.find(env_key);
+  Environment* env = nullptr;
   if (env_itr != env_map_.end()) {
+    env = &env_itr->second;
+
     // Check if the environment has been modified and would
-    // need to be extracted again.
-    if (env_itr->second.second == last_modified_time) {
+    // need to be extracted again
+
+    if (env->LastModifiedTime() == last_modified_time) {
       env_extracted = true;
     } else {
       // Environment file has been updated. Need to clear
       // the previously extracted environment and extract
       // the environment to the same destination directory.
-      RecursiveDirectoryDelete(env_itr->second.first.c_str());
       re_extraction = true;
     }
   }
@@ -304,37 +324,39 @@ EnvironmentManager::ExtractIfNotExtracted(std::string env_path)
   if (!env_extracted) {
     LOG_MESSAGE(
         TRITONSERVER_LOG_VERBOSE,
-        (std::string("Extracting Python execution env ") + canonical_env_path)
-            .c_str());
-    std::string dst_env_path;
-    if (re_extraction) {
-      dst_env_path = env_map_[canonical_env_path].first;
-    } else {
-      dst_env_path =
-          std::string(base_path_) + "/" + std::to_string(env_map_.size());
-    }
+        ("Extracting Python execution env " + env_path).c_str());
 
-    std::string canonical_env_path_str(canonical_env_path);
-
-    int status =
-        mkdir(dst_env_path.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-    if (status == 0) {
-      ExtractTarFile(canonical_env_path_str, dst_env_path);
-    } else {
-      throw PythonBackendException(
-          std::string("Failed to create environment directory for '") +
-          dst_env_path.c_str() + "'.");
-    }
     if (re_extraction) {
-      // Just update the last modified timestamp
-      env_map_[canonical_env_path].second = last_modified_time;
+      // Just replace with new environment (by updated source)
+      env->Update(last_modified_time);
     } else {
-      // Add the path to the list of environments
-      env_map_.insert({canonical_env_path, {dst_env_path, last_modified_time}});
+      std::string dst_env_path =
+          std::string(base_path_) + "/" + std::to_string(env_path_counter_);
+      ++env_path_counter_;
+
+      // Add the environment to the list of environments
+      env_itr = env_map_.try_emplace(env_key, env_path,
+                                     dst_env_path, last_modified_time).first;
+      env = &env_itr->second;
     }
-    return dst_env_path;
-  } else {
-    return env_map_.find(canonical_env_path)->second.first;
+  }
+
+  env->AddOwner();
+  return *env;
+}
+
+void
+EnvironmentManager::DropEnvironment(const EnvironmentProxy& env_proxy)
+{
+  std::lock_guard<std::mutex> lk(mutex_);
+
+  const std::string& env_key = env_proxy.Source();
+  auto env_itr = env_map_.find(env_key);
+  auto& env = env_itr->second;
+
+  size_t env_owners_counter = env.RemoveOwner();
+  if (env_owners_counter == 0) {
+    env_map_.erase(env.Source());
   }
 }
 
@@ -342,6 +364,75 @@ EnvironmentManager::~EnvironmentManager()
 {
   RecursiveDirectoryDelete(base_path_);
 }
+
+EnvironmentManager::Environment::Environment(
+    const std::string& source, const std::string& path,
+    const time_t& last_modified_time)
+    : source_(source), path_(path), last_modified_time_(last_modified_time)
+{
+  Extract();
+}
+
+void
+EnvironmentManager::Environment::Extract()
+{
+  int status = mkdir(path_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+  if (status != 0) {
+    throw PythonBackendException(
+        "Failed to create environment directory for '" + path_ + "'.");
+  }
+  ExtractTarFile(source_, path_);
+}
+
+void
+EnvironmentManager::Environment::Update(const time_t& last_modified_time)
+{
+  Delete();
+  Extract();
+  last_modified_time_ = last_modified_time;
+}
+
+void
+EnvironmentManager::Environment::Delete()
+{
+  RecursiveDirectoryDelete(path_.c_str());
+}
+
+EnvironmentManager::Environment::~Environment()
+{
+  Delete();
+}
+
+EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
+    EnvironmentManager* manager, Environment* env)
+    : manager_(manager), environment_proxy_(env)
+{
+}
+
+EnvironmentManager::EnvironmentGuard::EnvironmentGuard(
+    EnvironmentGuard&& other_guard)
+    : manager_(other_guard.manager_),
+      environment_proxy_(std::move(other_guard.environment_proxy_))
+{
+  other_guard.manager_ = nullptr;
+}
+
+EnvironmentManager::EnvironmentGuard&
+EnvironmentManager::EnvironmentGuard::operator=(EnvironmentGuard&& other_guard)
+{
+  EnvironmentGuard new_guard(std::move(other_guard));
+  std::swap(*this, new_guard);
+  return *this;
+}
+
+EnvironmentManager::EnvironmentGuard::~EnvironmentGuard()
+{
+  if (manager_ != nullptr) {
+    manager_->DropEnvironment(environment_proxy_);
+  }
+}
+
+
 #endif
 
 }}}  // namespace triton::backend::python

@@ -36,6 +36,7 @@
 #include <boost/interprocess/sync/scoped_lock.hpp>
 #include <boost/thread/thread_time.hpp>
 #include <future>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -49,6 +50,8 @@
 #include "triton/backend/backend_model_instance.h"
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
+
+#include "pb_env.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -203,7 +206,8 @@ class StubLauncher {
   // Path to python execution environment
   std::string path_to_libpython_;
   std::string path_to_activate_;
-  std::string python_execution_env_;
+  std::optional<EnvironmentManager::EnvironmentGuard> python_execution_env_;
+  std::string python_execution_env_source_;
 
   common::TritonJson::WriteBuffer model_config_buffer_;
   common::TritonJson::Value auto_complete_config_;

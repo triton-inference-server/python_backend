@@ -28,6 +28,7 @@
 #include <climits>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #ifdef WIN32
@@ -46,17 +47,91 @@ bool FileExists(std::string& path);
 //
 #ifndef _WIN32
 class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
-
  public:
+  class Environment {
+   public:
+    Environment(
+        const std::string& source, const std::string& path,
+        const time_t& last_modified_time);
+    ~Environment();
+
+    void Update(const time_t& last_modified_time);
+    void AddOwner() { ++owners_counter_; }
+    size_t RemoveOwner() { return --owners_counter_; }
+
+    const std::string& Source() const { return source_; }
+    const std::string& Path() const { return path_; }
+    const time_t& LastModifiedTime() const { return last_modified_time_; }
+
+   private:
+    void Extract();
+    void Delete();
+
+    std::string source_;
+    std::string path_;
+    time_t last_modified_time_;
+
+    size_t owners_counter_ = 0;
+  };
+
+  class EnvironmentProxy {
+   public:
+    EnvironmentProxy(const Environment* env) : env_(env) {}
+
+    EnvironmentProxy(EnvironmentProxy&& other_proxy) : env_(other_proxy.env_)
+    {
+      other_proxy.env_ = nullptr;
+    }
+
+    ~EnvironmentProxy() = default;
+
+    const std::string& Source() const & { return env_->Source(); }
+    const std::string& Path() const & { return env_->Path(); }
+    const time_t& LastModifiedTime() const & { return env_->LastModifiedTime(); }
+
+   private:
+    const Environment* env_;
+  };
+
+  class EnvironmentGuard {
+   public:
+    EnvironmentGuard(EnvironmentManager* manager, Environment* environment);
+
+    EnvironmentGuard(const EnvironmentGuard&) = delete;
+    EnvironmentGuard(EnvironmentGuard&&);
+
+    EnvironmentGuard& operator=(const EnvironmentGuard&) = delete;
+    EnvironmentGuard& operator=(EnvironmentGuard&&);
+
+    const EnvironmentProxy* operator->() const { return &environment_proxy_; }
+    const EnvironmentProxy& operator*() const { return environment_proxy_; }
+
+    ~EnvironmentGuard();
+
+   private:
+    EnvironmentManager* manager_;
+    EnvironmentProxy environment_proxy_;
+  };
+
   EnvironmentManager();
+  friend class EnvironmentGuard;
 
   // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
+  // already extracted. Returns nullopt when env_path is an uncompressed
+  // directory (caller uses that path directly).
+  std::optional<EnvironmentGuard> ExtractIfNotExtracted(
+      const std::string& env_path);
+
   ~EnvironmentManager();
+
+ private:
+  void DropEnvironment(const EnvironmentProxy& environment);
+  Environment& GetEnvironment(const std::string& env_path);
+
+  size_t env_path_counter_ = 0;
+  std::map<std::string, Environment> env_map_;
+  char base_path_[PATH_MAX + 1];
+  std::mutex mutex_;
 };
 #endif
 

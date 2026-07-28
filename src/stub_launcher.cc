@@ -64,7 +64,7 @@ StubLauncher::Initialize(ModelState* model_state)
   shm_growth_byte_size_ = model_state->StateForBackend()->shm_growth_byte_size;
   shm_message_queue_size_ =
       model_state->StateForBackend()->shm_message_queue_size;
-  python_execution_env_ = model_state->PythonExecutionEnv();
+  python_execution_env_source_ = model_state->PythonExecutionEnv();
   python_lib_ = model_state->StateForBackend()->python_lib;
   model_state->ModelConfig().Write(&model_config_buffer_);
   is_decoupled_ = model_state->IsDecoupled();
@@ -104,7 +104,7 @@ StubLauncher::Initialize(ModelState* model_state)
 
   // FIXME [DLIS-5969]: Enable for Windows when custom execution environments
   // are supported.
-  if (python_execution_env_ != "") {
+  if (python_execution_env_source_ != "") {
 #ifndef _WIN32
     RETURN_IF_ERROR(GetPythonEnvironment(model_state));
 #else
@@ -405,7 +405,7 @@ StubLauncher::Launch()
   // executables and libraries.
   ipc_control_->uses_env = false;
 
-  if (python_execution_env_ != "") {
+  if (python_execution_env_source_ != "") {
     ipc_control_->uses_env = true;
 
     // Parse environment variables from activation script
@@ -592,26 +592,31 @@ StubLauncher::Launch()
 TRITONSERVER_Error*
 StubLauncher::GetPythonEnvironment(ModelState* model_state)
 {
-  std::string python_execution_env = "";
+  auto python_execution_env_source = model_state->PythonExecutionEnv();
   try {
-    python_execution_env =
+    python_execution_env_ =
         model_state->StateForBackend()->env_manager->ExtractIfNotExtracted(
-            python_execution_env_);
+            python_execution_env_source);
   }
   catch (PythonBackendException& pb_exception) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
   }
 
-  path_to_activate_ = python_execution_env + "/bin/activate";
-  path_to_libpython_ = python_execution_env + "/lib";
-  if (python_execution_env.length() > 0 && !FileExists(path_to_activate_)) {
+  std::string python_execution_env_path = python_execution_env_source;
+  if (python_execution_env_.has_value()) {
+    python_execution_env_path = (*python_execution_env_)->Path();
+  }
+
+  path_to_activate_ = python_execution_env_path + "/bin/activate";
+  path_to_libpython_ = python_execution_env_path + "/lib";
+  if (python_execution_env_path.length() > 0 &&
+      !FileExists(path_to_activate_)) {
     return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         ("Path " + path_to_activate_ +
          " does not exist. The Python environment should contain an "
-         "'activate' script.")
-            .c_str());
+         "'activate' script.").c_str());
   }
   return nullptr;
 }
