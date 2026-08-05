@@ -44,16 +44,6 @@ std::unordered_set<std::string> parent_shm_regions;
 std::atomic<bool> parent_shm_atexit_registered{false};
 
 void
-CleanupParentShmRegions()
-{
-  std::lock_guard<std::mutex> lock(parent_shm_regions_mu);
-  for (const auto& region : parent_shm_regions) {
-    bi::shared_memory_object::remove(region.c_str());
-  }
-  parent_shm_regions.clear();
-}
-
-void
 RegisterParentShmRegion(const std::string& shm_region_name)
 {
   {
@@ -61,7 +51,13 @@ RegisterParentShmRegion(const std::string& shm_region_name)
     parent_shm_regions.insert(shm_region_name);
   }
   if (!parent_shm_atexit_registered.exchange(true)) {
-    if (std::atexit(CleanupParentShmRegions) != 0) {
+    if (std::atexit([]() {
+          std::lock_guard<std::mutex> lock(parent_shm_regions_mu);
+          for (const auto& region : parent_shm_regions) {
+            bi::shared_memory_object::remove(region.c_str());
+          }
+          parent_shm_regions.clear();
+        }) != 0) {
       std::cerr << "python_backend: failed to register atexit shm cleanup "
                    "handler; relying on TerminateStub for cleanup"
                 << std::endl;
