@@ -1,4 +1,4 @@
-# Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -284,6 +284,30 @@ target_compile_options(
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor>
 )
 target_compile_definitions(triton-python-backend-stub PRIVATE TRITON_PB_STUB)
+
+# When libpython is a static archive -- the manylinux base container builds
+# CPython with --disable-shared -- the Py_* symbols land inside the stub
+# executable instead of a shared library. Python C extension modules are
+# dlopen'ed and deliberately leave Py_* undefined, so they can only resolve
+# against the stub's dynamic symbol table. ENABLE_EXPORTS makes CMake add the
+# platform's flag for that (-Wl,--export-dynamic on Linux), the same way
+# CPython links its own interpreter binary.
+#
+# A shared libpython needs none of this, since modules bind to it directly.
+# Key off the linkage rather than the platform so this stays correct if a
+# target ever moves between the two.
+#
+# PYTHON_LIBRARY rather than PYTHON_LIBRARIES: pybind11 is pulled in with
+# FetchContent_MakeAvailable, which uses add_subdirectory, so only the cache
+# entry that find_library creates survives into this scope. PYTHON_LIBRARIES
+# is a plain variable set inside pybind11's directory and reads empty here.
+if(PYTHON_LIBRARY MATCHES "\\.a$")
+  set_target_properties(
+    triton-python-backend-stub
+    PROPERTIES
+      ENABLE_EXPORTS TRUE
+  )
+endif()
 
 # RHEL assets are not released in a container environment nor do the current
 # Python lib versions in the manylinux base container match those currently
