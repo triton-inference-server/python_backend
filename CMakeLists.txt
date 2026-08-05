@@ -93,9 +93,15 @@ FetchContent_Declare(
   GIT_SHALLOW ON
 )
 
-# RHEL base container has multiple version of Python installed. By default
-# it seems like pybind will pickup v3.6, so we specifically assign it to
-# search for 3.12 here.
+# Detect a RHEL-family build. Used further down to adjust how the stub
+# executable is linked.
+#
+# This used to also justify passing PYBIND11_PYTHON_VERSION, because pybind
+# would otherwise pick up an older interpreter present in the RHEL base
+# container. That is no longer needed: pybind11 prefers the newest entry of
+# its own Python_ADDITIONAL_VERSIONS list, and the manylinux base container
+# puts a single interpreter first on PATH. Set PYBIND11_PYTHON_VERSION
+# explicitly if a build ever has to target a specific version again.
 set(RHEL_BUILD OFF)
 if(LINUX)
   file(STRINGS "/etc/os-release" DISTRO_ID_LIKE REGEX "ID_LIKE")
