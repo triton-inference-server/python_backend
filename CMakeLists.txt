@@ -1,4 +1,4 @@
-# Copyright 2020-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -93,9 +93,15 @@ FetchContent_Declare(
   GIT_SHALLOW ON
 )
 
-# RHEL base container has multiple version of Python installed. By default
-# it seems like pybind will pickup v3.6, so we specifically assign it to
-# search for 3.12 here.
+# Detect a RHEL-family build. Used further down to adjust how the stub
+# executable is linked.
+#
+# This used to also justify passing PYBIND11_PYTHON_VERSION, because pybind
+# would otherwise pick up an older interpreter present in the RHEL base
+# container. That is no longer needed: pybind11 prefers the newest entry of
+# its own Python_ADDITIONAL_VERSIONS list, and the manylinux base container
+# puts a single interpreter first on PATH. Set PYBIND11_PYTHON_VERSION
+# explicitly if a build ever has to target a specific version again.
 set(RHEL_BUILD OFF)
 if(LINUX)
   file(STRINGS "/etc/os-release" DISTRO_ID_LIKE REGEX "ID_LIKE")
@@ -284,6 +290,30 @@ target_compile_options(
   $<$<CXX_COMPILER_ID:MSVC>:/Wall /D_WIN32_WINNT=0x0A00 /EHsc /Zc:preprocessor>
 )
 target_compile_definitions(triton-python-backend-stub PRIVATE TRITON_PB_STUB)
+
+# When libpython is a static archive -- the manylinux base container builds
+# CPython with --disable-shared -- the Py_* symbols land inside the stub
+# executable instead of a shared library. Python C extension modules are
+# dlopen'ed and deliberately leave Py_* undefined, so they can only resolve
+# against the stub's dynamic symbol table. ENABLE_EXPORTS makes CMake add the
+# platform's flag for that (-Wl,--export-dynamic on Linux), the same way
+# CPython links its own interpreter binary.
+#
+# A shared libpython needs none of this, since modules bind to it directly.
+# Key off the linkage rather than the platform so this stays correct if a
+# target ever moves between the two.
+#
+# PYTHON_LIBRARY rather than PYTHON_LIBRARIES: pybind11 is pulled in with
+# FetchContent_MakeAvailable, which uses add_subdirectory, so only the cache
+# entry that find_library creates survives into this scope. PYTHON_LIBRARIES
+# is a plain variable set inside pybind11's directory and reads empty here.
+if(PYTHON_LIBRARY MATCHES "\\.a$")
+  set_target_properties(
+    triton-python-backend-stub
+    PROPERTIES
+      ENABLE_EXPORTS TRUE
+  )
+endif()
 
 # RHEL assets are not released in a container environment nor do the current
 # Python lib versions in the manylinux base container match those currently
