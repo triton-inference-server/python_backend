@@ -40,7 +40,10 @@ TRITONSERVER_Error*
 CreateTritonErrorFromException(const PythonBackendException& pb_exception)
 {
   return TRITONSERVER_ErrorNew(
-      TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+      pb_exception.HasErrorCode()
+          ? static_cast<TRITONSERVER_Error_Code>(pb_exception.ErrorCode())
+          : TRITONSERVER_ERROR_INTERNAL,
+      pb_exception.what());
 }
 
 TRITONSERVER_Error*
@@ -524,7 +527,8 @@ RequestExecutor::Infer(
 
     throw PythonBackendException(
         std::string("Model ") + model_name +
-        " - Error when running inference: " + pb_exception.what());
+        " - Error when running inference: " + pb_exception.what(),
+        pb_exception.ErrorCode());
   }
 
   return response_future;

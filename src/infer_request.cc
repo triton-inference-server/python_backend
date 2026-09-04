@@ -575,7 +575,12 @@ InferRequest::Exec(const bool is_decoupled)
   catch (const PythonBackendException& pb_exception) {
     auto error_response = std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
-        std::make_shared<PbError>(pb_exception.what()));
+        std::make_shared<PbError>(
+            pb_exception.what(),
+            pb_exception.HasErrorCode()
+                ? static_cast<TRITONSERVER_Error_Code>(
+                      pb_exception.ErrorCode())
+                : TRITONSERVER_ERROR_INTERNAL));
 
     return error_response;
   }
