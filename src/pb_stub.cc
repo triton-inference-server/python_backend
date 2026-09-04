@@ -1548,12 +1548,14 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
             PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
         infer_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
-            std::make_shared<PbError>(pb_string->String()));
+            std::make_shared<PbError>(
+                pb_string->String(), response_batch->error_code));
       } else {
         infer_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
             std::make_shared<PbError>(
-                "An error occurred while performing BLS request."));
+                "An error occurred while performing BLS request.",
+                response_batch->error_code));
       }
     }
 

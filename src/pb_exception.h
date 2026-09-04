@@ -38,9 +38,21 @@ namespace triton { namespace backend { namespace python {
 struct PythonBackendException : std::exception {
   PythonBackendException(const std::string& message) : message_(message) {}
 
+  // Constructor that preserves an error code (stored as int to avoid
+  // depending on tritonserver.h in this lightweight header).
+  PythonBackendException(const std::string& message, int error_code)
+      : message_(message), error_code_(error_code), has_error_code_(true)
+  {
+  }
+
   const char* what() const throw() { return message_.c_str(); }
 
+  int ErrorCode() const { return error_code_; }
+  bool HasErrorCode() const { return has_error_code_; }
+
   std::string message_;
+  int error_code_ = 0;
+  bool has_error_code_ = false;
 };
 
 }}}  // namespace triton::backend::python
