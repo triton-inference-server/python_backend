@@ -1,0 +1,23 @@
+name: "bls_error_caller"
+backend: "python"
+max_batch_size: 0
+input [
+  {
+    name: "ERROR_CODE"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  }
+]
+output [
+  {
+    name: "RECEIVED_CODE"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "ERROR_MESSAGE"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+instance_group [{ kind: KIND_CPU }]
