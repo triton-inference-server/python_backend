@@ -40,7 +40,10 @@ TRITONSERVER_Error*
 CreateTritonErrorFromException(const PythonBackendException& pb_exception)
 {
   return TRITONSERVER_ErrorNew(
-      TRITONSERVER_ERROR_INTERNAL, pb_exception.what());
+      pb_exception.HasErrorCode()
+          ? static_cast<TRITONSERVER_Error_Code>(pb_exception.ErrorCode())
+          : TRITONSERVER_ERROR_INTERNAL,
+      pb_exception.what());
 }
 
 TRITONSERVER_Error*
@@ -522,9 +525,13 @@ RequestExecutor::Infer(
         TRITONSERVER_InferenceRequestDelete(irequest),
         "Failed to delete inference request.");
 
-    throw PythonBackendException(
-        std::string("Model ") + model_name +
-        " - Error when running inference: " + pb_exception.what());
+    std::string msg = std::string("Model ") + model_name +
+        " - Error when running inference: " + pb_exception.what();
+    if (pb_exception.HasErrorCode()) {
+      throw PythonBackendException(msg, pb_exception.ErrorCode());
+    } else {
+      throw PythonBackendException(msg);
+    }
   }
 
   return response_future;

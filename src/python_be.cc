@@ -679,6 +679,10 @@ ModelInstanceState::ExecuteBLSRequest(
   catch (const PythonBackendException& pb_exception) {
     if (is_response_batch_set) {
       response_batch->has_error = true;
+      if (pb_exception.HasErrorCode()) {
+        response_batch->error_code =
+            static_cast<TRITONSERVER_Error_Code>(pb_exception.ErrorCode());
+      }
       LOG_IF_EXCEPTION(
           pb_error_message =
               PbString::Create(Stub()->ShmPool(), pb_exception.what()));
@@ -1665,11 +1669,11 @@ ModelInstanceState::ProcessRequests(
       auto error = PbString::LoadFromSharedMemory(
           Stub()->ShmPool(), response_batch_shm_ptr->error);
       return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL, error->String().c_str());
+          response_batch_shm_ptr->error_code, error->String().c_str());
     }
 
     return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, "Failed to process the requests.");
+        response_batch_shm_ptr->error_code, "Failed to process the requests.");
   }
 
   if (response_batch_shm_ptr->batch_size > 0) {
@@ -1908,6 +1912,7 @@ ModelInstanceState::PrepareResponseBatch(
   (*response_batch)->is_error_set = false;
   (*response_batch)->cleanup = false;
   (*response_batch)->response_size = 1;
+  (*response_batch)->error_code = TRITONSERVER_ERROR_INTERNAL;
 }
 
 void
@@ -1978,6 +1983,10 @@ ModelInstanceState::SendBLSDecoupledResponse(
   catch (const PythonBackendException& pb_exception) {
     if (is_response_batch_set) {
       response_batch->has_error = true;
+      if (pb_exception.HasErrorCode()) {
+        response_batch->error_code =
+            static_cast<TRITONSERVER_Error_Code>(pb_exception.ErrorCode());
+      }
       LOG_IF_EXCEPTION(
           pb_error_message =
               PbString::Create(Stub()->ShmPool(), pb_exception.what()));
