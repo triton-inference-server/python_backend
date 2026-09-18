@@ -79,7 +79,7 @@ if [ ${INSTALL_INF1} -ne 1 ] && [ ${INSTALL_INF2} -ne 1 ]; then
     return 1
 fi
 
-if [ ${INSTALL_INF1} -eq 1 ] && [ ${INSTALL_INF2} -eq 1]
+if [ ${INSTALL_INF1} -eq 1 ] && [ ${INSTALL_INF2} -eq 1 ]
 then
     echo "Error: cannot install both inf1 and inf2 dependencies. Please select either -inf1 or -inf2."
     return 1
