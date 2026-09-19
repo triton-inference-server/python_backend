@@ -655,6 +655,22 @@ PbTensor::LoadFromSharedMemory(
   AllocatedSharedMemory<char> tensor_shm = shm_pool->Load<char>(tensor_handle);
   TensorShm* tensor_shm_ptr =
       reinterpret_cast<TensorShm*>(tensor_shm.data_.get());
+
+  // Validate 'dims_count' against the shared-memory region before using it to
+  // compute offsets and read the dims array, to avoid an out-of-bounds read
+  // when the value is corrupted. The division avoids overflowing the
+  // 'sizeof(int64_t) * dims_count' product. Mirrors the MemoryShm::byte_size
+  // boundary check.
+  char* region_end = reinterpret_cast<char*>(shm_pool->GetBaseAddress()) +
+                     shm_pool->GetCurrentCapacity();
+  char* dims_begin = tensor_shm.data_.get() + sizeof(TensorShm);
+  if (dims_begin > region_end ||
+      tensor_shm_ptr->dims_count >
+          static_cast<size_t>(region_end - dims_begin) / sizeof(int64_t)) {
+    throw PythonBackendException(
+        "Attempted to load a tensor with an out-of-bounds 'dims_count'");
+  }
+
   size_t name_offset =
       sizeof(TensorShm) + sizeof(int64_t) * tensor_shm_ptr->dims_count;
   std::unique_ptr<PbString> name_shm = PbString::LoadFromSharedMemory(
