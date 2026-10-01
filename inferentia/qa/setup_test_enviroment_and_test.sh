@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -153,7 +153,6 @@ docker tag tritonserver "${BASE_IMAGE}"
 # Build docker container for SDK
 docker build -t ${SDK_IMAGE} \
              -f ${TRITON_PATH}/server/Dockerfile.sdk \
-             --build-arg "BASE_IMAGE=nvcr.io/nvidia/tritonserver:${UPSTREAM_CONTAINER_VERSION}-py3-min" \
              --build-arg "TRITON_CLIENT_REPO_SUBDIR=clientrepo" \
              --build-arg "TRITON_COMMON_REPO_TAG=${TRITON_COMMON_REPO_TAG}" \
              --build-arg "TRITON_CORE_REPO_TAG=${TRITON_CORE_REPO_TAG}" \
