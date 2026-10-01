@@ -1529,7 +1529,11 @@ ModelInstanceState::ResponseSendDecoupled(
         bool cuda_used;
 
         try {
-          if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+          if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU ||
+              pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU_PINNED) {
+            // The GPU tensor was staged into a shared-memory intermediate by
+            // the stub (Triton fell back to host / pinned output memory), so
+            // it still has to be copied into the Triton-provided buffer.
             THROW_IF_TRITON_ERROR(CopyBuffer(
                 "Failed to copy the CPU output tensor to buffer.",
                 TRITONSERVER_MEMORY_CPU, 0, TRITONSERVER_MEMORY_CPU, 0,
@@ -1838,7 +1842,11 @@ ModelInstanceState::ProcessRequests(
           void* pointer = buffer_memory_pair.second;
           bool cuda_used = false;
 
-          if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+          if (pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU ||
+              pb_memory->MemoryType() == TRITONSERVER_MEMORY_CPU_PINNED) {
+            // The GPU tensor was staged into a shared-memory intermediate by
+            // the stub (Triton fell back to host / pinned output memory), so
+            // it still has to be copied into the Triton-provided buffer.
             GUARDED_RESPOND_IF_ERROR(
                 responses, response_index,
                 CopyBuffer(
