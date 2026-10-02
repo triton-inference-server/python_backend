@@ -1632,6 +1632,10 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
   bool function_exists = false;
   bool has_exception = false;
   std::string error_string;
+  // Keep error_string_shm alive until after parent ack so the parent can
+  // LoadFromSharedMemory the handle before this function returns and frees it.
+  // Same lifetime pattern as GetCUDAMemoryPoolAddress above.
+  std::unique_ptr<PbString> error_string_shm;
 
   try {
     py::gil_scoped_acquire acquire;
@@ -1673,7 +1677,6 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
   readiness_payload->error = 0;
 
   if (has_exception) {
-    std::unique_ptr<PbString> error_string_shm;
     LOG_IF_EXCEPTION(
         error_string_shm = PbString::Create(shm_pool_, error_string));
     if (error_string_shm != nullptr) {
@@ -1689,7 +1692,8 @@ Stub::ProcessUserModelReadinessRequest(std::unique_ptr<IPCMessage>& ipc_message)
     readiness_payload->waiting_on_stub = true;
     ipc_message->ResponseCondition()->notify_all();
 
-    // Wait for parent ack with timeout to avoid deadlock
+    // Wait for parent ack with timeout to avoid deadlock. Required so
+    // error_string_shm stays alive until the parent finishes reading it.
     boost::posix_time::ptime timeout =
         boost::get_system_time() +
         boost::posix_time::milliseconds(kUserModelReadinessTimeoutMs);
