@@ -1,4 +1,4 @@
-// Copyright 2022-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -52,7 +52,8 @@ PbMemory::Create(
       shm_pool->GetCUDAMemoryPoolManager(), memory_type, memory_type_id,
       byte_size, data, memory_shm.data_.get(), memory_shm.handle_, copy_gpu);
 
-  if (memory_type == TRITONSERVER_MEMORY_CPU) {
+  if (memory_type != TRITONSERVER_MEMORY_GPU) {
+    // CPU and CPU_PINNED intermediates both live in shared memory.
     data = memory_shm.data_.get() + sizeof(MemoryShm);
   }
 
@@ -123,25 +124,22 @@ PbMemory::CopyBuffer(
         " != " + std::to_string(src->ByteSize()));
   }
 
-  if (src->MemoryType() == TRITONSERVER_MEMORY_CPU &&
-      dst->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+  // CPU and CPU_PINNED are both host memory for the purpose of copies.
+  const bool src_is_host = (src->MemoryType() != TRITONSERVER_MEMORY_GPU);
+  const bool dst_is_host = (dst->MemoryType() != TRITONSERVER_MEMORY_GPU);
+
+  if (src_is_host && dst_is_host) {
     std::memcpy(dst->DataPtr(), src->DataPtr(), dst->ByteSize());
     return;
   }
 
 #ifdef TRITON_ENABLE_GPU
-  cudaMemcpyKind kind = cudaMemcpyHostToDevice;
-
-  if (src->MemoryType() == TRITONSERVER_MEMORY_CPU &&
-      dst->MemoryType() == TRITONSERVER_MEMORY_GPU) {
+  cudaMemcpyKind kind;
+  if (src_is_host && !dst_is_host) {
     kind = cudaMemcpyHostToDevice;
-  } else if (
-      src->MemoryType() == TRITONSERVER_MEMORY_GPU &&
-      dst->MemoryType() == TRITONSERVER_MEMORY_CPU) {
+  } else if (!src_is_host && dst_is_host) {
     kind = cudaMemcpyDeviceToHost;
-  } else if (
-      src->MemoryType() == TRITONSERVER_MEMORY_GPU &&
-      dst->MemoryType() == TRITONSERVER_MEMORY_GPU) {
+  } else {
     kind = cudaMemcpyDeviceToDevice;
   }
 
