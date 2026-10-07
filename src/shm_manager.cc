@@ -134,8 +134,12 @@ SharedMemoryManager::SharedMemoryManager(
     if (create) {
       // Remove (if any) and create the region.
       bi::shared_memory_object::remove(shm_region_name.c_str());
+      // Create permissions for the shm region: read/write user + read-only
+      // group.
+      bi::permissions perms{S_IRUSR | S_IWUSR | S_IRGRP};
+      // Create the shm region object with the specified permissions.
       shm_obj_ = std::make_unique<bi::shared_memory_object>(
-          bi::create_only, shm_region_name.c_str(), bi::read_write);
+          bi::create_only, shm_region_name.c_str(), bi::read_write, perms);
       shm_obj_->truncate(shm_size);
     } else {
       // Open the existing region.
