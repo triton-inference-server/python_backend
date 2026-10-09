@@ -36,6 +36,10 @@
 
 #ifdef _WIN32
 #include <process.h>  // getpid()
+#else
+#include <sys/wait.h>
+
+#include <csignal>
 #endif
 
 extern char** environ;
@@ -955,6 +959,32 @@ StubLauncher::WaitForStubProcess()
 #endif
 }
 
+#ifndef _WIN32
+namespace {
+
+// True when waitpid status is a crash. SIGKILL is excluded: an unhealthy stub
+// is terminated that way on purpose.
+bool
+StubDiedOnCrashSignal(int status)
+{
+  if (!WIFSIGNALED(status)) {
+    return false;
+  }
+  switch (WTERMSIG(status)) {
+    case SIGSEGV:
+    case SIGABRT:
+    case SIGBUS:
+    case SIGILL:
+    case SIGFPE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+#endif
+
 bool
 StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
 {
@@ -966,15 +996,24 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
     return true;
   }
 
-  for (int64_t elapsed = 0; elapsed < timeout_seconds; ++elapsed) {
-    int status;
-    pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
-    if (ret == stub_pid_) {
-      stub_pid_ = 0;
-      return true;
+  auto note_exit = [this](int status) {
+    if (StubDiedOnCrashSignal(status)) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("Python backend stub '") + model_instance_name_ +
+           "' exited on signal " + std::to_string(WTERMSIG(status)))
+              .c_str());
     }
-    if (ret == -1) {
+  };
+
+  for (int64_t elapsed = 0; elapsed < timeout_seconds; ++elapsed) {
+    int status = 0;
+    pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
+    if (ret == stub_pid_ || ret == -1) {
       stub_pid_ = 0;
+      if (ret == stub_pid_) {
+        note_exit(status);
+      }
       return true;
     }
     sleep(1);
@@ -982,10 +1021,13 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
 
   // Stub may have exited during the last sleep(1); recheck before killing.
   {
-    int status;
+    int status = 0;
     pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
     if (ret == stub_pid_ || ret == -1) {
       stub_pid_ = 0;
+      if (ret == stub_pid_) {
+        note_exit(status);
+      }
       return true;
     }
   }
