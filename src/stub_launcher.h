@@ -162,6 +162,7 @@ class StubLauncher {
   void WaitForStubProcess();
 
   // Wait for stub process with timeout. Returns true if the stub exited.
+  // A stub that exits on SIGSEGV, SIGABRT, SIGBUS, SIGILL, or SIGFPE is logged.
   bool WaitForStubProcessWithTimeout(int64_t timeout_seconds);
 
 #ifndef _WIN32
