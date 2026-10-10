@@ -996,7 +996,7 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
     return true;
   }
 
-  auto note_exit = [this](int status) {
+  auto log_crash_signal = [this](int status) {
     if (StubDiedOnCrashSignal(status)) {
       LOG_MESSAGE(
           TRITONSERVER_LOG_ERROR,
@@ -1010,10 +1010,10 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
     int status = 0;
     pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
     if (ret == stub_pid_ || ret == -1) {
-      stub_pid_ = 0;
       if (ret == stub_pid_) {
-        note_exit(status);
+        log_crash_signal(status);
       }
+      stub_pid_ = 0;
       return true;
     }
     sleep(1);
@@ -1024,10 +1024,10 @@ StubLauncher::WaitForStubProcessWithTimeout(int64_t timeout_seconds)
     int status = 0;
     pid_t ret = waitpid(stub_pid_, &status, WNOHANG);
     if (ret == stub_pid_ || ret == -1) {
-      stub_pid_ = 0;
       if (ret == stub_pid_) {
-        note_exit(status);
+        log_crash_signal(status);
       }
+      stub_pid_ = 0;
       return true;
     }
   }
