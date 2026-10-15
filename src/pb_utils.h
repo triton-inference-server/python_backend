@@ -85,9 +85,11 @@ constexpr uint64_t kUserModelReadinessTimeoutMs = 5000;
   do {                                                                        \
     TRITONSERVER_Error* tie_err__ = (X);                                      \
     if (tie_err__ != nullptr) {                                               \
+      auto error_code__ = TRITONSERVER_ErrorCode(tie_err__);                  \
       auto error_message = std::string(TRITONSERVER_ErrorMessage(tie_err__)); \
       TRITONSERVER_ErrorDelete(tie_err__);                                    \
-      throw PythonBackendException(error_message);                            \
+      throw PythonBackendException(                                           \
+          error_message, static_cast<int>(error_code__));                     \
     }                                                                         \
   } while (false)
 
@@ -177,6 +179,10 @@ struct ResponseBatch : SendMessageBase {
 
   // Indicates whether the response factory has been deleted or not.
   bool is_response_factory_deleted = false;
+
+  // The error code for batch-level errors. Without this field, batch errors
+  // always become TRITONSERVER_ERROR_INTERNAL regardless of the actual code.
+  TRITONSERVER_Error_Code error_code = TRITONSERVER_ERROR_INTERNAL;
 };
 
 enum LogLevel { kInfo = 0, kWarning, kError, kVerbose };

@@ -684,6 +684,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 
   std::optional<AllocatedSharedMemory<char>> response_batch;
   bool has_exception = false;
+  int exception_error_code = TRITONSERVER_ERROR_INTERNAL;
   std::string error_string;
   std::unique_ptr<PbString> error_string_shm;
   std::string err_message;
@@ -727,6 +728,9 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
   catch (const PythonBackendException& pb_exception) {
     has_exception = true;
     error_string = pb_exception.what();
+    if (pb_exception.HasErrorCode()) {
+      exception_error_code = pb_exception.ErrorCode();
+    }
   }
   catch (const py::error_already_set& error) {
     has_exception = true;
@@ -763,6 +767,8 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     error_string_shm = PbString::Create(shm_pool_, err_message);
     response_batch_shm_ptr->error = error_string_shm->ShmHandle();
     response_batch_shm_ptr->is_error_set = true;
+    response_batch_shm_ptr->error_code =
+        static_cast<TRITONSERVER_Error_Code>(exception_error_code);
     response_batch_shm_ptr->batch_size = 0;
     // Once the error is sent to the backend, the backend is supposed to close
     // all response factories if not already closed, so closing all response
@@ -1548,12 +1554,14 @@ Stub::ProcessBLSResponseDecoupled(std::unique_ptr<IPCMessage>& ipc_message)
             PbString::LoadFromSharedMemory(shm_pool_, response_batch->error);
         infer_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
-            std::make_shared<PbError>(pb_string->String()));
+            std::make_shared<PbError>(
+                pb_string->String(), response_batch->error_code));
       } else {
         infer_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
             std::make_shared<PbError>(
-                "An error occurred while performing BLS request."));
+                "An error occurred while performing BLS request.",
+                response_batch->error_code));
       }
     }
 
