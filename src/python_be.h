@@ -306,6 +306,9 @@ class ModelInstanceState : public BackendModelInstance {
   // Launch stub process.
   TRITONSERVER_Error* LaunchStubProcess();
 
+  // Restart unhealthy stub process.
+  TRITONSERVER_Error* RestartStubProcess();
+
   void ResponseSendDecoupled(std::shared_ptr<IPCMessage> response_send_message);
 
   // The parent message queue is monitored only by this function during the
