@@ -493,8 +493,20 @@ PbTensor::FromDLPackCapsule(
       dl_managed_tensor->dl_tensor.shape,
       dl_managed_tensor->dl_tensor.shape + ndim);
 
-  // Check if the input is contiguous and in C order
-  if (strides != nullptr) {
+  // Check if the input is contiguous and in C order.
+  // An empty tensor (any zero-size dimension, i.e. zero elements) has no
+  // meaningful memory layout and is trivially contiguous; skip the stride
+  // check, which can otherwise reject it because frameworks report
+  // inconsistent strides for empty tensors. See:
+  // https://github.com/triton-inference-server/server/issues/6960
+  bool is_empty = false;
+  for (auto dim : dims) {
+    if (dim == 0) {
+      is_empty = true;
+      break;
+    }
+  }
+  if (strides != nullptr && !is_empty) {
     int64_t calculated_stride{1};
     bool is_contiguous_c_order = true;
     for (size_t i = 1; i < dims.size(); i++) {
