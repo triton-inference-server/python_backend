@@ -1,5 +1,5 @@
 <!--
-# Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -47,6 +47,8 @@ Run onnx_exporter.py to convert ResNet50 PyTorch model to ONNX format. Width and
     cp model.py model_repository/preprocess/1
 
 **3. Build a TensorRT engine for the ONNX model**
+
+`trtexec` is no longer included in the default Triton Inference Server container, so run this step in the PyTorch container from step 1 (or any other container that provides `trtexec`), not in the Triton server container used in step 4.
 
 Set the arguments for enabling fp16 precision --fp16. To enable dynamic shapes use --minShapes, --optShapes, and maxShapes with --explicitBatch:
 
