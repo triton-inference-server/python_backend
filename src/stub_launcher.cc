@@ -539,12 +539,25 @@ StubLauncher::Launch()
       stub_message_queue_->Push(DUMMY_MESSAGE);
     }
 
-    // If the model is not initialized, wait for the stub process to exit.
+    // If the model is not initialized, make sure the stub process exits. A
+    // stub that reported an initialization error normally exits on its own. A
+    // stub the server gave up on, for example after missed health updates,
+    // may still consider itself initialized and would wait for commands
+    // forever, so a stub that has not exited when the stub timeout expires is
+    // killed.
     if (!is_initialized_) {
       stub_message_queue_.reset();
       parent_message_queue_.reset();
       memory_manager_.reset();
-      WaitForStubProcess();
+      if (!WaitForStubProcessWithTimeout(stub_timeout_seconds_)) {
+        LOG_MESSAGE(
+            TRITONSERVER_LOG_WARN,
+            (std::string("Python backend stub '") + model_instance_name_ +
+             "' did not exit within " + std::to_string(stub_timeout_seconds_) +
+             " seconds after its initialization failed; killing it.")
+                .c_str());
+        KillStubProcess();
+      }
     }
   });
 
