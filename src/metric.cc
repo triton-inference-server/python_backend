@@ -168,6 +168,7 @@ void
 Metric::SendIncrementRequest(const double& value)
 {
   py::gil_scoped_release release;
+  std::lock_guard<std::mutex> lock(operation_mu_);
   try {
     CheckIfCleared();
     auto stub = Stub::GetOrCreateInstance();
@@ -187,6 +188,7 @@ Metric::SendIncrementRequest(const double& value)
 void
 Metric::SendSetValueRequest(const double& value)
 {
+  std::lock_guard<std::mutex> lock(operation_mu_);
   try {
     CheckIfCleared();
     auto stub = Stub::GetOrCreateInstance();
@@ -206,6 +208,7 @@ void
 Metric::SendObserveRequest(const double& value)
 {
   py::gil_scoped_release release;
+  std::lock_guard<std::mutex> lock(operation_mu_);
   try {
     CheckIfCleared();
     auto stub = Stub::GetOrCreateInstance();
@@ -224,6 +227,7 @@ Metric::SendObserveRequest(const double& value)
 double
 Metric::SendGetValueRequest()
 {
+  std::lock_guard<std::mutex> lock(operation_mu_);
   CustomMetricsMessage* custom_metrics_msg = nullptr;
   AllocatedSharedMemory<CustomMetricsMessage> custom_metrics_shm;
   try {
@@ -249,6 +253,7 @@ Metric::Clear()
   // function can be called from two different locations: when the metric family
   // clears the 'metric_map_' and when the 'Metric' object goes out of
   // scope/being deleted.
+  std::lock_guard<std::mutex> lock(operation_mu_);
   if (!is_cleared_) {
     is_cleared_ = true;
     auto stub = Stub::GetOrCreateInstance();
