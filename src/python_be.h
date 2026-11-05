@@ -296,6 +296,17 @@ class ModelInstanceState : public BackendModelInstance {
   std::mutex infer_payload_mu_;
   std::unique_ptr<RequestExecutor> request_executor_;
 
+  // An execution that the backend stopped waiting for because the stub was
+  // not healthy. The stub may still be reading the requests, so their shared
+  // memory is kept until the stub has sent the response.
+  struct AbandonedExecution {
+    std::unique_ptr<IPCMessage> ipc_message;
+    AllocatedSharedMemory<char> request_batch;
+    // The address of each request and of its response factory.
+    std::vector<std::pair<intptr_t, intptr_t>> response_factories;
+  };
+  std::unique_ptr<AbandonedExecution> abandoned_execution_;
+
  public:
   static TRITONSERVER_Error* Create(
       ModelState* model_state, TRITONBACKEND_ModelInstance* model_instance,
@@ -331,6 +342,15 @@ class ModelInstanceState : public BackendModelInstance {
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       std::vector<std::unique_ptr<InferRequest>>& pb_infer_requests,
       PbMetricReporter& pb_metric_reporter);
+
+  // Wait until the stub finishes an abandoned execution, if any, and discard
+  // its response.
+  void FinishAbandonedExecution();
+
+  // Delete the response factories of an abandoned execution that its response
+  // releases.
+  void ReleaseAbandonedResponseFactories(
+      bi::managed_external_buffer::handle_t response_message);
 
   bool ExistsInClosedRequests(intptr_t closed_request);
 
