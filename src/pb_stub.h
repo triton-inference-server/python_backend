@@ -348,6 +348,7 @@ Stub::SendMessage(
   ipc_message->Args() = msg_shm.handle_;
 
   std::unique_lock<std::mutex> guard{stub_to_parent_message_mu_};
+  std::string error_string;
   {
     ScopedDefer _([&ipc_message, msg] {
       {
@@ -364,16 +365,21 @@ Stub::SendMessage(
         msg->cv.wait(guard);
       }
     }
+
+    // The parent process frees the error string as soon as the stub releases
+    // it below, so read the string first.
+    if (msg->has_error && msg->is_error_set) {
+      error_string =
+          PbString::LoadFromSharedMemory(shm_pool_, msg->error)->String();
+    }
   }
   if (msg->has_error) {
     if (msg->is_error_set) {
-      std::unique_ptr<PbString> pb_string =
-          PbString::LoadFromSharedMemory(shm_pool_, msg->error);
       std::string err_message =
           std::string(
               "Failed to process the request for model '" + name_ +
               "', message: ") +
-          pb_string->String();
+          error_string;
       throw PythonBackendException(err_message);
     } else {
       std::string err_message = std::string(
