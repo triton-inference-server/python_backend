@@ -1,4 +1,4 @@
-// Copyright 2023-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -188,6 +189,12 @@ class Metric {
   bi::managed_external_buffer::handle_t shm_handle_;
   std::unique_ptr<PbString> labels_shm_;
   std::unique_ptr<PbMemory> buckets_shm_;
+
+#ifdef TRITON_PB_STUB
+  // Python threads may use the same metric at once. Each operation stages its
+  // data in the members above, so the operations must not overlap.
+  std::mutex operation_mu_;
+#endif
 };
 
 }}};  // namespace triton::backend::python
