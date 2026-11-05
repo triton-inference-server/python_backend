@@ -302,6 +302,8 @@ class ModelInstanceState : public BackendModelInstance {
   struct AbandonedExecution {
     std::unique_ptr<IPCMessage> ipc_message;
     AllocatedSharedMemory<char> request_batch;
+    // The address of each request and of its response factory.
+    std::vector<std::pair<intptr_t, intptr_t>> response_factories;
   };
   std::unique_ptr<AbandonedExecution> abandoned_execution_;
 
@@ -344,6 +346,11 @@ class ModelInstanceState : public BackendModelInstance {
   // Wait until the stub finishes an abandoned execution, if any, and discard
   // its response.
   void FinishAbandonedExecution();
+
+  // Delete the response factories of an abandoned execution that its response
+  // releases.
+  void ReleaseAbandonedResponseFactories(
+      bi::managed_external_buffer::handle_t response_message);
 
   bool ExistsInClosedRequests(intptr_t closed_request);
 

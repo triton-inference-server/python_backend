@@ -746,6 +746,10 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
     if (!response_batch) {
       response_batch = shm_pool_->Construct<char>(
           sizeof(ResponseBatch) + sizeof(IPCMessageShm));
+      // The allocated memory is not initialized.
+      reinterpret_cast<ResponseBatch*>(
+          response_batch.value().data_.get() + sizeof(IPCMessageShm))
+          ->is_response_factory_deleted = false;
     }
     ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
@@ -783,6 +787,7 @@ Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
       ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
           response_batch.value().data_.get() + sizeof(IPCMessageShm));
       response_batch_shm_ptr->batch_size = 0;
+      response_batch_shm_ptr->is_response_factory_deleted = false;
     }
     ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
         response_batch.value().data_.get() + sizeof(IPCMessageShm));
@@ -895,6 +900,7 @@ Stub::ProcessReturnedResponses(
       sizeof(ResponseBatch)));
   ResponseBatch* response_batch_shm_ptr = reinterpret_cast<ResponseBatch*>(
       response_batch.value().data_.get() + sizeof(IPCMessageShm));
+  response_batch_shm_ptr->is_response_factory_deleted = false;
 
   bi::managed_external_buffer::handle_t* responses_shm_handle =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
