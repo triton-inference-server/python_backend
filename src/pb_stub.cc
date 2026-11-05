@@ -678,6 +678,10 @@ Stub::LoadRequestsFromSharedMemory(RequestBatch* request_batch_shm_ptr)
 void
 Stub::ProcessRequests(RequestBatch* request_batch_shm_ptr)
 {
+  // The GPU tensors of a previous execution remain when the backend discarded
+  // its response without loading them.
+  gpu_tensors_.clear();
+
   py::list py_request_list =
       LoadRequestsFromSharedMemory(request_batch_shm_ptr);
   std::unique_ptr<IPCMessage> execute_response;

@@ -1585,6 +1585,35 @@ ModelInstanceState::ResponseSendDecoupled(
   }
 }
 
+void
+ModelInstanceState::FinishAbandonedExecution()
+{
+  if (abandoned_execution_ == nullptr) {
+    return;
+  }
+
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_WARN,
+      (std::string("Stub process '") + Name() +
+       "' was not healthy while executing requests. Waiting for it to finish "
+       "the execution before sending it new requests.")
+          .c_str());
+
+  // The stub sends the response when it finishes the execution and keeps it
+  // until it receives the dummy message. The response is not used.
+  while (Stub()->StubActive()) {
+    bi::managed_external_buffer::handle_t response_message;
+    TRITONSERVER_Error* error =
+        Stub()->ReceiveMessageFromStub(response_message);
+    if (error == nullptr) {
+      Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
+      break;
+    }
+    TRITONSERVER_ErrorDelete(error);
+  }
+  abandoned_execution_.reset();
+}
+
 TRITONSERVER_Error*
 ModelInstanceState::ProcessRequests(
     TRITONBACKEND_Request** requests, const uint32_t request_count,
@@ -1628,15 +1657,25 @@ ModelInstanceState::ProcessRequests(
   ipc_message->Args() = request_batch.handle_;
 
   ScopedDefer execute_finalize([this] {
-    // Push a dummy message to signal the thread to terminate.
-    Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
+    // Push a dummy message to signal the thread to terminate. The stub
+    // releases its response when it receives this message, so it is not sent
+    // while the response has not been received.
+    if (abandoned_execution_ == nullptr) {
+      Stub()->StubMessageQueue()->Push(DUMMY_MESSAGE);
+    }
   });
 
   std::unique_ptr<IPCMessage> response;
   {
     Stub()->StubMessageQueue()->Push(ipc_message->ShmHandle());
     bi::managed_external_buffer::handle_t response_message;
-    RETURN_IF_ERROR(Stub()->ReceiveMessageFromStub(response_message));
+    TRITONSERVER_Error* error =
+        Stub()->ReceiveMessageFromStub(response_message);
+    if (error != nullptr) {
+      abandoned_execution_.reset(new AbandonedExecution{
+          std::move(ipc_message), std::move(request_batch)});
+      return error;
+    }
     response =
         IPCMessage::LoadFromSharedMemory(Stub()->ShmPool(), response_message);
   }
@@ -2629,6 +2668,11 @@ TRITONBACKEND_ModelInstanceExecute(
           }
         }
       }
+
+      // If the stub was not healthy during the execution, it may still be
+      // running it. Release the requests and send new ones only after it has
+      // finished.
+      instance_state->FinishAbandonedExecution();
 
       for (auto& infer_request : infer_requests) {
         // Reset the release flags for all the requests.
