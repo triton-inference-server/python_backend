@@ -1,4 +1,4 @@
-// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -36,7 +36,8 @@ namespace triton { namespace backend { namespace python {
 class PbCancel {
  public:
   PbCancel(intptr_t response_factory_address, intptr_t request_address)
-      : updating_(false), response_factory_address_(response_factory_address),
+      : updating_(false), released_(false),
+        response_factory_address_(response_factory_address),
         request_address_(request_address), is_cancelled_(false)
   {
   }
@@ -49,12 +50,19 @@ class PbCancel {
   bool IsCancelled();
   void ReportIsCancelled(bool is_cancelled);
 
+  // Must be called before the parent process can delete the response factory,
+  // which every query reads when it exists. Waits for an in-flight query to
+  // finish, so the parent never reads a deleted response factory. Later queries
+  // return the last observed state.
+  void Release();
+
  private:
   AllocatedSharedMemory<IsCancelledMessage> cancel_shm_;
 
   std::mutex mu_;
   std::condition_variable cv_;
   bool updating_;
+  bool released_;
 
   intptr_t response_factory_address_;
   intptr_t request_address_;
