@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -39,8 +39,14 @@ TRITONSERVER_Error* CreateTritonErrorFromException(
 
 struct RequestCompletionUserp {
   std::shared_ptr<InferPayload> infer_payload;
-  RequestCompletionUserp(std::shared_ptr<InferPayload>& infer_payload)
-      : infer_payload(infer_payload){};
+  // The release callback's reference to the request. The payload holds
+  // another until the final response, and the request is deleted when both
+  // are gone.
+  std::shared_ptr<TRITONSERVER_InferenceRequest> request;
+  RequestCompletionUserp(
+      std::shared_ptr<InferPayload>& infer_payload,
+      const std::shared_ptr<TRITONSERVER_InferenceRequest>& request)
+      : infer_payload(infer_payload), request(request){};
 };
 
 class RequestExecutor {
