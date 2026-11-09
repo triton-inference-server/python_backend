@@ -84,7 +84,7 @@ ResponseSender::UpdateStateAndCounters(
   }
   bool is_decoupled = *is_decoupled_;
 
-  std::lock_guard<std::mutex> lk(mu_);
+  std::unique_lock<std::mutex> lk(mu_);
 
   if (!is_decoupled) {
     if (response != nullptr && number_of_response_sent_ > 0) {
@@ -110,6 +110,13 @@ ResponseSender::UpdateStateAndCounters(
     closed_ = true;
   }
   number_of_response_sent_++;
+  lk.unlock();
+
+  // The parent releases the response factory once it has the final response.
+  // Outside the lock, because the release waits for an in-flight query.
+  if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL) {
+    pb_cancel_->Release();
+  }
 }
 
 void
@@ -269,9 +276,13 @@ ResponseSender::IsClosed()
 void
 ResponseSender::Close()
 {
-  std::lock_guard<std::mutex> lk(mu_);
-  closed_ = true;
-  response_factory_deleted_.exchange(true);
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    closed_ = true;
+    response_factory_deleted_.exchange(true);
+  }
+  // The parent releases the response factory when execute fails.
+  pb_cancel_->Release();
 }
 
 void

@@ -578,6 +578,11 @@ Although checking for request cancellation is optional, it is recommended to
 check for cancellation at strategic request execution stages that can early
 terminate the execution in the event of its response is no longer needed.
 
+Once the final response of a request is sent (a response returned from
+`execute` is a final response), or once `execute` raises, `is_cancelled()` no
+longer asks Triton and returns the last observed state, which is `False` if a
+cancellation was never observed.
+
 #### Decoupled mode
 
 This mode allows user to send multiple responses for a request or

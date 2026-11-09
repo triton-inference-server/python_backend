@@ -26,6 +26,8 @@
 
 #include "pb_cancel.h"
 
+#include <optional>
+
 #include "pb_stub.h"
 #include "pb_stub_log.h"
 
@@ -64,7 +66,9 @@ PbCancel::IsCancelled()
   std::unique_lock<std::mutex> lk(mu_);
   // The cancelled flag can only move from false to true, not the other way, so
   // it is checked on each query until cancelled and then implicitly cached.
-  if (is_cancelled_) {
+  // Once released, the parent can no longer be asked, so the last observed
+  // state is returned.
+  if (is_cancelled_ || released_) {
     return is_cancelled_;
   }
   if (!updating_) {
@@ -89,6 +93,32 @@ PbCancel::ReportIsCancelled(bool is_cancelled)
     updating_ = false;
   }
   cv_.notify_all();
+}
+
+void
+PbCancel::Release()
+{
+  {
+    // Without a query in flight there is nothing to wait for, so the GIL is
+    // kept. A contended lock takes the slow path, so a thread holding the GIL
+    // never blocks here.
+    std::unique_lock<std::mutex> lk(mu_, std::try_to_lock);
+    if (lk.owns_lock() && !updating_) {
+      released_ = true;
+      return;
+    }
+  }
+
+  // Wait without the GIL. The stub thread that sends the query may need the
+  // GIL to finish an earlier message first.
+  std::optional<py::gil_scoped_release> gil_release;
+  if (PyGILState_Check()) {
+    gil_release.emplace();
+  }
+
+  std::unique_lock<std::mutex> lk(mu_);
+  cv_.wait(lk, [this] { return !updating_; });
+  released_ = true;
 }
 
 }}}  // namespace triton::backend::python
