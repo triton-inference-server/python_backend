@@ -1,4 +1,4 @@
-// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,8 +31,7 @@ namespace triton { namespace backend { namespace python {
 InferPayload::InferPayload(
     const bool is_decoupled,
     std::function<void(std::unique_ptr<InferResponse>)> callback)
-    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback),
-      request_address_(reinterpret_cast<intptr_t>(nullptr))
+    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
 {
   promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
 }
@@ -93,10 +92,23 @@ InferPayload::ResponseAllocUserp()
 }
 
 void
-InferPayload::SetRequestAddress(intptr_t request_address)
+InferPayload::SetRequest(
+    const std::shared_ptr<TRITONSERVER_InferenceRequest>& request)
 {
-  std::unique_lock<std::mutex> lock(request_address_mutex_);
-  request_address_ = request_address;
+  std::lock_guard<std::mutex> lock(request_mutex_);
+  request_ = request;
+}
+
+void
+InferPayload::ReleaseRequest()
+{
+  std::shared_ptr<TRITONSERVER_InferenceRequest> request;
+  {
+    std::lock_guard<std::mutex> lock(request_mutex_);
+    request.swap(request_);
+  }
+  // The request, if this was its last reference, is deleted here, outside
+  // the lock.
 }
 
 void
@@ -109,13 +121,19 @@ InferPayload::SetRequestCancellationFunc(
 void
 InferPayload::SafeCancelRequest()
 {
-  std::unique_lock<std::mutex> lock(request_address_mutex_);
-  if (request_address_ == 0L) {
+  // A copy of the reference keeps the request alive while it is cancelled,
+  // even if its final response arrives meanwhile.
+  std::shared_ptr<TRITONSERVER_InferenceRequest> request;
+  {
+    std::lock_guard<std::mutex> lock(request_mutex_);
+    request = request_;
+  }
+  if (request == nullptr) {
     return;
   }
 
   if (request_cancel_func_) {
-    request_cancel_func_(request_address_);
+    request_cancel_func_(reinterpret_cast<intptr_t>(request.get()));
   }
 }
 

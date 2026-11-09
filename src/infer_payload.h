@@ -1,4 +1,4 @@
-// Copyright 2023-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,10 +27,12 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <queue>
 
 #include "infer_response.h"
 #include "pb_preferred_memory.h"
+#include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -62,7 +64,13 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
   void SetResponseAllocUserp(
       const ResponseAllocatorUserp& response_alloc_userp);
   std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
-  void SetRequestAddress(intptr_t request_address);
+  /// Holds a reference to the request submitted to Triton until
+  /// ReleaseRequest, so SafeCancelRequest can still reach it after the target
+  /// model has released it: a decoupled model may keep responding long after
+  /// its execute returns and Triton releases the request.
+  void SetRequest(
+      const std::shared_ptr<TRITONSERVER_InferenceRequest>& request);
+  void ReleaseRequest();
   void SetRequestCancellationFunc(
       const std::function<void(intptr_t)>& request_cancel_func);
   void SafeCancelRequest();
@@ -74,8 +82,8 @@ class InferPayload : public std::enable_shared_from_this<InferPayload> {
   bool is_promise_set_;
   std::function<void(std::unique_ptr<InferResponse>)> callback_;
   std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
-  std::mutex request_address_mutex_;
-  intptr_t request_address_;
+  std::mutex request_mutex_;
+  std::shared_ptr<TRITONSERVER_InferenceRequest> request_;
   std::function<void(intptr_t)> request_cancel_func_;
 };
 

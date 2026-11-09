@@ -1,4 +1,4 @@
-// Copyright 2021-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -65,18 +65,24 @@ MemoryTypeToTritonMemoryType(
 }
 
 void
+DeleteInferenceRequest(TRITONSERVER_InferenceRequest* request)
+{
+  LOG_IF_ERROR(
+      TRITONSERVER_InferenceRequestDelete(request),
+      "Failed to delete inference request.");
+}
+
+void
 InferRequestComplete(
     TRITONSERVER_InferenceRequest* request, const uint32_t flags, void* userp)
 {
   if (request != nullptr) {
     RequestCompletionUserp* completion_userp =
         reinterpret_cast<RequestCompletionUserp*>(userp);
-    completion_userp->infer_payload->SetRequestAddress(0L);
-
-    LOG_IF_ERROR(
-        TRITONSERVER_InferenceRequestDelete(request),
-        "Failed to delete inference request.");
-
+    // Drops the release's reference. If the final response has already
+    // arrived, this deletes the request. Otherwise a decoupled target model is
+    // still responding, and the payload keeps the request alive until the
+    // final response so that cancelling the response iterator reaches it.
     delete completion_userp;
   }
 }
@@ -233,6 +239,11 @@ InferResponseComplete(
         true /* is_last_response */, userp /* id */);
   }
 
+  if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) != 0) {
+    // Nothing is left to cancel once the final response is in.
+    infer_payload->ReleaseRequest();
+  }
+
   infer_payload->SetValue(std::move(infer_response));
 }
 
@@ -379,6 +390,7 @@ RequestExecutor::Infer(
   bool is_ready = false;
   const char* model_name = infer_request->ModelName().c_str();
   TRITONSERVER_InferenceRequest* irequest = nullptr;
+  std::shared_ptr<TRITONSERVER_InferenceRequest> irequest_ref;
   RequestCompletionUserp* completion_userp = nullptr;
 
   try {
@@ -412,6 +424,7 @@ RequestExecutor::Infer(
     // Inference
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestNew(
         &irequest, server_, model_name, model_version));
+    irequest_ref.reset(irequest, DeleteInferenceRequest);
 
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetId(
         irequest, infer_request->RequestId().c_str()));
@@ -431,7 +444,7 @@ RequestExecutor::Infer(
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetTimeoutMicroseconds(
         irequest, infer_request->Timeout()));
 
-    completion_userp = new RequestCompletionUserp(infer_payload);
+    completion_userp = new RequestCompletionUserp(infer_payload, irequest_ref);
     THROW_IF_TRITON_ERROR(TRITONSERVER_InferenceRequestSetReleaseCallback(
         irequest, InferRequestComplete,
         reinterpret_cast<void*>(completion_userp)));
@@ -503,9 +516,9 @@ RequestExecutor::Infer(
           reinterpret_cast<void*>(infer_payload->ResponseAllocUserp().get()),
           InferResponseComplete, reinterpret_cast<void*>(infer_payload.get())));
 
-      // Store the inference request address submitted to the Triton server for
-      // retrieval
-      infer_payload->SetRequestAddress(reinterpret_cast<intptr_t>(irequest));
+      // Keep the inference request submitted to the Triton server for
+      // cancellation.
+      infer_payload->SetRequest(irequest_ref);
       infer_payload->SetRequestCancellationFunc(InferRequestCancel);
 
       THROW_IF_TRITON_ERROR(
@@ -513,14 +526,13 @@ RequestExecutor::Infer(
     }
   }
   catch (const PythonBackendException& pb_exception) {
-    infer_payload->SetRequestAddress(0L);
+    // Triton did not take the request, so neither callback will run; the
+    // last of these references deletes it.
+    infer_payload->ReleaseRequest();
     if (completion_userp != nullptr) {
       delete completion_userp;
     }
-
-    LOG_IF_ERROR(
-        TRITONSERVER_InferenceRequestDelete(irequest),
-        "Failed to delete inference request.");
+    irequest_ref.reset();
 
     throw PythonBackendException(
         std::string("Model ") + model_name +
