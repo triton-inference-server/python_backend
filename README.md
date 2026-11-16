@@ -1695,6 +1695,22 @@ methods must be used instead.
 
 This function can be used to check whether a tensor is placed in CPU or not.
 
+## `pb_utils.Tensor.as_numpy() -> numpy.ndarray`
+
+This method returns the data of a CPU tensor as a NumPy array. For a tensor
+that the model receives (a request input or an output of a BLS response), the
+array is a view of the tensor's shared memory rather than a copy, like the
+DLPack capsule returned by `to_dlpack()`:
+
+- Writing into the array modifies the tensor. The change is visible to
+  `to_dlpack()` and to a BLS request that reuses the tensor.
+- Each call returns a new array object. All of them share the same memory.
+- The array keeps the tensor's shared memory allocated while it is alive. To
+  keep the data after the request, store a copy of the array, as recommended
+  for `execute` above.
+
+The method raises an exception for GPU tensors and for BF16 tensors.
+
 ## Input Tensor Device Placement
 
 By default, the Python backend moves all input tensors to CPU before providing
