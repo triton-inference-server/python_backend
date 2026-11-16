@@ -47,6 +47,19 @@ typedef SSIZE_T ssize_t;
 
 namespace triton { namespace backend { namespace python {
 
+// Offset of the PbMemory stored inline in a tensor's shared-memory block, after
+// the name. Padding makes the tensor data that follows it 16-byte aligned (the
+// block itself is), so NumPy views of the data are aligned whatever the name
+// length. The stub and the backend library must agree on this layout.
+static std::size_t
+InlineMemoryOffset(std::size_t name_end)
+{
+  constexpr std::size_t kAlignment = 16;
+  std::size_t data_offset =
+      (name_end + sizeof(MemoryShm) + kAlignment - 1) / kAlignment * kAlignment;
+  return data_offset - sizeof(MemoryShm);
+}
+
 #ifdef TRITON_PB_STUB
 py::array
 deserialize_bytes_tensor_cpp(const uint8_t* data, size_t data_size)
@@ -602,8 +615,9 @@ PbTensor::SaveToSharedMemory(
   if (!tensor_shm_.data_) {
     uint64_t byte_size;
     if (!pb_memory_) {
-      byte_size = sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
-                  PbString::ShmStructSize(name_) +
+      byte_size = InlineMemoryOffset(
+                      sizeof(TensorShm) + sizeof(int64_t) * dims_.size() +
+                      PbString::ShmStructSize(name_)) +
                   PbMemory::ShmStructSize(memory_type_, byte_size_);
 
     } else {
@@ -630,7 +644,8 @@ PbTensor::SaveToSharedMemory(
     name_shm_ = PbString::Create(
         name_, reinterpret_cast<char*>(tensor_shm_ptr_) + name_offset,
         shm_handle_ + name_offset);
-    std::size_t pb_memory_offset = name_offset + PbString::ShmStructSize(name_);
+    std::size_t pb_memory_offset =
+        InlineMemoryOffset(name_offset + PbString::ShmStructSize(name_));
 
     if (!pb_memory_) {
       pb_memory_ = PbMemory::Create(
@@ -662,7 +677,8 @@ PbTensor::LoadFromSharedMemory(
 
   std::unique_ptr<PbMemory> pb_memory;
   if (tensor_shm_ptr->memory == 0) {
-    std::size_t pb_memory_offset = name_offset + name_shm->Size();
+    std::size_t pb_memory_offset =
+        InlineMemoryOffset(name_offset + name_shm->Size());
     pb_memory = PbMemory::LoadFromSharedMemory(
         shm_pool, pb_memory_offset, tensor_shm.data_.get() + pb_memory_offset,
         open_cuda_handle);
