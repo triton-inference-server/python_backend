@@ -43,6 +43,7 @@ typedef SSIZE_T ssize_t;
 
 #include <cstdint>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 namespace triton { namespace backend { namespace python {
@@ -118,6 +119,22 @@ deserialize_bytes_tensor_cpp(const uint8_t* data, size_t data_size)
   return result;
 }
 
+// NumPy dtype of a Triton dtype, built once per dtype. Equivalent to
+// np.dtype(triton_to_numpy_type(dtype)). Leaked on purpose: it must not be
+// destroyed after the interpreter finalizes. Callers hold the GIL.
+static const py::dtype&
+CachedNumpyDtype(TRITONSERVER_DataType dtype)
+{
+  static auto* cache = new std::unordered_map<int, py::dtype>();
+  auto it = cache->find(dtype);
+  if (it == cache->end()) {
+    it =
+        cache->emplace(dtype, py::dtype::from_args(triton_to_numpy_type(dtype)))
+            .first;
+  }
+  return it->second;
+}
+
 PbTensor::PbTensor(const std::string& name, py::array& numpy_array)
     : name_(name)
 {
@@ -141,19 +158,20 @@ PbTensor::PbTensor(const std::string& name, py::array& numpy_array)
   if (dtype_ == TRITONSERVER_TYPE_BYTES) {
     py::module triton_pb_utils =
         py::module::import("triton_python_backend_utils");
-    numpy_array_serialized_ =
+    py::array serialized =
         triton_pb_utils.attr("serialize_byte_tensor")(numpy_array);
-    memory_ptr_ = numpy_array_serialized_.request().ptr;
-    byte_size_ = numpy_array_serialized_.nbytes();
+    numpy_array_serialized_ = serialized;
+    memory_ptr_ = serialized.request().ptr;
+    byte_size_ = serialized.nbytes();
   } else {
-    memory_ptr_ = numpy_array_.request().ptr;
-    byte_size_ = numpy_array_.nbytes();
+    memory_ptr_ = numpy_array.request().ptr;
+    byte_size_ = numpy_array.nbytes();
   }
 
   // Initialize tensor dimension
-  size_t dims_count = numpy_array_.ndim();
+  size_t dims_count = numpy_array.ndim();
 
-  const ssize_t* numpy_shape = numpy_array_.shape();
+  const ssize_t* numpy_shape = numpy_array.shape();
   for (size_t i = 0; i < dims_count; i++) {
     dims_.push_back(numpy_shape[i]);
   }
@@ -182,22 +200,23 @@ PbTensor::PbTensor(
   if (dtype == TRITONSERVER_TYPE_BYTES) {
     py::module triton_pb_utils =
         py::module::import("triton_python_backend_utils");
-    numpy_array_serialized_ =
+    py::array serialized =
         triton_pb_utils.attr("serialize_byte_tensor")(numpy_array);
-    memory_ptr_ = numpy_array_serialized_.request().ptr;
-    byte_size_ = numpy_array_serialized_.nbytes();
+    numpy_array_serialized_ = serialized;
+    memory_ptr_ = serialized.request().ptr;
+    byte_size_ = serialized.nbytes();
 
   } else {
-    memory_ptr_ = numpy_array_.request().ptr;
-    byte_size_ = numpy_array_.nbytes();
+    memory_ptr_ = numpy_array.request().ptr;
+    byte_size_ = numpy_array.nbytes();
   }
   memory_type_ = TRITONSERVER_MEMORY_CPU;
   dtype_ = dtype;
 
   // Initialize tensor dimension
-  size_t dims_count = numpy_array_.ndim();
+  size_t dims_count = numpy_array.ndim();
 
-  const ssize_t* numpy_shape = numpy_array_.shape();
+  const ssize_t* numpy_shape = numpy_array.shape();
   for (size_t i = 0; i < dims_count; i++) {
     dims_.push_back(numpy_shape[i]);
   }
@@ -230,9 +249,8 @@ PbTensor::PbTensor(
       // No native numpy representation for BF16. DLPack should be used instead.
       numpy_array_ = py::none();
     } else if (dtype != TRITONSERVER_TYPE_BYTES) {
-      py::object numpy_array =
-          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
-      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+      numpy_array_ =
+          py::array(CachedNumpyDtype(dtype_), dims_, (void*)memory_ptr_);
     } else {
       py::object numpy_array = deserialize_bytes_tensor_cpp(
           static_cast<const uint8_t*>(memory_ptr_), byte_size_);
@@ -577,8 +595,8 @@ PbTensor::~PbTensor() noexcept(false)
 #ifdef TRITON_PB_STUB
   {
     py::gil_scoped_acquire acquire;
-    py::array numpy_array_local(std::move(numpy_array_));
-    py::array numpy_array_serialized_local(std::move(numpy_array_serialized_));
+    py::object numpy_array_local(std::move(numpy_array_));
+    py::object numpy_array_serialized_local(std::move(numpy_array_serialized_));
   }
 #endif
 }
@@ -590,7 +608,7 @@ PbTensor::Name() const
 }
 
 #ifdef TRITON_PB_STUB
-const py::array*
+const py::object*
 PbTensor::AsNumpy() const
 {
   if (!IsCPU()) {
@@ -605,6 +623,24 @@ PbTensor::AsNumpy() const
   }
 
   return &numpy_array_;
+}
+
+py::object
+PbTensor::AsNumpyShared(const std::shared_ptr<PbTensor>& tensor)
+{
+  // AsNumpy() raises for GPU and BF16 tensors.
+  const py::object* numpy_array = tensor->AsNumpy();
+  if (!tensor->numpy_view_) {
+    return *numpy_array;
+  }
+  // The capsule owns a reference to the tensor, and the tensor owns the shared
+  // memory, so the view never outlives the memory it points to.
+  py::capsule owner(new std::shared_ptr<PbTensor>(tensor), [](void* ptr) {
+    delete static_cast<std::shared_ptr<PbTensor>*>(ptr);
+  });
+  return py::array(
+      CachedNumpyDtype(tensor->dtype_), tensor->dims_, tensor->memory_ptr_,
+      owner);
 }
 #endif  // TRITON_PB_STUB
 
@@ -737,9 +773,8 @@ PbTensor::PbTensor(
       // No native numpy representation for BF16. DLPack should be used instead.
       numpy_array_ = py::none();
     } else if (dtype_ != TRITONSERVER_TYPE_BYTES) {
-      py::object numpy_array =
-          py::array(triton_to_pybind_dtype(dtype_), dims_, (void*)memory_ptr_);
-      numpy_array_ = numpy_array.attr("view")(triton_to_numpy_type(dtype_));
+      // as_numpy() returns a view of the shared memory (AsNumpyShared).
+      numpy_view_ = true;
     } else {
       py::object numpy_array = deserialize_bytes_tensor_cpp(
           static_cast<const uint8_t*>(memory_ptr_), byte_size_);

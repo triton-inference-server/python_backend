@@ -1899,13 +1899,10 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
   py::class_<PbTensor, std::shared_ptr<PbTensor>>(module, "Tensor")
       .def(py::init(&PbTensor::FromNumpy))
       .def("name", &PbTensor::Name)
-      // The reference_internal is added to make sure that the NumPy object has
-      // the same lifetime as the tensor object. This means even when the NumPy
-      // object is only in scope, the tensor object is not deallocated from
-      // shared memory to make sure the NumPy object is still valid.
-      .def(
-          "as_numpy", &PbTensor::AsNumpy,
-          py::return_value_policy::reference_internal)
+      // A tensor loaded from shared memory returns a view whose base owns the
+      // tensor, so the shared memory stays valid while the NumPy object lives.
+      // Other tensors return the NumPy array they hold.
+      .def("as_numpy", &PbTensor::AsNumpyShared)
       .def("triton_dtype", &PbTensor::TritonDtype)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("is_cpu", &PbTensor::IsCPU)

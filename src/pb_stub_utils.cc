@@ -1,4 +1,4 @@
-// Copyright 2021-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -118,66 +118,6 @@ triton_to_numpy_type(TRITONSERVER_DataType data_type)
   }
 
   return np_type;
-}
-
-py::dtype
-triton_to_pybind_dtype(TRITONSERVER_DataType data_type)
-{
-  py::dtype dtype_numpy;
-
-  switch (data_type) {
-    case TRITONSERVER_TYPE_BOOL:
-      dtype_numpy = py::dtype(py::format_descriptor<bool>::format());
-      break;
-    case TRITONSERVER_TYPE_UINT8:
-      dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-      break;
-    case TRITONSERVER_TYPE_UINT16:
-      dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-      break;
-    case TRITONSERVER_TYPE_UINT32:
-      dtype_numpy = py::dtype(py::format_descriptor<uint32_t>::format());
-      break;
-    case TRITONSERVER_TYPE_UINT64:
-      dtype_numpy = py::dtype(py::format_descriptor<uint64_t>::format());
-      break;
-    case TRITONSERVER_TYPE_INT8:
-      dtype_numpy = py::dtype(py::format_descriptor<int8_t>::format());
-      break;
-    case TRITONSERVER_TYPE_INT16:
-      dtype_numpy = py::dtype(py::format_descriptor<int16_t>::format());
-      break;
-    case TRITONSERVER_TYPE_INT32:
-      dtype_numpy = py::dtype(py::format_descriptor<int32_t>::format());
-      break;
-    case TRITONSERVER_TYPE_INT64:
-      dtype_numpy = py::dtype(py::format_descriptor<int64_t>::format());
-      break;
-    case TRITONSERVER_TYPE_FP16:
-      // Will be reinterpreted in the python code.
-      dtype_numpy = py::dtype(py::format_descriptor<uint16_t>::format());
-      break;
-    case TRITONSERVER_TYPE_FP32:
-      dtype_numpy = py::dtype(py::format_descriptor<float>::format());
-      break;
-    case TRITONSERVER_TYPE_FP64:
-      dtype_numpy = py::dtype(py::format_descriptor<double>::format());
-      break;
-    case TRITONSERVER_TYPE_BYTES:
-      // Will be reinterpreted in the python code.
-      dtype_numpy = py::dtype(py::format_descriptor<uint8_t>::format());
-      break;
-    case TRITONSERVER_TYPE_BF16:
-      // NOTE: Currently skipping this call via `if (BF16)` check, but may
-      // want to better handle this or set some default/invalid dtype.
-      throw PythonBackendException("TYPE_BF16 not currently supported.");
-    case TRITONSERVER_TYPE_INVALID:
-      throw PythonBackendException("Dtype is invalid.");
-    default:
-      throw PythonBackendException("Unsupported triton dtype.");
-  }
-
-  return dtype_numpy;
 }
 
 DLDataType
