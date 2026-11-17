@@ -49,16 +49,33 @@ typedef SSIZE_T ssize_t;
 
 namespace triton { namespace backend { namespace python {
 
+// Alignment of the inline data of a tensor. Element alignment (at most 8
+// bytes) is what NumPy views and DLPack consumers need; 16 bytes also suits
+// vectorized loads.
+constexpr std::size_t kInlineDataAlignment = 16;
+// The offset is relative to the object returned by
+// SharedMemoryManager::Construct(), which is aligned if both the allocator's
+// blocks and the ownership header before the object are.
+static_assert(
+    bi::managed_external_buffer::segment_manager::memory_algorithm::Alignment %
+            kInlineDataAlignment ==
+        0,
+    "shared-memory blocks must be 16-byte aligned");
+static_assert(
+    sizeof(AllocatedShmOwnership) % kInlineDataAlignment == 0,
+    "the shared-memory ownership header must keep objects 16-byte aligned");
+
 // Offset of the PbMemory stored inline in a tensor's shared-memory block, after
-// the name. Padding makes the tensor data that follows it 16-byte aligned (the
-// block itself is), so NumPy views of the data are aligned whatever the name
-// length. The stub and the backend library must agree on this layout.
+// the name. Padding makes the tensor data that follows it 16-byte aligned
+// whatever the name length. Tensors whose PbMemory is a separate block (GPU
+// tensors, BLS outputs) keep their data at 8 bytes past a 16-byte boundary.
+// The stub and the backend library must agree on this layout.
 static std::size_t
 InlineMemoryOffset(std::size_t name_end)
 {
-  constexpr std::size_t kAlignment = 16;
   std::size_t data_offset =
-      (name_end + sizeof(MemoryShm) + kAlignment - 1) / kAlignment * kAlignment;
+      (name_end + sizeof(MemoryShm) + kInlineDataAlignment - 1) /
+      kInlineDataAlignment * kInlineDataAlignment;
   return data_offset - sizeof(MemoryShm);
 }
 
