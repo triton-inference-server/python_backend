@@ -1902,7 +1902,7 @@ PYBIND11_EMBEDDED_MODULE(c_python_backend_utils, module)
       // A tensor loaded from shared memory returns a view whose base owns the
       // tensor, so the shared memory stays valid while the NumPy object lives.
       // Other tensors return the NumPy array they hold.
-      .def("as_numpy", &PbTensor::AsNumpyShared)
+      .def("as_numpy", &PbTensor::AsNumpy)
       .def("triton_dtype", &PbTensor::TritonDtype)
       .def("to_dlpack", &PbTensor::ToDLPack)
       .def("is_cpu", &PbTensor::IsCPU)

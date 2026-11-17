@@ -175,16 +175,13 @@ class PbTensor {
       bool open_cuda_handle);
 
 #ifdef TRITON_PB_STUB
-  /// Get NumPy representation of the tensor.
-  /// \throw If the tensor is stored in GPU, an exception is thrown
-  /// \return NumPy representation of the Tensor
-  const py::object* AsNumpy() const;
-
   /// Python `as_numpy()`. A CPU tensor loaded from shared memory returns a
   /// writeable view of that memory instead of a copy. The view owns a
   /// reference to the tensor, so the memory stays allocated while any view is
-  /// alive. Other tensors return the array stored in the tensor.
-  static py::object AsNumpyShared(const std::shared_ptr<PbTensor>& tensor);
+  /// alive. Other tensors return the array they hold.
+  /// \throw If the tensor is in GPU memory, its dtype is BF16, or its shape
+  /// does not fit in its byte size.
+  static py::object AsNumpy(const std::shared_ptr<PbTensor>& tensor);
 #endif
 
   /// Save tensor inside shared memory.
@@ -245,8 +242,8 @@ class PbTensor {
   py::object numpy_array_;
   // Storing the serialized version of the numpy array
   py::object numpy_array_serialized_;
-  // True when as_numpy() returns a view of the shared memory (numpy_array_ is
-  // then unused).
+  // True when as_numpy() returns a view of the shared memory. numpy_array_ is
+  // then null.
   bool numpy_view_ = false;
 #endif
   TRITONSERVER_DataType dtype_;

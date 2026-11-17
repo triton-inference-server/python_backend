@@ -43,6 +43,7 @@ typedef SSIZE_T ssize_t;
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -121,11 +122,13 @@ deserialize_bytes_tensor_cpp(const uint8_t* data, size_t data_size)
 
 // NumPy dtype of a Triton dtype, built once per dtype. Equivalent to
 // np.dtype(triton_to_numpy_type(dtype)). Leaked on purpose: it must not be
-// destroyed after the interpreter finalizes. Callers hold the GIL.
+// destroyed after the interpreter finalizes. Callers hold the GIL: both run
+// from Python, in as_numpy() and from_dlpack().
 static const py::dtype&
 CachedNumpyDtype(TRITONSERVER_DataType dtype)
 {
-  static auto* cache = new std::unordered_map<int, py::dtype>();
+  static auto* cache =
+      new std::unordered_map<TRITONSERVER_DataType, py::dtype>();
   auto it = cache->find(dtype);
   if (it == cache->end()) {
     it =
@@ -608,39 +611,52 @@ PbTensor::Name() const
 }
 
 #ifdef TRITON_PB_STUB
-const py::object*
-PbTensor::AsNumpy() const
+py::object
+PbTensor::AsNumpy(const std::shared_ptr<PbTensor>& tensor)
 {
-  if (!IsCPU()) {
+  if (!tensor->IsCPU()) {
     throw PythonBackendException(
         "Tensor is stored in GPU and cannot be converted to NumPy.");
   }
 
-  if (dtype_ == TRITONSERVER_TYPE_BF16) {
+  if (tensor->dtype_ == TRITONSERVER_TYPE_BF16) {
     throw PythonBackendException(
         "Tensor dtype is BF16 and cannot be converted to NumPy. Use "
         "to_dlpack() and from_dlpack() instead.");
   }
 
-  return &numpy_array_;
-}
-
-py::object
-PbTensor::AsNumpyShared(const std::shared_ptr<PbTensor>& tensor)
-{
-  // AsNumpy() raises for GPU and BF16 tensors.
-  const py::object* numpy_array = tensor->AsNumpy();
   if (!tensor->numpy_view_) {
-    return *numpy_array;
+    // A copy, a deserialized BYTES array or the array the tensor was created
+    // from: it keeps its own memory alive and needs no reference to the tensor.
+    return tensor->numpy_array_;
   }
+
+  // The shape and the byte size both come from shared memory. Never map a
+  // writeable view past the end of the tensor's data.
+  const py::dtype& dtype = CachedNumpyDtype(tensor->dtype_);
+  uint64_t view_byte_size = dtype.itemsize();
+  for (int64_t dim : tensor->dims_) {
+    if (dim < 0 ||
+        (dim > 0 &&
+         view_byte_size > std::numeric_limits<uint64_t>::max() / dim)) {
+      throw PythonBackendException(
+          "Tensor '" + tensor->name_ + "' has an invalid shape.");
+    }
+    view_byte_size *= dim;
+  }
+  if (view_byte_size > tensor->byte_size_) {
+    throw PythonBackendException(
+        "Tensor '" + tensor->name_ + "' needs " +
+        std::to_string(view_byte_size) + " bytes for its shape but has " +
+        std::to_string(tensor->byte_size_) + ".");
+  }
+
   // The capsule owns a reference to the tensor, and the tensor owns the shared
   // memory, so the view never outlives the memory it points to.
   py::capsule owner(new std::shared_ptr<PbTensor>(tensor), [](void* ptr) {
     delete static_cast<std::shared_ptr<PbTensor>*>(ptr);
   });
-  return py::array(
-      CachedNumpyDtype(tensor->dtype_), tensor->dims_, tensor->memory_ptr_,
-      owner);
+  return py::array(dtype, tensor->dims_, tensor->memory_ptr_, owner);
 }
 #endif  // TRITON_PB_STUB
 
@@ -773,7 +789,7 @@ PbTensor::PbTensor(
       // No native numpy representation for BF16. DLPack should be used instead.
       numpy_array_ = py::none();
     } else if (dtype_ != TRITONSERVER_TYPE_BYTES) {
-      // as_numpy() returns a view of the shared memory (AsNumpyShared).
+      // as_numpy() returns a view of the shared memory (AsNumpy).
       numpy_view_ = true;
     } else {
       py::object numpy_array = deserialize_bytes_tensor_cpp(
