@@ -1697,10 +1697,10 @@ This function can be used to check whether a tensor is placed in CPU or not.
 
 ## `pb_utils.Tensor.as_numpy() -> numpy.ndarray`
 
-This method returns the data of a CPU tensor as a NumPy array. For a tensor
-that the model receives (a request input or an output of a BLS response), the
-array is a view of the tensor's shared memory rather than a copy, like the
-DLPack capsule returned by `to_dlpack()`:
+This method returns the data of a CPU tensor as a NumPy array. For a numeric
+tensor that the model receives (a request input or an output of a BLS
+response), the array is a view of the tensor's shared memory rather than a
+copy, like the DLPack capsule returned by `to_dlpack()`:
 
 - Writing into the array modifies the tensor. The change is visible to
   `to_dlpack()` and to a BLS request that reuses the tensor.
@@ -1709,6 +1709,10 @@ DLPack capsule returned by `to_dlpack()`:
   arrays kept after the request, for example by a background thread, hold
   space in the shared-memory pool. To keep only the data, store a copy of the
   array, as recommended in [`execute`](#execute).
+
+A received BYTES tensor is deserialized into a NumPy object array when the
+model receives it. `as_numpy()` returns that same array on each call, and
+writing into it does not change the tensor's shared memory.
 
 For a tensor that the model creates, the method returns the array the tensor
 was created from (`Tensor(name, array)`) or a copy made when the tensor was
