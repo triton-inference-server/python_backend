@@ -1705,11 +1705,15 @@ DLPack capsule returned by `to_dlpack()`:
 - Writing into the array modifies the tensor. The change is visible to
   `to_dlpack()` and to a BLS request that reuses the tensor.
 - Each call returns a new array object. All of them share the same memory.
-- The array keeps the tensor's shared memory allocated while it is alive. To
-  keep the data after the request, store a copy of the array, as recommended
-  for `execute` above.
+- The array keeps the tensor's shared memory allocated while it is alive, so
+  arrays kept after the request, for example by a background thread, hold
+  space in the shared-memory pool. To keep only the data, store a copy of the
+  array, as recommended in [`execute`](#execute).
 
-The method raises an exception for GPU tensors and for BF16 tensors.
+For a tensor that the model creates, the method returns the array the tensor
+was created from (`Tensor(name, array)`) or a copy made when the tensor was
+created (`Tensor.from_dlpack()`). The method raises an exception for GPU
+tensors; for BF16 tensors, see above.
 
 ## Input Tensor Device Placement
 
