@@ -1,4 +1,4 @@
-// Copyright (c) 2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -53,9 +53,4 @@ DLDataType triton_to_dlpack_type(TRITONSERVER_DataType data_type);
 /// \param data_type triton dtype to be converted
 /// \return equivalent Triton dtype
 TRITONSERVER_DataType dlpack_to_triton_type(const DLDataType& data_type);
-
-/// Convert triton data to pybind data type.
-/// \param data_type triton dtype to be converted.
-/// \return equivalent pybind numpy dtype.
-py::dtype triton_to_pybind_dtype(TRITONSERVER_DataType data_type);
 }}}  // namespace triton::backend::python
